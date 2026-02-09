@@ -1,0 +1,749 @@
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Modal,
+  Alert,
+  Platform,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { useThemeStore } from '../../src/store/themeStore';
+import {
+  branchSalesData,
+  topSellingProducts,
+  leastSellingProducts,
+  customersData,
+  productsData,
+  hourlySalesData,
+} from '../../src/data/mockData';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+
+type ReportType = 'sales' | 'stock' | 'customers' | 'products' | 'hourly';
+
+interface Report {
+  id: ReportType;
+  title: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  description: string;
+}
+
+const reports: Report[] = [
+  { id: 'sales', title: 'Şube Satış Raporu', icon: 'storefront-outline', description: 'Şube bazında satış verileri' },
+  { id: 'stock', title: 'Stok Durum Raporu', icon: 'cube-outline', description: 'Tüm ürünlerin stok durumu' },
+  { id: 'customers', title: 'Cari Hesap Raporu', icon: 'people-outline', description: 'Cari hesap bakiyeleri' },
+  { id: 'products', title: 'Ürün Performans Raporu', icon: 'trending-up-outline', description: 'En çok/az satan ürünler' },
+  { id: 'hourly', title: 'Saatlik Satış Raporu', icon: 'time-outline', description: 'Saatlik satış dağılımı' },
+];
+
+export default function ReportsScreen() {
+  const { colors } = useThemeStore();
+  const [selectedReport, setSelectedReport] = useState<ReportType | null>(null);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  const generateCSV = (reportType: ReportType): string => {
+    let csv = '';
+    const date = new Date().toLocaleDateString('tr-TR');
+
+    switch (reportType) {
+      case 'sales':
+        csv = 'Şube,Nakit,Kart,Açık Hesap,Toplam\n';
+        branchSalesData.forEach((b) => {
+          csv += `${b.branchName},${b.sales.cash},${b.sales.card},${b.sales.openAccount},${b.sales.total}\n`;
+        });
+        break;
+      case 'stock':
+        csv = 'Barkod,Ürün Adı,Grup,KDV,Alış,Satış,Miktar,Kar\n';
+        productsData.forEach((p) => {
+          csv += `${p.barcode},${p.name},${p.group},${p.kdv},${p.purchasePrice},${p.salesPrice},${p.quantity},${p.profit}\n`;
+        });
+        break;
+      case 'customers':
+        csv = 'Cari Adı,Telefon,Email,Bakiye\n';
+        customersData.forEach((c) => {
+          csv += `${c.name},${c.phone || '-'},${c.email || '-'},${c.balance}\n`;
+        });
+        break;
+      case 'products':
+        csv = 'Sıra,Ürün Adı,Satış Adedi,Ciro,Tip\n';
+        topSellingProducts.forEach((p, i) => {
+          csv += `${i + 1},${p.name},${p.quantity},${p.revenue},En Çok Satan\n`;
+        });
+        leastSellingProducts.forEach((p, i) => {
+          csv += `${i + 1},${p.name},${p.quantity},${p.revenue},En Az Satan\n`;
+        });
+        break;
+      case 'hourly':
+        csv = 'Saat,Tutar,İşlem Sayısı\n';
+        hourlySalesData.forEach((h) => {
+          csv += `${h.hour},${h.amount},${h.transactions}\n`;
+        });
+        break;
+    }
+
+    return csv;
+  };
+
+  const exportReport = async (format: 'csv' | 'pdf') => {
+    if (!selectedReport) return;
+
+    setExporting(true);
+    try {
+      const reportTitle = reports.find((r) => r.id === selectedReport)?.title || 'Rapor';
+      const date = new Date().toISOString().split('T')[0];
+      const fileName = `${reportTitle.replace(/\s/g, '_')}_${date}`;
+
+      if (format === 'csv') {
+        const csv = generateCSV(selectedReport);
+        const fileUri = FileSystem.documentDirectory + fileName + '.csv';
+        await FileSystem.writeAsStringAsync(fileUri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(fileUri, {
+            mimeType: 'text/csv',
+            dialogTitle: `${reportTitle} Paylaş`,
+          });
+        } else {
+          Alert.alert('Başarılı', 'Rapor oluşturuldu: ' + fileUri);
+        }
+      } else {
+        // For PDF, we'll create a simple HTML and share it
+        const html = generateHTMLReport(selectedReport, reportTitle);
+        const fileUri = FileSystem.documentDirectory + fileName + '.html';
+        await FileSystem.writeAsStringAsync(fileUri, html, { encoding: FileSystem.EncodingType.UTF8 });
+
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(fileUri, {
+            mimeType: 'text/html',
+            dialogTitle: `${reportTitle} Paylaş`,
+          });
+        } else {
+          Alert.alert('Başarılı', 'Rapor oluşturuldu');
+        }
+      }
+    } catch (error) {
+      Alert.alert('Hata', 'Rapor dışa aktarılırken bir hata oluştu');
+    } finally {
+      setExporting(false);
+      setShowExportModal(false);
+    }
+  };
+
+  const generateHTMLReport = (reportType: ReportType, title: string): string => {
+    const date = new Date().toLocaleDateString('tr-TR');
+    let tableContent = '';
+
+    switch (reportType) {
+      case 'sales':
+        tableContent = `
+          <tr><th>Şube</th><th>Nakit</th><th>Kart</th><th>Açık Hesap</th><th>Toplam</th></tr>
+          ${branchSalesData.map((b) => `
+            <tr>
+              <td>${b.branchName}</td>
+              <td>₺${b.sales.cash.toLocaleString('tr-TR')}</td>
+              <td>₺${b.sales.card.toLocaleString('tr-TR')}</td>
+              <td>₺${b.sales.openAccount.toLocaleString('tr-TR')}</td>
+              <td><strong>₺${b.sales.total.toLocaleString('tr-TR')}</strong></td>
+            </tr>
+          `).join('')}
+        `;
+        break;
+      case 'stock':
+        tableContent = `
+          <tr><th>Barkod</th><th>Ürün</th><th>Grup</th><th>Alış</th><th>Satış</th><th>Stok</th></tr>
+          ${productsData.map((p) => `
+            <tr>
+              <td>${p.barcode}</td>
+              <td>${p.name}</td>
+              <td>${p.group}</td>
+              <td>₺${p.purchasePrice}</td>
+              <td>₺${p.salesPrice}</td>
+              <td>${p.quantity}</td>
+            </tr>
+          `).join('')}
+        `;
+        break;
+      case 'customers':
+        tableContent = `
+          <tr><th>Cari Adı</th><th>Telefon</th><th>Email</th><th>Bakiye</th></tr>
+          ${customersData.map((c) => `
+            <tr>
+              <td>${c.name}</td>
+              <td>${c.phone || '-'}</td>
+              <td>${c.email || '-'}</td>
+              <td style="color: ${c.balance >= 0 ? 'green' : 'red'}">₺${c.balance.toLocaleString('tr-TR')}</td>
+            </tr>
+          `).join('')}
+        `;
+        break;
+      case 'products':
+        tableContent = `
+          <tr><th>Sıra</th><th>Ürün</th><th>Adet</th><th>Ciro</th></tr>
+          <tr><td colspan="4" style="background:#e8f5e9;"><strong>En Çok Satanlar</strong></td></tr>
+          ${topSellingProducts.map((p, i) => `
+            <tr><td>${i + 1}</td><td>${p.name}</td><td>${p.quantity}</td><td>₺${p.revenue.toLocaleString('tr-TR')}</td></tr>
+          `).join('')}
+          <tr><td colspan="4" style="background:#ffebee;"><strong>En Az Satanlar</strong></td></tr>
+          ${leastSellingProducts.map((p, i) => `
+            <tr><td>${i + 1}</td><td>${p.name}</td><td>${p.quantity}</td><td>₺${p.revenue.toLocaleString('tr-TR')}</td></tr>
+          `).join('')}
+        `;
+        break;
+      case 'hourly':
+        tableContent = `
+          <tr><th>Saat</th><th>Tutar</th><th>İşlem</th></tr>
+          ${hourlySalesData.map((h) => `
+            <tr><td>${h.hour}</td><td>₺${h.amount.toLocaleString('tr-TR')}</td><td>${h.transactions}</td></tr>
+          `).join('')}
+        `;
+        break;
+    }
+
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${title}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 20px; }
+          h1 { color: #2563eb; }
+          .date { color: #666; margin-bottom: 20px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+          th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+          th { background: #2563eb; color: white; }
+          tr:nth-child(even) { background: #f9f9f9; }
+        </style>
+      </head>
+      <body>
+        <h1>${title}</h1>
+        <p class="date">Tarih: ${date}</p>
+        <table>${tableContent}</table>
+      </body>
+      </html>
+    `;
+  };
+
+  const renderReportContent = () => {
+    switch (selectedReport) {
+      case 'sales':
+        return (
+          <>
+            <View style={styles.reportHeader}>
+              <Text style={[styles.reportTitle, { color: colors.text }]}>Şube Satış Raporu</Text>
+              <Text style={[styles.reportDate, { color: colors.textSecondary }]}>
+                {new Date().toLocaleDateString('tr-TR')}
+              </Text>
+            </View>
+            {branchSalesData.map((branch) => (
+              <View key={branch.branchId} style={[styles.reportRow, { borderBottomColor: colors.border }]}>
+                <Text style={[styles.reportRowTitle, { color: colors.text }]}>{branch.branchName}</Text>
+                <View style={styles.reportRowValues}>
+                  <View style={styles.reportValue}>
+                    <Text style={[styles.reportValueLabel, { color: colors.textSecondary }]}>Nakit</Text>
+                    <Text style={[styles.reportValueAmount, { color: colors.cash }]}>
+                      ₺{branch.sales.cash.toLocaleString('tr-TR')}
+                    </Text>
+                  </View>
+                  <View style={styles.reportValue}>
+                    <Text style={[styles.reportValueLabel, { color: colors.textSecondary }]}>Kart</Text>
+                    <Text style={[styles.reportValueAmount, { color: colors.primary }]}>
+                      ₺{branch.sales.card.toLocaleString('tr-TR')}
+                    </Text>
+                  </View>
+                  <View style={styles.reportValue}>
+                    <Text style={[styles.reportValueLabel, { color: colors.textSecondary }]}>Toplam</Text>
+                    <Text style={[styles.reportValueAmount, { color: colors.text }]}>
+                      ₺{branch.sales.total.toLocaleString('tr-TR')}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </>
+        );
+      case 'stock':
+        return (
+          <>
+            <View style={styles.reportHeader}>
+              <Text style={[styles.reportTitle, { color: colors.text }]}>Stok Durum Raporu</Text>
+              <Text style={[styles.reportDate, { color: colors.textSecondary }]}>
+                {productsData.length} ürün
+              </Text>
+            </View>
+            {productsData.slice(0, 10).map((product) => (
+              <View key={product.id} style={[styles.reportRow, { borderBottomColor: colors.border }]}>
+                <View style={styles.productReportInfo}>
+                  <Text style={[styles.reportRowTitle, { color: colors.text }]}>{product.name}</Text>
+                  <Text style={[styles.reportRowSub, { color: colors.textSecondary }]}>{product.barcode}</Text>
+                </View>
+                <View style={styles.productReportValues}>
+                  <Text style={[styles.stockQty, { color: product.quantity > 50 ? colors.success : colors.warning }]}>
+                    {product.quantity} adet
+                  </Text>
+                  <Text style={[styles.stockPrice, { color: colors.text }]}>₺{product.salesPrice}</Text>
+                </View>
+              </View>
+            ))}
+          </>
+        );
+      case 'customers':
+        return (
+          <>
+            <View style={styles.reportHeader}>
+              <Text style={[styles.reportTitle, { color: colors.text }]}>Cari Hesap Raporu</Text>
+              <Text style={[styles.reportDate, { color: colors.textSecondary }]}>
+                {customersData.length} cari
+              </Text>
+            </View>
+            {customersData.map((customer) => (
+              <View key={customer.id} style={[styles.reportRow, { borderBottomColor: colors.border }]}>
+                <View style={styles.customerReportInfo}>
+                  <Text style={[styles.reportRowTitle, { color: colors.text }]}>{customer.name}</Text>
+                  <Text style={[styles.reportRowSub, { color: colors.textSecondary }]}>
+                    {customer.phone || customer.email || '-'}
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.customerBalance,
+                    { color: customer.balance >= 0 ? colors.success : colors.error },
+                  ]}
+                >
+                  {customer.balance >= 0 ? '+' : ''}₺{customer.balance.toLocaleString('tr-TR')}
+                </Text>
+              </View>
+            ))}
+          </>
+        );
+      case 'products':
+        return (
+          <>
+            <View style={styles.reportHeader}>
+              <Text style={[styles.reportTitle, { color: colors.text }]}>Ürün Performans Raporu</Text>
+            </View>
+            <Text style={[styles.subSectionTitle, { color: colors.success }]}>En Çok Satanlar</Text>
+            {topSellingProducts.slice(0, 5).map((p, i) => (
+              <View key={p.id} style={[styles.reportRow, { borderBottomColor: colors.border }]}>
+                <View style={[styles.rankBadge, { backgroundColor: colors.success + '20' }]}>
+                  <Text style={[styles.rankText, { color: colors.success }]}>{i + 1}</Text>
+                </View>
+                <View style={styles.productPerformInfo}>
+                  <Text style={[styles.reportRowTitle, { color: colors.text }]}>{p.name}</Text>
+                  <Text style={[styles.reportRowSub, { color: colors.textSecondary }]}>{p.quantity} adet</Text>
+                </View>
+                <Text style={[styles.performRevenue, { color: colors.success }]}>
+                  ₺{p.revenue.toLocaleString('tr-TR')}
+                </Text>
+              </View>
+            ))}
+            <Text style={[styles.subSectionTitle, { color: colors.error, marginTop: 16 }]}>En Az Satanlar</Text>
+            {leastSellingProducts.slice(0, 5).map((p, i) => (
+              <View key={p.id} style={[styles.reportRow, { borderBottomColor: colors.border }]}>
+                <View style={[styles.rankBadge, { backgroundColor: colors.error + '20' }]}>
+                  <Text style={[styles.rankText, { color: colors.error }]}>{i + 1}</Text>
+                </View>
+                <View style={styles.productPerformInfo}>
+                  <Text style={[styles.reportRowTitle, { color: colors.text }]}>{p.name}</Text>
+                  <Text style={[styles.reportRowSub, { color: colors.textSecondary }]}>{p.quantity} adet</Text>
+                </View>
+                <Text style={[styles.performRevenue, { color: colors.error }]}>
+                  ₺{p.revenue.toLocaleString('tr-TR')}
+                </Text>
+              </View>
+            ))}
+          </>
+        );
+      case 'hourly':
+        const maxAmount = Math.max(...hourlySalesData.map((h) => h.amount));
+        return (
+          <>
+            <View style={styles.reportHeader}>
+              <Text style={[styles.reportTitle, { color: colors.text }]}>Saatlik Satış Raporu</Text>
+            </View>
+            {hourlySalesData.map((hour) => (
+              <View key={hour.hour} style={[styles.hourlyRow, { borderBottomColor: colors.border }]}>
+                <Text style={[styles.hourTime, { color: colors.text }]}>{hour.hour}</Text>
+                <View style={styles.hourlyBarContainer}>
+                  <View
+                    style={[
+                      styles.hourlyBar,
+                      {
+                        backgroundColor: colors.primary,
+                        width: `${(hour.amount / maxAmount) * 100}%`,
+                      },
+                    ]}
+                  />
+                </View>
+                <View style={styles.hourlyValues}>
+                  <Text style={[styles.hourlyAmount, { color: colors.text }]}>
+                    ₺{(hour.amount / 1000).toFixed(1)}K
+                  </Text>
+                  <Text style={[styles.hourlyTx, { color: colors.textSecondary }]}>{hour.transactions}</Text>
+                </View>
+              </View>
+            ))}
+          </>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* Header */}
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Raporlar</Text>
+      </View>
+
+      <ScrollView style={styles.scrollView}>
+        {/* Report List */}
+        {!selectedReport && (
+          <View style={styles.reportList}>
+            {reports.map((report) => (
+              <TouchableOpacity
+                key={report.id}
+                style={[styles.reportCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => setSelectedReport(report.id)}
+              >
+                <View style={[styles.reportIcon, { backgroundColor: colors.primary + '20' }]}>
+                  <Ionicons name={report.icon} size={24} color={colors.primary} />
+                </View>
+                <View style={styles.reportInfo}>
+                  <Text style={[styles.reportCardTitle, { color: colors.text }]}>{report.title}</Text>
+                  <Text style={[styles.reportCardDesc, { color: colors.textSecondary }]}>
+                    {report.description}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* Report Detail */}
+        {selectedReport && (
+          <View style={styles.reportDetail}>
+            <View style={styles.reportActions}>
+              <TouchableOpacity
+                style={[styles.backBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => setSelectedReport(null)}
+              >
+                <Ionicons name="arrow-back" size={20} color={colors.text} />
+                <Text style={[styles.backBtnText, { color: colors.text }]}>Geri</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.exportBtn, { backgroundColor: colors.primary }]}
+                onPress={() => setShowExportModal(true)}
+              >
+                <Ionicons name="share-outline" size={20} color="#FFF" />
+                <Text style={styles.exportBtnText}>Dışa Aktar</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={[styles.reportContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              {renderReportContent()}
+            </View>
+          </View>
+        )}
+
+        <View style={{ height: 100 }} />
+      </ScrollView>
+
+      {/* Export Modal */}
+      <Modal visible={showExportModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Dışa Aktar</Text>
+              <TouchableOpacity onPress={() => setShowExportModal(false)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.modalBody}>
+              <TouchableOpacity
+                style={[styles.exportOption, { backgroundColor: colors.success + '15', borderColor: colors.success }]}
+                onPress={() => exportReport('csv')}
+                disabled={exporting}
+              >
+                <Ionicons name="document-text-outline" size={32} color={colors.success} />
+                <Text style={[styles.exportOptionTitle, { color: colors.text }]}>CSV / Excel</Text>
+                <Text style={[styles.exportOptionDesc, { color: colors.textSecondary }]}>
+                  Tablolar için ideal format
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.exportOption, { backgroundColor: colors.error + '15', borderColor: colors.error }]}
+                onPress={() => exportReport('pdf')}
+                disabled={exporting}
+              >
+                <Ionicons name="document-outline" size={32} color={colors.error} />
+                <Text style={[styles.exportOptionTitle, { color: colors.text }]}>HTML / PDF</Text>
+                <Text style={[styles.exportOptionDesc, { color: colors.textSecondary }]}>
+                  Baskıya hazır format
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  scrollView: {
+    flex: 1,
+  },
+  reportList: {
+    padding: 16,
+  },
+  reportCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  reportIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 14,
+  },
+  reportInfo: {
+    flex: 1,
+  },
+  reportCardTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  reportCardDesc: {
+    fontSize: 13,
+  },
+  reportDetail: {
+    padding: 16,
+  },
+  reportActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  backBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 6,
+  },
+  backBtnText: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  exportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+    gap: 6,
+  },
+  exportBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+  reportContent: {
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+  },
+  reportHeader: {
+    marginBottom: 16,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  reportTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  reportDate: {
+    fontSize: 13,
+  },
+  reportRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+  },
+  reportRowTitle: {
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  reportRowSub: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  reportRowValues: {
+    flexDirection: 'row',
+    marginTop: 8,
+    gap: 16,
+  },
+  reportValue: {
+    alignItems: 'center',
+  },
+  reportValueLabel: {
+    fontSize: 11,
+    marginBottom: 2,
+  },
+  reportValueAmount: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  productReportInfo: {
+    flex: 1,
+  },
+  productReportValues: {
+    alignItems: 'flex-end',
+  },
+  stockQty: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  stockPrice: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  customerReportInfo: {
+    flex: 1,
+  },
+  customerBalance: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  subSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  rankBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  rankText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  productPerformInfo: {
+    flex: 1,
+  },
+  performRevenue: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  hourlyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+  },
+  hourTime: {
+    width: 50,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  hourlyBarContainer: {
+    flex: 1,
+    height: 20,
+    backgroundColor: '#E5E7EB20',
+    borderRadius: 4,
+    marginHorizontal: 10,
+    overflow: 'hidden',
+  },
+  hourlyBar: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  hourlyValues: {
+    width: 60,
+    alignItems: 'flex-end',
+  },
+  hourlyAmount: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  hourlyTx: {
+    fontSize: 10,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  modalBody: {
+    padding: 20,
+    gap: 16,
+  },
+  exportOption: {
+    alignItems: 'center',
+    padding: 24,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  exportOptionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  exportOptionDesc: {
+    fontSize: 13,
+  },
+});
