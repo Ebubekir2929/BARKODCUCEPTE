@@ -1,11 +1,52 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
-import { Platform, View, StyleSheet } from 'react-native';
+import { Platform } from 'react-native';
+
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
+
+const TabIcon = ({ name, color, size }: { name: IconName; color: string; size: number }) => (
+  <Ionicons name={name} size={size} color={color} />
+);
 
 export default function TabLayout() {
   const { colors } = useThemeStore();
+
+  const renderDashboardIcon = useCallback(
+    ({ color, size }: { color: string; size: number }) => (
+      <TabIcon name="grid" color={color} size={size} />
+    ),
+    []
+  );
+
+  const renderStockIcon = useCallback(
+    ({ color, size }: { color: string; size: number }) => (
+      <TabIcon name="cube" color={color} size={size} />
+    ),
+    []
+  );
+
+  const renderCustomersIcon = useCallback(
+    ({ color, size }: { color: string; size: number }) => (
+      <TabIcon name="people" color={color} size={size} />
+    ),
+    []
+  );
+
+  const renderReportsIcon = useCallback(
+    ({ color, size }: { color: string; size: number }) => (
+      <TabIcon name="document-text" color={color} size={size} />
+    ),
+    []
+  );
+
+  const renderSettingsIcon = useCallback(
+    ({ color, size }: { color: string; size: number }) => (
+      <TabIcon name="settings" color={color} size={size} />
+    ),
+    []
+  );
 
   return (
     <Tabs
@@ -30,45 +71,35 @@ export default function TabLayout() {
         name="dashboard"
         options={{
           title: 'Dashboard',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="grid" size={size} color={color} />
-          ),
+          tabBarIcon: renderDashboardIcon,
         }}
       />
       <Tabs.Screen
         name="stock"
         options={{
           title: 'Stok',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="cube" size={size} color={color} />
-          ),
+          tabBarIcon: renderStockIcon,
         }}
       />
       <Tabs.Screen
         name="customers"
         options={{
           title: 'Cariler',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="people" size={size} color={color} />
-          ),
+          tabBarIcon: renderCustomersIcon,
         }}
       />
       <Tabs.Screen
         name="reports"
         options={{
           title: 'Raporlar',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="document-text" size={size} color={color} />
-          ),
+          tabBarIcon: renderReportsIcon,
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
           title: 'Ayarlar',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="settings" size={size} color={color} />
-          ),
+          tabBarIcon: renderSettingsIcon,
         }}
       />
     </Tabs>
