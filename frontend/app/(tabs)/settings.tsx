@@ -15,16 +15,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAuthStore } from '../../src/store/authStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Notifications from 'expo-notifications';
-
-// Configure notification handler
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -35,19 +25,15 @@ export default function SettingsScreen() {
   const [salesAlert, setSalesAlert] = useState(true);
 
   useEffect(() => {
-    checkNotificationPermission();
     loadNotificationSettings();
   }, []);
 
-  const checkNotificationPermission = async () => {
-    const { status } = await Notifications.getPermissionsAsync();
-    setNotificationsEnabled(status === 'granted');
-  };
-
   const loadNotificationSettings = async () => {
     try {
+      const notifs = await AsyncStorage.getItem('notificationsEnabled');
       const lowStock = await AsyncStorage.getItem('lowStockAlert');
       const sales = await AsyncStorage.getItem('salesAlert');
+      if (notifs !== null) setNotificationsEnabled(notifs === 'true');
       if (lowStock !== null) setLowStockAlert(lowStock === 'true');
       if (sales !== null) setSalesAlert(sales === 'true');
     } catch (error) {
@@ -56,62 +42,23 @@ export default function SettingsScreen() {
   };
 
   const toggleNotifications = async () => {
-    if (!notificationsEnabled) {
-      const { status } = await Notifications.requestPermissionsAsync();
-      if (status === 'granted') {
-        setNotificationsEnabled(true);
-        // Send test notification
-        await sendTestNotification();
-      } else {
-        Alert.alert('İzin Gerekli', 'Bildirimler için izin verilmedi. Lütfen ayarlardan izin verin.');
-      }
-    } else {
-      Alert.alert(
-        'Bildirimler',
-        'Bildirimleri kapatmak için cihaz ayarlarından değiştirmeniz gerekiyor.',
-        [{ text: 'Tamam' }]
-      );
+    const newValue = !notificationsEnabled;
+    setNotificationsEnabled(newValue);
+    await AsyncStorage.setItem('notificationsEnabled', newValue.toString());
+    
+    if (newValue) {
+      Alert.alert('Bildirimler Aktif', 'Artık stok ve satış uyarıları alacaksınız.');
     }
-  };
-
-  const sendTestNotification = async () => {
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: 'BizStats Bildirimleri Aktif! 🎉',
-        body: 'Artık stok ve satış uyarıları alacaksınız.',
-        data: { type: 'test' },
-      },
-      trigger: { seconds: 1 },
-    });
   };
 
   const toggleLowStockAlert = async (value: boolean) => {
     setLowStockAlert(value);
     await AsyncStorage.setItem('lowStockAlert', value.toString());
-    if (value && notificationsEnabled) {
-      // Demo notification
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Düşük Stok Uyarısı Aktif',
-          body: 'Stok 50 adetten az olduğunda bildirim alacaksınız.',
-        },
-        trigger: { seconds: 1 },
-      });
-    }
   };
 
   const toggleSalesAlert = async (value: boolean) => {
     setSalesAlert(value);
     await AsyncStorage.setItem('salesAlert', value.toString());
-    if (value && notificationsEnabled) {
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Satış Uyarıları Aktif',
-          body: 'Yüksek tutarlı satışlarda bildirim alacaksınız.',
-        },
-        trigger: { seconds: 1 },
-      });
-    }
   };
 
   const handleLogout = () => {
@@ -331,7 +278,7 @@ export default function SettingsScreen() {
           <Text style={[styles.logoutText, { color: colors.error }]}>Çıkış Yap</Text>
         </TouchableOpacity>
 
-        <View style={{ height: 100 }} />
+        <View style={{ height: 20 }} />
       </ScrollView>
     </SafeAreaView>
   );
