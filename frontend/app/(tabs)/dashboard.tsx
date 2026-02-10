@@ -21,7 +21,6 @@ import {
   topSellingProducts,
   leastSellingProducts,
   weeklyComparisonData,
-  todayTotals,
 } from '../../src/data/mockData';
 import { BranchSales, HourlySales, CancelledReceipt } from '../../src/types';
 
