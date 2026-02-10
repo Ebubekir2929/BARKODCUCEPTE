@@ -6,6 +6,7 @@ import {
   Modal,
   TouchableOpacity,
   ScrollView,
+  TextInput,
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,6 +36,10 @@ export const FilterModal: React.FC<FilterModalProps> = ({
     start: currentFilters.startDate,
     end: currentFilters.endDate,
   });
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+  const [tempStartDate, setTempStartDate] = useState({ day: '', month: '', year: '' });
+  const [tempEndDate, setTempEndDate] = useState({ day: '', month: '', year: '' });
 
   const handleApply = () => {
     onApply({
@@ -48,6 +53,8 @@ export const FilterModal: React.FC<FilterModalProps> = ({
   const handleReset = () => {
     setSelectedBranch(null);
     setDateRange({ start: new Date(), end: new Date() });
+    setTempStartDate({ day: '', month: '', year: '' });
+    setTempEndDate({ day: '', month: '', year: '' });
   };
 
   const quickDateOptions = [
@@ -63,7 +70,6 @@ export const FilterModal: React.FC<FilterModalProps> = ({
     let start = new Date();
     
     if (days === -1) {
-      // This month
       start = new Date(end.getFullYear(), end.getMonth(), 1);
     } else if (days === 0) {
       start = new Date();
@@ -72,6 +78,30 @@ export const FilterModal: React.FC<FilterModalProps> = ({
     }
     
     setDateRange({ start, end });
+  };
+
+  const applyManualStartDate = () => {
+    const day = parseInt(tempStartDate.day) || 1;
+    const month = parseInt(tempStartDate.month) || 1;
+    const year = parseInt(tempStartDate.year) || new Date().getFullYear();
+    
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2020) {
+      const newDate = new Date(year, month - 1, day);
+      setDateRange(prev => ({ ...prev, start: newDate }));
+    }
+    setShowStartPicker(false);
+  };
+
+  const applyManualEndDate = () => {
+    const day = parseInt(tempEndDate.day) || 1;
+    const month = parseInt(tempEndDate.month) || 1;
+    const year = parseInt(tempEndDate.year) || new Date().getFullYear();
+    
+    if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2020) {
+      const newDate = new Date(year, month - 1, day);
+      setDateRange(prev => ({ ...prev, end: newDate }));
+    }
+    setShowEndPicker(false);
   };
 
   return (
@@ -135,21 +165,117 @@ export const FilterModal: React.FC<FilterModalProps> = ({
               ))}
             </View>
 
-            {/* Date Display */}
-            <View style={[styles.dateDisplay, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <View style={styles.dateItem}>
-                <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>Başlangıç</Text>
-                <Text style={[styles.dateValue, { color: colors.text }]}>
-                  {dateRange.start.toLocaleDateString('tr-TR')}
-                </Text>
+            {/* Manual Date Entry */}
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>Manuel Tarih Girişi</Text>
+            
+            {/* Start Date */}
+            <View style={[styles.dateCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.dateCardHeader}>
+                <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>Başlangıç Tarihi</Text>
+                <TouchableOpacity
+                  style={[styles.editBtn, { backgroundColor: colors.primary + '20' }]}
+                  onPress={() => setShowStartPicker(!showStartPicker)}
+                >
+                  <Ionicons name="create-outline" size={16} color={colors.primary} />
+                </TouchableOpacity>
               </View>
-              <Ionicons name="arrow-forward" size={20} color={colors.textSecondary} />
-              <View style={styles.dateItem}>
-                <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>Bitiş</Text>
-                <Text style={[styles.dateValue, { color: colors.text }]}>
-                  {dateRange.end.toLocaleDateString('tr-TR')}
-                </Text>
+              <Text style={[styles.dateValue, { color: colors.text }]}>
+                {dateRange.start.toLocaleDateString('tr-TR')}
+              </Text>
+              {showStartPicker && (
+                <View style={styles.dateInputRow}>
+                  <TextInput
+                    style={[styles.dateInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                    placeholder="GG"
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="number-pad"
+                    maxLength={2}
+                    value={tempStartDate.day}
+                    onChangeText={(t) => setTempStartDate(prev => ({ ...prev, day: t }))}
+                  />
+                  <Text style={[styles.dateSeparator, { color: colors.textSecondary }]}>/</Text>
+                  <TextInput
+                    style={[styles.dateInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                    placeholder="AA"
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="number-pad"
+                    maxLength={2}
+                    value={tempStartDate.month}
+                    onChangeText={(t) => setTempStartDate(prev => ({ ...prev, month: t }))}
+                  />
+                  <Text style={[styles.dateSeparator, { color: colors.textSecondary }]}>/</Text>
+                  <TextInput
+                    style={[styles.dateInputYear, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                    placeholder="YYYY"
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="number-pad"
+                    maxLength={4}
+                    value={tempStartDate.year}
+                    onChangeText={(t) => setTempStartDate(prev => ({ ...prev, year: t }))}
+                  />
+                  <TouchableOpacity
+                    style={[styles.applyDateBtn, { backgroundColor: colors.primary }]}
+                    onPress={applyManualStartDate}
+                  >
+                    <Ionicons name="checkmark" size={18} color="#FFF" />
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+
+            {/* End Date */}
+            <View style={[styles.dateCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <View style={styles.dateCardHeader}>
+                <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>Bitiş Tarihi</Text>
+                <TouchableOpacity
+                  style={[styles.editBtn, { backgroundColor: colors.primary + '20' }]}
+                  onPress={() => setShowEndPicker(!showEndPicker)}
+                >
+                  <Ionicons name="create-outline" size={16} color={colors.primary} />
+                </TouchableOpacity>
               </View>
+              <Text style={[styles.dateValue, { color: colors.text }]}>
+                {dateRange.end.toLocaleDateString('tr-TR')}
+              </Text>
+              {showEndPicker && (
+                <View style={styles.dateInputRow}>
+                  <TextInput
+                    style={[styles.dateInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                    placeholder="GG"
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="number-pad"
+                    maxLength={2}
+                    value={tempEndDate.day}
+                    onChangeText={(t) => setTempEndDate(prev => ({ ...prev, day: t }))}
+                  />
+                  <Text style={[styles.dateSeparator, { color: colors.textSecondary }]}>/</Text>
+                  <TextInput
+                    style={[styles.dateInput, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                    placeholder="AA"
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="number-pad"
+                    maxLength={2}
+                    value={tempEndDate.month}
+                    onChangeText={(t) => setTempEndDate(prev => ({ ...prev, month: t }))}
+                  />
+                  <Text style={[styles.dateSeparator, { color: colors.textSecondary }]}>/</Text>
+                  <TextInput
+                    style={[styles.dateInputYear, { backgroundColor: colors.background, color: colors.text, borderColor: colors.border }]}
+                    placeholder="YYYY"
+                    placeholderTextColor={colors.textSecondary}
+                    keyboardType="number-pad"
+                    maxLength={4}
+                    value={tempEndDate.year}
+                    onChangeText={(t) => setTempEndDate(prev => ({ ...prev, year: t }))}
+                  />
+                  <TouchableOpacity
+                    style={[styles.applyDateBtn, { backgroundColor: colors.primary }]}
+                    onPress={applyManualEndDate}
+                  >
+                    <Ionicons name="checkmark" size={18} color="#FFF" />
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
           </ScrollView>
 
@@ -182,7 +308,7 @@ const styles = StyleSheet.create({
   container: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '80%',
+    maxHeight: '85%',
   },
   header: {
     flexDirection: 'row',
@@ -235,24 +361,61 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  dateDisplay: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  dateCard: {
     padding: 16,
     borderRadius: 12,
     borderWidth: 1,
+    marginBottom: 12,
   },
-  dateItem: {
+  dateCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 8,
   },
   dateLabel: {
-    fontSize: 12,
-    marginBottom: 4,
+    fontSize: 13,
+  },
+  editBtn: {
+    padding: 6,
+    borderRadius: 8,
   },
   dateValue: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
+  },
+  dateInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    gap: 4,
+  },
+  dateInput: {
+    width: 50,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  dateInputYear: {
+    width: 70,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  dateSeparator: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  applyDateBtn: {
+    padding: 10,
+    borderRadius: 8,
+    marginLeft: 8,
   },
   footer: {
     flexDirection: 'row',
