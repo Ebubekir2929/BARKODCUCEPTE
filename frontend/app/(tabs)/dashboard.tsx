@@ -72,11 +72,18 @@ export default function DashboardScreen() {
     setTimeout(() => setRefreshing(false), 1000);
   };
 
-  const comparePercentage = useMemo(() => {
-    const lastWeek = weeklyComparisonData.lastWeek.total;
-    const thisWeek = weeklyComparisonData.thisWeek.total;
-    return ((thisWeek - lastWeek) / lastWeek) * 100;
-  }, []);
+  // Calculate percentage changes for each payment type
+  const cardChangePercents = useMemo(() => {
+    const calcPercent = (current: number, last: number) => 
+      last > 0 ? ((current - last) / last) * 100 : 0;
+    
+    return {
+      cash: calcPercent(totals.cash, weeklyComparisonData.lastWeek.cash),
+      card: calcPercent(totals.card, weeklyComparisonData.lastWeek.card),
+      openAccount: calcPercent(totals.openAccount, weeklyComparisonData.lastWeek.openAccount),
+      total: calcPercent(totals.total, weeklyComparisonData.lastWeek.total),
+    };
+  }, [totals]);
 
   const maxHourAmount = useMemo(() => Math.max(...hourlySalesData.map(h => h.amount)), []);
 
