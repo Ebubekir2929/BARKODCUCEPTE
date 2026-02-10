@@ -414,7 +414,7 @@ export default function CustomersScreen() {
               </TouchableOpacity>
             </View>
             {selectedInvoice && (
-              <ScrollView style={styles.modalBody}>
+              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
                 <View style={[styles.invoiceHeader, { backgroundColor: colors.primary + '15' }]}>
                   <Text style={[styles.invoiceNo, { color: colors.primary }]}>
                     {selectedInvoice.description}
