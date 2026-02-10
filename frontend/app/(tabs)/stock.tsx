@@ -9,6 +9,7 @@ import {
   ScrollView,
   ActivityIndicator,
   FlatList,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,21 +21,35 @@ import {
 } from '../../src/data/mockData';
 import { Product, ProductLocationStock, ProductMovement } from '../../src/types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 
 const CACHE_KEY = 'cached_products';
+
+interface StockFilters {
+  group: string | null;
+  profitType: 'all' | 'profit' | 'loss';
+  quantityType: 'all' | 'low' | 'medium' | 'high';
+  kdvType: 'all' | '1' | '10' | '20';
+}
 
 export default function StockScreen() {
   const { colors } = useThemeStore();
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedGroup, setSelectedGroup] = useState<string | null>(null);
+  const [filters, setFilters] = useState<StockFilters>({
+    group: null,
+    profitType: 'all',
+    quantityType: 'all',
+    kdvType: 'all',
+  });
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [productLocations, setProductLocations] = useState<ProductLocationStock[]>([]);
   const [productMovements, setProductMovements] = useState<ProductMovement[]>([]);
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
   const [loading, setLoading] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
+  const [permission, requestPermission] = useCameraPermissions();
 
-  // Load cached products or use mock data
   useEffect(() => {
     const loadProducts = async () => {
       try {
@@ -71,18 +86,76 @@ export default function StockScreen() {
       );
     }
 
-    if (selectedGroup) {
-      filtered = filtered.filter((p) => p.group === selectedGroup);
+    if (filters.group) {
+      filtered = filtered.filter((p) => p.group === filters.group);
+    }
+
+    if (filters.profitType === 'profit') {
+      filtered = filtered.filter((p) => p.profit >= 0);
+    } else if (filters.profitType === 'loss') {
+      filtered = filtered.filter((p) => p.profit < 0);
+    }
+
+    if (filters.quantityType === 'low') {
+      filtered = filtered.filter((p) => p.quantity < 50);
+    } else if (filters.quantityType === 'medium') {
+      filtered = filtered.filter((p) => p.quantity >= 50 && p.quantity < 200);
+    } else if (filters.quantityType === 'high') {
+      filtered = filtered.filter((p) => p.quantity >= 200);
+    }
+
+    if (filters.kdvType !== 'all') {
+      filtered = filtered.filter((p) => p.kdv === parseInt(filters.kdvType));
     }
 
     return filtered;
-  }, [products, searchQuery, selectedGroup]);
+  }, [products, searchQuery, filters]);
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (filters.group) count++;
+    if (filters.profitType !== 'all') count++;
+    if (filters.quantityType !== 'all') count++;
+    if (filters.kdvType !== 'all') count++;
+    return count;
+  }, [filters]);
 
   const handleProductPress = useCallback((product: Product) => {
     setSelectedProduct(product);
     setProductLocations(getProductLocationStocks(product.id));
     setProductMovements(getProductMovements(product.id));
   }, []);
+
+  const handleBarCodeScanned = ({ data }: { data: string }) => {
+    setShowScanner(false);
+    setSearchQuery(data);
+    const found = products.find(p => p.barcode === data);
+    if (found) {
+      handleProductPress(found);
+    } else {
+      Alert.alert('Ürün Bulunamadı', `"${data}" barkodlu ürün bulunamadı.`);
+    }
+  };
+
+  const openScanner = async () => {
+    if (!permission?.granted) {
+      const result = await requestPermission();
+      if (!result.granted) {
+        Alert.alert('İzin Gerekli', 'Barkod tarama için kamera izni gereklidir.');
+        return;
+      }
+    }
+    setShowScanner(true);
+  };
+
+  const resetFilters = () => {
+    setFilters({
+      group: null,
+      profitType: 'all',
+      quantityType: 'all',
+      kdvType: 'all',
+    });
+  };
 
   const renderProduct = useCallback(
     ({ item }: { item: Product }) => (
@@ -121,7 +194,7 @@ export default function StockScreen() {
           </View>
           <View style={styles.detailColumn}>
             <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Miktar</Text>
-            <Text style={[styles.detailValue, { color: colors.text }]}>{item.quantity}</Text>
+            <Text style={[styles.detailValue, { color: item.quantity < 50 ? colors.warning : colors.text }]}>{item.quantity}</Text>
           </View>
         </View>
 
@@ -159,13 +232,25 @@ export default function StockScreen() {
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Stok Yönetimi</Text>
-        <TouchableOpacity
-          style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border }]}
-          onPress={() => setShowFilterModal(true)}
-        >
-          <Ionicons name="filter" size={20} color={colors.primary} />
-          {selectedGroup && <View style={[styles.filterDot, { backgroundColor: colors.primary }]} />}
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={[styles.scanButton, { backgroundColor: colors.success + '20' }]}
+            onPress={openScanner}
+          >
+            <Ionicons name="barcode-outline" size={22} color={colors.success} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+            onPress={() => setShowFilterModal(true)}
+          >
+            <Ionicons name="filter" size={20} color={colors.primary} />
+            {activeFilterCount > 0 && (
+              <View style={[styles.filterBadge, { backgroundColor: colors.primary }]}>
+                <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* Search */}
@@ -187,15 +272,53 @@ export default function StockScreen() {
         </View>
       </View>
 
-      {/* Selected Group Indicator */}
-      {selectedGroup && (
-        <View style={styles.selectedFilterRow}>
-          <View style={[styles.selectedFilter, { backgroundColor: colors.primary + '20' }]}>
-            <Text style={[styles.selectedFilterText, { color: colors.primary }]}>{selectedGroup}</Text>
-            <TouchableOpacity onPress={() => setSelectedGroup(null)}>
-              <Ionicons name="close" size={16} color={colors.primary} />
+      {/* Active Filters */}
+      {activeFilterCount > 0 && (
+        <View style={styles.activeFiltersRow}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.activeFiltersContent}>
+            {filters.group && (
+              <View style={[styles.activeFilter, { backgroundColor: colors.primary + '20' }]}>
+                <Text style={[styles.activeFilterText, { color: colors.primary }]}>{filters.group}</Text>
+                <TouchableOpacity onPress={() => setFilters(prev => ({ ...prev, group: null }))}>
+                  <Ionicons name="close" size={14} color={colors.primary} />
+                </TouchableOpacity>
+              </View>
+            )}
+            {filters.profitType !== 'all' && (
+              <View style={[styles.activeFilter, { backgroundColor: filters.profitType === 'profit' ? colors.success + '20' : colors.error + '20' }]}>
+                <Text style={[styles.activeFilterText, { color: filters.profitType === 'profit' ? colors.success : colors.error }]}>
+                  {filters.profitType === 'profit' ? 'Karlı' : 'Zararlı'}
+                </Text>
+                <TouchableOpacity onPress={() => setFilters(prev => ({ ...prev, profitType: 'all' }))}>
+                  <Ionicons name="close" size={14} color={filters.profitType === 'profit' ? colors.success : colors.error} />
+                </TouchableOpacity>
+              </View>
+            )}
+            {filters.quantityType !== 'all' && (
+              <View style={[styles.activeFilter, { backgroundColor: colors.warning + '20' }]}>
+                <Text style={[styles.activeFilterText, { color: colors.warning }]}>
+                  {filters.quantityType === 'low' ? 'Düşük Stok' : filters.quantityType === 'medium' ? 'Orta Stok' : 'Yüksek Stok'}
+                </Text>
+                <TouchableOpacity onPress={() => setFilters(prev => ({ ...prev, quantityType: 'all' }))}>
+                  <Ionicons name="close" size={14} color={colors.warning} />
+                </TouchableOpacity>
+              </View>
+            )}
+            {filters.kdvType !== 'all' && (
+              <View style={[styles.activeFilter, { backgroundColor: colors.info + '20' }]}>
+                <Text style={[styles.activeFilterText, { color: colors.info }]}>KDV %{filters.kdvType}</Text>
+                <TouchableOpacity onPress={() => setFilters(prev => ({ ...prev, kdvType: 'all' }))}>
+                  <Ionicons name="close" size={14} color={colors.info} />
+                </TouchableOpacity>
+              </View>
+            )}
+            <TouchableOpacity
+              style={[styles.clearAllBtn, { borderColor: colors.error }]}
+              onPress={resetFilters}
+            >
+              <Text style={[styles.clearAllText, { color: colors.error }]}>Temizle</Text>
             </TouchableOpacity>
-          </View>
+          </ScrollView>
         </View>
       )}
 
@@ -224,51 +347,164 @@ export default function StockScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Grup Filtresi</Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Filtreler</Text>
               <TouchableOpacity onPress={() => setShowFilterModal(false)}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.modalBody}>
+              {/* Group Filter */}
+              <Text style={[styles.filterSectionTitle, { color: colors.text }]}>Grup</Text>
+              <View style={styles.filterOptions}>
+                <TouchableOpacity
+                  style={[
+                    styles.filterOption,
+                    { borderColor: colors.border },
+                    filters.group === null && { backgroundColor: colors.primary + '20', borderColor: colors.primary },
+                  ]}
+                  onPress={() => setFilters(prev => ({ ...prev, group: null }))}
+                >
+                  <Text style={[styles.filterOptionText, { color: filters.group === null ? colors.primary : colors.text }]}>
+                    Tümü
+                  </Text>
+                </TouchableOpacity>
+                {groups.map((group) => (
+                  <TouchableOpacity
+                    key={group}
+                    style={[
+                      styles.filterOption,
+                      { borderColor: colors.border },
+                      filters.group === group && { backgroundColor: colors.primary + '20', borderColor: colors.primary },
+                    ]}
+                    onPress={() => setFilters(prev => ({ ...prev, group }))}
+                  >
+                    <Text style={[styles.filterOptionText, { color: filters.group === group ? colors.primary : colors.text }]}>
+                      {group}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Profit Filter */}
+              <Text style={[styles.filterSectionTitle, { color: colors.text }]}>Kar/Zarar</Text>
+              <View style={styles.filterOptions}>
+                {(['all', 'profit', 'loss'] as const).map((type) => (
+                  <TouchableOpacity
+                    key={type}
+                    style={[
+                      styles.filterOption,
+                      { borderColor: colors.border },
+                      filters.profitType === type && { 
+                        backgroundColor: type === 'profit' ? colors.success + '20' : type === 'loss' ? colors.error + '20' : colors.primary + '20',
+                        borderColor: type === 'profit' ? colors.success : type === 'loss' ? colors.error : colors.primary,
+                      },
+                    ]}
+                    onPress={() => setFilters(prev => ({ ...prev, profitType: type }))}
+                  >
+                    <Ionicons
+                      name={type === 'profit' ? 'trending-up' : type === 'loss' ? 'trending-down' : 'swap-horizontal'}
+                      size={16}
+                      color={
+                        filters.profitType === type
+                          ? type === 'profit' ? colors.success : type === 'loss' ? colors.error : colors.primary
+                          : colors.textSecondary
+                      }
+                    />
+                    <Text style={[styles.filterOptionText, { 
+                      color: filters.profitType === type 
+                        ? type === 'profit' ? colors.success : type === 'loss' ? colors.error : colors.primary
+                        : colors.text 
+                    }]}>
+                      {type === 'all' ? 'Tümü' : type === 'profit' ? 'Karlı' : 'Zararlı'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Quantity Filter */}
+              <Text style={[styles.filterSectionTitle, { color: colors.text }]}>Stok Miktarı</Text>
+              <View style={styles.filterOptions}>
+                {(['all', 'low', 'medium', 'high'] as const).map((type) => (
+                  <TouchableOpacity
+                    key={type}
+                    style={[
+                      styles.filterOption,
+                      { borderColor: colors.border },
+                      filters.quantityType === type && { backgroundColor: colors.warning + '20', borderColor: colors.warning },
+                    ]}
+                    onPress={() => setFilters(prev => ({ ...prev, quantityType: type }))}
+                  >
+                    <Text style={[styles.filterOptionText, { color: filters.quantityType === type ? colors.warning : colors.text }]}>
+                      {type === 'all' ? 'Tümü' : type === 'low' ? '< 50' : type === 'medium' ? '50-200' : '> 200'}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* KDV Filter */}
+              <Text style={[styles.filterSectionTitle, { color: colors.text }]}>KDV Oranı</Text>
+              <View style={styles.filterOptions}>
+                {(['all', '1', '10', '20'] as const).map((type) => (
+                  <TouchableOpacity
+                    key={type}
+                    style={[
+                      styles.filterOption,
+                      { borderColor: colors.border },
+                      filters.kdvType === type && { backgroundColor: colors.info + '20', borderColor: colors.info },
+                    ]}
+                    onPress={() => setFilters(prev => ({ ...prev, kdvType: type }))}
+                  >
+                    <Text style={[styles.filterOptionText, { color: filters.kdvType === type ? colors.info : colors.text }]}>
+                      {type === 'all' ? 'Tümü' : `%${type}`}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+            <View style={[styles.modalFooter, { borderTopColor: colors.border }]}>
               <TouchableOpacity
-                style={[
-                  styles.filterItem,
-                  { borderColor: colors.border },
-                  selectedGroup === null && { backgroundColor: colors.primary + '20', borderColor: colors.primary },
-                ]}
+                style={[styles.resetBtn, { borderColor: colors.border }]}
                 onPress={() => {
-                  setSelectedGroup(null);
+                  resetFilters();
                   setShowFilterModal(false);
                 }}
               >
-                <Text style={[styles.filterItemText, { color: selectedGroup === null ? colors.primary : colors.text }]}>
-                  Tüm Gruplar
-                </Text>
+                <Text style={[styles.resetBtnText, { color: colors.text }]}>Sıfırla</Text>
               </TouchableOpacity>
-              {groups.map((group) => (
-                <TouchableOpacity
-                  key={group}
-                  style={[
-                    styles.filterItem,
-                    { borderColor: colors.border },
-                    selectedGroup === group && { backgroundColor: colors.primary + '20', borderColor: colors.primary },
-                  ]}
-                  onPress={() => {
-                    setSelectedGroup(group);
-                    setShowFilterModal(false);
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.filterItemText,
-                      { color: selectedGroup === group ? colors.primary : colors.text },
-                    ]}
-                  >
-                    {group}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+              <TouchableOpacity
+                style={[styles.applyBtn, { backgroundColor: colors.primary }]}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={styles.applyBtnText}>Uygula</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Barcode Scanner Modal */}
+      <Modal visible={showScanner} animationType="slide">
+        <View style={[styles.scannerContainer, { backgroundColor: colors.background }]}>
+          <View style={[styles.scannerHeader, { backgroundColor: colors.surface }]}>
+            <TouchableOpacity onPress={() => setShowScanner(false)} style={styles.scannerCloseBtn}>
+              <Ionicons name="close" size={28} color={colors.text} />
+            </TouchableOpacity>
+            <Text style={[styles.scannerTitle, { color: colors.text }]}>Barkod Tara</Text>
+            <View style={{ width: 28 }} />
+          </View>
+          <CameraView
+            style={styles.scanner}
+            facing="back"
+            barcodeScannerSettings={{
+              barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'code128', 'code39'],
+            }}
+            onBarcodeScanned={handleBarCodeScanned}
+          />
+          <View style={styles.scannerOverlay}>
+            <View style={[styles.scannerFrame, { borderColor: colors.primary }]} />
+            <Text style={[styles.scannerHint, { color: '#FFF' }]}>
+              Barkodu çerçevenin içine hizalayın
+            </Text>
           </View>
         </View>
       </Modal>
@@ -419,22 +655,39 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  scanButton: {
+    padding: 10,
+    borderRadius: 12,
+  },
   filterButton: {
     padding: 10,
     borderRadius: 12,
     borderWidth: 1,
     position: 'relative',
   },
-  filterDot: {
+  filterBadge: {
     position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    top: -4,
+    right: -4,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  filterBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '700',
   },
   searchContainer: {
     padding: 16,
+    paddingBottom: 8,
   },
   searchInput: {
     flexDirection: 'row',
@@ -449,26 +702,40 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
   },
-  selectedFilterRow: {
+  activeFiltersRow: {
     paddingHorizontal: 16,
     marginBottom: 8,
   },
-  selectedFilter: {
+  activeFiltersContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
+    gap: 8,
+  },
+  activeFilter: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
     gap: 6,
   },
-  selectedFilterText: {
-    fontSize: 13,
+  activeFilterText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  clearAllBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  clearAllText: {
+    fontSize: 12,
     fontWeight: '500',
   },
   countRow: {
     paddingHorizontal: 16,
-    marginBottom: 8,
+    paddingVertical: 8,
   },
   countText: {
     fontSize: 13,
@@ -548,7 +815,7 @@ const styles = StyleSheet.create({
   modalContent: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '70%',
+    maxHeight: '80%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -566,15 +833,94 @@ const styles = StyleSheet.create({
   modalBody: {
     padding: 20,
   },
-  filterItem: {
+  filterSectionTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  filterOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 20,
+  },
+  filterOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 20,
+    borderWidth: 1,
+    gap: 6,
+  },
+  filterOptionText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    padding: 20,
+    borderTopWidth: 1,
+    gap: 12,
+  },
+  resetBtn: {
+    flex: 1,
     paddingVertical: 14,
-    paddingHorizontal: 16,
     borderRadius: 12,
     borderWidth: 1,
-    marginBottom: 8,
+    alignItems: 'center',
   },
-  filterItemText: {
-    fontSize: 15,
+  resetBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  applyBtn: {
+    flex: 2,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  applyBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFF',
+  },
+  scannerContainer: {
+    flex: 1,
+  },
+  scannerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    paddingTop: 50,
+  },
+  scannerCloseBtn: {
+    padding: 4,
+  },
+  scannerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  scanner: {
+    flex: 1,
+  },
+  scannerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    marginTop: 90,
+  },
+  scannerFrame: {
+    width: 280,
+    height: 180,
+    borderWidth: 3,
+    borderRadius: 16,
+  },
+  scannerHint: {
+    marginTop: 24,
+    fontSize: 14,
     fontWeight: '500',
   },
   sectionTitle: {
