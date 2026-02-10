@@ -783,6 +783,9 @@ export default function ReportsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Custom Alert */}
+      <CustomAlert {...alertProps} />
     </SafeAreaView>
   );
 }
