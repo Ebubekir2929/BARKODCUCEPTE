@@ -7,7 +7,7 @@ import {
   TouchableOpacity,
   Modal,
   Alert,
-  Platform,
+  TextInput,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +19,7 @@ import {
   customersData,
   productsData,
   hourlySalesData,
+  branches,
 } from '../../src/data/mockData';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -32,6 +33,12 @@ interface Report {
   description: string;
 }
 
+interface ReportFilters {
+  branchId: string | null;
+  startDate: string;
+  endDate: string;
+}
+
 const reports: Report[] = [
   { id: 'sales', title: 'Şube Satış Raporu', icon: 'storefront-outline', description: 'Şube bazında satış verileri' },
   { id: 'stock', title: 'Stok Durum Raporu', icon: 'cube-outline', description: 'Tüm ürünlerin stok durumu' },
@@ -43,17 +50,38 @@ const reports: Report[] = [
 export default function ReportsScreen() {
   const { colors } = useThemeStore();
   const [selectedReport, setSelectedReport] = useState<ReportType | null>(null);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [filters, setFilters] = useState<ReportFilters>({
+    branchId: null,
+    startDate: '',
+    endDate: '',
+  });
+  const [pendingReport, setPendingReport] = useState<ReportType | null>(null);
+
+  const handleReportSelect = (reportId: ReportType) => {
+    setPendingReport(reportId);
+    setShowFilterModal(true);
+  };
+
+  const applyFiltersAndOpenReport = () => {
+    setShowFilterModal(false);
+    setSelectedReport(pendingReport);
+    setShowReportModal(true);
+  };
 
   const generateCSV = (reportType: ReportType): string => {
     let csv = '';
-    const date = new Date().toLocaleDateString('tr-TR');
 
     switch (reportType) {
       case 'sales':
         csv = 'Şube,Nakit,Kart,Açık Hesap,Toplam\n';
-        branchSalesData.forEach((b) => {
+        const filteredSales = filters.branchId 
+          ? branchSalesData.filter(b => b.branchId === filters.branchId)
+          : branchSalesData;
+        filteredSales.forEach((b) => {
           csv += `${b.branchName},${b.sales.cash},${b.sales.card},${b.sales.openAccount},${b.sales.total}\n`;
         });
         break;
@@ -112,7 +140,6 @@ export default function ReportsScreen() {
           Alert.alert('Başarılı', 'Rapor oluşturuldu: ' + fileUri);
         }
       } else {
-        // For PDF, we'll create a simple HTML and share it
         const html = generateHTMLReport(selectedReport, reportTitle);
         const fileUri = FileSystem.documentDirectory + fileName + '.html';
         await FileSystem.writeAsStringAsync(fileUri, html, { encoding: FileSystem.EncodingType.UTF8 });
@@ -140,9 +167,12 @@ export default function ReportsScreen() {
 
     switch (reportType) {
       case 'sales':
+        const filteredSales = filters.branchId 
+          ? branchSalesData.filter(b => b.branchId === filters.branchId)
+          : branchSalesData;
         tableContent = `
           <tr><th>Şube</th><th>Nakit</th><th>Kart</th><th>Açık Hesap</th><th>Toplam</th></tr>
-          ${branchSalesData.map((b) => `
+          ${filteredSales.map((b) => `
             <tr>
               <td>${b.branchName}</td>
               <td>₺${b.sales.cash.toLocaleString('tr-TR')}</td>
@@ -215,6 +245,7 @@ export default function ReportsScreen() {
           body { font-family: Arial, sans-serif; padding: 20px; }
           h1 { color: #2563eb; }
           .date { color: #666; margin-bottom: 20px; }
+          .filters { background: #f5f5f5; padding: 10px; border-radius: 8px; margin-bottom: 20px; }
           table { width: 100%; border-collapse: collapse; margin-top: 20px; }
           th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
           th { background: #2563eb; color: white; }
@@ -224,6 +255,12 @@ export default function ReportsScreen() {
       <body>
         <h1>${title}</h1>
         <p class="date">Tarih: ${date}</p>
+        <div class="filters">
+          <strong>Filtreler:</strong> 
+          ${filters.branchId ? `Şube: ${branches.find(b => b.id === filters.branchId)?.name || 'Tümü'}` : 'Tüm Şubeler'}
+          ${filters.startDate ? ` | Başlangıç: ${filters.startDate}` : ''}
+          ${filters.endDate ? ` | Bitiş: ${filters.endDate}` : ''}
+        </div>
         <table>${tableContent}</table>
       </body>
       </html>
@@ -233,6 +270,9 @@ export default function ReportsScreen() {
   const renderReportContent = () => {
     switch (selectedReport) {
       case 'sales':
+        const filteredSales = filters.branchId 
+          ? branchSalesData.filter(b => b.branchId === filters.branchId)
+          : branchSalesData;
         return (
           <>
             <View style={styles.reportHeader}>
@@ -241,7 +281,7 @@ export default function ReportsScreen() {
                 {new Date().toLocaleDateString('tr-TR')}
               </Text>
             </View>
-            {branchSalesData.map((branch) => (
+            {filteredSales.map((branch) => (
               <View key={branch.branchId} style={[styles.reportRow, { borderBottomColor: colors.border }]}>
                 <Text style={[styles.reportRowTitle, { color: colors.text }]}>{branch.branchName}</Text>
                 <View style={styles.reportRowValues}>
@@ -405,57 +445,156 @@ export default function ReportsScreen() {
 
       <ScrollView style={styles.scrollView}>
         {/* Report List */}
-        {!selectedReport && (
-          <View style={styles.reportList}>
-            {reports.map((report) => (
-              <TouchableOpacity
-                key={report.id}
-                style={[styles.reportCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-                onPress={() => setSelectedReport(report.id)}
-              >
-                <View style={[styles.reportIcon, { backgroundColor: colors.primary + '20' }]}>
-                  <Ionicons name={report.icon} size={24} color={colors.primary} />
-                </View>
-                <View style={styles.reportInfo}>
-                  <Text style={[styles.reportCardTitle, { color: colors.text }]}>{report.title}</Text>
-                  <Text style={[styles.reportCardDesc, { color: colors.textSecondary }]}>
-                    {report.description}
-                  </Text>
-                </View>
-                <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {/* Report Detail */}
-        {selectedReport && (
-          <View style={styles.reportDetail}>
-            <View style={styles.reportActions}>
-              <TouchableOpacity
-                style={[styles.backBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
-                onPress={() => setSelectedReport(null)}
-              >
-                <Ionicons name="arrow-back" size={20} color={colors.text} />
-                <Text style={[styles.backBtnText, { color: colors.text }]}>Geri</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.exportBtn, { backgroundColor: colors.primary }]}
-                onPress={() => setShowExportModal(true)}
-              >
-                <Ionicons name="share-outline" size={20} color="#FFF" />
-                <Text style={styles.exportBtnText}>Dışa Aktar</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={[styles.reportContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              {renderReportContent()}
-            </View>
-          </View>
-        )}
+        <View style={styles.reportList}>
+          <Text style={[styles.listTitle, { color: colors.textSecondary }]}>
+            Rapor seçin ve filtreleri belirleyin
+          </Text>
+          {reports.map((report) => (
+            <TouchableOpacity
+              key={report.id}
+              style={[styles.reportCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+              onPress={() => handleReportSelect(report.id)}
+            >
+              <View style={[styles.reportIcon, { backgroundColor: colors.primary + '20' }]}>
+                <Ionicons name={report.icon} size={24} color={colors.primary} />
+              </View>
+              <View style={styles.reportInfo}>
+                <Text style={[styles.reportCardTitle, { color: colors.text }]}>{report.title}</Text>
+                <Text style={[styles.reportCardDesc, { color: colors.textSecondary }]}>
+                  {report.description}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+          ))}
+        </View>
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* Filter Modal */}
+      <Modal visible={showFilterModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Rapor Filtreleri</Text>
+              <TouchableOpacity onPress={() => setShowFilterModal(false)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalBody}>
+              {/* Branch Filter */}
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Şube Seçimi</Text>
+              <View style={styles.filterOptions}>
+                <TouchableOpacity
+                  style={[
+                    styles.filterOption,
+                    { borderColor: colors.border },
+                    filters.branchId === null && { backgroundColor: colors.primary + '20', borderColor: colors.primary },
+                  ]}
+                  onPress={() => setFilters(prev => ({ ...prev, branchId: null }))}
+                >
+                  <Text style={[styles.filterOptionText, { color: filters.branchId === null ? colors.primary : colors.text }]}>
+                    Tüm Şubeler
+                  </Text>
+                </TouchableOpacity>
+                {branches.map((branch) => (
+                  <TouchableOpacity
+                    key={branch.id}
+                    style={[
+                      styles.filterOption,
+                      { borderColor: colors.border },
+                      filters.branchId === branch.id && { backgroundColor: colors.primary + '20', borderColor: colors.primary },
+                    ]}
+                    onPress={() => setFilters(prev => ({ ...prev, branchId: branch.id }))}
+                  >
+                    <Text style={[styles.filterOptionText, { color: filters.branchId === branch.id ? colors.primary : colors.text }]}>
+                      {branch.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Date Filters */}
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Tarih Aralığı</Text>
+              <View style={styles.dateInputs}>
+                <View style={styles.dateInputWrapper}>
+                  <Text style={[styles.dateInputLabel, { color: colors.textSecondary }]}>Başlangıç</Text>
+                  <TextInput
+                    style={[styles.dateInput, { backgroundColor: colors.card, color: colors.text, borderColor: colors.border }]}
+                    placeholder="GG/AA/YYYY"
+                    placeholderTextColor={colors.textSecondary}
+                    value={filters.startDate}
+                    onChangeText={(t) => setFilters(prev => ({ ...prev, startDate: t }))}
+                  />
+                </View>
+                <View style={styles.dateInputWrapper}>
+                  <Text style={[styles.dateInputLabel, { color: colors.textSecondary }]}>Bitiş</Text>
+                  <TextInput
+                    style={[styles.dateInput, { backgroundColor: colors.card, color: colors.text, borderColor: colors.border }]}
+                    placeholder="GG/AA/YYYY"
+                    placeholderTextColor={colors.textSecondary}
+                    value={filters.endDate}
+                    onChangeText={(t) => setFilters(prev => ({ ...prev, endDate: t }))}
+                  />
+                </View>
+              </View>
+            </ScrollView>
+            <View style={[styles.modalFooter, { borderTopColor: colors.border }]}>
+              <TouchableOpacity
+                style={[styles.cancelBtn, { borderColor: colors.border }]}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={[styles.cancelBtnText, { color: colors.text }]}>İptal</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.viewReportBtn, { backgroundColor: colors.primary }]}
+                onPress={applyFiltersAndOpenReport}
+              >
+                <Text style={styles.viewReportBtnText}>Raporu Görüntüle</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Report View Modal */}
+      <Modal visible={showReportModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '90%' }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+              <TouchableOpacity
+                style={styles.backBtn}
+                onPress={() => setShowReportModal(false)}
+              >
+                <Ionicons name="arrow-back" size={24} color={colors.text} />
+              </TouchableOpacity>
+              <Text style={[styles.modalTitle, { color: colors.text, flex: 1, textAlign: 'center' }]}>
+                {reports.find(r => r.id === selectedReport)?.title}
+              </Text>
+              <TouchableOpacity
+                style={[styles.exportIconBtn, { backgroundColor: colors.primary }]}
+                onPress={() => setShowExportModal(true)}
+              >
+                <Ionicons name="share-outline" size={20} color="#FFF" />
+              </TouchableOpacity>
+            </View>
+            
+            {/* Applied Filters Display */}
+            <View style={[styles.appliedFilters, { backgroundColor: colors.background }]}>
+              <Text style={[styles.appliedFiltersText, { color: colors.textSecondary }]}>
+                {filters.branchId ? branches.find(b => b.id === filters.branchId)?.name : 'Tüm Şubeler'}
+                {filters.startDate ? ` • ${filters.startDate}` : ''}
+                {filters.endDate ? ` - ${filters.endDate}` : ''}
+              </Text>
+            </View>
+
+            <ScrollView style={styles.reportContent}>
+              {renderReportContent()}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* Export Modal */}
       <Modal visible={showExportModal} animationType="slide" transparent>
@@ -518,6 +657,10 @@ const styles = StyleSheet.create({
   reportList: {
     padding: 16,
   },
+  listTitle: {
+    fontSize: 14,
+    marginBottom: 16,
+  },
   reportCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -545,44 +688,114 @@ const styles = StyleSheet.create({
   reportCardDesc: {
     fontSize: 13,
   },
-  reportDetail: {
-    padding: 16,
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
   },
-  reportActions: {
+  modalContent: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '80%',
+  },
+  modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
   },
   backBtn: {
+    padding: 4,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  exportIconBtn: {
+    padding: 8,
+    borderRadius: 10,
+  },
+  modalBody: {
+    padding: 20,
+  },
+  filterLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  filterOptions: {
     flexDirection: 'row',
-    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 20,
+  },
+  filterOption: {
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 12,
+    borderRadius: 20,
     borderWidth: 1,
-    gap: 6,
   },
-  backBtnText: {
-    fontSize: 14,
+  filterOptionText: {
+    fontSize: 13,
     fontWeight: '500',
   },
-  exportBtn: {
+  dateInputs: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 12,
-    gap: 6,
+    gap: 12,
+    marginBottom: 16,
   },
-  exportBtnText: {
+  dateInputWrapper: {
+    flex: 1,
+  },
+  dateInputLabel: {
+    fontSize: 12,
+    marginBottom: 6,
+  },
+  dateInput: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
     fontSize: 14,
+  },
+  modalFooter: {
+    flexDirection: 'row',
+    padding: 20,
+    borderTopWidth: 1,
+    gap: 12,
+  },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  cancelBtnText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  viewReportBtn: {
+    flex: 2,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  viewReportBtnText: {
+    fontSize: 16,
     fontWeight: '600',
     color: '#FFF',
   },
+  appliedFilters: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  appliedFiltersText: {
+    fontSize: 13,
+  },
   reportContent: {
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 16,
+    padding: 20,
   },
   reportHeader: {
     marginBottom: 16,
@@ -707,35 +920,12 @@ const styles = StyleSheet.create({
   hourlyTx: {
     fontSize: 10,
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  modalBody: {
-    padding: 20,
-    gap: 16,
-  },
   exportOption: {
     alignItems: 'center',
     padding: 24,
     borderRadius: 16,
     borderWidth: 1,
+    marginBottom: 16,
   },
   exportOptionTitle: {
     fontSize: 16,
