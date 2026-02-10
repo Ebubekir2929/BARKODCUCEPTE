@@ -8,6 +8,7 @@ import {
   Modal,
   Alert,
   TextInput,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -23,6 +24,7 @@ import {
 } from '../../src/data/mockData';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 type ReportType = 'sales' | 'stock' | 'customers' | 'products' | 'hourly';
 
@@ -35,8 +37,8 @@ interface Report {
 
 interface ReportFilters {
   branchId: string | null;
-  startDate: string;
-  endDate: string;
+  startDate: Date;
+  endDate: Date;
 }
 
 const reports: Report[] = [
@@ -47,6 +49,14 @@ const reports: Report[] = [
   { id: 'hourly', title: 'Saatlik Satış Raporu', icon: 'time-outline', description: 'Saatlik satış dağılımı' },
 ];
 
+const quickDateOptions = [
+  { label: 'Bugün', days: 0 },
+  { label: 'Dün', days: 1 },
+  { label: 'Son 7 Gün', days: 7 },
+  { label: 'Son 30 Gün', days: 30 },
+  { label: 'Bu Ay', days: -1 },
+];
+
 export default function ReportsScreen() {
   const { colors } = useThemeStore();
   const [selectedReport, setSelectedReport] = useState<ReportType | null>(null);
@@ -54,12 +64,89 @@ export default function ReportsScreen() {
   const [showReportModal, setShowReportModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+  
   const [filters, setFilters] = useState<ReportFilters>({
     branchId: null,
-    startDate: '',
-    endDate: '',
+    startDate: new Date(),
+    endDate: new Date(),
   });
+  const [startDateInput, setStartDateInput] = useState(formatDateForInput(new Date()));
+  const [endDateInput, setEndDateInput] = useState(formatDateForInput(new Date()));
   const [pendingReport, setPendingReport] = useState<ReportType | null>(null);
+
+  function formatDateForInput(date: Date): string {
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
+
+  const parseDate = (input: string): Date | null => {
+    const cleaned = input.replace(/[.\-]/g, '/');
+    const parts = cleaned.split('/');
+    
+    if (parts.length === 3) {
+      const day = parseInt(parts[0]);
+      const month = parseInt(parts[1]);
+      const year = parseInt(parts[2]);
+      
+      if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2020 && year <= 2030) {
+        return new Date(year, month - 1, day);
+      }
+    }
+    return null;
+  };
+
+  const handleStartDateChange = (text: string) => {
+    setStartDateInput(text);
+    const parsed = parseDate(text);
+    if (parsed) {
+      setFilters(prev => ({ ...prev, startDate: parsed }));
+    }
+  };
+
+  const handleEndDateChange = (text: string) => {
+    setEndDateInput(text);
+    const parsed = parseDate(text);
+    if (parsed) {
+      setFilters(prev => ({ ...prev, endDate: parsed }));
+    }
+  };
+
+  const onStartDatePickerChange = (event: any, selectedDate?: Date) => {
+    setShowStartPicker(Platform.OS === 'ios');
+    if (selectedDate) {
+      setFilters(prev => ({ ...prev, startDate: selectedDate }));
+      setStartDateInput(formatDateForInput(selectedDate));
+    }
+  };
+
+  const onEndDatePickerChange = (event: any, selectedDate?: Date) => {
+    setShowEndPicker(Platform.OS === 'ios');
+    if (selectedDate) {
+      setFilters(prev => ({ ...prev, endDate: selectedDate }));
+      setEndDateInput(formatDateForInput(selectedDate));
+    }
+  };
+
+  const selectQuickDate = (days: number) => {
+    const end = new Date();
+    let start = new Date();
+    
+    if (days === -1) {
+      start = new Date(end.getFullYear(), end.getMonth(), 1);
+    } else if (days === 0) {
+      start = new Date();
+    } else {
+      start.setDate(start.getDate() - days);
+    }
+    
+    setFilters(prev => ({ ...prev, startDate: start, endDate: end }));
+    setStartDateInput(formatDateForInput(start));
+    setEndDateInput(formatDateForInput(end));
+  };
 
   const handleReportSelect = (reportId: ReportType) => {
     setPendingReport(reportId);
@@ -258,8 +345,7 @@ export default function ReportsScreen() {
         <div class="filters">
           <strong>Filtreler:</strong> 
           ${filters.branchId ? `Şube: ${branches.find(b => b.id === filters.branchId)?.name || 'Tümü'}` : 'Tüm Şubeler'}
-          ${filters.startDate ? ` | Başlangıç: ${filters.startDate}` : ''}
-          ${filters.endDate ? ` | Bitiş: ${filters.endDate}` : ''}
+          | ${formatDateForInput(filters.startDate)} - ${formatDateForInput(filters.endDate)}
         </div>
         <table>${tableContent}</table>
       </body>
@@ -482,7 +568,7 @@ export default function ReportsScreen() {
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalBody}>
+            <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
               {/* Branch Filter */}
               <Text style={[styles.filterLabel, { color: colors.text }]}>Şube Seçimi</Text>
               <View style={styles.filterOptions}>
@@ -515,30 +601,93 @@ export default function ReportsScreen() {
                 ))}
               </View>
 
-              {/* Date Filters */}
+              {/* Quick Date Selection */}
+              <Text style={[styles.filterLabel, { color: colors.text }]}>Hızlı Tarih</Text>
+              <View style={styles.filterOptions}>
+                {quickDateOptions.map((option) => (
+                  <TouchableOpacity
+                    key={option.label}
+                    style={[
+                      styles.filterOption,
+                      { borderColor: colors.border },
+                    ]}
+                    onPress={() => selectQuickDate(option.days)}
+                  >
+                    <Text style={[styles.filterOptionText, { color: colors.text }]}>{option.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Date Filters with Picker */}
               <Text style={[styles.filterLabel, { color: colors.text }]}>Tarih Aralığı</Text>
               <View style={styles.dateInputs}>
                 <View style={styles.dateInputWrapper}>
                   <Text style={[styles.dateInputLabel, { color: colors.textSecondary }]}>Başlangıç</Text>
-                  <TextInput
-                    style={[styles.dateInput, { backgroundColor: colors.card, color: colors.text, borderColor: colors.border }]}
-                    placeholder="GG/AA/YYYY"
-                    placeholderTextColor={colors.textSecondary}
-                    value={filters.startDate}
-                    onChangeText={(t) => setFilters(prev => ({ ...prev, startDate: t }))}
-                  />
+                  <View style={[styles.dateInputContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <TextInput
+                      style={[styles.dateInput, { color: colors.text }]}
+                      placeholder="GG/AA/YYYY"
+                      placeholderTextColor={colors.textSecondary}
+                      value={startDateInput}
+                      onChangeText={handleStartDateChange}
+                      keyboardType="numbers-and-punctuation"
+                      maxLength={10}
+                    />
+                    <TouchableOpacity onPress={() => setShowStartPicker(true)} style={styles.calendarBtn}>
+                      <Ionicons name="calendar" size={20} color={colors.primary} />
+                    </TouchableOpacity>
+                  </View>
                 </View>
                 <View style={styles.dateInputWrapper}>
                   <Text style={[styles.dateInputLabel, { color: colors.textSecondary }]}>Bitiş</Text>
-                  <TextInput
-                    style={[styles.dateInput, { backgroundColor: colors.card, color: colors.text, borderColor: colors.border }]}
-                    placeholder="GG/AA/YYYY"
-                    placeholderTextColor={colors.textSecondary}
-                    value={filters.endDate}
-                    onChangeText={(t) => setFilters(prev => ({ ...prev, endDate: t }))}
-                  />
+                  <View style={[styles.dateInputContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <TextInput
+                      style={[styles.dateInput, { color: colors.text }]}
+                      placeholder="GG/AA/YYYY"
+                      placeholderTextColor={colors.textSecondary}
+                      value={endDateInput}
+                      onChangeText={handleEndDateChange}
+                      keyboardType="numbers-and-punctuation"
+                      maxLength={10}
+                    />
+                    <TouchableOpacity onPress={() => setShowEndPicker(true)} style={styles.calendarBtn}>
+                      <Ionicons name="calendar" size={20} color={colors.primary} />
+                    </TouchableOpacity>
+                  </View>
                 </View>
               </View>
+
+              {/* Date Pickers */}
+              {showStartPicker && (
+                <DateTimePicker
+                  value={filters.startDate}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={onStartDatePickerChange}
+                  locale="tr-TR"
+                />
+              )}
+              {showEndPicker && (
+                <DateTimePicker
+                  value={filters.endDate}
+                  mode="date"
+                  display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                  onChange={onEndDatePickerChange}
+                  locale="tr-TR"
+                />
+              )}
+
+              {/* Selected Date Display */}
+              <View style={[styles.selectedDateDisplay, { backgroundColor: colors.background }]}>
+                <Ionicons name="time-outline" size={18} color={colors.primary} />
+                <Text style={[styles.selectedDateText, { color: colors.text }]}>
+                  {formatDateForInput(filters.startDate)} - {formatDateForInput(filters.endDate)}
+                </Text>
+              </View>
+
+              <Text style={[styles.dateHint, { color: colors.textSecondary }]}>
+                Elle yazın veya takvim ikonuna tıklayın
+              </Text>
             </ScrollView>
             <View style={[styles.modalFooter, { borderTopColor: colors.border }]}>
               <TouchableOpacity
@@ -584,12 +733,11 @@ export default function ReportsScreen() {
             <View style={[styles.appliedFilters, { backgroundColor: colors.background }]}>
               <Text style={[styles.appliedFiltersText, { color: colors.textSecondary }]}>
                 {filters.branchId ? branches.find(b => b.id === filters.branchId)?.name : 'Tüm Şubeler'}
-                {filters.startDate ? ` • ${filters.startDate}` : ''}
-                {filters.endDate ? ` - ${filters.endDate}` : ''}
+                {` • ${formatDateForInput(filters.startDate)} - ${formatDateForInput(filters.endDate)}`}
               </Text>
             </View>
 
-            <ScrollView style={styles.reportContent}>
+            <ScrollView style={styles.reportContent} contentContainerStyle={styles.reportContentContainer}>
               {renderReportContent()}
             </ScrollView>
           </View>
@@ -690,7 +838,7 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.35)',
     justifyContent: 'flex-end',
   },
   modalContent: {
@@ -719,6 +867,9 @@ const styles = StyleSheet.create({
   modalBody: {
     padding: 20,
   },
+  modalBodyContent: {
+    paddingBottom: 50,
+  },
   filterLabel: {
     fontSize: 15,
     fontWeight: '600',
@@ -743,7 +894,7 @@ const styles = StyleSheet.create({
   dateInputs: {
     flexDirection: 'row',
     gap: 12,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   dateInputWrapper: {
     flex: 1,
@@ -752,12 +903,40 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 6,
   },
-  dateInput: {
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+  dateInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 12,
+    paddingRight: 4,
+    paddingVertical: 4,
     borderRadius: 12,
     borderWidth: 1,
+  },
+  dateInput: {
+    flex: 1,
     fontSize: 14,
+    paddingVertical: 8,
+  },
+  calendarBtn: {
+    padding: 8,
+  },
+  selectedDateDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 12,
+    borderRadius: 10,
+    gap: 8,
+    marginBottom: 8,
+  },
+  selectedDateText: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  dateHint: {
+    fontSize: 11,
+    textAlign: 'center',
+    marginBottom: 10,
   },
   modalFooter: {
     flexDirection: 'row',
@@ -796,6 +975,9 @@ const styles = StyleSheet.create({
   },
   reportContent: {
     padding: 20,
+  },
+  reportContentContainer: {
+    paddingBottom: 50,
   },
   reportHeader: {
     marginBottom: 16,
