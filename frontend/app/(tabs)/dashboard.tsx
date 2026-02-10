@@ -8,9 +8,8 @@ import {
   Modal,
   Dimensions,
   RefreshControl,
-  Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAuthStore } from '../../src/store/authStore';
@@ -24,7 +23,7 @@ import {
   weeklyComparisonData,
   todayTotals,
 } from '../../src/data/mockData';
-import { BranchSales, HourlySales, TopProduct, CancelledReceipt } from '../../src/types';
+import { BranchSales, HourlySales, CancelledReceipt } from '../../src/types';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -42,6 +41,7 @@ export default function DashboardScreen() {
   const [selectedCardType, setSelectedCardType] = useState<'cash' | 'card' | 'openAccount' | 'total' | null>(null);
   const [selectedHour, setSelectedHour] = useState<HourlySales | null>(null);
   const [showHourDetail, setShowHourDetail] = useState(false);
+  const [selectedBranchCancellations, setSelectedBranchCancellations] = useState<{ branch: BranchSales; receipts: CancelledReceipt[] } | null>(null);
   const [selectedReceipt, setSelectedReceipt] = useState<CancelledReceipt | null>(null);
   const [highlightedHourIndex, setHighlightedHourIndex] = useState<number | null>(null);
 
@@ -83,12 +83,7 @@ export default function DashboardScreen() {
   const handleHourPress = (hour: HourlySales, index: number) => {
     setSelectedHour(hour);
     setHighlightedHourIndex(index);
-  };
-
-  const openHourDetail = () => {
-    if (selectedHour) {
-      setShowHourDetail(true);
-    }
+    setShowHourDetail(true);
   };
 
   const getCardTypeLabel = (type: string) => {
@@ -109,6 +104,10 @@ export default function DashboardScreen() {
       case 'total': return colors.total;
       default: return colors.primary;
     }
+  };
+
+  const openCancellations = (branch: BranchSales) => {
+    setSelectedBranchCancellations({ branch, receipts: branch.cancellations });
   };
 
   return (
@@ -167,38 +166,34 @@ export default function DashboardScreen() {
               onPress={() => setSelectedCardType('total')}
             />
           </View>
-        </View>
 
-        {/* Weekly Comparison - Below Cards */}
-        <View style={[styles.comparisonSection, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={styles.comparisonGrid}>
-            <View style={styles.comparisonColumn}>
-              <Text style={[styles.comparisonLabel, { color: colors.textSecondary }]}>Geçen Hafta</Text>
-              <Text style={[styles.comparisonAmount, { color: colors.text }]}>
-                ₺{weeklyComparisonData.lastWeek.total.toLocaleString('tr-TR')}
-              </Text>
-            </View>
-            <View style={styles.comparisonColumn}>
-              <Text style={[styles.comparisonLabel, { color: colors.textSecondary }]}>Bugün</Text>
-              <Text style={[styles.comparisonAmount, { color: colors.success }]}>
-                ₺{todayTotals.total.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-              </Text>
-            </View>
-            <View style={styles.comparisonColumn}>
-              <Text style={[styles.comparisonLabel, { color: colors.textSecondary }]}>Toplam</Text>
-              <Text style={[styles.comparisonAmount, { color: colors.text }]}>
-                ₺{weeklyComparisonData.thisWeek.total.toLocaleString('tr-TR')}
-              </Text>
-            </View>
-            <View style={styles.comparisonColumn}>
-              <Text style={[styles.comparisonLabel, { color: colors.textSecondary }]}>Değişim</Text>
-              <View style={[styles.changeBadge, { backgroundColor: comparePercentage >= 0 ? colors.success + '20' : colors.error + '20' }]}>
+          {/* Weekly Comparison - Inside Cards Section */}
+          <View style={[styles.weeklyCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.weeklyRow}>
+              <View style={styles.weeklyItem}>
+                <Ionicons name="calendar-outline" size={16} color={colors.textSecondary} />
+                <Text style={[styles.weeklyLabel, { color: colors.textSecondary }]}>Geçen Hafta</Text>
+                <Text style={[styles.weeklyValue, { color: colors.text }]}>
+                  ₺{weeklyComparisonData.lastWeek.total.toLocaleString('tr-TR')}
+                </Text>
+              </View>
+              <View style={[styles.weeklyDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.weeklyItem}>
+                <Ionicons name="today-outline" size={16} color={colors.success} />
+                <Text style={[styles.weeklyLabel, { color: colors.textSecondary }]}>Bugün</Text>
+                <Text style={[styles.weeklyValue, { color: colors.success }]}>
+                  ₺{todayTotals.total.toLocaleString('tr-TR')}
+                </Text>
+              </View>
+              <View style={[styles.weeklyDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.weeklyItem}>
                 <Ionicons
                   name={comparePercentage >= 0 ? 'trending-up' : 'trending-down'}
-                  size={14}
+                  size={16}
                   color={comparePercentage >= 0 ? colors.success : colors.error}
                 />
-                <Text style={{ color: comparePercentage >= 0 ? colors.success : colors.error, fontWeight: '700', fontSize: 13 }}>
+                <Text style={[styles.weeklyLabel, { color: colors.textSecondary }]}>Değişim</Text>
+                <Text style={[styles.weeklyValue, { color: comparePercentage >= 0 ? colors.success : colors.error }]}>
                   %{Math.abs(comparePercentage).toFixed(1)}
                 </Text>
               </View>
@@ -217,28 +212,6 @@ export default function DashboardScreen() {
               </Text>
             </View>
           </View>
-
-          {/* Selected Hour Display */}
-          {selectedHour && (
-            <TouchableOpacity
-              style={[styles.selectedHourDisplay, { backgroundColor: colors.primary + '15', borderColor: colors.primary }]}
-              onPress={openHourDetail}
-            >
-              <View style={styles.selectedHourInfo}>
-                <Ionicons name="time" size={20} color={colors.primary} />
-                <Text style={[styles.selectedHourTime, { color: colors.primary }]}>{selectedHour.hour}</Text>
-              </View>
-              <View style={styles.selectedHourValues}>
-                <Text style={[styles.selectedHourAmount, { color: colors.text }]}>
-                  ₺{selectedHour.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                </Text>
-                <Text style={[styles.selectedHourTx, { color: colors.textSecondary }]}>
-                  {selectedHour.transactions} işlem
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.primary} />
-            </TouchableOpacity>
-          )}
 
           {/* Bar Chart */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chartScroll}>
@@ -277,6 +250,9 @@ export default function DashboardScreen() {
               })}
             </View>
           </ScrollView>
+          <Text style={[styles.chartHint, { color: colors.textSecondary }]}>
+            Saate dokunarak detay görüntüleyin
+          </Text>
         </View>
 
         {/* Top Selling Products */}
@@ -322,10 +298,17 @@ export default function DashboardScreen() {
         </View>
 
         {/* Location Summary */}
-        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, marginBottom: 100 }]}>
+        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Lokasyon Özeti</Text>
-          {branchSalesData.map((branch) => (
-            <View key={branch.branchId} style={[styles.locationCard, { borderBottomColor: colors.border }]}>
+          {branchSalesData.map((branch, index) => (
+            <View 
+              key={branch.branchId} 
+              style={[
+                styles.locationCard, 
+                { borderBottomColor: colors.border },
+                index === branchSalesData.length - 1 && { borderBottomWidth: 0 }
+              ]}
+            >
               <Text style={[styles.locationName, { color: colors.text }]}>{branch.branchName}</Text>
               <View style={styles.locationDetails}>
                 <View style={styles.locationRow}>
@@ -363,17 +346,20 @@ export default function DashboardScreen() {
               </View>
               <TouchableOpacity
                 style={[styles.cancellationButton, { backgroundColor: colors.error + '15' }]}
-                onPress={() => setSelectedReceipt(branch.cancellations[0])}
+                onPress={() => openCancellations(branch)}
               >
                 <Ionicons name="close-circle-outline" size={16} color={colors.error} />
                 <Text style={[styles.cancellationText, { color: colors.error }]}>
-                  {branch.cancellations.length} İptal ({'\u20ba'}
-                  {branch.cancellations.reduce((acc, c) => acc + c.amount, 0).toLocaleString('tr-TR')})
+                  {branch.cancellations.length} İptal Fişi
                 </Text>
+                <Ionicons name="chevron-forward" size={14} color={colors.error} />
               </TouchableOpacity>
             </View>
           ))}
         </View>
+
+        {/* Bottom Spacing - Reduced */}
+        <View style={{ height: 20 }} />
       </ScrollView>
 
       {/* Filter Modal */}
@@ -396,7 +382,7 @@ export default function DashboardScreen() {
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalBody}>
+            <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
               {branchSalesData.map((branch) => {
                 const value = selectedCardType === 'cash' ? branch.sales.cash
                   : selectedCardType === 'card' ? branch.sales.card
@@ -441,12 +427,12 @@ export default function DashboardScreen() {
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 {selectedHour?.hour} Satış Detayı
               </Text>
-              <TouchableOpacity onPress={() => setShowHourDetail(false)}>
+              <TouchableOpacity onPress={() => { setShowHourDetail(false); setHighlightedHourIndex(null); }}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
             {selectedHour && (
-              <View style={styles.modalBody}>
+              <View style={[styles.modalBody, styles.modalBodyContent]}>
                 <View style={[styles.hourDetailCard, { backgroundColor: colors.primary + '15' }]}>
                   <Ionicons name="time-outline" size={48} color={colors.primary} />
                   <Text style={[styles.hourDetailTime, { color: colors.text }]}>{selectedHour.hour}</Text>
@@ -477,18 +463,77 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
+      {/* Cancellations List Modal */}
+      <Modal visible={!!selectedBranchCancellations} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                {selectedBranchCancellations?.branch.branchName} - İptal Fişleri
+              </Text>
+              <TouchableOpacity onPress={() => setSelectedBranchCancellations(null)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
+              <View style={[styles.cancellationSummary, { backgroundColor: colors.error + '15' }]}>
+                <Ionicons name="alert-circle" size={24} color={colors.error} />
+                <View style={styles.cancellationSummaryText}>
+                  <Text style={[styles.cancellationCount, { color: colors.error }]}>
+                    {selectedBranchCancellations?.receipts.length} İptal Fişi
+                  </Text>
+                  <Text style={[styles.cancellationTotal, { color: colors.text }]}>
+                    Toplam: ₺{selectedBranchCancellations?.receipts.reduce((acc, r) => acc + r.amount, 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                  </Text>
+                </View>
+              </View>
+
+              {selectedBranchCancellations?.receipts.map((receipt) => (
+                <TouchableOpacity
+                  key={receipt.id}
+                  style={[styles.receiptCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  onPress={() => setSelectedReceipt(receipt)}
+                >
+                  <View style={styles.receiptCardHeader}>
+                    <View>
+                      <Text style={[styles.receiptCardNo, { color: colors.text }]}>{receipt.receiptNo}</Text>
+                      <Text style={[styles.receiptCardDate, { color: colors.textSecondary }]}>{receipt.date}</Text>
+                    </View>
+                    <Text style={[styles.receiptCardAmount, { color: colors.error }]}>
+                      ₺{receipt.amount.toFixed(2)}
+                    </Text>
+                  </View>
+                  <View style={styles.receiptCardFooter}>
+                    <Text style={[styles.receiptCardReason, { color: colors.textSecondary }]} numberOfLines={1}>
+                      {receipt.reason}
+                    </Text>
+                    <View style={styles.receiptCardAction}>
+                      <Text style={[styles.receiptCardActionText, { color: colors.primary }]}>Detay</Text>
+                      <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       {/* Receipt Detail Modal */}
       <Modal visible={!!selectedReceipt} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>İptal Fişi Detayı</Text>
               <TouchableOpacity onPress={() => setSelectedReceipt(null)}>
-                <Ionicons name="close" size={24} color={colors.text} />
+                <Ionicons name="arrow-back" size={24} color={colors.text} />
               </TouchableOpacity>
+              <Text style={[styles.modalTitle, { color: colors.text, flex: 1, textAlign: 'center' }]}>
+                Fiş Detayı
+              </Text>
+              <View style={{ width: 24 }} />
             </View>
             {selectedReceipt && (
-              <ScrollView style={styles.modalBody}>
+              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
                 <View style={[styles.receiptHeader, { backgroundColor: colors.error + '15' }]}>
                   <Text style={[styles.receiptNo, { color: colors.error }]}>
                     {selectedReceipt.receiptNo}
@@ -496,11 +541,14 @@ export default function DashboardScreen() {
                   <Text style={[styles.receiptDate, { color: colors.textSecondary }]}>
                     {selectedReceipt.date}
                   </Text>
-                  <Text style={[styles.receiptReason, { color: colors.text }]}>
-                    Sebep: {selectedReceipt.reason}
-                  </Text>
+                  <View style={styles.receiptReasonRow}>
+                    <Ionicons name="information-circle-outline" size={16} color={colors.text} />
+                    <Text style={[styles.receiptReason, { color: colors.text }]}>
+                      {selectedReceipt.reason}
+                    </Text>
+                  </View>
                 </View>
-                <Text style={[styles.receiptItemsTitle, { color: colors.text }]}>Ürünler</Text>
+                <Text style={[styles.receiptItemsTitle, { color: colors.text }]}>Ürünler ({selectedReceipt.items.length})</Text>
                 {selectedReceipt.items.map((item, index) => (
                   <View key={index} style={[styles.receiptItem, { borderBottomColor: colors.border }]}>
                     <View style={styles.receiptItemInfo}>
@@ -571,36 +619,32 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginBottom: 8,
   },
-  comparisonSection: {
-    marginHorizontal: 16,
-    marginBottom: 16,
-    padding: 16,
+  weeklyCard: {
+    marginTop: 8,
+    padding: 14,
     borderRadius: 16,
     borderWidth: 1,
   },
-  comparisonGrid: {
+  weeklyRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  comparisonColumn: {
     alignItems: 'center',
+  },
+  weeklyItem: {
     flex: 1,
+    alignItems: 'center',
   },
-  comparisonLabel: {
+  weeklyDivider: {
+    width: 1,
+    height: 40,
+  },
+  weeklyLabel: {
     fontSize: 11,
-    marginBottom: 4,
+    marginTop: 4,
   },
-  comparisonAmount: {
+  weeklyValue: {
     fontSize: 14,
     fontWeight: '700',
-  },
-  changeBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    gap: 2,
+    marginTop: 2,
   },
   section: {
     marginHorizontal: 16,
@@ -632,35 +676,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
-  selectedHourDisplay: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 16,
-  },
-  selectedHourInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  selectedHourTime: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  selectedHourValues: {
-    flex: 1,
-    alignItems: 'flex-end',
-    marginRight: 8,
-  },
-  selectedHourAmount: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  selectedHourTx: {
-    fontSize: 12,
-  },
   chartScroll: {
     marginBottom: 8,
   },
@@ -688,6 +703,11 @@ const styles = StyleSheet.create({
     fontSize: 10,
     marginTop: 6,
     fontWeight: '500',
+  },
+  chartHint: {
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 4,
   },
   productItem: {
     flexDirection: 'row',
@@ -764,6 +784,7 @@ const styles = StyleSheet.create({
   cancellationText: {
     fontSize: 12,
     fontWeight: '500',
+    flex: 1,
   },
   modalOverlay: {
     flex: 1,
@@ -788,6 +809,9 @@ const styles = StyleSheet.create({
   },
   modalBody: {
     padding: 20,
+  },
+  modalBodyContent: {
+    paddingBottom: 20,
   },
   locationModalItem: {
     flexDirection: 'row',
@@ -877,6 +901,68 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '700',
   },
+  cancellationSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+    gap: 12,
+  },
+  cancellationSummaryText: {
+    flex: 1,
+  },
+  cancellationCount: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  cancellationTotal: {
+    fontSize: 14,
+    marginTop: 2,
+  },
+  receiptCard: {
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 10,
+  },
+  receiptCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
+  receiptCardNo: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  receiptCardDate: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  receiptCardAmount: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  receiptCardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  receiptCardReason: {
+    fontSize: 13,
+    flex: 1,
+    marginRight: 10,
+  },
+  receiptCardAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+  },
+  receiptCardActionText: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
   receiptHeader: {
     padding: 16,
     borderRadius: 12,
@@ -891,8 +977,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: 8,
   },
+  receiptReasonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   receiptReason: {
     fontSize: 14,
+    flex: 1,
   },
   receiptItemsTitle: {
     fontSize: 15,
