@@ -770,7 +770,7 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.35)',
     justifyContent: 'flex-end',
   },
   modalContent: {
@@ -793,7 +793,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalBodyContent: {
-    paddingBottom: 20,
+    paddingBottom: 40,
   },
   locationModalItem: {
     flexDirection: 'row',
