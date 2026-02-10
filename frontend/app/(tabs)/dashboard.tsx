@@ -601,33 +601,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginBottom: 8,
   },
-  weeklyCard: {
-    marginTop: 8,
-    padding: 14,
-    borderRadius: 16,
-    borderWidth: 1,
-  },
-  weeklyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  weeklyItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  weeklyDivider: {
-    width: 1,
-    height: 40,
-  },
-  weeklyLabel: {
-    fontSize: 11,
-    marginTop: 4,
-  },
-  weeklyValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    marginTop: 2,
-  },
   section: {
     marginHorizontal: 16,
     marginBottom: 16,
