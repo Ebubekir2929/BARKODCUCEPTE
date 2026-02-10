@@ -8,7 +8,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,12 +15,14 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/authStore';
 import { useThemeStore } from '../../src/store/themeStore';
+import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function LoginScreen() {
   const router = useRouter();
   const { login } = useAuthStore();
   const { colors, isDark, toggleTheme } = useThemeStore();
+  const { showError, showSuccess, alertProps } = useAlert();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -48,7 +49,7 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (!email || !password) {
-      Alert.alert('Hata', 'Lütfen tüm alanları doldurun');
+      showError('Hata', 'Lütfen tüm alanları doldurun');
       return;
     }
 
@@ -65,10 +66,10 @@ export default function LoginScreen() {
       if (success) {
         router.replace('/(tabs)/dashboard');
       } else {
-        Alert.alert('Hata', 'Giriş başarısız');
+        showError('Giriş Başarısız', 'E-posta veya şifre hatalı');
       }
     } catch (error) {
-      Alert.alert('Hata', 'Bir hata oluştu');
+      showError('Hata', 'Bir hata oluştu. Lütfen tekrar deneyin.');
     } finally {
       setIsLoading(false);
     }
