@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -64,12 +64,10 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
 
   useEffect(() => {
     if (visible) {
-      // Reset animations
       scaleAnim.setValue(0);
       opacityAnim.setValue(0);
       iconScaleAnim.setValue(0);
 
-      // Start animations
       Animated.parallel([
         Animated.spring(scaleAnim, {
           toValue: 1,
@@ -83,7 +81,6 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
           useNativeDriver: true,
         }),
       ]).start(() => {
-        // Icon bounce animation
         Animated.spring(iconScaleAnim, {
           toValue: 1,
           useNativeDriver: true,
@@ -144,7 +141,6 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
             },
           ]}
         >
-          {/* Icon Circle */}
           <Animated.View
             style={[
               styles.iconCircle,
@@ -159,7 +155,6 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
             </View>
           </Animated.View>
 
-          {/* Content */}
           <View style={styles.content}>
             <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
             {message && (
@@ -167,7 +162,6 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
             )}
           </View>
 
-          {/* Buttons */}
           <View style={styles.buttonContainer}>
             {buttons.map((button, index) => (
               <TouchableOpacity
@@ -193,8 +187,6 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
 };
 
 // Hook for easy usage
-import { useState, useCallback } from 'react';
-
 interface AlertState {
   visible: boolean;
   type: AlertType;
@@ -245,17 +237,6 @@ export const useAlert = () => {
     setAlertState(prev => ({ ...prev, visible: false }));
   }, []);
 
-  const AlertComponent = useCallback(() => (
-    <CustomAlert
-      visible={alertState.visible}
-      type={alertState.type}
-      title={alertState.title}
-      message={alertState.message}
-      buttons={alertState.buttons}
-      onClose={hideAlert}
-    />
-  ), [alertState, hideAlert]);
-
   return {
     showAlert,
     showSuccess,
@@ -263,7 +244,6 @@ export const useAlert = () => {
     showWarning,
     showInfo,
     hideAlert,
-    AlertComponent,
     alertProps: {
       ...alertState,
       onClose: hideAlert,
