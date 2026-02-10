@@ -765,7 +765,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalBodyContent: {
-    paddingBottom: 40,
+    paddingBottom: 50,
   },
   locationModalItem: {
     flexDirection: 'row',
