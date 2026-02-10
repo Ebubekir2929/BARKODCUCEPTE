@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   ScrollView,
   Alert,
   Switch,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -14,11 +15,104 @@ import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAuthStore } from '../../src/store/authStore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
+
+// Configure notification handler
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
 
 export default function SettingsScreen() {
   const router = useRouter();
   const { colors, isDark, toggleTheme } = useThemeStore();
   const { user, logout } = useAuthStore();
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [lowStockAlert, setLowStockAlert] = useState(true);
+  const [salesAlert, setSalesAlert] = useState(true);
+
+  useEffect(() => {
+    checkNotificationPermission();
+    loadNotificationSettings();
+  }, []);
+
+  const checkNotificationPermission = async () => {
+    const { status } = await Notifications.getPermissionsAsync();
+    setNotificationsEnabled(status === 'granted');
+  };
+
+  const loadNotificationSettings = async () => {
+    try {
+      const lowStock = await AsyncStorage.getItem('lowStockAlert');
+      const sales = await AsyncStorage.getItem('salesAlert');
+      if (lowStock !== null) setLowStockAlert(lowStock === 'true');
+      if (sales !== null) setSalesAlert(sales === 'true');
+    } catch (error) {
+      console.log('Error loading notification settings:', error);
+    }
+  };
+
+  const toggleNotifications = async () => {
+    if (!notificationsEnabled) {
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status === 'granted') {
+        setNotificationsEnabled(true);
+        // Send test notification
+        await sendTestNotification();
+      } else {
+        Alert.alert('İzin Gerekli', 'Bildirimler için izin verilmedi. Lütfen ayarlardan izin verin.');
+      }
+    } else {
+      Alert.alert(
+        'Bildirimler',
+        'Bildirimleri kapatmak için cihaz ayarlarından değiştirmeniz gerekiyor.',
+        [{ text: 'Tamam' }]
+      );
+    }
+  };
+
+  const sendTestNotification = async () => {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'BizStats Bildirimleri Aktif! 🎉',
+        body: 'Artık stok ve satış uyarıları alacaksınız.',
+        data: { type: 'test' },
+      },
+      trigger: { seconds: 1 },
+    });
+  };
+
+  const toggleLowStockAlert = async (value: boolean) => {
+    setLowStockAlert(value);
+    await AsyncStorage.setItem('lowStockAlert', value.toString());
+    if (value && notificationsEnabled) {
+      // Demo notification
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Düşük Stok Uyarısı Aktif',
+          body: 'Stok 50 adetten az olduğunda bildirim alacaksınız.',
+        },
+        trigger: { seconds: 1 },
+      });
+    }
+  };
+
+  const toggleSalesAlert = async (value: boolean) => {
+    setSalesAlert(value);
+    await AsyncStorage.setItem('salesAlert', value.toString());
+    if (value && notificationsEnabled) {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Satış Uyarıları Aktif',
+          body: 'Yüksek tutarlı satışlarda bildirim alacaksınız.',
+        },
+        trigger: { seconds: 1 },
+      });
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert(
@@ -61,55 +155,6 @@ export default function SettingsScreen() {
     );
   };
 
-  const menuItems = [
-    {
-      title: 'Görünüm',
-      items: [
-        {
-          icon: 'moon-outline' as const,
-          label: 'Koyu Tema',
-          type: 'switch' as const,
-          value: isDark,
-          onToggle: toggleTheme,
-        },
-      ],
-    },
-    {
-      title: 'Veri Yönetimi',
-      items: [
-        {
-          icon: 'trash-outline' as const,
-          label: 'Önbelleği Temizle',
-          type: 'button' as const,
-          onPress: handleClearCache,
-        },
-        {
-          icon: 'sync-outline' as const,
-          label: 'Verileri Senkronize Et',
-          type: 'button' as const,
-          onPress: () => Alert.alert('Bilgi', 'Demo modunda senkronizasyon devre dışı'),
-        },
-      ],
-    },
-    {
-      title: 'Uygulama',
-      items: [
-        {
-          icon: 'information-circle-outline' as const,
-          label: 'Hakkında',
-          type: 'button' as const,
-          onPress: () => Alert.alert('BizStats', 'Versiyon 1.0.0\n\nSatış Yönetim Sistemi'),
-        },
-        {
-          icon: 'help-circle-outline' as const,
-          label: 'Yardım',
-          type: 'button' as const,
-          onPress: () => Alert.alert('Yardım', 'Destek için: destek@bizstats.com'),
-        },
-      ],
-    },
-  ];
-
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
@@ -138,51 +183,144 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* Menu Sections */}
-        {menuItems.map((section, sectionIndex) => (
-          <View key={sectionIndex} style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{section.title}</Text>
-            <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              {section.items.map((item, itemIndex) => (
-                <React.Fragment key={itemIndex}>
-                  {item.type === 'switch' ? (
-                    <View
-                      style={[
-                        styles.menuItem,
-                        itemIndex < section.items.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 1 },
-                      ]}
-                    >
-                      <View style={styles.menuItemLeft}>
-                        <Ionicons name={item.icon} size={22} color={colors.primary} />
-                        <Text style={[styles.menuItemLabel, { color: colors.text }]}>{item.label}</Text>
-                      </View>
-                      <Switch
-                        value={item.value}
-                        onValueChange={item.onToggle}
-                        trackColor={{ false: colors.border, true: colors.primary }}
-                        thumbColor="#FFF"
-                      />
-                    </View>
-                  ) : (
-                    <TouchableOpacity
-                      style={[
-                        styles.menuItem,
-                        itemIndex < section.items.length - 1 && { borderBottomColor: colors.border, borderBottomWidth: 1 },
-                      ]}
-                      onPress={item.onPress}
-                    >
-                      <View style={styles.menuItemLeft}>
-                        <Ionicons name={item.icon} size={22} color={colors.primary} />
-                        <Text style={[styles.menuItemLabel, { color: colors.text }]}>{item.label}</Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-                    </TouchableOpacity>
-                  )}
-                </React.Fragment>
-              ))}
+        {/* Appearance Section */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Görünüm</Text>
+          <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.menuItem}>
+              <View style={styles.menuItemLeft}>
+                <Ionicons name="moon-outline" size={22} color={colors.primary} />
+                <Text style={[styles.menuItemLabel, { color: colors.text }]}>Koyu Tema</Text>
+              </View>
+              <Switch
+                value={isDark}
+                onValueChange={toggleTheme}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor="#FFF"
+              />
             </View>
           </View>
-        ))}
+        </View>
+
+        {/* Notifications Section */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Bildirimler</Text>
+          <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}>
+              <View style={styles.menuItemLeft}>
+                <Ionicons name="notifications-outline" size={22} color={colors.primary} />
+                <View>
+                  <Text style={[styles.menuItemLabel, { color: colors.text }]}>Push Bildirimler</Text>
+                  <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>
+                    {notificationsEnabled ? 'Aktif' : 'Kapalı'}
+                  </Text>
+                </View>
+              </View>
+              <Switch
+                value={notificationsEnabled}
+                onValueChange={toggleNotifications}
+                trackColor={{ false: colors.border, true: colors.success }}
+                thumbColor="#FFF"
+              />
+            </View>
+            
+            {notificationsEnabled && (
+              <>
+                <View style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}>
+                  <View style={styles.menuItemLeft}>
+                    <Ionicons name="cube-outline" size={22} color={colors.warning} />
+                    <View>
+                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>Düşük Stok Uyarısı</Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>
+                        Stok 50 adetten az olduğunda
+                      </Text>
+                    </View>
+                  </View>
+                  <Switch
+                    value={lowStockAlert}
+                    onValueChange={toggleLowStockAlert}
+                    trackColor={{ false: colors.border, true: colors.warning }}
+                    thumbColor="#FFF"
+                  />
+                </View>
+                
+                <View style={styles.menuItem}>
+                  <View style={styles.menuItemLeft}>
+                    <Ionicons name="cash-outline" size={22} color={colors.success} />
+                    <View>
+                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>Satış Uyarıları</Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>
+                        Yüksek tutarlı satışlarda
+                      </Text>
+                    </View>
+                  </View>
+                  <Switch
+                    value={salesAlert}
+                    onValueChange={toggleSalesAlert}
+                    trackColor={{ false: colors.border, true: colors.success }}
+                    thumbColor="#FFF"
+                  />
+                </View>
+              </>
+            )}
+          </View>
+        </View>
+
+        {/* Data Section */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Veri Yönetimi</Text>
+          <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <TouchableOpacity
+              style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}
+              onPress={handleClearCache}
+            >
+              <View style={styles.menuItemLeft}>
+                <Ionicons name="trash-outline" size={22} color={colors.primary} />
+                <Text style={[styles.menuItemLabel, { color: colors.text }]}>Önbelleği Temizle</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => Alert.alert('Bilgi', 'Demo modunda senkronizasyon devre dışı')}
+            >
+              <View style={styles.menuItemLeft}>
+                <Ionicons name="sync-outline" size={22} color={colors.primary} />
+                <Text style={[styles.menuItemLabel, { color: colors.text }]}>Verileri Senkronize Et</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* About Section */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Uygulama</Text>
+          <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <TouchableOpacity
+              style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}
+              onPress={() => Alert.alert('BizStats', 'Versiyon 1.0.0\n\nSatış Yönetim Sistemi\n\n© 2025')}
+            >
+              <View style={styles.menuItemLeft}>
+                <Ionicons name="information-circle-outline" size={22} color={colors.primary} />
+                <Text style={[styles.menuItemLabel, { color: colors.text }]}>Hakkında</Text>
+              </View>
+              <Text style={[styles.versionText, { color: colors.textSecondary }]}>v1.0.0</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => Alert.alert('Yardım', 'Destek için: destek@bizstats.com')}
+            >
+              <View style={styles.menuItemLeft}>
+                <Ionicons name="help-circle-outline" size={22} color={colors.primary} />
+                <Text style={[styles.menuItemLabel, { color: colors.text }]}>Yardım</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        </View>
 
         {/* Logout Button */}
         <TouchableOpacity
@@ -284,10 +422,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+    flex: 1,
   },
   menuItemLabel: {
     fontSize: 15,
     fontWeight: '500',
+  },
+  menuItemSub: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  versionText: {
+    fontSize: 14,
   },
   logoutButton: {
     flexDirection: 'row',
