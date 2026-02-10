@@ -244,6 +244,9 @@ export default function LoginScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Custom Alert */}
+      <CustomAlert {...alertProps} />
     </SafeAreaView>
   );
 }
