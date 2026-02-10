@@ -832,6 +832,7 @@ const styles = StyleSheet.create({
   },
   modalBody: {
     padding: 20,
+    paddingBottom: 40,
   },
   filterSectionTitle: {
     fontSize: 15,
