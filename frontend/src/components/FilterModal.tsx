@@ -7,10 +7,12 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
 import { branches } from '../data/mockData';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 interface FilterModalProps {
   visible: boolean;
@@ -35,8 +37,17 @@ export const FilterModal: React.FC<FilterModalProps> = ({
     start: currentFilters.startDate,
     end: currentFilters.endDate,
   });
-  const [startDateInput, setStartDateInput] = useState('');
-  const [endDateInput, setEndDateInput] = useState('');
+  const [startDateInput, setStartDateInput] = useState(formatDateForInput(currentFilters.startDate));
+  const [endDateInput, setEndDateInput] = useState(formatDateForInput(currentFilters.endDate));
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showEndPicker, setShowEndPicker] = useState(false);
+
+  function formatDateForInput(date: Date): string {
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const year = date.getFullYear();
+    return `${day}/${month}/${year}`;
+  }
 
   const handleApply = () => {
     onApply({
@@ -51,8 +62,8 @@ export const FilterModal: React.FC<FilterModalProps> = ({
     setSelectedBranch(null);
     const today = new Date();
     setDateRange({ start: today, end: today });
-    setStartDateInput('');
-    setEndDateInput('');
+    setStartDateInput(formatDateForInput(today));
+    setEndDateInput(formatDateForInput(today));
   };
 
   const quickDateOptions = [
@@ -78,13 +89,6 @@ export const FilterModal: React.FC<FilterModalProps> = ({
     setDateRange({ start, end });
     setStartDateInput(formatDateForInput(start));
     setEndDateInput(formatDateForInput(end));
-  };
-
-  const formatDateForInput = (date: Date): string => {
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const year = date.getFullYear();
-    return `${day}/${month}/${year}`;
   };
 
   const parseDate = (input: string): Date | null => {
@@ -117,6 +121,22 @@ export const FilterModal: React.FC<FilterModalProps> = ({
     const parsed = parseDate(text);
     if (parsed) {
       setDateRange(prev => ({ ...prev, end: parsed }));
+    }
+  };
+
+  const onStartDatePickerChange = (event: any, selectedDate?: Date) => {
+    setShowStartPicker(Platform.OS === 'ios');
+    if (selectedDate) {
+      setDateRange(prev => ({ ...prev, start: selectedDate }));
+      setStartDateInput(formatDateForInput(selectedDate));
+    }
+  };
+
+  const onEndDatePickerChange = (event: any, selectedDate?: Date) => {
+    setShowEndPicker(Platform.OS === 'ios');
+    if (selectedDate) {
+      setDateRange(prev => ({ ...prev, end: selectedDate }));
+      setEndDateInput(formatDateForInput(selectedDate));
     }
   };
 
@@ -181,13 +201,12 @@ export const FilterModal: React.FC<FilterModalProps> = ({
               ))}
             </View>
 
-            {/* Manual Date Entry */}
+            {/* Manual Date Entry with Picker */}
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Tarih Seçimi</Text>
             <View style={styles.dateInputsRow}>
               <View style={styles.dateInputWrapper}>
                 <Text style={[styles.dateInputLabel, { color: colors.textSecondary }]}>Başlangıç</Text>
                 <View style={[styles.dateInputContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <Ionicons name="calendar-outline" size={18} color={colors.textSecondary} />
                   <TextInput
                     style={[styles.dateInput, { color: colors.text }]}
                     placeholder="GG/AA/YYYY"
@@ -197,12 +216,14 @@ export const FilterModal: React.FC<FilterModalProps> = ({
                     keyboardType="numbers-and-punctuation"
                     maxLength={10}
                   />
+                  <TouchableOpacity onPress={() => setShowStartPicker(true)} style={styles.calendarBtn}>
+                    <Ionicons name="calendar" size={20} color={colors.primary} />
+                  </TouchableOpacity>
                 </View>
               </View>
               <View style={styles.dateInputWrapper}>
                 <Text style={[styles.dateInputLabel, { color: colors.textSecondary }]}>Bitiş</Text>
                 <View style={[styles.dateInputContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <Ionicons name="calendar-outline" size={18} color={colors.textSecondary} />
                   <TextInput
                     style={[styles.dateInput, { color: colors.text }]}
                     placeholder="GG/AA/YYYY"
@@ -212,9 +233,32 @@ export const FilterModal: React.FC<FilterModalProps> = ({
                     keyboardType="numbers-and-punctuation"
                     maxLength={10}
                   />
+                  <TouchableOpacity onPress={() => setShowEndPicker(true)} style={styles.calendarBtn}>
+                    <Ionicons name="calendar" size={20} color={colors.primary} />
+                  </TouchableOpacity>
                 </View>
               </View>
             </View>
+
+            {/* Date Pickers */}
+            {showStartPicker && (
+              <DateTimePicker
+                value={dateRange.start}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={onStartDatePickerChange}
+                locale="tr-TR"
+              />
+            )}
+            {showEndPicker && (
+              <DateTimePicker
+                value={dateRange.end}
+                mode="date"
+                display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                onChange={onEndDatePickerChange}
+                locale="tr-TR"
+              />
+            )}
 
             {/* Selected Date Display */}
             <View style={[styles.selectedDateDisplay, { backgroundColor: colors.background }]}>
@@ -225,7 +269,7 @@ export const FilterModal: React.FC<FilterModalProps> = ({
             </View>
 
             <Text style={[styles.dateHint, { color: colors.textSecondary }]}>
-              Format: GG/AA/YYYY (örn: 15/07/2025)
+              Elle yazın veya takvim ikonuna tıklayın
             </Text>
           </ScrollView>
 
@@ -254,13 +298,13 @@ export const FilterModal: React.FC<FilterModalProps> = ({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: 'rgba(0,0,0,0.35)',
     justifyContent: 'flex-end',
   },
   container: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '80%',
+    maxHeight: '85%',
   },
   header: {
     flexDirection: 'row',
@@ -277,7 +321,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   contentContainer: {
-    paddingBottom: 10,
+    paddingBottom: 40,
   },
   sectionTitle: {
     fontSize: 15,
@@ -332,16 +376,19 @@ const styles = StyleSheet.create({
   dateInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingLeft: 12,
+    paddingRight: 4,
+    paddingVertical: 4,
     borderRadius: 12,
     borderWidth: 1,
-    gap: 8,
   },
   dateInput: {
     flex: 1,
-    fontSize: 15,
-    padding: 0,
+    fontSize: 14,
+    paddingVertical: 8,
+  },
+  calendarBtn: {
+    padding: 8,
   },
   selectedDateDisplay: {
     flexDirection: 'row',
