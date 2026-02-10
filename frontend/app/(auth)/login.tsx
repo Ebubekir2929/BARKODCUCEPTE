@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/authStore';
 import { useThemeStore } from '../../src/store/themeStore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -26,6 +27,24 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
+  const [capsLockOn, setCapsLockOn] = useState(false);
+
+  useEffect(() => {
+    loadRememberedEmail();
+  }, []);
+
+  const loadRememberedEmail = async () => {
+    try {
+      const savedEmail = await AsyncStorage.getItem('remembered_email');
+      if (savedEmail) {
+        setEmail(savedEmail);
+        setRememberMe(true);
+      }
+    } catch (error) {
+      console.log('Error loading remembered email');
+    }
+  };
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -35,6 +54,13 @@ export default function LoginScreen() {
 
     setIsLoading(true);
     try {
+      // Save or remove email based on remember me
+      if (rememberMe) {
+        await AsyncStorage.setItem('remembered_email', email);
+      } else {
+        await AsyncStorage.removeItem('remembered_email');
+      }
+
       const success = await login(email, password);
       if (success) {
         router.replace('/(tabs)/dashboard');
@@ -45,6 +71,30 @@ export default function LoginScreen() {
       Alert.alert('Hata', 'Bir hata oluştu');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handlePasswordKeyPress = (e: any) => {
+    // Check for caps lock on web
+    if (Platform.OS === 'web' && e.nativeEvent) {
+      const isCapsLock = e.nativeEvent.getModifierState && e.nativeEvent.getModifierState('CapsLock');
+      setCapsLockOn(isCapsLock);
+    }
+  };
+
+  const handlePasswordChange = (text: string) => {
+    setPassword(text);
+    // Simple caps lock detection based on input
+    if (text.length > 0) {
+      const lastChar = text[text.length - 1];
+      const isUpperCase = lastChar === lastChar.toUpperCase() && lastChar !== lastChar.toLowerCase();
+      // Only show warning if it looks like caps lock might be on
+      if (isUpperCase && text.length > 2) {
+        const upperCount = text.split('').filter(c => c === c.toUpperCase() && c !== c.toLowerCase()).length;
+        setCapsLockOn(upperCount > text.length * 0.7);
+      } else {
+        setCapsLockOn(false);
+      }
     }
   };
 
@@ -70,9 +120,9 @@ export default function LoginScreen() {
           {/* Logo/Title */}
           <View style={styles.header}>
             <View style={[styles.logoContainer, { backgroundColor: colors.primary }]}>
-              <Ionicons name="bar-chart" size={48} color="#FFFFFF" />
+              <Ionicons name="barcode-outline" size={48} color="#FFFFFF" />
             </View>
-            <Text style={[styles.title, { color: colors.text }]}>BizStats</Text>
+            <Text style={[styles.title, { color: colors.text }]}>Barkodcu Cepte</Text>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
               Satış Yönetim Sistemi
             </Text>
@@ -100,7 +150,8 @@ export default function LoginScreen() {
                 placeholder="Şifre"
                 placeholderTextColor={colors.textSecondary}
                 value={password}
-                onChangeText={setPassword}
+                onChangeText={handlePasswordChange}
+                onKeyPress={handlePasswordKeyPress}
                 secureTextEntry={!showPassword}
               />
               <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
@@ -112,14 +163,42 @@ export default function LoginScreen() {
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity
-              style={styles.forgotPassword}
-              onPress={() => router.push('/(auth)/forgot-password')}
-            >
-              <Text style={[styles.forgotPasswordText, { color: colors.primary }]}>
-                Şifremi Unuttum
-              </Text>
-            </TouchableOpacity>
+            {/* Caps Lock Warning */}
+            {capsLockOn && (
+              <View style={[styles.capsWarning, { backgroundColor: colors.warning + '20' }]}>
+                <Ionicons name="warning-outline" size={16} color={colors.warning} />
+                <Text style={[styles.capsWarningText, { color: colors.warning }]}>
+                  Caps Lock açık olabilir
+                </Text>
+              </View>
+            )}
+
+            {/* Remember Me & Forgot Password Row */}
+            <View style={styles.optionsRow}>
+              <TouchableOpacity 
+                style={styles.rememberMe} 
+                onPress={() => setRememberMe(!rememberMe)}
+              >
+                <View style={[
+                  styles.checkbox, 
+                  { borderColor: colors.border },
+                  rememberMe && { backgroundColor: colors.primary, borderColor: colors.primary }
+                ]}>
+                  {rememberMe && <Ionicons name="checkmark" size={14} color="#FFF" />}
+                </View>
+                <Text style={[styles.rememberMeText, { color: colors.textSecondary }]}>
+                  Beni Hatırla
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => router.push('/(auth)/forgot-password')}
+              >
+                <Text style={[styles.forgotPasswordText, { color: colors.primary }]}>
+                  Şifremi Unuttum
+                </Text>
+              </TouchableOpacity>
+            </View>
 
             <TouchableOpacity
               style={[styles.loginButton, { backgroundColor: colors.primary }]}
@@ -150,6 +229,16 @@ export default function LoginScreen() {
             <Ionicons name="information-circle" size={20} color={colors.info} />
             <Text style={[styles.demoText, { color: colors.info }]}>
               Demo: Herhangi bir e-posta ve şifre ile giriş yapabilirsiniz
+            </Text>
+          </View>
+
+          {/* Footer */}
+          <View style={styles.footer}>
+            <Text style={[styles.footerText, { color: colors.textSecondary }]}>
+              Berk Yazılım Tarafından Geliştirilmiştir
+            </Text>
+            <Text style={[styles.versionText, { color: colors.textSecondary }]}>
+              v1.0.0
             </Text>
           </View>
         </ScrollView>
@@ -189,7 +278,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   title: {
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '800',
     marginBottom: 8,
   },
@@ -214,9 +303,41 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     fontSize: 16,
   },
-  forgotPassword: {
-    alignSelf: 'flex-end',
+  capsWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginBottom: 12,
+    marginTop: -8,
+  },
+  capsWarningText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  optionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 24,
+  },
+  rememberMe: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  rememberMeText: {
+    fontSize: 14,
   },
   forgotPasswordText: {
     fontSize: 14,
@@ -251,9 +372,21 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     gap: 10,
+    marginBottom: 24,
   },
   demoText: {
     flex: 1,
     fontSize: 13,
+  },
+  footer: {
+    alignItems: 'center',
+    paddingTop: 16,
+  },
+  footerText: {
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  versionText: {
+    fontSize: 11,
   },
 });
