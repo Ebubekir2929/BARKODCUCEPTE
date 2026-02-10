@@ -72,31 +72,60 @@ export const SummaryCard: React.FC<SummaryCardProps> = ({
 const styles = StyleSheet.create({
   card: {
     flex: 1,
-    padding: 16,
+    padding: 14,
     borderRadius: 16,
     marginHorizontal: 4,
     borderWidth: 1,
     minWidth: 150,
   },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 10,
+  },
   iconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+    width: 40,
+    height: 40,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
   },
-  title: {
-    fontSize: 13,
-    fontWeight: '500',
-    marginBottom: 4,
+  changeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 8,
+    gap: 2,
   },
-  amount: {
-    fontSize: 18,
+  changeText: {
+    fontSize: 10,
     fontWeight: '700',
   },
+  title: {
+    fontSize: 12,
+    fontWeight: '500',
+    marginBottom: 3,
+  },
+  amount: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  lastWeekRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  lastWeekLabel: {
+    fontSize: 10,
+  },
+  lastWeekValue: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
   subtitle: {
-    fontSize: 11,
+    fontSize: 10,
     marginTop: 4,
   },
 });
