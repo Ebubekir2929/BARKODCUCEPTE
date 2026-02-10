@@ -6,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Modal,
-  Alert,
   TextInput,
   Platform,
 } from 'react-native';
@@ -25,6 +24,7 @@ import {
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 
 type ReportType = 'sales' | 'stock' | 'customers' | 'products' | 'hourly';
 
