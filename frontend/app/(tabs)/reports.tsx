@@ -225,7 +225,7 @@ export default function ReportsScreen() {
             dialogTitle: `${reportTitle} Paylaş`,
           });
         } else {
-          Alert.alert('Başarılı', 'Rapor oluşturuldu: ' + fileUri);
+          showSuccess('Başarılı', 'Rapor oluşturuldu');
         }
       } else {
         const html = generateHTMLReport(selectedReport, reportTitle);
@@ -238,11 +238,11 @@ export default function ReportsScreen() {
             dialogTitle: `${reportTitle} Paylaş`,
           });
         } else {
-          Alert.alert('Başarılı', 'Rapor oluşturuldu');
+          showSuccess('Başarılı', 'Rapor oluşturuldu');
         }
       }
     } catch (error) {
-      Alert.alert('Hata', 'Rapor dışa aktarılırken bir hata oluştu');
+      showError('Hata', 'Rapor dışa aktarılırken bir hata oluştu');
     } finally {
       setExporting(false);
       setShowExportModal(false);
