@@ -148,6 +148,8 @@ export default function DashboardScreen() {
               icon="cash-outline"
               color={colors.cash}
               onPress={() => setSelectedCardType('cash')}
+              lastWeekAmount={weeklyComparisonData.lastWeek.cash}
+              changePercent={cardChangePercents.cash}
             />
             <SummaryCard
               title="Kredi Kartı"
@@ -155,6 +157,8 @@ export default function DashboardScreen() {
               icon="card-outline"
               color={colors.primary}
               onPress={() => setSelectedCardType('card')}
+              lastWeekAmount={weeklyComparisonData.lastWeek.card}
+              changePercent={cardChangePercents.card}
             />
           </View>
           <View style={styles.cardRow}>
@@ -164,6 +168,8 @@ export default function DashboardScreen() {
               icon="wallet-outline"
               color={colors.openAccount}
               onPress={() => setSelectedCardType('openAccount')}
+              lastWeekAmount={weeklyComparisonData.lastWeek.openAccount}
+              changePercent={cardChangePercents.openAccount}
             />
             <SummaryCard
               title="Toplam"
@@ -171,40 +177,9 @@ export default function DashboardScreen() {
               icon="stats-chart"
               color={colors.total}
               onPress={() => setSelectedCardType('total')}
+              lastWeekAmount={weeklyComparisonData.lastWeek.total}
+              changePercent={cardChangePercents.total}
             />
-          </View>
-
-          {/* Weekly Comparison - Inside Cards Section */}
-          <View style={[styles.weeklyCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={styles.weeklyRow}>
-              <View style={styles.weeklyItem}>
-                <Ionicons name="calendar-outline" size={16} color={colors.textSecondary} />
-                <Text style={[styles.weeklyLabel, { color: colors.textSecondary }]}>Geçen Hafta</Text>
-                <Text style={[styles.weeklyValue, { color: colors.text }]}>
-                  ₺{weeklyComparisonData.lastWeek.total.toLocaleString('tr-TR')}
-                </Text>
-              </View>
-              <View style={[styles.weeklyDivider, { backgroundColor: colors.border }]} />
-              <View style={styles.weeklyItem}>
-                <Ionicons name="today-outline" size={16} color={colors.success} />
-                <Text style={[styles.weeklyLabel, { color: colors.textSecondary }]}>Bugün</Text>
-                <Text style={[styles.weeklyValue, { color: colors.success }]}>
-                  ₺{todayTotals.total.toLocaleString('tr-TR')}
-                </Text>
-              </View>
-              <View style={[styles.weeklyDivider, { backgroundColor: colors.border }]} />
-              <View style={styles.weeklyItem}>
-                <Ionicons
-                  name={comparePercentage >= 0 ? 'trending-up' : 'trending-down'}
-                  size={16}
-                  color={comparePercentage >= 0 ? colors.success : colors.error}
-                />
-                <Text style={[styles.weeklyLabel, { color: colors.textSecondary }]}>Değişim</Text>
-                <Text style={[styles.weeklyValue, { color: comparePercentage >= 0 ? colors.success : colors.error }]}>
-                  %{Math.abs(comparePercentage).toFixed(1)}
-                </Text>
-              </View>
-            </View>
           </View>
         </View>
 
