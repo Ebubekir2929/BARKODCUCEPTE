@@ -59,6 +59,7 @@ const quickDateOptions = [
 
 export default function ReportsScreen() {
   const { colors } = useThemeStore();
+  const { showSuccess, showError, alertProps } = useAlert();
   const [selectedReport, setSelectedReport] = useState<ReportType | null>(null);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
