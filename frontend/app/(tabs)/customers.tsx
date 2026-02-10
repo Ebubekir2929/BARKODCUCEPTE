@@ -290,7 +290,7 @@ export default function CustomersScreen() {
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalBody}>
+            <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
               {/* Customer Info */}
               {selectedCustomer && (
                 <View style={[styles.customerDetail, { backgroundColor: colors.card, borderColor: colors.border }]}>
