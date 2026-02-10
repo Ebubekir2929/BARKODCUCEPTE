@@ -521,7 +521,7 @@ export default function StockScreen() {
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalBody}>
+            <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
               {/* Location Stocks */}
               <Text style={[styles.sectionTitle, { color: colors.text }]}>Lokasyon Dağılımı</Text>
               {productLocations.map((loc) => (
