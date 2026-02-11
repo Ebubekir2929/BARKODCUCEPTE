@@ -50,12 +50,10 @@ export default function SettingsScreen() {
   const toggleNotifications = async () => {
     const newValue = !notificationsEnabled;
     
-    // On native platforms, try to register for push notifications
     if (newValue && Platform.OS !== 'web') {
       try {
         const token = await notificationService.registerForPushNotifications();
         if (!token) {
-          // Still allow enabling notifications for local alerts
           console.log('Push token not available, but local notifications will work');
         }
       } catch (error) {
@@ -90,7 +88,6 @@ export default function SettingsScreen() {
     await AsyncStorage.setItem('cancellationAlert', value.toString());
   };
 
-  // Test notification for cancellation
   const testCancellationNotification = async () => {
     if (Platform.OS === 'web') {
       showInfo('Demo Bildirim', '🚫 Fiş İptali: Merkez Şube - FIS-001 numaralı fiş iptal edildi. Tutar: ₺245.50');
@@ -145,13 +142,11 @@ export default function SettingsScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Ayarlar</Text>
       </View>
 
       <ScrollView style={styles.scrollView}>
-        {/* User Card */}
         <View style={[styles.userCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={[styles.userAvatar, { backgroundColor: colors.primary + '20' }]}>
             <Text style={[styles.userAvatarText, { color: colors.primary }]}>
@@ -171,7 +166,6 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* Appearance Section */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Görünüm</Text>
           <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -190,7 +184,6 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* Notifications Section */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Bildirimler</Text>
           <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -219,9 +212,7 @@ export default function SettingsScreen() {
                     <Ionicons name="cube-outline" size={22} color={colors.warning} />
                     <View>
                       <Text style={[styles.menuItemLabel, { color: colors.text }]}>Düşük Stok Uyarısı</Text>
-                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>
-                        Stok 50 adetten az olduğunda
-                      </Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>Stok 50 adetten az olduğunda</Text>
                     </View>
                   </View>
                   <Switch
@@ -237,9 +228,7 @@ export default function SettingsScreen() {
                     <Ionicons name="cash-outline" size={22} color={colors.success} />
                     <View>
                       <Text style={[styles.menuItemLabel, { color: colors.text }]}>Satış Uyarıları</Text>
-                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>
-                        Yüksek tutarlı satışlarda
-                      </Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>Yüksek tutarlı satışlarda</Text>
                     </View>
                   </View>
                   <Switch
@@ -250,15 +239,12 @@ export default function SettingsScreen() {
                   />
                 </View>
 
-                {/* Fiş İptali Bildirimi */}
                 <View style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}>
                   <View style={styles.menuItemLeft}>
                     <Ionicons name="close-circle-outline" size={22} color={colors.error} />
                     <View>
                       <Text style={[styles.menuItemLabel, { color: colors.text }]}>Fiş İptali Bildirimi</Text>
-                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>
-                        Fiş iptal edildiğinde
-                      </Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>Fiş iptal edildiğinde</Text>
                     </View>
                   </View>
                   <Switch
@@ -269,18 +255,12 @@ export default function SettingsScreen() {
                   />
                 </View>
 
-                {/* Test Notification Button */}
-                <TouchableOpacity
-                  style={styles.menuItem}
-                  onPress={testCancellationNotification}
-                >
+                <TouchableOpacity style={styles.menuItem} onPress={testCancellationNotification}>
                   <View style={styles.menuItemLeft}>
                     <Ionicons name="paper-plane-outline" size={22} color={colors.info} />
                     <View>
                       <Text style={[styles.menuItemLabel, { color: colors.text }]}>Test Bildirimi Gönder</Text>
-                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>
-                        Fiş iptali bildirimi test et
-                      </Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>Fiş iptali bildirimi test et</Text>
                     </View>
                   </View>
                   <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
@@ -290,7 +270,6 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* Data Section */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Veri Yönetimi</Text>
           <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -318,7 +297,6 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* About Section */}
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Uygulama</Text>
           <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -346,7 +324,6 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        {/* Logout Button */}
         <TouchableOpacity
           style={[styles.logoutButton, { backgroundColor: colors.error + '15', borderColor: colors.error }]}
           onPress={handleLogout}
@@ -358,7 +335,6 @@ export default function SettingsScreen() {
         <View style={{ height: 20 }} />
       </ScrollView>
 
-      {/* Custom Alert */}
       <CustomAlert {...alertProps} />
     </SafeAreaView>
   );
