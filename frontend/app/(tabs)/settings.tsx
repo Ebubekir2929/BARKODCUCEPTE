@@ -50,11 +50,16 @@ export default function SettingsScreen() {
   const toggleNotifications = async () => {
     const newValue = !notificationsEnabled;
     
+    // On native platforms, try to register for push notifications
     if (newValue && Platform.OS !== 'web') {
-      const token = await notificationService.registerForPushNotifications();
-      if (!token) {
-        showError('Hata', 'Bildirim izni alınamadı. Lütfen ayarlardan izin verin.');
-        return;
+      try {
+        const token = await notificationService.registerForPushNotifications();
+        if (!token) {
+          // Still allow enabling notifications for local alerts
+          console.log('Push token not available, but local notifications will work');
+        }
+      } catch (error) {
+        console.log('Push notification registration error:', error);
       }
     }
     
@@ -62,7 +67,12 @@ export default function SettingsScreen() {
     await AsyncStorage.setItem('notificationsEnabled', newValue.toString());
     
     if (newValue) {
-      showSuccess('Bildirimler Aktif', 'Artık stok, satış ve fiş iptali uyarıları alacaksınız.');
+      if (Platform.OS === 'web') {
+        showSuccess('Bildirimler Aktif', 'Web platformunda bildirimler uygulama içi gösterilecektir.');
+      } else {
+        showSuccess('Bildirimler Aktif', 'Artık stok, satış ve fiş iptali uyarıları alacaksınız.');
+      }
+    }
     }
   };
 
