@@ -73,7 +73,6 @@ export default function SettingsScreen() {
         showSuccess('Bildirimler Aktif', 'Artık stok, satış ve fiş iptali uyarıları alacaksınız.');
       }
     }
-    }
   };
 
   const toggleLowStockAlert = async (value: boolean) => {
