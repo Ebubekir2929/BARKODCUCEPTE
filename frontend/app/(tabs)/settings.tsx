@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Alert,
   Switch,
   Platform,
 } from 'react-native';
@@ -14,15 +13,20 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAuthStore } from '../../src/store/authStore';
+import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import notificationService from '../../src/services/notificationService';
 
 export default function SettingsScreen() {
   const router = useRouter();
   const { colors, isDark, toggleTheme } = useThemeStore();
   const { user, logout } = useAuthStore();
+  const { showSuccess, showError, showInfo, showWarning, alertProps } = useAlert();
+  
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [lowStockAlert, setLowStockAlert] = useState(true);
   const [salesAlert, setSalesAlert] = useState(true);
+  const [cancellationAlert, setCancellationAlert] = useState(true);
 
   useEffect(() => {
     loadNotificationSettings();
@@ -33,9 +37,11 @@ export default function SettingsScreen() {
       const notifs = await AsyncStorage.getItem('notificationsEnabled');
       const lowStock = await AsyncStorage.getItem('lowStockAlert');
       const sales = await AsyncStorage.getItem('salesAlert');
+      const cancellation = await AsyncStorage.getItem('cancellationAlert');
       if (notifs !== null) setNotificationsEnabled(notifs === 'true');
       if (lowStock !== null) setLowStockAlert(lowStock === 'true');
       if (sales !== null) setSalesAlert(sales === 'true');
+      if (cancellation !== null) setCancellationAlert(cancellation === 'true');
     } catch (error) {
       console.log('Error loading notification settings:', error);
     }
@@ -43,11 +49,20 @@ export default function SettingsScreen() {
 
   const toggleNotifications = async () => {
     const newValue = !notificationsEnabled;
+    
+    if (newValue && Platform.OS !== 'web') {
+      const token = await notificationService.registerForPushNotifications();
+      if (!token) {
+        showError('Hata', 'Bildirim izni alınamadı. Lütfen ayarlardan izin verin.');
+        return;
+      }
+    }
+    
     setNotificationsEnabled(newValue);
     await AsyncStorage.setItem('notificationsEnabled', newValue.toString());
     
     if (newValue) {
-      Alert.alert('Bildirimler Aktif', 'Artık stok ve satış uyarıları alacaksınız.');
+      showSuccess('Bildirimler Aktif', 'Artık stok, satış ve fiş iptali uyarıları alacaksınız.');
     }
   };
 
@@ -61,45 +76,62 @@ export default function SettingsScreen() {
     await AsyncStorage.setItem('salesAlert', value.toString());
   };
 
-  const handleLogout = () => {
-    Alert.alert(
-      'Çıkış Yap',
-      'Hesabınızdan çıkış yapmak istediğinize emin misiniz?',
-      [
-        { text: 'İptal', style: 'cancel' },
+  const toggleCancellationAlert = async (value: boolean) => {
+    setCancellationAlert(value);
+    await AsyncStorage.setItem('cancellationAlert', value.toString());
+  };
+
+  // Test notification for cancellation
+  const testCancellationNotification = async () => {
+    if (Platform.OS === 'web') {
+      showInfo('Demo Bildirim', '🚫 Fiş İptali: Merkez Şube - FIS-001 numaralı fiş iptal edildi. Tutar: ₺245.50');
+    } else {
+      await notificationService.sendReceiptCancelledNotification(
         {
-          text: 'Çıkış Yap',
-          style: 'destructive',
-          onPress: async () => {
-            await logout();
-            router.replace('/(auth)/login');
-          },
+          id: 'test-1',
+          receiptNo: 'FIS-TEST-001',
+          date: new Date().toISOString(),
+          amount: 245.50,
+          reason: 'Test bildirimi',
+          items: [],
         },
-      ]
-    );
+        'Merkez Şube'
+      );
+      showSuccess('Gönderildi', 'Test bildirimi gönderildi. Bildirim çubuğunuzu kontrol edin.');
+    }
+  };
+
+  const handleLogout = () => {
+    showWarning('Çıkış Yap', 'Hesabınızdan çıkış yapmak istediğinize emin misiniz?', [
+      { text: 'İptal', style: 'cancel' },
+      {
+        text: 'Çıkış Yap',
+        style: 'destructive',
+        onPress: async () => {
+          await logout();
+          router.replace('/(auth)/login');
+        },
+      },
+    ]);
   };
 
   const handleClearCache = () => {
-    Alert.alert(
-      'Önbelleği Temizle',
-      'Tüm önbellekteki veriler silinecek. Devam etmek istiyor musunuz?',
-      [
-        { text: 'İptal', style: 'cancel' },
-        {
-          text: 'Temizle',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await AsyncStorage.removeItem('cached_products');
-              await AsyncStorage.removeItem('cached_customers');
-              Alert.alert('Başarılı', 'Önbellek temizlendi');
-            } catch (error) {
-              Alert.alert('Hata', 'Önbellek temizlenirken bir hata oluştu');
-            }
-          },
+    showWarning('Önbelleği Temizle', 'Tüm önbellekteki veriler silinecek. Devam etmek istiyor musunuz?', [
+      { text: 'İptal', style: 'cancel' },
+      {
+        text: 'Temizle',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await AsyncStorage.removeItem('cached_products');
+            await AsyncStorage.removeItem('cached_customers');
+            showSuccess('Başarılı', 'Önbellek temizlendi');
+          } catch (error) {
+            showError('Hata', 'Önbellek temizlenirken bir hata oluştu');
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   return (
@@ -191,7 +223,7 @@ export default function SettingsScreen() {
                   />
                 </View>
                 
-                <View style={styles.menuItem}>
+                <View style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}>
                   <View style={styles.menuItemLeft}>
                     <Ionicons name="cash-outline" size={22} color={colors.success} />
                     <View>
@@ -208,6 +240,42 @@ export default function SettingsScreen() {
                     thumbColor="#FFF"
                   />
                 </View>
+
+                {/* Fiş İptali Bildirimi */}
+                <View style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}>
+                  <View style={styles.menuItemLeft}>
+                    <Ionicons name="close-circle-outline" size={22} color={colors.error} />
+                    <View>
+                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>Fiş İptali Bildirimi</Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>
+                        Fiş iptal edildiğinde
+                      </Text>
+                    </View>
+                  </View>
+                  <Switch
+                    value={cancellationAlert}
+                    onValueChange={toggleCancellationAlert}
+                    trackColor={{ false: colors.border, true: colors.error }}
+                    thumbColor="#FFF"
+                  />
+                </View>
+
+                {/* Test Notification Button */}
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={testCancellationNotification}
+                >
+                  <View style={styles.menuItemLeft}>
+                    <Ionicons name="paper-plane-outline" size={22} color={colors.info} />
+                    <View>
+                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>Test Bildirimi Gönder</Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>
+                        Fiş iptali bildirimi test et
+                      </Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
               </>
             )}
           </View>
@@ -230,7 +298,7 @@ export default function SettingsScreen() {
             
             <TouchableOpacity
               style={styles.menuItem}
-              onPress={() => Alert.alert('Bilgi', 'Demo modunda senkronizasyon devre dışı')}
+              onPress={() => showInfo('Bilgi', 'Demo modunda senkronizasyon devre dışı')}
             >
               <View style={styles.menuItemLeft}>
                 <Ionicons name="sync-outline" size={22} color={colors.primary} />
@@ -247,7 +315,7 @@ export default function SettingsScreen() {
           <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <TouchableOpacity
               style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}
-              onPress={() => Alert.alert('BizStats', 'Versiyon 1.0.0\n\nSatış Yönetim Sistemi\n\n© 2025')}
+              onPress={() => showInfo('Barkodcu Cepte', 'Versiyon 1.0.0\n\nSatış Yönetim Sistemi\n\nBerk Yazılım © 2025')}
             >
               <View style={styles.menuItemLeft}>
                 <Ionicons name="information-circle-outline" size={22} color={colors.primary} />
@@ -258,7 +326,7 @@ export default function SettingsScreen() {
             
             <TouchableOpacity
               style={styles.menuItem}
-              onPress={() => Alert.alert('Yardım', 'Destek için: destek@bizstats.com')}
+              onPress={() => showInfo('Yardım', 'Destek için:\ndestek@barkodcucepte.com')}
             >
               <View style={styles.menuItemLeft}>
                 <Ionicons name="help-circle-outline" size={22} color={colors.primary} />
@@ -280,6 +348,9 @@ export default function SettingsScreen() {
 
         <View style={{ height: 20 }} />
       </ScrollView>
+
+      {/* Custom Alert */}
+      <CustomAlert {...alertProps} />
     </SafeAreaView>
   );
 }
