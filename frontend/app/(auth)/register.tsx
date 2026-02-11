@@ -8,7 +8,6 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  Alert,
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -16,11 +15,13 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/authStore';
 import { useThemeStore } from '../../src/store/themeStore';
+import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 
 export default function RegisterScreen() {
   const router = useRouter();
   const { register } = useAuthStore();
   const { colors } = useThemeStore();
+  const { showError, showWarning, alertProps } = useAlert();
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -31,17 +32,24 @@ export default function RegisterScreen() {
 
   const handleRegister = async () => {
     if (!name || !email || !password || !confirmPassword) {
-      Alert.alert('Hata', 'Lütfen tüm alanları doldurun');
+      showWarning('Uyarı', 'Lütfen tüm alanları doldurun');
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('Hata', 'Şifreler eşleşmiyor');
+      showError('Hata', 'Şifreler eşleşmiyor');
       return;
     }
 
     if (password.length < 6) {
-      Alert.alert('Hata', 'Şifre en az 6 karakter olmalıdır');
+      showWarning('Uyarı', 'Şifre en az 6 karakter olmalıdır');
+      return;
+    }
+
+    // Email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      showError('Hata', 'Geçerli bir e-posta adresi girin');
       return;
     }
 
@@ -51,10 +59,10 @@ export default function RegisterScreen() {
       if (success) {
         router.replace('/(tabs)/dashboard');
       } else {
-        Alert.alert('Hata', 'Kayıt başarısız');
+        showError('Hata', 'Kayıt başarısız. Lütfen tekrar deneyin.');
       }
     } catch (error) {
-      Alert.alert('Hata', 'Bir hata oluştu');
+      showError('Hata', 'Bir hata oluştu. Lütfen tekrar deneyin.');
     } finally {
       setIsLoading(false);
     }
@@ -142,6 +150,21 @@ export default function RegisterScreen() {
               />
             </View>
 
+            {/* Password strength indicator */}
+            {password.length > 0 && (
+              <View style={styles.passwordStrength}>
+                <View style={styles.strengthBars}>
+                  <View style={[styles.strengthBar, { backgroundColor: password.length >= 1 ? colors.error : colors.border }]} />
+                  <View style={[styles.strengthBar, { backgroundColor: password.length >= 4 ? colors.warning : colors.border }]} />
+                  <View style={[styles.strengthBar, { backgroundColor: password.length >= 6 ? colors.success : colors.border }]} />
+                  <View style={[styles.strengthBar, { backgroundColor: password.length >= 8 && /[A-Z]/.test(password) && /[0-9]/.test(password) ? colors.success : colors.border }]} />
+                </View>
+                <Text style={[styles.strengthText, { color: colors.textSecondary }]}>
+                  {password.length < 4 ? 'Zayıf' : password.length < 6 ? 'Orta' : password.length < 8 ? 'İyi' : 'Güçlü'}
+                </Text>
+              </View>
+            )}
+
             <TouchableOpacity
               style={[styles.registerButton, { backgroundColor: colors.primary }]}
               onPress={handleRegister}
@@ -167,6 +190,9 @@ export default function RegisterScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Custom Alert */}
+      <CustomAlert {...alertProps} />
     </SafeAreaView>
   );
 }
@@ -213,6 +239,28 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 12,
     fontSize: 16,
+  },
+  passwordStrength: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    marginTop: -8,
+  },
+  strengthBars: {
+    flexDirection: 'row',
+    gap: 4,
+    flex: 1,
+    marginRight: 12,
+  },
+  strengthBar: {
+    flex: 1,
+    height: 4,
+    borderRadius: 2,
+  },
+  strengthText: {
+    fontSize: 12,
+    fontWeight: '500',
   },
   registerButton: {
     paddingVertical: 16,
