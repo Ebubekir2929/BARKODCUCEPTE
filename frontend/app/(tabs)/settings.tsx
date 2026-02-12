@@ -213,9 +213,9 @@ export default function SettingsScreen() {
               <View style={styles.menuItemLeft}>
                 <Ionicons name="notifications-outline" size={22} color={colors.primary} />
                 <View>
-                  <Text style={[styles.menuItemLabel, { color: colors.text }]}>Push Bildirimler</Text>
+                  <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('push_notifications')}</Text>
                   <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>
-                    {notificationsEnabled ? 'Aktif' : 'Kapalı'}
+                    {notificationsEnabled ? t('active') : t('inactive')}
                   </Text>
                 </View>
               </View>
@@ -233,8 +233,8 @@ export default function SettingsScreen() {
                   <View style={styles.menuItemLeft}>
                     <Ionicons name="cube-outline" size={22} color={colors.warning} />
                     <View>
-                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>Düşük Stok Uyarısı</Text>
-                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>Stok 50 adetten az olduğunda</Text>
+                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('low_stock_alert')}</Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>{t('low_stock_desc')}</Text>
                     </View>
                   </View>
                   <Switch
@@ -249,8 +249,8 @@ export default function SettingsScreen() {
                   <View style={styles.menuItemLeft}>
                     <Ionicons name="cash-outline" size={22} color={colors.success} />
                     <View>
-                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>Satış Uyarıları</Text>
-                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>Yüksek tutarlı satışlarda</Text>
+                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('sales_alerts')}</Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>{t('sales_alerts_desc')}</Text>
                     </View>
                   </View>
                   <Switch
@@ -265,8 +265,8 @@ export default function SettingsScreen() {
                   <View style={styles.menuItemLeft}>
                     <Ionicons name="close-circle-outline" size={22} color={colors.error} />
                     <View>
-                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>Fiş İptali Bildirimi</Text>
-                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>Fiş iptal edildiğinde</Text>
+                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('cancellation_alert')}</Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>{t('cancellation_alert_desc')}</Text>
                     </View>
                   </View>
                   <Switch
@@ -281,8 +281,8 @@ export default function SettingsScreen() {
                   <View style={styles.menuItemLeft}>
                     <Ionicons name="paper-plane-outline" size={22} color={colors.info} />
                     <View>
-                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>Test Bildirimi Gönder</Text>
-                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>Fiş iptali bildirimi test et</Text>
+                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('test_notification')}</Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>{t('test_notification_desc')}</Text>
                     </View>
                   </View>
                   <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
