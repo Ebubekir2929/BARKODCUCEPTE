@@ -1,16 +1,27 @@
 import { Platform } from 'react-native';
-import * as Notifications from 'expo-notifications';
-import * as Device from 'expo-device';
 import { CancelledReceipt } from '../types';
 
-// Configure notification behavior
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+// Conditionally import expo-notifications only on native
+let Notifications: any = null;
+let Device: any = null;
+
+if (Platform.OS !== 'web') {
+  try {
+    Notifications = require('expo-notifications');
+    Device = require('expo-device');
+    
+    // Configure notification behavior
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }),
+    });
+  } catch (error) {
+    console.log('expo-notifications not available');
+  }
+}
 
 export interface NotificationData {
   type: 'receipt_cancelled' | 'low_stock' | 'new_order' | 'payment_received' | 'general';
@@ -22,10 +33,9 @@ export interface NotificationData {
 class NotificationService {
   private expoPushToken: string | null = null;
 
-  // Register for push notifications
   async registerForPushNotifications(): Promise<string | null> {
-    if (Platform.OS === 'web') {
-      console.log('Push notifications not supported on web');
+    if (Platform.OS === 'web' || !Notifications || !Device) {
+      console.log('Push notifications not supported on this platform');
       return null;
     }
 
@@ -49,13 +59,12 @@ class NotificationService {
       }
 
       const tokenData = await Notifications.getExpoPushTokenAsync({
-        projectId: 'your-project-id', // Replace with actual project ID
+        projectId: 'your-project-id',
       });
       
       this.expoPushToken = tokenData.data;
       console.log('Push token:', this.expoPushToken);
 
-      // Android specific channel
       if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('default', {
           name: 'Varsayılan',
@@ -71,13 +80,6 @@ class NotificationService {
           lightColor: '#EF4444',
           sound: 'default',
         });
-
-        await Notifications.setNotificationChannelAsync('alerts', {
-          name: 'Uyarılar',
-          importance: Notifications.AndroidImportance.HIGH,
-          vibrationPattern: [0, 250, 250, 250],
-          lightColor: '#F59E0B',
-        });
       }
 
       return this.expoPushToken;
@@ -87,10 +89,9 @@ class NotificationService {
     }
   }
 
-  // Send local notification
   async sendLocalNotification(notification: NotificationData): Promise<void> {
-    if (Platform.OS === 'web') {
-      console.log('Local notification:', notification);
+    if (Platform.OS === 'web' || !Notifications) {
+      console.log('Local notification (web):', notification.title, notification.body);
       return;
     }
 
@@ -101,16 +102,14 @@ class NotificationService {
           body: notification.body,
           data: { ...notification.data, type: notification.type },
           sound: true,
-          priority: Notifications.AndroidNotificationPriority.HIGH,
         },
-        trigger: null, // Immediate
+        trigger: null,
       });
     } catch (error) {
       console.error('Error sending local notification:', error);
     }
   }
 
-  // Send receipt cancellation notification
   async sendReceiptCancelledNotification(receipt: CancelledReceipt, branchName: string): Promise<void> {
     const notification: NotificationData = {
       type: 'receipt_cancelled',
@@ -128,54 +127,17 @@ class NotificationService {
     await this.sendLocalNotification(notification);
   }
 
-  // Send low stock notification
   async sendLowStockNotification(productName: string, quantity: number, branchName: string): Promise<void> {
     const notification: NotificationData = {
       type: 'low_stock',
       title: '⚠️ Düşük Stok Uyarısı',
       body: `${branchName}: ${productName} stoğu kritik seviyede (${quantity} adet)`,
-      data: {
-        productName,
-        quantity,
-        branchName,
-      },
+      data: { productName, quantity, branchName },
     };
 
     await this.sendLocalNotification(notification);
   }
 
-  // Send new order notification
-  async sendNewOrderNotification(orderId: string, amount: number, customerName: string): Promise<void> {
-    const notification: NotificationData = {
-      type: 'new_order',
-      title: '🛒 Yeni Sipariş',
-      body: `${customerName} tarafından ₺${amount.toFixed(2)} tutarında yeni sipariş`,
-      data: {
-        orderId,
-        amount,
-        customerName,
-      },
-    };
-
-    await this.sendLocalNotification(notification);
-  }
-
-  // Send payment received notification
-  async sendPaymentReceivedNotification(customerName: string, amount: number): Promise<void> {
-    const notification: NotificationData = {
-      type: 'payment_received',
-      title: '💰 Ödeme Alındı',
-      body: `${customerName} tarafından ₺${amount.toFixed(2)} ödeme alındı`,
-      data: {
-        customerName,
-        amount,
-      },
-    };
-
-    await this.sendLocalNotification(notification);
-  }
-
-  // Send general notification
   async sendGeneralNotification(title: string, body: string, data?: any): Promise<void> {
     const notification: NotificationData = {
       type: 'general',
@@ -187,34 +149,8 @@ class NotificationService {
     await this.sendLocalNotification(notification);
   }
 
-  // Add notification listener
-  addNotificationListener(callback: (notification: Notifications.Notification) => void) {
-    return Notifications.addNotificationReceivedListener(callback);
-  }
-
-  // Add notification response listener (when user taps notification)
-  addNotificationResponseListener(callback: (response: Notifications.NotificationResponse) => void) {
-    return Notifications.addNotificationResponseReceivedListener(callback);
-  }
-
-  // Get expo push token
   getExpoPushToken(): string | null {
     return this.expoPushToken;
-  }
-
-  // Cancel all notifications
-  async cancelAllNotifications(): Promise<void> {
-    await Notifications.cancelAllScheduledNotificationsAsync();
-  }
-
-  // Get badge count
-  async getBadgeCount(): Promise<number> {
-    return await Notifications.getBadgeCountAsync();
-  }
-
-  // Set badge count
-  async setBadgeCount(count: number): Promise<void> {
-    await Notifications.setBadgeCountAsync(count);
   }
 }
 
