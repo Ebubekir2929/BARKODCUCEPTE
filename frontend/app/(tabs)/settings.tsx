@@ -337,9 +337,9 @@ export default function SettingsScreen() {
               style={styles.menuItem}
               onPress={() => showInfo(t('help'), 'destek@barkodcucepte.com')}
             >
-              <View style={styles.menuItemLeft}>>
+              <View style={styles.menuItemLeft}>
                 <Ionicons name="help-circle-outline" size={22} color={colors.primary} />
-                <Text style={[styles.menuItemLabel, { color: colors.text }]}>Yardım</Text>
+                <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('help')}</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
