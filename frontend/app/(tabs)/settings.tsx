@@ -148,7 +148,7 @@ export default function SettingsScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Ayarlar</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>{t('settings')}</Text>
       </View>
 
       <ScrollView style={styles.scrollView}>
@@ -165,14 +165,49 @@ export default function SettingsScreen() {
             </Text>
             <View style={[styles.roleBadge, { backgroundColor: colors.success + '20' }]}>
               <Text style={[styles.roleText, { color: colors.success }]}>
-                {user?.role === 'admin' ? 'Yönetici' : 'Kullanıcı'}
+                {user?.role === 'admin' ? t('admin') : t('user')}
               </Text>
             </View>
           </View>
         </View>
 
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Görünüm</Text>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('appearance')}</Text>
+          <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}>
+              <View style={styles.menuItemLeft}>
+                <Ionicons name="moon-outline" size={22} color={colors.primary} />
+                <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('dark_theme')}</Text>
+              </View>
+              <Switch
+                value={isDark}
+                onValueChange={toggleTheme}
+                trackColor={{ false: colors.border, true: colors.primary }}
+                thumbColor="#FFF"
+              />
+            </View>
+            
+            {/* Language Selection */}
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => setShowLanguageModal(true)}
+            >
+              <View style={styles.menuItemLeft}>
+                <Ionicons name="language-outline" size={22} color={colors.primary} />
+                <View>
+                  <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('language')}</Text>
+                  <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>
+                    {language === 'tr' ? '🇹🇷 Türkçe' : '🇬🇧 English'}
+                  </Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('notifications')}</Text>
           <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.menuItem}>
               <View style={styles.menuItemLeft}>
