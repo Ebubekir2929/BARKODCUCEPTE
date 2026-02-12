@@ -2,6 +2,7 @@ import React, { useCallback } from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
+import { useLanguageStore } from '../../src/store/languageStore';
 import { Platform } from 'react-native';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -12,6 +13,7 @@ const TabIcon = ({ name, color, size }: { name: IconName; color: string; size: n
 
 export default function TabLayout() {
   const { colors } = useThemeStore();
+  const { t } = useLanguageStore();
 
   const renderDashboardIcon = useCallback(
     ({ color, size }: { color: string; size: number }) => (
@@ -70,35 +72,35 @@ export default function TabLayout() {
       <Tabs.Screen
         name="dashboard"
         options={{
-          title: 'Dashboard',
+          title: t('dashboard'),
           tabBarIcon: renderDashboardIcon,
         }}
       />
       <Tabs.Screen
         name="stock"
         options={{
-          title: 'Stok',
+          title: t('stock'),
           tabBarIcon: renderStockIcon,
         }}
       />
       <Tabs.Screen
         name="customers"
         options={{
-          title: 'Cariler',
+          title: t('customers'),
           tabBarIcon: renderCustomersIcon,
         }}
       />
       <Tabs.Screen
         name="reports"
         options={{
-          title: 'Raporlar',
+          title: t('reports'),
           tabBarIcon: renderReportsIcon,
         }}
       />
       <Tabs.Screen
         name="settings"
         options={{
-          title: 'Ayarlar',
+          title: t('settings'),
           tabBarIcon: renderSettingsIcon,
         }}
       />
