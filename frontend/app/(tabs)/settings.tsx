@@ -7,12 +7,14 @@ import {
   ScrollView,
   Switch,
   Platform,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAuthStore } from '../../src/store/authStore';
+import { useLanguageStore } from '../../src/store/languageStore';
 import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import notificationService from '../../src/services/notificationService';
@@ -21,15 +23,18 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { colors, isDark, toggleTheme } = useThemeStore();
   const { user, logout } = useAuthStore();
+  const { language, setLanguage, t, loadLanguage } = useLanguageStore();
   const { showSuccess, showError, showInfo, showWarning, alertProps } = useAlert();
   
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [lowStockAlert, setLowStockAlert] = useState(true);
   const [salesAlert, setSalesAlert] = useState(true);
   const [cancellationAlert, setCancellationAlert] = useState(true);
+  const [showLanguageModal, setShowLanguageModal] = useState(false);
 
   useEffect(() => {
     loadNotificationSettings();
+    loadLanguage();
   }, []);
 
   const loadNotificationSettings = async () => {
