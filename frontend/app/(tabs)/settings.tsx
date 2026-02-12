@@ -351,11 +351,66 @@ export default function SettingsScreen() {
           onPress={handleLogout}
         >
           <Ionicons name="log-out-outline" size={22} color={colors.error} />
-          <Text style={[styles.logoutText, { color: colors.error }]}>Çıkış Yap</Text>
+          <Text style={[styles.logoutText, { color: colors.error }]}>{t('logout')}</Text>
         </TouchableOpacity>
 
         <View style={{ height: 20 }} />
       </ScrollView>
+
+      {/* Language Selection Modal */}
+      <Modal visible={showLanguageModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>{t('select_language')}</Text>
+              <TouchableOpacity onPress={() => setShowLanguageModal(false)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.modalBody}>
+              <TouchableOpacity
+                style={[
+                  styles.languageOption,
+                  { backgroundColor: colors.card, borderColor: language === 'tr' ? colors.primary : colors.border }
+                ]}
+                onPress={() => {
+                  setLanguage('tr');
+                  setShowLanguageModal(false);
+                }}
+              >
+                <Text style={styles.languageFlag}>🇹🇷</Text>
+                <View style={styles.languageInfo}>
+                  <Text style={[styles.languageName, { color: colors.text }]}>Türkçe</Text>
+                  <Text style={[styles.languageNative, { color: colors.textSecondary }]}>Turkish</Text>
+                </View>
+                {language === 'tr' && (
+                  <Ionicons name="checkmark-circle" size={24} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.languageOption,
+                  { backgroundColor: colors.card, borderColor: language === 'en' ? colors.primary : colors.border }
+                ]}
+                onPress={() => {
+                  setLanguage('en');
+                  setShowLanguageModal(false);
+                }}
+              >
+                <Text style={styles.languageFlag}>🇬🇧</Text>
+                <View style={styles.languageInfo}>
+                  <Text style={[styles.languageName, { color: colors.text }]}>English</Text>
+                  <Text style={[styles.languageNative, { color: colors.textSecondary }]}>İngilizce</Text>
+                </View>
+                {language === 'en' && (
+                  <Ionicons name="checkmark-circle" size={24} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <CustomAlert {...alertProps} />
     </SafeAreaView>
