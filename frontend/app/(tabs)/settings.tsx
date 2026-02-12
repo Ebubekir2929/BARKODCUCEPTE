@@ -293,7 +293,7 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Veri Yönetimi</Text>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('data_management')}</Text>
           <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <TouchableOpacity
               style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}
@@ -301,18 +301,18 @@ export default function SettingsScreen() {
             >
               <View style={styles.menuItemLeft}>
                 <Ionicons name="trash-outline" size={22} color={colors.primary} />
-                <Text style={[styles.menuItemLabel, { color: colors.text }]}>Önbelleği Temizle</Text>
+                <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('clear_cache')}</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
             
             <TouchableOpacity
               style={styles.menuItem}
-              onPress={() => showInfo('Bilgi', 'Demo modunda senkronizasyon devre dışı')}
+              onPress={() => showInfo(t('info'), t('demo_mode'))}
             >
               <View style={styles.menuItemLeft}>
                 <Ionicons name="sync-outline" size={22} color={colors.primary} />
-                <Text style={[styles.menuItemLabel, { color: colors.text }]}>Verileri Senkronize Et</Text>
+                <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('sync_data')}</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
@@ -320,24 +320,24 @@ export default function SettingsScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Uygulama</Text>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('application')}</Text>
           <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <TouchableOpacity
               style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}
-              onPress={() => showInfo('Barkodcu Cepte', 'Versiyon 1.0.0\n\nSatış Yönetim Sistemi\n\nBerk Yazılım © 2025')}
+              onPress={() => showInfo(t('app_name'), `${t('version')}\n\n${t('app_subtitle')}\n\nBerk Yazılım © 2025`)}
             >
               <View style={styles.menuItemLeft}>
                 <Ionicons name="information-circle-outline" size={22} color={colors.primary} />
-                <Text style={[styles.menuItemLabel, { color: colors.text }]}>Hakkında</Text>
+                <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('about')}</Text>
               </View>
-              <Text style={[styles.versionText, { color: colors.textSecondary }]}>v1.0.0</Text>
+              <Text style={[styles.versionText, { color: colors.textSecondary }]}>{t('version')}</Text>
             </TouchableOpacity>
             
             <TouchableOpacity
               style={styles.menuItem}
-              onPress={() => showInfo('Yardım', 'Destek için:\ndestek@barkodcucepte.com')}
+              onPress={() => showInfo(t('help'), 'destek@barkodcucepte.com')}
             >
-              <View style={styles.menuItemLeft}>
+              <View style={styles.menuItemLeft}>>
                 <Ionicons name="help-circle-outline" size={22} color={colors.primary} />
                 <Text style={[styles.menuItemLabel, { color: colors.text }]}>Yardım</Text>
               </View>
