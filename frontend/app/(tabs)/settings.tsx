@@ -209,24 +209,6 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('notifications')}</Text>
           <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={styles.menuItem}>
-              <View style={styles.menuItemLeft}>
-                <Ionicons name="moon-outline" size={22} color={colors.primary} />
-                <Text style={[styles.menuItemLabel, { color: colors.text }]}>Koyu Tema</Text>
-              </View>
-              <Switch
-                value={isDark}
-                onValueChange={toggleTheme}
-                trackColor={{ false: colors.border, true: colors.primary }}
-                thumbColor="#FFF"
-              />
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>Bildirimler</Text>
-          <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}>
               <View style={styles.menuItemLeft}>
                 <Ionicons name="notifications-outline" size={22} color={colors.primary} />
