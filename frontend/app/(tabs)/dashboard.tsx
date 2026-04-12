@@ -48,8 +48,7 @@ export default function DashboardScreen() {
   const [highlightedHourIndex, setHighlightedHourIndex] = useState<number | null>(null);
   
   // Open Tables state
-  const [openTableLocationFilter, setOpenTableLocationFilter] = useState<string>('all');
-  const [selectedCustomerTables, setSelectedCustomerTables] = useState<{ customerName: string; tables: OpenTable[] } | null>(null);
+  const [openTableDataFilter, setOpenTableDataFilter] = useState<string>('all');
   const [selectedOpenTable, setSelectedOpenTable] = useState<OpenTable | null>(null);
 
   // Calculate totals from all branches
@@ -95,27 +94,15 @@ export default function DashboardScreen() {
   const maxHourAmount = useMemo(() => Math.max(...hourlySalesData.map(h => h.amount)), []);
 
   // Open Tables computed values
-  const openTableLocations = useMemo(() => {
-    const locs = [...new Set(openTablesData.map(t => t.location))];
-    return locs;
+  const openTableDataSources = useMemo(() => {
+    const sources = [...new Set(openTablesData.map(t => t.dataSource))];
+    return sources.sort();
   }, []);
 
   const filteredOpenTables = useMemo(() => {
-    if (openTableLocationFilter === 'all') return openTablesData;
-    return openTablesData.filter(t => t.location === openTableLocationFilter);
-  }, [openTableLocationFilter]);
-
-  // Group tables by customer
-  const groupedByCustomer = useMemo(() => {
-    const groups: Record<string, OpenTable[]> = {};
-    filteredOpenTables.forEach(table => {
-      if (!groups[table.customerId]) {
-        groups[table.customerId] = [];
-      }
-      groups[table.customerId].push(table);
-    });
-    return groups;
-  }, [filteredOpenTables]);
+    if (openTableDataFilter === 'all') return openTablesData;
+    return openTablesData.filter(t => t.dataSource === openTableDataFilter);
+  }, [openTableDataFilter]);
 
   const openTableTotals = useMemo(() => {
     return filteredOpenTables.reduce(
@@ -251,46 +238,52 @@ export default function DashboardScreen() {
             </View>
           </View>
 
-          {/* Location Filter Chips */}
+          {/* Data Source Filter Chips */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.locationFilterScroll}>
             <TouchableOpacity
               style={[
                 styles.locationChip,
                 {
-                  backgroundColor: openTableLocationFilter === 'all' ? colors.primary : colors.background,
-                  borderColor: openTableLocationFilter === 'all' ? colors.primary : colors.border,
+                  backgroundColor: openTableDataFilter === 'all' ? colors.primary : colors.background,
+                  borderColor: openTableDataFilter === 'all' ? colors.primary : colors.border,
                 },
               ]}
-              onPress={() => setOpenTableLocationFilter('all')}
+              onPress={() => setOpenTableDataFilter('all')}
             >
               <Text
                 style={[
                   styles.locationChipText,
-                  { color: openTableLocationFilter === 'all' ? '#fff' : colors.textSecondary },
+                  { color: openTableDataFilter === 'all' ? '#fff' : colors.textSecondary },
                 ]}
               >
-                {t('all_locations')}
+                {t('all')}
               </Text>
             </TouchableOpacity>
-            {openTableLocations.map((loc) => (
+            {openTableDataSources.map((src) => (
               <TouchableOpacity
-                key={loc}
+                key={src}
                 style={[
                   styles.locationChip,
                   {
-                    backgroundColor: openTableLocationFilter === loc ? colors.primary : colors.background,
-                    borderColor: openTableLocationFilter === loc ? colors.primary : colors.border,
+                    backgroundColor: openTableDataFilter === src ? colors.primary : colors.background,
+                    borderColor: openTableDataFilter === src ? colors.primary : colors.border,
                   },
                 ]}
-                onPress={() => setOpenTableLocationFilter(loc)}
+                onPress={() => setOpenTableDataFilter(src)}
               >
+                <Ionicons 
+                  name="server-outline" 
+                  size={12} 
+                  color={openTableDataFilter === src ? '#fff' : colors.textSecondary} 
+                  style={{ marginRight: 4 }}
+                />
                 <Text
                   style={[
                     styles.locationChipText,
-                    { color: openTableLocationFilter === loc ? '#fff' : colors.textSecondary },
+                    { color: openTableDataFilter === src ? '#fff' : colors.textSecondary },
                   ]}
                 >
-                  {loc}
+                  {src}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -320,106 +313,55 @@ export default function DashboardScreen() {
             </View>
           </View>
 
-          {/* Open Tables List - Grouped by Customer */}
-          {Object.entries(groupedByCustomer).map(([customerId, tables]) => {
-            const customerName = tables[0].customerName;
-            const customerTotal = tables.reduce((sum, t) => sum + t.amount, 0);
-            const customerPaid = tables.reduce((sum, t) => sum + t.paidAmount, 0);
-            const hasMultiple = tables.length > 1;
-
-            return (
-              <View key={customerId} style={[styles.customerGroup, { borderColor: colors.border }]}>
-                {/* Customer Header */}
-                <TouchableOpacity
-                  style={styles.customerGroupHeader}
-                  onPress={() => {
-                    if (hasMultiple) {
-                      setSelectedCustomerTables({ customerName, tables });
-                    }
-                  }}
-                >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                    <View style={[styles.customerAvatar, { backgroundColor: colors.primary + '20' }]}>
-                      <Ionicons name="person" size={16} color={colors.primary} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.customerGroupName, { color: colors.text }]}>{customerName}</Text>
-                      {hasMultiple && (
-                        <Text style={[styles.customerGroupSub, { color: colors.textSecondary }]}>
-                          {tables.length} {t('open_tables').toLowerCase()}
-                        </Text>
-                      )}
-                    </View>
+          {/* Open Tables List - Flat */}
+          {filteredOpenTables.map((table) => (
+            <TouchableOpacity
+              key={table.id}
+              style={[styles.openTableCard, { backgroundColor: colors.background, borderColor: colors.border }]}
+              onPress={() => setSelectedOpenTable(table)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.openTableCardTop}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <View style={[styles.tableIcon, { backgroundColor: getPaymentStatusColor(table) + '15' }]}>
+                    <Ionicons name="restaurant-outline" size={16} color={getPaymentStatusColor(table)} />
                   </View>
-                  {hasMultiple && (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                      <Text style={[styles.customerGroupTotal, { color: colors.primary }]}>
-                        ₺{customerTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                      </Text>
-                      <Ionicons name="chevron-forward" size={16} color={colors.primary} />
-                    </View>
-                  )}
-                </TouchableOpacity>
-
-                {/* Individual Table Cards */}
-                {tables.map((table) => (
-                  <TouchableOpacity
-                    key={table.id}
-                    style={[styles.openTableCard, { backgroundColor: colors.background, borderColor: colors.border }]}
-                    onPress={() => setSelectedOpenTable(table)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.openTableCardTop}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                        <View style={[styles.tableIcon, { backgroundColor: getPaymentStatusColor(table) + '15' }]}>
-                          <Ionicons name="restaurant-outline" size={16} color={getPaymentStatusColor(table)} />
-                        </View>
-                        <View>
-                          <Text style={[styles.openTableName, { color: colors.text }]}>{table.tableNo}</Text>
-                          <Text style={[styles.openTableLocation, { color: colors.textSecondary }]}>
-                            <Ionicons name="location-outline" size={11} color={colors.textSecondary} /> {table.location}
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={[styles.paymentBadge, { backgroundColor: getPaymentStatusColor(table) + '15' }]}>
-                        <Text style={[styles.paymentBadgeText, { color: getPaymentStatusColor(table) }]}>
-                          {getPaymentStatusText(table)}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.openTableCardBottom}>
-                      <View style={styles.openTableStat}>
-                        <Text style={[styles.openTableStatLabel, { color: colors.textSecondary }]}>{t('amount_label')}</Text>
-                        <Text style={[styles.openTableStatValue, { color: colors.text }]}>
-                          ₺{table.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                        </Text>
-                      </View>
-                      <View style={styles.openTableStat}>
-                        <Text style={[styles.openTableStatLabel, { color: colors.textSecondary }]}>{t('paid_amount')}</Text>
-                        <Text style={[styles.openTableStatValue, { color: colors.success }]}>
-                          ₺{table.paidAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                        </Text>
-                      </View>
-                      <View style={styles.openTableStat}>
-                        <Text style={[styles.openTableStatLabel, { color: colors.textSecondary }]}>{t('remaining_amount')}</Text>
-                        <Text style={[styles.openTableStatValue, { color: colors.error }]}>
-                          ₺{table.remainingAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                        </Text>
-                      </View>
-                    </View>
-
-                    {hasMultiple && (
-                      <View style={[styles.dataSourceTag, { backgroundColor: colors.info + '12' }]}>
-                        <Ionicons name="server-outline" size={10} color={colors.info} />
-                        <Text style={[styles.dataSourceText, { color: colors.info }]}>{table.dataSource}</Text>
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                ))}
+                  <View>
+                    <Text style={[styles.openTableName, { color: colors.text }]}>{table.tableNo}</Text>
+                    <Text style={[styles.openTableLocation, { color: colors.textSecondary }]}>
+                      <Ionicons name="location-outline" size={11} color={colors.textSecondary} /> {table.location}
+                    </Text>
+                  </View>
+                </View>
+                <View style={[styles.paymentBadge, { backgroundColor: getPaymentStatusColor(table) + '15' }]}>
+                  <Text style={[styles.paymentBadgeText, { color: getPaymentStatusColor(table) }]}>
+                    {getPaymentStatusText(table)}
+                  </Text>
+                </View>
               </View>
-            );
-          })}
+
+              <View style={styles.openTableCardBottom}>
+                <View style={styles.openTableStat}>
+                  <Text style={[styles.openTableStatLabel, { color: colors.textSecondary }]}>{t('amount_label')}</Text>
+                  <Text style={[styles.openTableStatValue, { color: colors.text }]}>
+                    ₺{table.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                  </Text>
+                </View>
+                <View style={styles.openTableStat}>
+                  <Text style={[styles.openTableStatLabel, { color: colors.textSecondary }]}>{t('paid_amount')}</Text>
+                  <Text style={[styles.openTableStatValue, { color: colors.success }]}>
+                    ₺{table.paidAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                  </Text>
+                </View>
+                <View style={styles.openTableStat}>
+                  <Text style={[styles.openTableStatLabel, { color: colors.textSecondary }]}>{t('remaining_amount')}</Text>
+                  <Text style={[styles.openTableStatValue, { color: colors.error }]}>
+                    ₺{table.remainingAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                  </Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          ))}
 
           {filteredOpenTables.length === 0 && (
             <View style={styles.emptyState}>
@@ -889,103 +831,6 @@ export default function DashboardScreen() {
           </View>
         </View>
       </Modal>
-
-      {/* Customer Tables Modal (Multiple data) */}
-      <Modal visible={!!selectedCustomerTables} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>
-                {selectedCustomerTables?.customerName} - {t('customer_tables')}
-              </Text>
-              <TouchableOpacity onPress={() => setSelectedCustomerTables(null)}>
-                <Ionicons name="close" size={24} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
-              {/* Customer Summary */}
-              <View style={[styles.customerModalSummary, { backgroundColor: colors.primary + '10' }]}>
-                <View style={[styles.customerModalAvatar, { backgroundColor: colors.primary + '20' }]}>
-                  <Ionicons name="person" size={28} color={colors.primary} />
-                </View>
-                <Text style={[styles.customerModalName, { color: colors.text }]}>
-                  {selectedCustomerTables?.customerName}
-                </Text>
-                <Text style={[styles.customerModalSubtitle, { color: colors.textSecondary }]}>
-                  {selectedCustomerTables?.tables.length} {t('open_tables').toLowerCase()}
-                </Text>
-                <View style={styles.customerModalTotals}>
-                  <View style={styles.customerModalTotalItem}>
-                    <Text style={[styles.customerModalTotalLabel, { color: colors.textSecondary }]}>{t('total')}</Text>
-                    <Text style={[styles.customerModalTotalValue, { color: colors.text }]}>
-                      ₺{selectedCustomerTables?.tables.reduce((s, t) => s + t.amount, 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                    </Text>
-                  </View>
-                  <View style={styles.customerModalTotalItem}>
-                    <Text style={[styles.customerModalTotalLabel, { color: colors.textSecondary }]}>{t('paid_amount')}</Text>
-                    <Text style={[styles.customerModalTotalValue, { color: colors.success }]}>
-                      ₺{selectedCustomerTables?.tables.reduce((s, t) => s + t.paidAmount, 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                    </Text>
-                  </View>
-                  <View style={styles.customerModalTotalItem}>
-                    <Text style={[styles.customerModalTotalLabel, { color: colors.textSecondary }]}>{t('remaining_amount')}</Text>
-                    <Text style={[styles.customerModalTotalValue, { color: colors.error }]}>
-                      ₺{selectedCustomerTables?.tables.reduce((s, t) => s + t.remainingAmount, 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* Individual Tables */}
-              {selectedCustomerTables?.tables.map((table) => (
-                <TouchableOpacity
-                  key={table.id}
-                  style={[styles.customerModalTableCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-                  onPress={() => {
-                    setSelectedCustomerTables(null);
-                    setTimeout(() => setSelectedOpenTable(table), 300);
-                  }}
-                >
-                  <View style={styles.customerModalTableHeader}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                      <View style={[styles.tableIcon, { backgroundColor: getPaymentStatusColor(table) + '15' }]}>
-                        <Ionicons name="restaurant-outline" size={16} color={getPaymentStatusColor(table)} />
-                      </View>
-                      <View>
-                        <Text style={[styles.openTableName, { color: colors.text }]}>{table.tableNo}</Text>
-                        <Text style={[styles.openTableLocation, { color: colors.textSecondary }]}>
-                          {table.location}
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={{ alignItems: 'flex-end' }}>
-                      <View style={[styles.dataSourceTag, { backgroundColor: colors.info + '12' }]}>
-                        <Ionicons name="server-outline" size={10} color={colors.info} />
-                        <Text style={[styles.dataSourceText, { color: colors.info }]}>{table.dataSource}</Text>
-                      </View>
-                    </View>
-                  </View>
-                  <View style={[styles.customerModalTableFooter, { borderTopColor: colors.border }]}>
-                    <View>
-                      <Text style={[styles.openTableStatLabel, { color: colors.textSecondary }]}>{t('amount_label')}</Text>
-                      <Text style={[styles.openTableStatValue, { color: colors.text }]}>₺{table.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</Text>
-                    </View>
-                    <View>
-                      <Text style={[styles.openTableStatLabel, { color: colors.textSecondary }]}>{t('paid_amount')}</Text>
-                      <Text style={[styles.openTableStatValue, { color: colors.success }]}>₺{table.paidAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</Text>
-                    </View>
-                    <View>
-                      <Text style={[styles.openTableStatLabel, { color: colors.textSecondary }]}>{t('remaining_amount')}</Text>
-                      <Text style={[styles.openTableStatValue, { color: colors.error }]}>₺{table.remainingAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -1449,6 +1294,8 @@ const styles = StyleSheet.create({
     marginTop: -4,
   },
   locationChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 20,
@@ -1516,8 +1363,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   openTableCard: {
-    margin: 8,
-    marginTop: 0,
+    marginBottom: 8,
     padding: 12,
     borderRadius: 10,
     borderWidth: 1,
