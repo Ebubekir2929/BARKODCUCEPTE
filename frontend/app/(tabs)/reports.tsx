@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,15 +12,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
-import {
-  branchSalesData,
-  topSellingProducts,
-  leastSellingProducts,
-  customersData,
-  productsData,
-  hourlySalesData,
-  branches,
-} from '../../src/data/mockData';
+import { useDataSourceStore } from '../../src/store/dataSourceStore';
+import { DataSourceSelector } from '../../src/components/DataSourceSelector';
+import { getDataBySource } from '../../src/data/mockData';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -59,6 +53,8 @@ const quickDateOptions = [
 
 export default function ReportsScreen() {
   const { colors } = useThemeStore();
+  const { activeSource } = useDataSourceStore();
+  const sourceData = useMemo(() => getDataBySource(activeSource), [activeSource]);
   const { showSuccess, showError, alertProps } = useAlert();
   const [selectedReport, setSelectedReport] = useState<ReportType | null>(null);
   const [showFilterModal, setShowFilterModal] = useState(false);
@@ -167,36 +163,36 @@ export default function ReportsScreen() {
       case 'sales':
         csv = 'Şube,Nakit,Kart,Açık Hesap,Toplam\n';
         const filteredSales = filters.branchId 
-          ? branchSalesData.filter(b => b.branchId === filters.branchId)
-          : branchSalesData;
+          ? sourceData.branchSales.filter(b => b.branchId === filters.branchId)
+          : sourceData.branchSales;
         filteredSales.forEach((b) => {
           csv += `${b.branchName},${b.sales.cash},${b.sales.card},${b.sales.openAccount},${b.sales.total}\n`;
         });
         break;
       case 'stock':
         csv = 'Barkod,Ürün Adı,Grup,KDV,Alış,Satış,Miktar,Kar\n';
-        productsData.forEach((p) => {
+        sourceData.products.forEach((p) => {
           csv += `${p.barcode},${p.name},${p.group},${p.kdv},${p.purchasePrice},${p.salesPrice},${p.quantity},${p.profit}\n`;
         });
         break;
       case 'customers':
         csv = 'Cari Adı,Telefon,Email,Bakiye\n';
-        customersData.forEach((c) => {
+        sourceData.customers.forEach((c) => {
           csv += `${c.name},${c.phone || '-'},${c.email || '-'},${c.balance}\n`;
         });
         break;
       case 'products':
         csv = 'Sıra,Ürün Adı,Satış Adedi,Ciro,Tip\n';
-        topSellingProducts.forEach((p, i) => {
+        sourceData.topSelling.forEach((p, i) => {
           csv += `${i + 1},${p.name},${p.quantity},${p.revenue},En Çok Satan\n`;
         });
-        leastSellingProducts.forEach((p, i) => {
+        sourceData.leastSelling.forEach((p, i) => {
           csv += `${i + 1},${p.name},${p.quantity},${p.revenue},En Az Satan\n`;
         });
         break;
       case 'hourly':
         csv = 'Saat,Tutar,İşlem Sayısı\n';
-        hourlySalesData.forEach((h) => {
+        sourceData.hourlySales.forEach((h) => {
           csv += `${h.hour},${h.amount},${h.transactions}\n`;
         });
         break;
@@ -256,8 +252,8 @@ export default function ReportsScreen() {
     switch (reportType) {
       case 'sales':
         const filteredSales = filters.branchId 
-          ? branchSalesData.filter(b => b.branchId === filters.branchId)
-          : branchSalesData;
+          ? sourceData.branchSales.filter(b => b.branchId === filters.branchId)
+          : sourceData.branchSales;
         tableContent = `
           <tr><th>Şube</th><th>Nakit</th><th>Kart</th><th>Açık Hesap</th><th>Toplam</th></tr>
           ${filteredSales.map((b) => `
@@ -274,7 +270,7 @@ export default function ReportsScreen() {
       case 'stock':
         tableContent = `
           <tr><th>Barkod</th><th>Ürün</th><th>Grup</th><th>Alış</th><th>Satış</th><th>Stok</th></tr>
-          ${productsData.map((p) => `
+          ${sourceData.products.map((p) => `
             <tr>
               <td>${p.barcode}</td>
               <td>${p.name}</td>
@@ -289,7 +285,7 @@ export default function ReportsScreen() {
       case 'customers':
         tableContent = `
           <tr><th>Cari Adı</th><th>Telefon</th><th>Email</th><th>Bakiye</th></tr>
-          ${customersData.map((c) => `
+          ${sourceData.customers.map((c) => `
             <tr>
               <td>${c.name}</td>
               <td>${c.phone || '-'}</td>
@@ -303,11 +299,11 @@ export default function ReportsScreen() {
         tableContent = `
           <tr><th>Sıra</th><th>Ürün</th><th>Adet</th><th>Ciro</th></tr>
           <tr><td colspan="4" style="background:#e8f5e9;"><strong>En Çok Satanlar</strong></td></tr>
-          ${topSellingProducts.map((p, i) => `
+          ${sourceData.topSelling.map((p, i) => `
             <tr><td>${i + 1}</td><td>${p.name}</td><td>${p.quantity}</td><td>₺${p.revenue.toLocaleString('tr-TR')}</td></tr>
           `).join('')}
           <tr><td colspan="4" style="background:#ffebee;"><strong>En Az Satanlar</strong></td></tr>
-          ${leastSellingProducts.map((p, i) => `
+          ${sourceData.leastSelling.map((p, i) => `
             <tr><td>${i + 1}</td><td>${p.name}</td><td>${p.quantity}</td><td>₺${p.revenue.toLocaleString('tr-TR')}</td></tr>
           `).join('')}
         `;
@@ -315,7 +311,7 @@ export default function ReportsScreen() {
       case 'hourly':
         tableContent = `
           <tr><th>Saat</th><th>Tutar</th><th>İşlem</th></tr>
-          ${hourlySalesData.map((h) => `
+          ${sourceData.hourlySales.map((h) => `
             <tr><td>${h.hour}</td><td>₺${h.amount.toLocaleString('tr-TR')}</td><td>${h.transactions}</td></tr>
           `).join('')}
         `;
@@ -345,7 +341,7 @@ export default function ReportsScreen() {
         <p class="date">Tarih: ${date}</p>
         <div class="filters">
           <strong>Filtreler:</strong> 
-          ${filters.branchId ? `Şube: ${branches.find(b => b.id === filters.branchId)?.name || 'Tümü'}` : 'Tüm Şubeler'}
+          ${filters.branchId ? `Şube: ${sourceData.branches.find(b => b.id === filters.branchId)?.name || 'Tümü'}` : 'Tüm Şubeler'}
           | ${formatDateForInput(filters.startDate)} - ${formatDateForInput(filters.endDate)}
         </div>
         <table>${tableContent}</table>
@@ -358,8 +354,8 @@ export default function ReportsScreen() {
     switch (selectedReport) {
       case 'sales':
         const filteredSales = filters.branchId 
-          ? branchSalesData.filter(b => b.branchId === filters.branchId)
-          : branchSalesData;
+          ? sourceData.branchSales.filter(b => b.branchId === filters.branchId)
+          : sourceData.branchSales;
         return (
           <>
             <View style={styles.reportHeader}>
@@ -401,10 +397,10 @@ export default function ReportsScreen() {
             <View style={styles.reportHeader}>
               <Text style={[styles.reportTitle, { color: colors.text }]}>Stok Durum Raporu</Text>
               <Text style={[styles.reportDate, { color: colors.textSecondary }]}>
-                {productsData.length} ürün
+                {sourceData.products.length} ürün
               </Text>
             </View>
-            {productsData.slice(0, 10).map((product) => (
+            {sourceData.products.slice(0, 10).map((product) => (
               <View key={product.id} style={[styles.reportRow, { borderBottomColor: colors.border }]}>
                 <View style={styles.productReportInfo}>
                   <Text style={[styles.reportRowTitle, { color: colors.text }]}>{product.name}</Text>
@@ -426,10 +422,10 @@ export default function ReportsScreen() {
             <View style={styles.reportHeader}>
               <Text style={[styles.reportTitle, { color: colors.text }]}>Cari Hesap Raporu</Text>
               <Text style={[styles.reportDate, { color: colors.textSecondary }]}>
-                {customersData.length} cari
+                {sourceData.customers.length} cari
               </Text>
             </View>
-            {customersData.map((customer) => (
+            {sourceData.customers.map((customer) => (
               <View key={customer.id} style={[styles.reportRow, { borderBottomColor: colors.border }]}>
                 <View style={styles.customerReportInfo}>
                   <Text style={[styles.reportRowTitle, { color: colors.text }]}>{customer.name}</Text>
@@ -456,7 +452,7 @@ export default function ReportsScreen() {
               <Text style={[styles.reportTitle, { color: colors.text }]}>Ürün Performans Raporu</Text>
             </View>
             <Text style={[styles.subSectionTitle, { color: colors.success }]}>En Çok Satanlar</Text>
-            {topSellingProducts.slice(0, 5).map((p, i) => (
+            {sourceData.topSelling.slice(0, 5).map((p, i) => (
               <View key={p.id} style={[styles.reportRow, { borderBottomColor: colors.border }]}>
                 <View style={[styles.rankBadge, { backgroundColor: colors.success + '20' }]}>
                   <Text style={[styles.rankText, { color: colors.success }]}>{i + 1}</Text>
@@ -471,7 +467,7 @@ export default function ReportsScreen() {
               </View>
             ))}
             <Text style={[styles.subSectionTitle, { color: colors.error, marginTop: 16 }]}>En Az Satanlar</Text>
-            {leastSellingProducts.slice(0, 5).map((p, i) => (
+            {sourceData.leastSelling.slice(0, 5).map((p, i) => (
               <View key={p.id} style={[styles.reportRow, { borderBottomColor: colors.border }]}>
                 <View style={[styles.rankBadge, { backgroundColor: colors.error + '20' }]}>
                   <Text style={[styles.rankText, { color: colors.error }]}>{i + 1}</Text>
@@ -488,13 +484,13 @@ export default function ReportsScreen() {
           </>
         );
       case 'hourly':
-        const maxAmount = Math.max(...hourlySalesData.map((h) => h.amount));
+        const maxAmount = Math.max(...sourceData.hourlySales.map((h) => h.amount));
         return (
           <>
             <View style={styles.reportHeader}>
               <Text style={[styles.reportTitle, { color: colors.text }]}>Saatlik Satış Raporu</Text>
             </View>
-            {hourlySalesData.map((hour) => (
+            {sourceData.hourlySales.map((hour) => (
               <View key={hour.hour} style={[styles.hourlyRow, { borderBottomColor: colors.border }]}>
                 <Text style={[styles.hourTime, { color: colors.text }]}>{hour.hour}</Text>
                 <View style={styles.hourlyBarContainer}>
@@ -525,6 +521,8 @@ export default function ReportsScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* Global Data Source Selector */}
+      <DataSourceSelector />
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Raporlar</Text>
@@ -585,7 +583,7 @@ export default function ReportsScreen() {
                     Tüm Şubeler
                   </Text>
                 </TouchableOpacity>
-                {branches.map((branch) => (
+                {sourceData.branches.map((branch) => (
                   <TouchableOpacity
                     key={branch.id}
                     style={[
@@ -733,7 +731,7 @@ export default function ReportsScreen() {
             {/* Applied Filters Display */}
             <View style={[styles.appliedFilters, { backgroundColor: colors.background }]}>
               <Text style={[styles.appliedFiltersText, { color: colors.textSecondary }]}>
-                {filters.branchId ? branches.find(b => b.id === filters.branchId)?.name : 'Tüm Şubeler'}
+                {filters.branchId ? sourceData.branches.find(b => b.id === filters.branchId)?.name : 'Tüm Şubeler'}
                 {` • ${formatDateForInput(filters.startDate)} - ${formatDateForInput(filters.endDate)}`}
               </Text>
             </View>

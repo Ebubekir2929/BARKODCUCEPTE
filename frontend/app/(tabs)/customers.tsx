@@ -13,7 +13,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
-import { customersData, getCustomerMovements } from '../../src/data/mockData';
+import { useDataSourceStore } from '../../src/store/dataSourceStore';
+import { DataSourceSelector } from '../../src/components/DataSourceSelector';
+import { getDataBySource, getCustomerMovements } from '../../src/data/mockData';
 import { Customer, CustomerMovement, InvoiceDetail } from '../../src/types';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -21,6 +23,8 @@ const CACHE_KEY = 'cached_customers';
 
 export default function CustomersScreen() {
   const { colors } = useThemeStore();
+  const { activeSource } = useDataSourceStore();
+  const sourceData = useMemo(() => getDataBySource(activeSource), [activeSource]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'debit' | 'credit'>('all');
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
@@ -33,21 +37,15 @@ export default function CustomersScreen() {
   useEffect(() => {
     const loadCustomers = async () => {
       try {
-        const cached = await AsyncStorage.getItem(CACHE_KEY);
-        if (cached) {
-          setCustomers(JSON.parse(cached));
-        } else {
-          setCustomers(customersData);
-          await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(customersData));
-        }
+        setCustomers(sourceData.customers);
       } catch (error) {
-        setCustomers(customersData);
+        setCustomers(sourceData.customers);
       } finally {
         setLoading(false);
       }
     };
     loadCustomers();
-  }, []);
+  }, [sourceData]);
 
   const filteredCustomers = useMemo(() => {
     let filtered = customers;
@@ -137,6 +135,8 @@ export default function CustomersScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* Global Data Source Selector */}
+      <DataSourceSelector />
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Cari Kartlar</Text>

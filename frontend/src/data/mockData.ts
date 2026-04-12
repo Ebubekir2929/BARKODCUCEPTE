@@ -387,3 +387,175 @@ export const openTablesData: OpenTable[] = [
     dataSource: 'Data 2',
   },
 ];
+
+
+// ===== DATA SOURCE ORGANIZED DATA =====
+// Her data source farklı veri seti döndürür
+
+import { DataSource } from '../store/dataSourceStore';
+
+// Branch Sales by Data Source
+const branchSalesBySource: Record<DataSource, BranchSales[]> = {
+  data1: [
+    { branchId: '1', branchName: 'Merkez Şube', sales: { cash: 15420.50, card: 28350.00, openAccount: 5200.00, total: 48970.50 }, cancellations: generateCancelledReceipts('1') },
+    { branchId: '2', branchName: 'Kadıköy Şube', sales: { cash: 12300.00, card: 22150.50, openAccount: 3800.00, total: 38250.50 }, cancellations: generateCancelledReceipts('2') },
+    { branchId: '3', branchName: 'Beşiktaş Şube', sales: { cash: 18500.00, card: 31200.00, openAccount: 6100.00, total: 55800.00 }, cancellations: generateCancelledReceipts('3') },
+  ],
+  data2: [
+    { branchId: '1', branchName: 'Merkez Şube', sales: { cash: 22100.00, card: 35600.00, openAccount: 7800.00, total: 65500.00 }, cancellations: generateCancelledReceipts('1') },
+    { branchId: '4', branchName: 'Ataşehir Şube', sales: { cash: 14500.00, card: 24800.00, openAccount: 4100.00, total: 43400.00 }, cancellations: generateCancelledReceipts('4') },
+    { branchId: '5', branchName: 'Maltepe Şube', sales: { cash: 16800.00, card: 27200.00, openAccount: 5500.00, total: 49500.00 }, cancellations: generateCancelledReceipts('5') },
+  ],
+  data3: [
+    { branchId: '2', branchName: 'Kadıköy Şube', sales: { cash: 19200.00, card: 33400.00, openAccount: 6200.00, total: 58800.00 }, cancellations: generateCancelledReceipts('2') },
+    { branchId: '3', branchName: 'Beşiktaş Şube', sales: { cash: 25100.00, card: 41500.00, openAccount: 8900.00, total: 75500.00 }, cancellations: generateCancelledReceipts('3') },
+    { branchId: '4', branchName: 'Ataşehir Şube', sales: { cash: 11400.00, card: 19600.00, openAccount: 3200.00, total: 34200.00 }, cancellations: generateCancelledReceipts('4') },
+    { branchId: '5', branchName: 'Maltepe Şube', sales: { cash: 13700.00, card: 22100.00, openAccount: 4600.00, total: 40400.00 }, cancellations: generateCancelledReceipts('5') },
+  ],
+};
+
+// Hourly Sales by Data Source
+const hourlySalesBySource: Record<DataSource, HourlySales[]> = {
+  data1: [
+    { hour: '08:00', amount: 2450.00, transactions: 15 },
+    { hour: '09:00', amount: 4200.50, transactions: 28 },
+    { hour: '10:00', amount: 6800.00, transactions: 42 },
+    { hour: '11:00', amount: 8500.50, transactions: 55 },
+    { hour: '12:00', amount: 15200.00, transactions: 98 },
+    { hour: '13:00', amount: 18500.00, transactions: 120 },
+    { hour: '14:00', amount: 12400.50, transactions: 78 },
+    { hour: '15:00', amount: 9800.00, transactions: 62 },
+    { hour: '16:00', amount: 11200.00, transactions: 71 },
+    { hour: '17:00', amount: 14500.50, transactions: 89 },
+    { hour: '18:00', amount: 16800.00, transactions: 105 },
+    { hour: '19:00', amount: 13200.00, transactions: 82 },
+    { hour: '20:00', amount: 8900.50, transactions: 54 },
+    { hour: '21:00', amount: 5400.00, transactions: 32 },
+    { hour: '22:00', amount: 2800.00, transactions: 18 },
+  ],
+  data2: [
+    { hour: '08:00', amount: 3100.00, transactions: 20 },
+    { hour: '09:00', amount: 5800.00, transactions: 35 },
+    { hour: '10:00', amount: 8200.00, transactions: 50 },
+    { hour: '11:00', amount: 11500.00, transactions: 72 },
+    { hour: '12:00', amount: 19800.00, transactions: 125 },
+    { hour: '13:00', amount: 22100.00, transactions: 140 },
+    { hour: '14:00', amount: 15600.00, transactions: 95 },
+    { hour: '15:00', amount: 12400.00, transactions: 78 },
+    { hour: '16:00', amount: 13800.00, transactions: 86 },
+    { hour: '17:00', amount: 17200.00, transactions: 108 },
+    { hour: '18:00', amount: 20500.00, transactions: 130 },
+    { hour: '19:00', amount: 16100.00, transactions: 100 },
+    { hour: '20:00', amount: 11200.00, transactions: 68 },
+    { hour: '21:00', amount: 7500.00, transactions: 45 },
+    { hour: '22:00', amount: 3900.00, transactions: 24 },
+  ],
+  data3: [
+    { hour: '08:00', amount: 1800.00, transactions: 12 },
+    { hour: '09:00', amount: 3500.00, transactions: 22 },
+    { hour: '10:00', amount: 5600.00, transactions: 35 },
+    { hour: '11:00', amount: 7200.00, transactions: 45 },
+    { hour: '12:00', amount: 12500.00, transactions: 80 },
+    { hour: '13:00', amount: 14800.00, transactions: 95 },
+    { hour: '14:00', amount: 10200.00, transactions: 65 },
+    { hour: '15:00', amount: 8100.00, transactions: 52 },
+    { hour: '16:00', amount: 9500.00, transactions: 60 },
+    { hour: '17:00', amount: 12100.00, transactions: 75 },
+    { hour: '18:00', amount: 13800.00, transactions: 88 },
+    { hour: '19:00', amount: 10900.00, transactions: 70 },
+    { hour: '20:00', amount: 7400.00, transactions: 46 },
+    { hour: '21:00', amount: 4200.00, transactions: 26 },
+    { hour: '22:00', amount: 2100.00, transactions: 14 },
+  ],
+};
+
+// Top Selling Products by Data Source
+const topSellingBySource: Record<DataSource, TopProduct[]> = {
+  data1: [
+    { id: '1', name: 'Coca Cola 1L', quantity: 450, revenue: 15750.00 },
+    { id: '2', name: 'Simit', quantity: 380, revenue: 5700.00 },
+    { id: '3', name: 'Ekmek', quantity: 320, revenue: 4800.00 },
+    { id: '4', name: 'Su 500ml', quantity: 290, revenue: 2900.00 },
+    { id: '5', name: 'Çikolata Bar', quantity: 250, revenue: 6250.00 },
+  ],
+  data2: [
+    { id: '6', name: 'Peynir 500g', quantity: 520, revenue: 62400.00 },
+    { id: '1', name: 'Coca Cola 1L', quantity: 480, revenue: 16800.00 },
+    { id: '7', name: 'Süt 1L', quantity: 410, revenue: 10250.00 },
+    { id: '3', name: 'Ekmek', quantity: 390, revenue: 5850.00 },
+    { id: '8', name: 'Ayran 200ml', quantity: 350, revenue: 4375.00 },
+  ],
+  data3: [
+    { id: '3', name: 'Ekmek', quantity: 560, revenue: 8400.00 },
+    { id: '2', name: 'Simit', quantity: 490, revenue: 7350.00 },
+    { id: '4', name: 'Su 500ml', quantity: 420, revenue: 4200.00 },
+    { id: '9', name: 'Cips Paket', quantity: 380, revenue: 9500.00 },
+    { id: '10', name: 'Dondurma', quantity: 310, revenue: 7750.00 },
+  ],
+};
+
+// Least Selling Products by Data Source
+const leastSellingBySource: Record<DataSource, TopProduct[]> = {
+  data1: [
+    { id: '11', name: 'Konserve Balık', quantity: 5, revenue: 225.00 },
+    { id: '12', name: 'Zeytinyağı 2L', quantity: 8, revenue: 720.00 },
+    { id: '13', name: 'Bal 500g', quantity: 12, revenue: 1080.00 },
+    { id: '14', name: 'Reçel 750g', quantity: 15, revenue: 600.00 },
+    { id: '15', name: 'Makarna 1kg', quantity: 18, revenue: 540.00 },
+  ],
+  data2: [
+    { id: '16', name: 'Pirinç 2kg', quantity: 4, revenue: 180.00 },
+    { id: '17', name: 'Bulgur 1kg', quantity: 7, revenue: 140.00 },
+    { id: '11', name: 'Konserve Balık', quantity: 9, revenue: 405.00 },
+    { id: '18', name: 'Mercimek 1kg', quantity: 11, revenue: 275.00 },
+    { id: '13', name: 'Bal 500g', quantity: 14, revenue: 1260.00 },
+  ],
+  data3: [
+    { id: '19', name: 'Tuz 750g', quantity: 3, revenue: 30.00 },
+    { id: '20', name: 'Şeker 2kg', quantity: 6, revenue: 180.00 },
+    { id: '12', name: 'Zeytinyağı 2L', quantity: 10, revenue: 900.00 },
+    { id: '16', name: 'Pirinç 2kg', quantity: 13, revenue: 585.00 },
+    { id: '14', name: 'Reçel 750g', quantity: 16, revenue: 640.00 },
+  ],
+};
+
+// Weekly Comparison by Data Source
+const weeklyComparisonBySource: Record<DataSource, typeof weeklyComparisonData> = {
+  data1: { lastWeek: { cash: 52000.00, card: 95000.00, openAccount: 18000.00, total: 165000.00 }, thisWeek: { cash: 46221.00, card: 81700.50, openAccount: 15100.00, total: 143021.50 } },
+  data2: { lastWeek: { cash: 45000.00, card: 78000.00, openAccount: 14000.00, total: 137000.00 }, thisWeek: { cash: 53400.00, card: 87600.00, openAccount: 17400.00, total: 158400.00 } },
+  data3: { lastWeek: { cash: 60000.00, card: 105000.00, openAccount: 20000.00, total: 185000.00 }, thisWeek: { cash: 69400.00, card: 116600.00, openAccount: 22900.00, total: 208900.00 } },
+};
+
+// Products by Data Source
+const productsBySource: Record<DataSource, Product[]> = {
+  data1: productsData.slice(0, 10),
+  data2: productsData.slice(3, 13),
+  data3: productsData,
+};
+
+// Customers by Data Source
+const customersBySource: Record<DataSource, Customer[]> = {
+  data1: customersData.slice(0, 5),
+  data2: customersData.slice(2, 7),
+  data3: customersData,
+};
+
+// Open Tables by Data Source
+const openTablesBySource: Record<DataSource, OpenTable[]> = {
+  data1: openTablesData.filter(t => t.dataSource === 'Data 1'),
+  data2: openTablesData.filter(t => t.dataSource === 'Data 2'),
+  data3: openTablesData.filter(t => t.dataSource === 'Data 3'),
+};
+
+// ===== GETTER FUNCTIONS =====
+export const getDataBySource = (source: DataSource) => ({
+  branchSales: branchSalesBySource[source],
+  hourlySales: hourlySalesBySource[source],
+  topSelling: topSellingBySource[source],
+  leastSelling: leastSellingBySource[source],
+  weeklyComparison: weeklyComparisonBySource[source],
+  products: productsBySource[source],
+  customers: customersBySource[source],
+  openTables: openTablesBySource[source],
+  branches: branchSalesBySource[source].map(b => ({ id: b.branchId, name: b.branchName })),
+});

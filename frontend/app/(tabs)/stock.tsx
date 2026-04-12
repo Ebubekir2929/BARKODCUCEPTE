@@ -14,8 +14,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
+import { useDataSourceStore } from '../../src/store/dataSourceStore';
+import { DataSourceSelector } from '../../src/components/DataSourceSelector';
 import {
-  productsData,
+  getDataBySource,
   getProductLocationStocks,
   getProductMovements,
 } from '../../src/data/mockData';
@@ -34,6 +36,8 @@ interface StockFilters {
 
 export default function StockScreen() {
   const { colors } = useThemeStore();
+  const { activeSource } = useDataSourceStore();
+  const sourceData = useMemo(() => getDataBySource(activeSource), [activeSource]);
   const [searchQuery, setSearchQuery] = useState('');
   const [filters, setFilters] = useState<StockFilters>({
     group: null,
@@ -53,21 +57,15 @@ export default function StockScreen() {
   useEffect(() => {
     const loadProducts = async () => {
       try {
-        const cached = await AsyncStorage.getItem(CACHE_KEY);
-        if (cached) {
-          setProducts(JSON.parse(cached));
-        } else {
-          setProducts(productsData);
-          await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(productsData));
-        }
+        setProducts(sourceData.products);
       } catch (error) {
-        setProducts(productsData);
+        setProducts(sourceData.products);
       } finally {
         setLoading(false);
       }
     };
     loadProducts();
-  }, []);
+  }, [sourceData]);
 
   const groups = useMemo(() => {
     const uniqueGroups = [...new Set(products.map((p) => p.group))];
@@ -229,6 +227,8 @@ export default function StockScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      {/* Global Data Source Selector */}
+      <DataSourceSelector />
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Stok Yönetimi</Text>

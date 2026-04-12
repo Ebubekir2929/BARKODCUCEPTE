@@ -14,16 +14,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAuthStore } from '../../src/store/authStore';
 import { useLanguageStore } from '../../src/store/languageStore';
+import { useDataSourceStore } from '../../src/store/dataSourceStore';
+import { DataSourceSelector } from '../../src/components/DataSourceSelector';
 import { SummaryCard } from '../../src/components/SummaryCard';
 import { FilterModal } from '../../src/components/FilterModal';
-import {
-  branchSalesData,
-  hourlySalesData,
-  topSellingProducts,
-  leastSellingProducts,
-  weeklyComparisonData,
-  openTablesData,
-} from '../../src/data/mockData';
+import { getDataBySource } from '../../src/data/mockData';
 import { BranchSales, HourlySales, CancelledReceipt, OpenTable } from '../../src/types';
 
 const screenWidth = Dimensions.get('window').width;
@@ -32,6 +27,10 @@ export default function DashboardScreen() {
   const { colors } = useThemeStore();
   const { user } = useAuthStore();
   const { t } = useLanguageStore();
+  const { activeSource } = useDataSourceStore();
+
+  // Get data based on active source
+  const sourceData = useMemo(() => getDataBySource(activeSource), [activeSource]);
 
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [filters, setFilters] = useState({
@@ -48,14 +47,13 @@ export default function DashboardScreen() {
   const [highlightedHourIndex, setHighlightedHourIndex] = useState<number | null>(null);
   
   // Open Tables state
-  const [openTableDataFilter, setOpenTableDataFilter] = useState<string>('all');
   const [selectedOpenTable, setSelectedOpenTable] = useState<OpenTable | null>(null);
 
   // Calculate totals from all branches
   const totals = useMemo(() => {
     const filteredBranches = filters.branchId
-      ? branchSalesData.filter((b) => b.branchId === filters.branchId)
-      : branchSalesData;
+      ? sourceData.branchSales.filter((b) => b.branchId === filters.branchId)
+      : sourceData.branchSales;
 
     return filteredBranches.reduce(
       (acc, branch) => ({
@@ -66,12 +64,12 @@ export default function DashboardScreen() {
       }),
       { cash: 0, card: 0, openAccount: 0, total: 0 }
     );
-  }, [filters.branchId]);
+  }, [filters.branchId, sourceData]);
 
   // Best selling hour
   const bestSellingHour = useMemo(() => {
-    return hourlySalesData.reduce((max, hour) => hour.amount > max.amount ? hour : max, hourlySalesData[0]);
-  }, []);
+    return sourceData.hourlySales.reduce((max, hour) => hour.amount > max.amount ? hour : max, sourceData.hourlySales[0]);
+  }, [sourceData]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -84,28 +82,18 @@ export default function DashboardScreen() {
       last > 0 ? ((current - last) / last) * 100 : 0;
     
     return {
-      cash: calcPercent(totals.cash, weeklyComparisonData.lastWeek.cash),
-      card: calcPercent(totals.card, weeklyComparisonData.lastWeek.card),
-      openAccount: calcPercent(totals.openAccount, weeklyComparisonData.lastWeek.openAccount),
-      total: calcPercent(totals.total, weeklyComparisonData.lastWeek.total),
+      cash: calcPercent(totals.cash, sourceData.weeklyComparison.lastWeek.cash),
+      card: calcPercent(totals.card, sourceData.weeklyComparison.lastWeek.card),
+      openAccount: calcPercent(totals.openAccount, sourceData.weeklyComparison.lastWeek.openAccount),
+      total: calcPercent(totals.total, sourceData.weeklyComparison.lastWeek.total),
     };
-  }, [totals]);
+  }, [totals, sourceData]);
 
-  const maxHourAmount = useMemo(() => Math.max(...hourlySalesData.map(h => h.amount)), []);
+  const maxHourAmount = useMemo(() => Math.max(...sourceData.hourlySales.map(h => h.amount)), [sourceData]);
 
   // Open Tables computed values
-  const openTableDataSources = useMemo(() => {
-    const sources = [...new Set(openTablesData.map(t => t.dataSource))];
-    return sources.sort();
-  }, []);
-
-  const filteredOpenTables = useMemo(() => {
-    if (openTableDataFilter === 'all') return openTablesData;
-    return openTablesData.filter(t => t.dataSource === openTableDataFilter);
-  }, [openTableDataFilter]);
-
   const openTableTotals = useMemo(() => {
-    return filteredOpenTables.reduce(
+    return sourceData.openTables.reduce(
       (acc, table) => ({
         amount: acc.amount + table.amount,
         paid: acc.paid + table.paidAmount,
@@ -113,7 +101,7 @@ export default function DashboardScreen() {
       }),
       { amount: 0, paid: 0, remaining: 0 }
     );
-  }, [filteredOpenTables]);
+  }, [sourceData]);
 
   const getPaymentStatusColor = (table: OpenTable) => {
     if (table.remainingAmount === 0) return colors.success;
@@ -174,6 +162,9 @@ export default function DashboardScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Global Data Source Selector */}
+      <DataSourceSelector />
+
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
@@ -188,7 +179,7 @@ export default function DashboardScreen() {
               icon="cash-outline"
               color={colors.cash}
               onPress={() => setSelectedCardType('cash')}
-              lastWeekAmount={weeklyComparisonData.lastWeek.cash}
+              lastWeekAmount={sourceData.weeklyComparison.lastWeek.cash}
               changePercent={cardChangePercents.cash}
             />
             <SummaryCard
@@ -197,7 +188,7 @@ export default function DashboardScreen() {
               icon="card-outline"
               color={colors.primary}
               onPress={() => setSelectedCardType('card')}
-              lastWeekAmount={weeklyComparisonData.lastWeek.card}
+              lastWeekAmount={sourceData.weeklyComparison.lastWeek.card}
               changePercent={cardChangePercents.card}
             />
           </View>
@@ -208,7 +199,7 @@ export default function DashboardScreen() {
               icon="wallet-outline"
               color={colors.openAccount}
               onPress={() => setSelectedCardType('openAccount')}
-              lastWeekAmount={weeklyComparisonData.lastWeek.openAccount}
+              lastWeekAmount={sourceData.weeklyComparison.lastWeek.openAccount}
               changePercent={cardChangePercents.openAccount}
             />
             <SummaryCard
@@ -217,7 +208,7 @@ export default function DashboardScreen() {
               icon="stats-chart"
               color={colors.total}
               onPress={() => setSelectedCardType('total')}
-              lastWeekAmount={weeklyComparisonData.lastWeek.total}
+              lastWeekAmount={sourceData.weeklyComparison.lastWeek.total}
               changePercent={cardChangePercents.total}
             />
           </View>
@@ -234,60 +225,9 @@ export default function DashboardScreen() {
               </View>
             </View>
             <View style={[styles.openTableCount, { backgroundColor: colors.primary + '15' }]}>
-              <Text style={[styles.openTableCountText, { color: colors.primary }]}>{filteredOpenTables.length}</Text>
+              <Text style={[styles.openTableCountText, { color: colors.primary }]}>{sourceData.openTables.length}</Text>
             </View>
           </View>
-
-          {/* Data Source Filter Chips */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.locationFilterScroll}>
-            <TouchableOpacity
-              style={[
-                styles.locationChip,
-                {
-                  backgroundColor: openTableDataFilter === 'all' ? colors.primary : colors.background,
-                  borderColor: openTableDataFilter === 'all' ? colors.primary : colors.border,
-                },
-              ]}
-              onPress={() => setOpenTableDataFilter('all')}
-            >
-              <Text
-                style={[
-                  styles.locationChipText,
-                  { color: openTableDataFilter === 'all' ? '#fff' : colors.textSecondary },
-                ]}
-              >
-                {t('all')}
-              </Text>
-            </TouchableOpacity>
-            {openTableDataSources.map((src) => (
-              <TouchableOpacity
-                key={src}
-                style={[
-                  styles.locationChip,
-                  {
-                    backgroundColor: openTableDataFilter === src ? colors.primary : colors.background,
-                    borderColor: openTableDataFilter === src ? colors.primary : colors.border,
-                  },
-                ]}
-                onPress={() => setOpenTableDataFilter(src)}
-              >
-                <Ionicons 
-                  name="server-outline" 
-                  size={12} 
-                  color={openTableDataFilter === src ? '#fff' : colors.textSecondary} 
-                  style={{ marginRight: 4 }}
-                />
-                <Text
-                  style={[
-                    styles.locationChipText,
-                    { color: openTableDataFilter === src ? '#fff' : colors.textSecondary },
-                  ]}
-                >
-                  {src}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
 
           {/* Open Tables Summary Row */}
           <View style={[styles.openTablesSummary, { backgroundColor: colors.background, borderColor: colors.border }]}>
@@ -314,7 +254,7 @@ export default function DashboardScreen() {
           </View>
 
           {/* Open Tables List - Flat */}
-          {filteredOpenTables.map((table) => (
+          {sourceData.openTables.map((table) => (
             <TouchableOpacity
               key={table.id}
               style={[styles.openTableCard, { backgroundColor: colors.background, borderColor: colors.border }]}
@@ -363,7 +303,7 @@ export default function DashboardScreen() {
             </TouchableOpacity>
           ))}
 
-          {filteredOpenTables.length === 0 && (
+          {sourceData.openTables.length === 0 && (
             <View style={styles.emptyState}>
               <Ionicons name="restaurant-outline" size={40} color={colors.textSecondary} />
               <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>{t('no_open_tables')}</Text>
@@ -386,7 +326,7 @@ export default function DashboardScreen() {
           {/* Bar Chart */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chartScroll}>
             <View style={styles.barChart}>
-              {hourlySalesData.map((hour, index) => {
+              {sourceData.hourlySales.map((hour, index) => {
                 const barHeight = (hour.amount / maxHourAmount) * 150;
                 const isHighlighted = highlightedHourIndex === index;
                 const isBest = hour.hour === bestSellingHour.hour;
@@ -428,7 +368,7 @@ export default function DashboardScreen() {
         {/* Top Selling Products */}
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>En Çok Satan Ürünler</Text>
-          {topSellingProducts.slice(0, 5).map((product, index) => (
+          {sourceData.topSelling.slice(0, 5).map((product, index) => (
             <View key={product.id} style={[styles.productItem, { borderBottomColor: colors.border }]}>
               <View style={[styles.productRank, { backgroundColor: colors.success + '20' }]}>
                 <Text style={[styles.productRankText, { color: colors.success }]}>{index + 1}</Text>
@@ -449,7 +389,7 @@ export default function DashboardScreen() {
         {/* Least Selling Products */}
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>En Az Satan Ürünler</Text>
-          {leastSellingProducts.slice(0, 5).map((product, index) => (
+          {sourceData.leastSelling.slice(0, 5).map((product, index) => (
             <View key={product.id} style={[styles.productItem, { borderBottomColor: colors.border }]}>
               <View style={[styles.productRank, { backgroundColor: colors.error + '20' }]}>
                 <Text style={[styles.productRankText, { color: colors.error }]}>{index + 1}</Text>
@@ -470,13 +410,13 @@ export default function DashboardScreen() {
         {/* Location Summary */}
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Lokasyon Özeti</Text>
-          {branchSalesData.map((branch, index) => (
+          {sourceData.branchSales.map((branch, index) => (
             <View 
               key={branch.branchId} 
               style={[
                 styles.locationCard, 
                 { borderBottomColor: colors.border },
-                index === branchSalesData.length - 1 && { borderBottomWidth: 0 }
+                index === sourceData.branchSales.length - 1 && { borderBottomWidth: 0 }
               ]}
             >
               <Text style={[styles.locationName, { color: colors.text }]}>{branch.branchName}</Text>
@@ -553,7 +493,7 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
-              {branchSalesData.map((branch) => {
+              {sourceData.branchSales.map((branch) => {
                 const value = selectedCardType === 'cash' ? branch.sales.cash
                   : selectedCardType === 'card' ? branch.sales.card
                   : selectedCardType === 'openAccount' ? branch.sales.openAccount
