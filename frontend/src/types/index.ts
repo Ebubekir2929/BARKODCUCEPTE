@@ -110,3 +110,17 @@ export interface TopProduct {
   quantity: number;
   revenue: number;
 }
+
+export interface OpenTable {
+  id: string;
+  tableNo: string;
+  customerName: string;
+  customerId: string;
+  amount: number;        // Tutar (toplam hesap)
+  paidAmount: number;    // Ödenen tutar
+  remainingAmount: number; // Kalan tutar
+  location: string;      // Lokasyon/Şube
+  openedAt: string;      // Açılış zamanı
+  itemCount: number;     // Ürün sayısı
+  dataSource: string;    // Veri kaynağı (Data 1, Data 2, Data 3)
+}
