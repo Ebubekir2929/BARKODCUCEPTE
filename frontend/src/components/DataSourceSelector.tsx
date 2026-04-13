@@ -4,59 +4,72 @@ import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
 import { useDataSourceStore, DataSource } from '../store/dataSourceStore';
 import { useAuthStore } from '../store/authStore';
-import { useLanguageStore } from '../store/languageStore';
 import { getDataBySource } from '../data/mockData';
-
-const DEFAULT_SOURCES: { key: DataSource; label: string }[] = [
-  { key: 'data1', label: 'Data 1' },
-  { key: 'data2', label: 'Data 2' },
-  { key: 'data3', label: 'Data 3' },
-];
 
 const DATA_SOURCE_KEYS: DataSource[] = ['data1', 'data2', 'data3'];
 
 const formatCurrency = (amount: number) => {
-  return '₺' + amount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return '₺' + amount.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 };
 
+// === DASHBOARD: Full interactive selector with cards ===
 export const DataSourceSelector: React.FC = () => {
   const { colors } = useThemeStore();
   const { activeSource, setActiveSource } = useDataSourceStore();
   const { user } = useAuthStore();
-  const { t } = useLanguageStore();
 
-  // Build data sources from user tenants or fallback to defaults
   const dataSources = React.useMemo(() => {
     if (user?.tenants && user.tenants.length > 0) {
       return user.tenants.slice(0, 10).map((tenant, index) => {
         const key = DATA_SOURCE_KEYS[index] || (`data${index + 1}` as DataSource);
         const sourceData = getDataBySource(key);
         const total = sourceData?.weeklyComparison?.thisWeek?.total || 0;
+        const lastWeekTotal = sourceData?.weeklyComparison?.lastWeek?.total || 0;
+        const changePercent = lastWeekTotal > 0 ? ((total - lastWeekTotal) / lastWeekTotal) * 100 : 0;
+        const branchCount = sourceData?.branchSales?.length || 0;
         return {
           key,
           label: tenant.name || `Data ${index + 1}`,
           tenantId: tenant.tenant_id,
           total,
+          changePercent,
+          branchCount,
+          isUp: changePercent >= 0,
         };
       });
     }
-    return DEFAULT_SOURCES.map(s => {
-      const sourceData = getDataBySource(s.key);
+    return DATA_SOURCE_KEYS.map((key, index) => {
+      const sourceData = getDataBySource(key);
       const total = sourceData?.weeklyComparison?.thisWeek?.total || 0;
-      return { ...s, tenantId: '', total };
+      const lastWeekTotal = sourceData?.weeklyComparison?.lastWeek?.total || 0;
+      const changePercent = lastWeekTotal > 0 ? ((total - lastWeekTotal) / lastWeekTotal) * 100 : 0;
+      const branchCount = sourceData?.branchSales?.length || 0;
+      return {
+        key,
+        label: `Data ${index + 1}`,
+        tenantId: '',
+        total,
+        changePercent,
+        branchCount,
+        isUp: changePercent >= 0,
+      };
     });
   }, [user?.tenants]);
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+    <View style={[styles.container, { borderBottomColor: colors.border }]}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
+      >
         {dataSources.map((src) => {
           const isActive = activeSource === src.key;
           return (
             <TouchableOpacity
               key={src.key}
               style={[
-                styles.chip,
+                styles.card,
                 {
                   backgroundColor: isActive ? colors.primary : colors.card,
                   borderColor: isActive ? colors.primary : colors.border,
@@ -65,27 +78,66 @@ export const DataSourceSelector: React.FC = () => {
               onPress={() => setActiveSource(src.key)}
               activeOpacity={0.7}
             >
-              {isActive && (
-                <Ionicons name="checkmark-circle" size={14} color="#fff" style={{ marginRight: 4 }} />
-              )}
-              <View style={styles.chipContent}>
+              <View style={styles.cardTop}>
+                <View style={styles.cardLabelRow}>
+                  {isActive && (
+                    <View style={[styles.activeDot, { backgroundColor: '#fff' }]} />
+                  )}
+                  <Text
+                    style={[
+                      styles.cardLabel,
+                      { color: isActive ? '#fff' : colors.text },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {src.label}
+                  </Text>
+                </View>
+                <View style={styles.cardBranchRow}>
+                  <Ionicons
+                    name="business-outline"
+                    size={11}
+                    color={isActive ? 'rgba(255,255,255,0.7)' : colors.textSecondary}
+                  />
+                  <Text
+                    style={[
+                      styles.cardBranch,
+                      { color: isActive ? 'rgba(255,255,255,0.7)' : colors.textSecondary },
+                    ]}
+                  >
+                    {src.branchCount} Şube
+                  </Text>
+                </View>
+              </View>
+              <Text
+                style={[
+                  styles.cardTotal,
+                  { color: isActive ? '#fff' : colors.text },
+                ]}
+                numberOfLines={1}
+              >
+                {formatCurrency(src.total)}
+              </Text>
+              <View style={styles.cardChangeRow}>
+                <Ionicons
+                  name={src.isUp ? 'trending-up' : 'trending-down'}
+                  size={13}
+                  color={isActive
+                    ? (src.isUp ? 'rgba(255,255,255,0.85)' : 'rgba(255,180,180,0.9)')
+                    : (src.isUp ? '#10B981' : '#EF4444')
+                  }
+                />
                 <Text
                   style={[
-                    styles.chipLabel,
-                    { color: isActive ? '#fff' : colors.text },
+                    styles.cardChange,
+                    {
+                      color: isActive
+                        ? (src.isUp ? 'rgba(255,255,255,0.85)' : 'rgba(255,180,180,0.9)')
+                        : (src.isUp ? '#10B981' : '#EF4444'),
+                    },
                   ]}
-                  numberOfLines={1}
                 >
-                  {src.label}
-                </Text>
-                <Text
-                  style={[
-                    styles.chipTotal,
-                    { color: isActive ? 'rgba(255,255,255,0.85)' : colors.textSecondary },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {formatCurrency(src.total)}
+                  {src.isUp ? '+' : ''}{src.changePercent.toFixed(1)}%
                 </Text>
               </View>
             </TouchableOpacity>
@@ -96,35 +148,115 @@ export const DataSourceSelector: React.FC = () => {
   );
 };
 
+// === OTHER PAGES: Small indicator showing active source ===
+export const ActiveSourceIndicator: React.FC = () => {
+  const { colors } = useThemeStore();
+  const { activeSource } = useDataSourceStore();
+  const { user } = useAuthStore();
+
+  const activeLabel = React.useMemo(() => {
+    if (user?.tenants && user.tenants.length > 0) {
+      const index = DATA_SOURCE_KEYS.indexOf(activeSource);
+      if (index >= 0 && index < user.tenants.length) {
+        return user.tenants[index].name;
+      }
+    }
+    const idx = DATA_SOURCE_KEYS.indexOf(activeSource);
+    return `Data ${idx + 1}`;
+  }, [user?.tenants, activeSource]);
+
+  return (
+    <View style={[styles.indicatorContainer, { borderBottomColor: colors.border }]}>
+      <View style={[styles.indicatorChip, { backgroundColor: colors.primary + '15' }]}>
+        <View style={[styles.indicatorDot, { backgroundColor: colors.primary }]} />
+        <Text style={[styles.indicatorText, { color: colors.primary }]} numberOfLines={1}>
+          {activeLabel}
+        </Text>
+      </View>
+    </View>
+  );
+};
+
 const styles = StyleSheet.create({
+  // Dashboard Selector Styles
   container: {
     borderBottomWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 12,
   },
-  chipsRow: {
-    flexDirection: 'row',
-    gap: 8,
+  scrollContent: {
+    paddingHorizontal: 16,
+    gap: 10,
   },
-  chip: {
+  card: {
+    width: 140,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1.5,
+  },
+  cardTop: {
+    marginBottom: 8,
+  },
+  cardLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    minWidth: 100,
+    gap: 6,
   },
-  chipContent: {
-    flexDirection: 'column',
+  activeDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
   },
-  chipLabel: {
-    fontSize: 13,
+  cardLabel: {
+    fontSize: 14,
     fontWeight: '700',
+    flex: 1,
   },
-  chipTotal: {
+  cardBranchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 3,
+  },
+  cardBranch: {
+    fontSize: 11,
+  },
+  cardTotal: {
+    fontSize: 17,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  cardChangeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  cardChange: {
     fontSize: 12,
     fontWeight: '600',
-    marginTop: 2,
+  },
+  // Active Source Indicator Styles
+  indicatorContainer: {
+    borderBottomWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  indicatorChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 6,
+  },
+  indicatorDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  indicatorText: {
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
-import { DataSourceSelector } from '../../src/components/DataSourceSelector';
+import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import {
   getDataBySource,
   getProductLocationStocks,
@@ -228,7 +228,7 @@ export default function StockScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Global Data Source Selector */}
-      <DataSourceSelector />
+      <ActiveSourceIndicator />
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Stok Yönetimi</Text>

@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
-import { DataSourceSelector } from '../../src/components/DataSourceSelector';
+import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import { getDataBySource } from '../../src/data/mockData';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -522,7 +522,7 @@ export default function ReportsScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Global Data Source Selector */}
-      <DataSourceSelector />
+      <ActiveSourceIndicator />
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Raporlar</Text>
