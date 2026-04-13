@@ -315,6 +315,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     width: '100%',
+    justifyContent: 'center',
   },
   button: {
     paddingVertical: 14,

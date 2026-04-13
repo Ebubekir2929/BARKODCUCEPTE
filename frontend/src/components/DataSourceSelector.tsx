@@ -5,6 +5,7 @@ import { useThemeStore } from '../store/themeStore';
 import { useDataSourceStore, DataSource } from '../store/dataSourceStore';
 import { useAuthStore } from '../store/authStore';
 import { useLanguageStore } from '../store/languageStore';
+import { getDataBySource } from '../data/mockData';
 
 const DEFAULT_SOURCES: { key: DataSource; label: string }[] = [
   { key: 'data1', label: 'Data 1' },
@@ -13,6 +14,10 @@ const DEFAULT_SOURCES: { key: DataSource; label: string }[] = [
 ];
 
 const DATA_SOURCE_KEYS: DataSource[] = ['data1', 'data2', 'data3'];
+
+const formatCurrency = (amount: number) => {
+  return '₺' + amount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
 
 export const DataSourceSelector: React.FC = () => {
   const { colors } = useThemeStore();
@@ -23,55 +28,70 @@ export const DataSourceSelector: React.FC = () => {
   // Build data sources from user tenants or fallback to defaults
   const dataSources = React.useMemo(() => {
     if (user?.tenants && user.tenants.length > 0) {
-      return user.tenants.slice(0, 10).map((tenant, index) => ({
-        key: DATA_SOURCE_KEYS[index] || (`data${index + 1}` as DataSource),
-        label: tenant.name || `Data ${index + 1}`,
-        tenantId: tenant.tenant_id,
-      }));
+      return user.tenants.slice(0, 10).map((tenant, index) => {
+        const key = DATA_SOURCE_KEYS[index] || (`data${index + 1}` as DataSource);
+        const sourceData = getDataBySource(key);
+        const total = sourceData?.weeklyComparison?.thisWeek?.total || 0;
+        return {
+          key,
+          label: tenant.name || `Data ${index + 1}`,
+          tenantId: tenant.tenant_id,
+          total,
+        };
+      });
     }
-    return DEFAULT_SOURCES.map(s => ({ ...s, tenantId: '' }));
+    return DEFAULT_SOURCES.map(s => {
+      const sourceData = getDataBySource(s.key);
+      const total = sourceData?.weeklyComparison?.thisWeek?.total || 0;
+      return { ...s, tenantId: '', total };
+    });
   }, [user?.tenants]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
-      <View style={styles.inner}>
-        <View style={styles.labelRow}>
-          <Ionicons name="server-outline" size={14} color={colors.textSecondary} />
-          <Text style={[styles.label, { color: colors.textSecondary }]}>{t('data_source')}:</Text>
-        </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
-          {dataSources.map((src) => {
-            const isActive = activeSource === src.key;
-            return (
-              <TouchableOpacity
-                key={src.key}
-                style={[
-                  styles.chip,
-                  {
-                    backgroundColor: isActive ? colors.primary : colors.background,
-                    borderColor: isActive ? colors.primary : colors.border,
-                  },
-                ]}
-                onPress={() => setActiveSource(src.key)}
-                activeOpacity={0.7}
-              >
-                {isActive && (
-                  <Ionicons name="checkmark-circle" size={14} color="#fff" style={{ marginRight: 4 }} />
-                )}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
+        {dataSources.map((src) => {
+          const isActive = activeSource === src.key;
+          return (
+            <TouchableOpacity
+              key={src.key}
+              style={[
+                styles.chip,
+                {
+                  backgroundColor: isActive ? colors.primary : colors.card,
+                  borderColor: isActive ? colors.primary : colors.border,
+                },
+              ]}
+              onPress={() => setActiveSource(src.key)}
+              activeOpacity={0.7}
+            >
+              {isActive && (
+                <Ionicons name="checkmark-circle" size={14} color="#fff" style={{ marginRight: 4 }} />
+              )}
+              <View style={styles.chipContent}>
                 <Text
                   style={[
-                    styles.chipText,
-                    { color: isActive ? '#fff' : colors.textSecondary },
+                    styles.chipLabel,
+                    { color: isActive ? '#fff' : colors.text },
                   ]}
                   numberOfLines={1}
                 >
                   {src.label}
                 </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
+                <Text
+                  style={[
+                    styles.chipTotal,
+                    { color: isActive ? 'rgba(255,255,255,0.85)' : colors.textSecondary },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {formatCurrency(src.total)}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
     </View>
   );
 };
@@ -79,39 +99,32 @@ export const DataSourceSelector: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     borderBottomWidth: 1,
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 10,
-  },
-  inner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  labelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginRight: 8,
-  },
-  label: {
-    fontSize: 12,
-    fontWeight: '600',
   },
   chipsRow: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 8,
   },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
     borderWidth: 1,
-    maxWidth: 150,
+    minWidth: 100,
   },
-  chipText: {
+  chipContent: {
+    flexDirection: 'column',
+  },
+  chipLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  chipTotal: {
     fontSize: 12,
     fontWeight: '600',
+    marginTop: 2,
   },
 });
