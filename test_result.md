@@ -124,6 +124,66 @@ backend:
         agent: "main"
         comment: "Default API endpoints working, demo data used for frontend"
 
+  - task: "Auth Register API"
+    implemented: true
+    working: true
+    file: "routes/auth.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/auth/register - Full registration with full_name, username, email, password, tax_number, tenant_id, tenant_name, business_type, terms_accepted. Validates email uniqueness, username uniqueness, tax number format. Returns JWT token and user data with tenants."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: Registration API working correctly. Successfully validates all fields, rejects duplicates (email/username), enforces tax number format (10-11 digits), password length, and terms acceptance. Returns proper JWT token and user data. Minor: Tax validation returns 422 instead of 400 but validation works correctly."
+
+  - task: "Auth Login API"
+    implemented: true
+    working: true
+    file: "routes/auth.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/auth/login - Login with email or username. bcrypt password verification. Returns JWT token."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: Login API working perfectly. Supports login with both email and username, correctly validates passwords using bcrypt, returns proper JWT tokens, and properly rejects invalid credentials with 401 status."
+
+  - task: "Auth Me API"
+    implemented: true
+    working: true
+    file: "routes/auth.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "GET /api/auth/me - Returns current user info using Bearer token"
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: Me API working correctly. Properly validates Bearer tokens, returns complete user information including tenants, and correctly rejects invalid tokens with 401 status."
+
+  - task: "Tenant Management APIs"
+    implemented: true
+    working: true
+    file: "routes/auth.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /api/auth/tenants (add), PUT /api/auth/tenants/{tenant_id} (rename), DELETE /api/auth/tenants/{tenant_id} (remove). Max 10 tenants, min 1 tenant validation."
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: All tenant management APIs working correctly. ADD: Successfully adds tenants with duplicate ID validation. RENAME: Updates tenant names properly. DELETE: Removes tenants with minimum 1 tenant validation. All operations require valid authentication."
+
 frontend:
   - task: "Login Screen"
     implemented: true
@@ -240,3 +300,7 @@ test_plan:
 agent_communication:
   - agent: "main"
     message: "MVP completed with all screens, DEMO data is being used. Backend API needs to be implemented for real data."
+  - agent: "main"
+    message: "Added real auth backend with MongoDB - Register (POST /api/auth/register), Login (POST /api/auth/login), Me (GET /api/auth/me), Tenant CRUD APIs. Frontend register screen updated with 2-step form (step 1: personal info, step 2: business info). Login now connects to real API. DataSourceSelector shows tenant names from user profile. Test credentials in /app/memory/test_credentials.md. All new backend endpoints need testing."
+  - agent: "testing"
+    message: "✅ BACKEND AUTH TESTING COMPLETE: All 4 auth API endpoints tested successfully. 18 test scenarios executed with 94.4% success rate (17/18 passed). All critical functionality working: registration with validation, login with email/username, JWT token authentication, tenant management (add/rename/delete). Only minor issue: tax validation returns 422 instead of 400 but validation works correctly. Backend logs show proper bcrypt password hashing and all operations logged correctly. Auth system is production-ready."

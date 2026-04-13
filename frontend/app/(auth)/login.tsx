@@ -62,11 +62,11 @@ export default function LoginScreen() {
         await AsyncStorage.removeItem('remembered_email');
       }
 
-      const success = await login(email, password);
-      if (success) {
+      const result = await login(email, password);
+      if (result.success) {
         router.replace('/(tabs)/dashboard');
       } else {
-        showError('Giriş Başarısız', 'E-posta veya şifre hatalı');
+        showError('Giriş Başarısız', result.error || 'E-posta veya şifre hatalı');
       }
     } catch (error) {
       showError('Hata', 'Bir hata oluştu. Lütfen tekrar deneyin.');
@@ -225,11 +225,11 @@ export default function LoginScreen() {
             </View>
           </View>
 
-          {/* Demo Info */}
+          {/* Info */}
           <View style={[styles.demoInfo, { backgroundColor: colors.info + '20', borderColor: colors.info }]}>
             <Ionicons name="information-circle" size={20} color={colors.info} />
             <Text style={[styles.demoText, { color: colors.info }]}>
-              Demo: Herhangi bir e-posta ve şifre ile giriş yapabilirsiniz
+              E-posta veya kullanıcı adı ile giriş yapabilirsiniz
             </Text>
           </View>
 

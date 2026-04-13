@@ -1,60 +1,103 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { User } from '../types';
+import { User, TenantSource } from '../types';
+
+const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+
+interface RegisterData {
+  full_name: string;
+  username: string;
+  email: string;
+  password: string;
+  tax_number: string;
+  tenant_id: string;
+  tenant_name: string;
+  business_type: 'normal' | 'restoran';
+  terms_accepted: boolean;
+}
 
 interface AuthStore {
   user: User | null;
   token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<boolean>;
-  register: (name: string, email: string, password: string) => Promise<boolean>;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  register: (data: RegisterData) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
   forgotPassword: (email: string) => Promise<boolean>;
+  addTenant: (tenant_id: string, name: string) => Promise<{ success: boolean; error?: string }>;
+  updateTenantName: (tenant_id: string, name: string) => Promise<{ success: boolean; error?: string }>;
+  removeTenant: (tenant_id: string) => Promise<{ success: boolean; error?: string }>;
+  refreshUser: () => Promise<void>;
 }
 
-// Demo user for testing
-const DEMO_USER: User = {
-  id: '1',
-  email: 'demo@sirket.com',
-  name: 'Demo Kullanıcı',
-  role: 'admin',
-};
-
-export const useAuthStore = create<AuthStore>((set) => ({
+export const useAuthStore = create<AuthStore>((set, get) => ({
   user: null,
   token: null,
   isAuthenticated: false,
   isLoading: true,
 
   login: async (email: string, password: string) => {
-    // Demo login - accept any credentials for demo
-    if (email && password) {
-      const token = 'demo-jwt-token-' + Date.now();
-      await AsyncStorage.setItem('token', token);
-      await AsyncStorage.setItem('user', JSON.stringify(DEMO_USER));
-      set({ user: DEMO_USER, token, isAuthenticated: true, isLoading: false });
-      return true;
+    try {
+      const response = await fetch(`${API_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return { success: false, error: data.detail || 'Giriş başarısız' };
+      }
+
+      await AsyncStorage.setItem('token', data.access_token);
+      await AsyncStorage.setItem('user', JSON.stringify(data.user));
+
+      set({
+        user: data.user,
+        token: data.access_token,
+        isAuthenticated: true,
+        isLoading: false,
+      });
+
+      return { success: true };
+    } catch (error) {
+      console.error('Login error:', error);
+      return { success: false, error: 'Bağlantı hatası. Lütfen tekrar deneyin.' };
     }
-    return false;
   },
 
-  register: async (name: string, email: string, password: string) => {
-    if (name && email && password) {
-      const newUser: User = {
-        id: Date.now().toString(),
-        email,
-        name,
-        role: 'user',
-      };
-      const token = 'demo-jwt-token-' + Date.now();
-      await AsyncStorage.setItem('token', token);
-      await AsyncStorage.setItem('user', JSON.stringify(newUser));
-      set({ user: newUser, token, isAuthenticated: true, isLoading: false });
-      return true;
+  register: async (registerData: RegisterData) => {
+    try {
+      const response = await fetch(`${API_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(registerData),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return { success: false, error: data.detail || 'Kayıt başarısız' };
+      }
+
+      await AsyncStorage.setItem('token', data.access_token);
+      await AsyncStorage.setItem('user', JSON.stringify(data.user));
+
+      set({
+        user: data.user,
+        token: data.access_token,
+        isAuthenticated: true,
+        isLoading: false,
+      });
+
+      return { success: true };
+    } catch (error) {
+      console.error('Register error:', error);
+      return { success: false, error: 'Bağlantı hatası. Lütfen tekrar deneyin.' };
     }
-    return false;
   },
 
   logout: async () => {
@@ -69,7 +112,23 @@ export const useAuthStore = create<AuthStore>((set) => ({
       const userStr = await AsyncStorage.getItem('user');
       if (token && userStr) {
         const user = JSON.parse(userStr);
-        set({ user, token, isAuthenticated: true, isLoading: false });
+        // Verify token is still valid
+        try {
+          const response = await fetch(`${API_URL}/api/auth/me`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          if (response.ok) {
+            const freshUser = await response.json();
+            await AsyncStorage.setItem('user', JSON.stringify(freshUser));
+            set({ user: freshUser, token, isAuthenticated: true, isLoading: false });
+          } else {
+            // Token expired, use cached data as fallback
+            set({ user, token, isAuthenticated: true, isLoading: false });
+          }
+        } catch {
+          // Network error, use cached data
+          set({ user, token, isAuthenticated: true, isLoading: false });
+        }
       } else {
         set({ isLoading: false });
       }
@@ -79,7 +138,107 @@ export const useAuthStore = create<AuthStore>((set) => ({
   },
 
   forgotPassword: async (email: string) => {
-    // Demo - just simulate success
+    // TODO: Implement when backend endpoint is ready
     return !!email;
+  },
+
+  addTenant: async (tenant_id: string, name: string) => {
+    const { token } = get();
+    if (!token) return { success: false, error: 'Oturum açmanız gerekiyor' };
+
+    try {
+      const response = await fetch(`${API_URL}/api/auth/tenants`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ tenant_id, name }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return { success: false, error: data.detail || 'Tenant eklenemedi' };
+      }
+
+      await AsyncStorage.setItem('user', JSON.stringify(data));
+      set({ user: data });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: 'Bağlantı hatası' };
+    }
+  },
+
+  updateTenantName: async (tenant_id: string, name: string) => {
+    const { token } = get();
+    if (!token) return { success: false, error: 'Oturum açmanız gerekiyor' };
+
+    try {
+      const response = await fetch(`${API_URL}/api/auth/tenants/${encodeURIComponent(tenant_id)}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ name }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return { success: false, error: data.detail || 'İsim güncellenemedi' };
+      }
+
+      await AsyncStorage.setItem('user', JSON.stringify(data));
+      set({ user: data });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: 'Bağlantı hatası' };
+    }
+  },
+
+  removeTenant: async (tenant_id: string) => {
+    const { token } = get();
+    if (!token) return { success: false, error: 'Oturum açmanız gerekiyor' };
+
+    try {
+      const response = await fetch(`${API_URL}/api/auth/tenants/${encodeURIComponent(tenant_id)}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        return { success: false, error: data.detail || 'Tenant silinemedi' };
+      }
+
+      await AsyncStorage.setItem('user', JSON.stringify(data));
+      set({ user: data });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: 'Bağlantı hatası' };
+    }
+  },
+
+  refreshUser: async () => {
+    const { token } = get();
+    if (!token) return;
+
+    try {
+      const response = await fetch(`${API_URL}/api/auth/me`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const user = await response.json();
+        await AsyncStorage.setItem('user', JSON.stringify(user));
+        set({ user });
+      }
+    } catch (error) {
+      console.error('Refresh user error:', error);
+    }
   },
 }));

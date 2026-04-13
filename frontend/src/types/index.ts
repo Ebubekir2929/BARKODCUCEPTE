@@ -1,10 +1,21 @@
 // Types for the POS/Sales Management App
 
+export interface TenantSource {
+  tenant_id: string;
+  name: string;
+  added_at?: string;
+}
+
 export interface User {
   id: string;
+  full_name: string;
+  username: string;
   email: string;
-  name: string;
+  tax_number: string;
+  business_type: 'normal' | 'restoran';
+  tenants: TenantSource[];
   role: string;
+  created_at?: string;
 }
 
 export interface AuthState {

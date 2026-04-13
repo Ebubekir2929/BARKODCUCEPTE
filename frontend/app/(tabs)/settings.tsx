@@ -155,11 +155,11 @@ export default function SettingsScreen() {
         <View style={[styles.userCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={[styles.userAvatar, { backgroundColor: colors.primary + '20' }]}>
             <Text style={[styles.userAvatarText, { color: colors.primary }]}>
-              {user?.name?.charAt(0) || 'U'}
+              {user?.full_name?.charAt(0) || 'U'}
             </Text>
           </View>
           <View style={styles.userInfo}>
-            <Text style={[styles.userName, { color: colors.text }]}>{user?.name || 'Kullanıcı'}</Text>
+            <Text style={[styles.userName, { color: colors.text }]}>{user?.full_name || 'Kullanıcı'}</Text>
             <Text style={[styles.userEmail, { color: colors.textSecondary }]}>
               {user?.email || 'email@example.com'}
             </Text>
