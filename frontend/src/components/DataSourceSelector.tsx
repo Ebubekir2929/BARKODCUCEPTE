@@ -9,10 +9,12 @@ import { getDataBySource } from '../data/mockData';
 const DATA_SOURCE_KEYS: DataSource[] = ['data1', 'data2', 'data3'];
 
 const formatCurrency = (amount: number) => {
-  return '₺' + amount.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  if (amount >= 1000000) return '₺' + (amount / 1000000).toFixed(1) + 'M';
+  if (amount >= 1000) return '₺' + (amount / 1000).toFixed(1) + 'K';
+  return '₺' + amount.toLocaleString('tr-TR', { maximumFractionDigits: 0 });
 };
 
-// === DASHBOARD: Full interactive selector with cards ===
+// === DASHBOARD: Compact interactive selector ===
 export const DataSourceSelector: React.FC = () => {
   const { colors } = useThemeStore();
   const { activeSource, setActiveSource } = useDataSourceStore();
@@ -24,35 +26,13 @@ export const DataSourceSelector: React.FC = () => {
         const key = DATA_SOURCE_KEYS[index] || (`data${index + 1}` as DataSource);
         const sourceData = getDataBySource(key);
         const total = sourceData?.weeklyComparison?.thisWeek?.total || 0;
-        const lastWeekTotal = sourceData?.weeklyComparison?.lastWeek?.total || 0;
-        const changePercent = lastWeekTotal > 0 ? ((total - lastWeekTotal) / lastWeekTotal) * 100 : 0;
-        const branchCount = sourceData?.branchSales?.length || 0;
-        return {
-          key,
-          label: tenant.name || `Data ${index + 1}`,
-          tenantId: tenant.tenant_id,
-          total,
-          changePercent,
-          branchCount,
-          isUp: changePercent >= 0,
-        };
+        return { key, label: tenant.name || `Data ${index + 1}`, total };
       });
     }
     return DATA_SOURCE_KEYS.map((key, index) => {
       const sourceData = getDataBySource(key);
       const total = sourceData?.weeklyComparison?.thisWeek?.total || 0;
-      const lastWeekTotal = sourceData?.weeklyComparison?.lastWeek?.total || 0;
-      const changePercent = lastWeekTotal > 0 ? ((total - lastWeekTotal) / lastWeekTotal) * 100 : 0;
-      const branchCount = sourceData?.branchSales?.length || 0;
-      return {
-        key,
-        label: `Data ${index + 1}`,
-        tenantId: '',
-        total,
-        changePercent,
-        branchCount,
-        isUp: changePercent >= 0,
-      };
+      return { key, label: `Data ${index + 1}`, total };
     });
   }, [user?.tenants]);
 
@@ -69,7 +49,7 @@ export const DataSourceSelector: React.FC = () => {
             <TouchableOpacity
               key={src.key}
               style={[
-                styles.card,
+                styles.chip,
                 {
                   backgroundColor: isActive ? colors.primary : colors.card,
                   borderColor: isActive ? colors.primary : colors.border,
@@ -78,66 +58,23 @@ export const DataSourceSelector: React.FC = () => {
               onPress={() => setActiveSource(src.key)}
               activeOpacity={0.7}
             >
-              <View style={styles.cardTop}>
-                <View style={styles.cardLabelRow}>
-                  {isActive && (
-                    <View style={[styles.activeDot, { backgroundColor: '#fff' }]} />
-                  )}
-                  <Text
-                    style={[
-                      styles.cardLabel,
-                      { color: isActive ? '#fff' : colors.text },
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {src.label}
-                  </Text>
-                </View>
-                <View style={styles.cardBranchRow}>
-                  <Ionicons
-                    name="business-outline"
-                    size={11}
-                    color={isActive ? 'rgba(255,255,255,0.7)' : colors.textSecondary}
-                  />
-                  <Text
-                    style={[
-                      styles.cardBranch,
-                      { color: isActive ? 'rgba(255,255,255,0.7)' : colors.textSecondary },
-                    ]}
-                  >
-                    {src.branchCount} Şube
-                  </Text>
-                </View>
-              </View>
-              <Text
-                style={[
-                  styles.cardTotal,
-                  { color: isActive ? '#fff' : colors.text },
-                ]}
-                numberOfLines={1}
-              >
-                {formatCurrency(src.total)}
-              </Text>
-              <View style={styles.cardChangeRow}>
-                <Ionicons
-                  name={src.isUp ? 'trending-up' : 'trending-down'}
-                  size={13}
-                  color={isActive
-                    ? (src.isUp ? 'rgba(255,255,255,0.85)' : 'rgba(255,180,180,0.9)')
-                    : (src.isUp ? '#10B981' : '#EF4444')
-                  }
-                />
+              <Ionicons
+                name={isActive ? 'radio-button-on' : 'radio-button-off'}
+                size={16}
+                color={isActive ? '#fff' : colors.textSecondary}
+              />
+              <View style={styles.chipTexts}>
                 <Text
-                  style={[
-                    styles.cardChange,
-                    {
-                      color: isActive
-                        ? (src.isUp ? 'rgba(255,255,255,0.85)' : 'rgba(255,180,180,0.9)')
-                        : (src.isUp ? '#10B981' : '#EF4444'),
-                    },
-                  ]}
+                  style={[styles.chipLabel, { color: isActive ? '#fff' : colors.text }]}
+                  numberOfLines={1}
                 >
-                  {src.isUp ? '+' : ''}{src.changePercent.toFixed(1)}%
+                  {src.label}
+                </Text>
+                <Text
+                  style={[styles.chipTotal, { color: isActive ? 'rgba(255,255,255,0.8)' : colors.textSecondary }]}
+                  numberOfLines={1}
+                >
+                  {formatCurrency(src.total)}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -148,7 +85,7 @@ export const DataSourceSelector: React.FC = () => {
   );
 };
 
-// === OTHER PAGES: Small indicator showing active source ===
+// === OTHER PAGES: Elegant active source display ===
 export const ActiveSourceIndicator: React.FC = () => {
   const { colors } = useThemeStore();
   const { activeSource } = useDataSourceStore();
@@ -166,97 +103,59 @@ export const ActiveSourceIndicator: React.FC = () => {
   }, [user?.tenants, activeSource]);
 
   return (
-    <View style={[styles.indicatorContainer, { borderBottomColor: colors.border }]}>
-      <View style={[styles.indicatorChip, { backgroundColor: colors.primary + '15' }]}>
-        <View style={[styles.indicatorDot, { backgroundColor: colors.primary }]} />
-        <Text style={[styles.indicatorText, { color: colors.primary }]} numberOfLines={1}>
-          {activeLabel}
-        </Text>
-      </View>
+    <View style={[styles.indicatorBar, { borderBottomColor: colors.border }]}>
+      <Ionicons name="server-outline" size={14} color={colors.primary} />
+      <Text style={[styles.indicatorLabel, { color: colors.textSecondary }]}>Veri Kaynağı:</Text>
+      <Text style={[styles.indicatorName, { color: colors.primary }]} numberOfLines={1}>{activeLabel}</Text>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  // Dashboard Selector Styles
+  // Dashboard selector
   container: {
     borderBottomWidth: 1,
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   scrollContent: {
     paddingHorizontal: 16,
-    gap: 10,
+    gap: 8,
   },
-  card: {
-    width: 140,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 16,
-    borderWidth: 1.5,
-  },
-  cardTop: {
-    marginBottom: 8,
-  },
-  cardLabelRow: {
+  chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-  },
-  activeDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  cardLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    flex: 1,
-  },
-  cardBranchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 3,
-  },
-  cardBranch: {
-    fontSize: 11,
-  },
-  cardTotal: {
-    fontSize: 17,
-    fontWeight: '800',
-    marginBottom: 4,
-  },
-  cardChangeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  cardChange: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  // Active Source Indicator Styles
-  indicatorContainer: {
-    borderBottomWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  indicatorChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 8,
   },
-  indicatorDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  indicatorText: {
+  chipTexts: {},
+  chipLabel: {
     fontSize: 13,
     fontWeight: '700',
+  },
+  chipTotal: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 1,
+  },
+  // Other pages indicator
+  indicatorBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    gap: 6,
+  },
+  indicatorLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  indicatorName: {
+    fontSize: 13,
+    fontWeight: '700',
+    flex: 1,
   },
 });
