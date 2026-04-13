@@ -9,6 +9,7 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -40,6 +41,7 @@ export default function RegisterScreen() {
   const [businessType, setBusinessType] = useState<'normal' | 'restoran'>('normal');
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
 
   const getPasswordStrength = useCallback((pwd: string) => {
     if (!pwd) return { level: 0, text: '—', color: colors.textSecondary };
@@ -322,7 +324,13 @@ export default function RegisterScreen() {
         <View style={{ flex: 1 }}>
           <Text style={[styles.termsText, { color: colors.textSecondary }]}>
             Şartlar ve koşulları{' '}
-            <Text style={{ color: colors.primary, fontWeight: '600' }}>
+            <Text
+              style={{ color: colors.primary, fontWeight: '600', textDecorationLine: 'underline' }}
+              onPress={(e) => {
+                e.stopPropagation?.();
+                setShowTermsModal(true);
+              }}
+            >
               okudum ve onaylıyorum
             </Text>
             .
@@ -399,6 +407,96 @@ export default function RegisterScreen() {
       </KeyboardAvoidingView>
 
       <CustomAlert {...alertProps} />
+
+      {/* Terms & Conditions Modal */}
+      <Modal visible={showTermsModal} animationType="slide" transparent>
+        <View style={styles.termsModalOverlay}>
+          <View style={[styles.termsModalContent, { backgroundColor: colors.surface }]}>
+            <View style={[styles.termsModalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.termsModalTitle, { color: colors.text }]}>Kullanım Koşulları</Text>
+              <TouchableOpacity onPress={() => setShowTermsModal(false)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.termsModalBody} showsVerticalScrollIndicator={true}>
+              <Text style={[styles.termsHeading, { color: colors.text }]}>BARKODCU CEPTE KULLANIM KOŞULLARI</Text>
+              <Text style={[styles.termsDate, { color: colors.textSecondary }]}>Son güncelleme: Nisan 2026</Text>
+
+              <Text style={[styles.termsSubheading, { color: colors.text }]}>1. Genel Hükümler</Text>
+              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>
+                Bu kullanım koşulları, Barkodcu Cepte mobil uygulamasının ("Uygulama") kullanımını düzenler. Uygulamayı kullanarak bu koşulları kabul etmiş sayılırsınız. Uygulama, Berk Yazılım tarafından geliştirilmiş olup, satış noktası (POS) yönetim hizmetleri sunmaktadır.
+              </Text>
+
+              <Text style={[styles.termsSubheading, { color: colors.text }]}>2. Hesap ve Güvenlik</Text>
+              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>
+                • Kayıt sırasında doğru ve güncel bilgiler sağlamak kullanıcının sorumluluğundadır.{'\n'}
+                • Hesap güvenliği kullanıcının sorumluluğundadır. Şifrenizi üçüncü kişilerle paylaşmayınız.{'\n'}
+                • Vergi numarası ve Tenant ID bilgilerinin doğruluğundan kullanıcı sorumludur.{'\n'}
+                • Şüpheli hesap aktivitesi tespit edilmesi halinde hesap askıya alınabilir.
+              </Text>
+
+              <Text style={[styles.termsSubheading, { color: colors.text }]}>3. Veri Kullanımı ve Gizlilik</Text>
+              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>
+                • Kullanıcı verileri güvenli sunucularda şifrelenmiş olarak saklanır.{'\n'}
+                • Satış, stok ve müşteri verileri yalnızca ilgili Tenant ID kapsamında erişilebilir.{'\n'}
+                • Verileriniz üçüncü taraflarla izniniz olmadan paylaşılmaz.{'\n'}
+                • Yasal zorunluluklar kapsamında ilgili kurumlara veri aktarımı yapılabilir.
+              </Text>
+
+              <Text style={[styles.termsSubheading, { color: colors.text }]}>4. Hizmet Kapsamı</Text>
+              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>
+                • Uygulama, satış takibi, stok yönetimi, müşteri hesapları ve raporlama hizmetleri sunar.{'\n'}
+                • Hizmet kesintileri bakım ve güncelleme nedeniyle yaşanabilir.{'\n'}
+                • Uygulama özellikleri önceden bildirilmeksizin değiştirilebilir veya güncellenebilir.
+              </Text>
+
+              <Text style={[styles.termsSubheading, { color: colors.text }]}>5. Kullanıcı Yükümlülükleri</Text>
+              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>
+                • Uygulamayı yalnızca yasal amaçlarla kullanmayı kabul edersiniz.{'\n'}
+                • Uygulamaya yetkisiz erişim sağlamaya çalışmak yasaktır.{'\n'}
+                • Uygulamanın güvenliğini tehlikeye atacak faaliyetlerde bulunmak yasaktır.{'\n'}
+                • Fikri mülkiyet haklarına saygı göstermek zorunludur.
+              </Text>
+
+              <Text style={[styles.termsSubheading, { color: colors.text }]}>6. Sorumluluk Sınırı</Text>
+              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>
+                • Berk Yazılım, uygulama kullanımından doğan doğrudan veya dolaylı zararlardan sorumlu tutulamaz.{'\n'}
+                • Veri kaybı, iş kesintisi veya kâr kaybından kaynaklanan talepler kabul edilmez.{'\n'}
+                • Kullanıcı, uygulamayı kendi risk ve sorumluluğunda kullanır.
+              </Text>
+
+              <Text style={[styles.termsSubheading, { color: colors.text }]}>7. Hesap Sonlandırma</Text>
+              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>
+                • Kullanıcı dilediği zaman hesabını kapatabilir.{'\n'}
+                • Koşulların ihlali durumunda Berk Yazılım hesabı askıya alma veya sonlandırma hakkını saklı tutar.{'\n'}
+                • Hesap sonlandırma sonrası veriler yasal saklama süreleri boyunca muhafaza edilebilir.
+              </Text>
+
+              <Text style={[styles.termsSubheading, { color: colors.text }]}>8. İletişim</Text>
+              <Text style={[styles.termsBody, { color: colors.textSecondary }]}>
+                Sorularınız veya geri bildirimleriniz için:{'\n'}
+                E-posta: destek@barkodcucepte.com{'\n'}
+                {'\n'}
+                Bu koşulları kabul ederek Barkodcu Cepte uygulamasını kullanmayı onaylamış olursunuz.
+              </Text>
+
+              <View style={{ height: 30 }} />
+            </ScrollView>
+            <View style={[styles.termsModalFooter, { borderTopColor: colors.border }]}>
+              <TouchableOpacity
+                style={[styles.termsAcceptBtn, { backgroundColor: colors.primary }]}
+                onPress={() => {
+                  setTermsAccepted(true);
+                  setShowTermsModal(false);
+                }}
+              >
+                <Ionicons name="checkmark-circle-outline" size={20} color="#FFF" />
+                <Text style={styles.termsAcceptBtnText}>Kabul Ediyorum</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -599,5 +697,67 @@ const styles = StyleSheet.create({
   loginLink: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  // Terms Modal Styles
+  termsModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'flex-end',
+  },
+  termsModalContent: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '90%',
+  },
+  termsModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+  },
+  termsModalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  termsModalBody: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
+  termsHeading: {
+    fontSize: 17,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  termsDate: {
+    fontSize: 12,
+    marginBottom: 20,
+  },
+  termsSubheading: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  termsBody: {
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  termsModalFooter: {
+    padding: 20,
+    borderTopWidth: 1,
+  },
+  termsAcceptBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 8,
+  },
+  termsAcceptBtnText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '700',
   },
 });
