@@ -1244,6 +1244,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     flexGrow: 0,
     flexShrink: 1,
+    alignSelf: 'flex-end',
+    width: '100%',
   },
   modalHeader: {
     flexDirection: 'row',
