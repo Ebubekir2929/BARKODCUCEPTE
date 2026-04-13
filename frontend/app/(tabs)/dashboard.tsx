@@ -19,7 +19,7 @@ import { DataSourceSelector } from '../../src/components/DataSourceSelector';
 import { SummaryCard } from '../../src/components/SummaryCard';
 import { FilterModal } from '../../src/components/FilterModal';
 import { getDataBySource } from '../../src/data/mockData';
-import { BranchSales, HourlySales, CancelledReceipt, OpenTable } from '../../src/types';
+import { BranchSales, HourlySales, CancelledReceipt, OpenTable, WaiterSale, WaiterLocation } from '../../src/types';
 
 const screenWidth = Dimensions.get('window').width;
 
@@ -48,6 +48,10 @@ export default function DashboardScreen() {
   
   // Open Tables state
   const [selectedOpenTable, setSelectedOpenTable] = useState<OpenTable | null>(null);
+
+  // Waiter Sales state
+  const [expandedWaiterLocation, setExpandedWaiterLocation] = useState<string | null>(null);
+  const [selectedWaiter, setSelectedWaiter] = useState<WaiterSale | null>(null);
 
   // Calculate totals from all branches
   const totals = useMemo(() => {
@@ -309,6 +313,100 @@ export default function DashboardScreen() {
               <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>{t('no_open_tables')}</Text>
             </View>
           )}
+        </View>
+
+        {/* Waiter Sales Section */}
+        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>{t('waiter_sales')}</Text>
+            <View style={[styles.openTableCount, { backgroundColor: colors.primary + '15' }]}>
+              <Text style={[styles.openTableCountText, { color: colors.primary }]}>
+                {sourceData.waiterLocations.reduce((sum, loc) => sum + loc.waiterCount, 0)} {t('waiter_count')}
+              </Text>
+            </View>
+          </View>
+
+          {sourceData.waiterLocations.map((loc) => {
+            const isExpanded = expandedWaiterLocation === loc.location;
+            return (
+              <View key={loc.location} style={[styles.waiterLocationCard, { borderColor: colors.border }]}>
+                {/* Location Header - Tıklanabilir */}
+                <TouchableOpacity
+                  style={[styles.waiterLocationHeader, { backgroundColor: isExpanded ? colors.primary + '08' : colors.background }]}
+                  onPress={() => setExpandedWaiterLocation(isExpanded ? null : loc.location)}
+                  activeOpacity={0.7}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                    <View style={[styles.waiterLocationIcon, { backgroundColor: colors.primary + '15' }]}>
+                      <Ionicons name="location" size={18} color={colors.primary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.waiterLocationName, { color: colors.text }]}>{loc.location}</Text>
+                      <Text style={[styles.waiterLocationSub, { color: colors.textSecondary }]}>
+                        {loc.waiterCount} {t('waiter_count').toLowerCase()} · ₺{loc.totalSales.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                      </Text>
+                    </View>
+                  </View>
+                  <Ionicons 
+                    name={isExpanded ? 'chevron-up' : 'chevron-down'} 
+                    size={20} 
+                    color={colors.primary} 
+                  />
+                </TouchableOpacity>
+
+                {/* Expanded Waiter List */}
+                {isExpanded && (
+                  <View style={styles.waiterList}>
+                    {loc.waiters.map((waiter, idx) => (
+                      <TouchableOpacity
+                        key={waiter.id}
+                        style={[
+                          styles.waiterCard,
+                          { backgroundColor: colors.background, borderColor: colors.border },
+                          idx === loc.waiters.length - 1 && { marginBottom: 0 },
+                        ]}
+                        onPress={() => setSelectedWaiter(waiter)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.waiterCardTop}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                            <View style={[styles.waiterAvatar, { backgroundColor: colors.success + '15' }]}>
+                              <Ionicons name="person" size={18} color={colors.success} />
+                            </View>
+                            <View>
+                              <Text style={[styles.waiterName, { color: colors.text }]}>{waiter.name}</Text>
+                              <Text style={[styles.waiterHours, { color: colors.textSecondary }]}>
+                                <Ionicons name="time-outline" size={11} color={colors.textSecondary} /> {waiter.workingHours}
+                              </Text>
+                            </View>
+                          </View>
+                          <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                        </View>
+                        <View style={styles.waiterCardStats}>
+                          <View style={styles.waiterStat}>
+                            <Text style={[styles.waiterStatLabel, { color: colors.textSecondary }]}>{t('total_sales')}</Text>
+                            <Text style={[styles.waiterStatValue, { color: colors.text }]}>
+                              ₺{waiter.totalSales.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                            </Text>
+                          </View>
+                          <View style={styles.waiterStat}>
+                            <Text style={[styles.waiterStatLabel, { color: colors.textSecondary }]}>{t('transactions')}</Text>
+                            <Text style={[styles.waiterStatValue, { color: colors.primary }]}>{waiter.transactionCount}</Text>
+                          </View>
+                          <View style={styles.waiterStat}>
+                            <Text style={[styles.waiterStatLabel, { color: colors.textSecondary }]}>{t('average_ticket')}</Text>
+                            <Text style={[styles.waiterStatValue, { color: colors.success }]}>
+                              ₺{waiter.averageTicket.toFixed(2)}
+                            </Text>
+                          </View>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+            );
+          })}
         </View>
 
         {/* Hourly Sales Chart */}
@@ -764,6 +862,132 @@ export default function DashboardScreen() {
                       <Text style={[styles.tableDetailInfoLabel, { color: colors.textSecondary }]}>{t('data_source')}</Text>
                     </View>
                     <Text style={[styles.tableDetailInfoValue, { color: colors.text }]}>{selectedOpenTable.dataSource}</Text>
+                  </View>
+                </View>
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Waiter Detail Modal */}
+      <Modal visible={!!selectedWaiter} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                {t('waiter_detail')}
+              </Text>
+              <TouchableOpacity onPress={() => setSelectedWaiter(null)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            {selectedWaiter && (
+              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
+                {/* Waiter Header */}
+                <View style={[styles.waiterModalHeader, { backgroundColor: colors.primary + '10' }]}>
+                  <View style={[styles.waiterModalAvatar, { backgroundColor: colors.success + '20' }]}>
+                    <Ionicons name="person" size={36} color={colors.success} />
+                  </View>
+                  <Text style={[styles.waiterModalName, { color: colors.text }]}>{selectedWaiter.name}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                    <Ionicons name="location-outline" size={14} color={colors.textSecondary} />
+                    <Text style={[styles.waiterModalLocation, { color: colors.textSecondary }]}>{selectedWaiter.location}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                    <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
+                    <Text style={[styles.waiterModalLocation, { color: colors.textSecondary }]}>{selectedWaiter.workingHours}</Text>
+                  </View>
+                </View>
+
+                {/* Sales Grid */}
+                <View style={styles.tableDetailGrid}>
+                  <View style={[styles.tableDetailGridItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <Ionicons name="wallet-outline" size={20} color={colors.primary} />
+                    <Text style={[styles.tableDetailGridLabel, { color: colors.textSecondary }]}>{t('total_sales')}</Text>
+                    <Text style={[styles.tableDetailGridValue, { color: colors.text }]}>
+                      ₺{selectedWaiter.totalSales.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                    </Text>
+                  </View>
+                  <View style={[styles.tableDetailGridItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <Ionicons name="cash-outline" size={20} color={colors.success} />
+                    <Text style={[styles.tableDetailGridLabel, { color: colors.textSecondary }]}>{t('cash_sales')}</Text>
+                    <Text style={[styles.tableDetailGridValue, { color: colors.success }]}>
+                      ₺{selectedWaiter.cashSales.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                    </Text>
+                  </View>
+                  <View style={[styles.tableDetailGridItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <Ionicons name="card-outline" size={20} color={colors.info} />
+                    <Text style={[styles.tableDetailGridLabel, { color: colors.textSecondary }]}>{t('card_sales')}</Text>
+                    <Text style={[styles.tableDetailGridValue, { color: colors.info }]}>
+                      ₺{selectedWaiter.cardSales.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                    </Text>
+                  </View>
+                  <View style={[styles.tableDetailGridItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <Ionicons name="receipt-outline" size={20} color={colors.warning} />
+                    <Text style={[styles.tableDetailGridLabel, { color: colors.textSecondary }]}>{t('transaction_count')}</Text>
+                    <Text style={[styles.tableDetailGridValue, { color: colors.text }]}>
+                      {selectedWaiter.transactionCount}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Info Rows */}
+                <View style={[styles.tableDetailInfo, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                  <View style={[styles.tableDetailInfoRow, { borderBottomColor: colors.border }]}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Ionicons name="analytics-outline" size={18} color={colors.primary} />
+                      <Text style={[styles.tableDetailInfoLabel, { color: colors.textSecondary }]}>{t('average_ticket')}</Text>
+                    </View>
+                    <Text style={[styles.tableDetailInfoValue, { color: colors.text }]}>
+                      ₺{selectedWaiter.averageTicket.toFixed(2)}
+                    </Text>
+                  </View>
+                  <View style={styles.tableDetailInfoRow}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Ionicons name="star-outline" size={18} color={colors.primary} />
+                      <Text style={[styles.tableDetailInfoLabel, { color: colors.textSecondary }]}>{t('top_product')}</Text>
+                    </View>
+                    <Text style={[styles.tableDetailInfoValue, { color: colors.text }]}>{selectedWaiter.topProduct}</Text>
+                  </View>
+                </View>
+
+                {/* Cash vs Card Progress */}
+                <View style={[styles.waiterModalProgress, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                  <Text style={[styles.waiterProgressTitle, { color: colors.text }]}>{t('cash_sales')} / {t('card_sales')}</Text>
+                  <View style={[styles.progressBar, { backgroundColor: colors.border }]}>
+                    <View 
+                      style={[
+                        styles.progressFillCash, 
+                        { 
+                          backgroundColor: colors.success, 
+                          width: `${(selectedWaiter.cashSales / selectedWaiter.totalSales) * 100}%` 
+                        }
+                      ]} 
+                    />
+                    <View 
+                      style={[
+                        styles.progressFillCard, 
+                        { 
+                          backgroundColor: colors.info, 
+                          width: `${(selectedWaiter.cardSales / selectedWaiter.totalSales) * 100}%` 
+                        }
+                      ]} 
+                    />
+                  </View>
+                  <View style={styles.progressLabels}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <View style={[styles.progressDot, { backgroundColor: colors.success }]} />
+                      <Text style={[styles.progressLabelText, { color: colors.textSecondary }]}>
+                        {t('cash_sales')} %{((selectedWaiter.cashSales / selectedWaiter.totalSales) * 100).toFixed(0)}
+                      </Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <View style={[styles.progressDot, { backgroundColor: colors.info }]} />
+                      <Text style={[styles.progressLabelText, { color: colors.textSecondary }]}>
+                        {t('card_sales')} %{((selectedWaiter.cardSales / selectedWaiter.totalSales) * 100).toFixed(0)}
+                      </Text>
+                    </View>
                   </View>
                 </View>
               </ScrollView>
@@ -1497,5 +1721,138 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 12,
     borderTopWidth: 1,
+  },
+  // Waiter Sales Styles
+  waiterLocationCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  waiterLocationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 14,
+  },
+  waiterLocationIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  waiterLocationName: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  waiterLocationSub: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  waiterList: {
+    padding: 8,
+    paddingTop: 0,
+  },
+  waiterCard: {
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 6,
+  },
+  waiterCardTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  waiterAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  waiterName: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  waiterHours: {
+    fontSize: 11,
+    marginTop: 1,
+  },
+  waiterCardStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  waiterStat: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  waiterStatLabel: {
+    fontSize: 10,
+    marginBottom: 2,
+  },
+  waiterStatValue: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  // Waiter Modal Styles
+  waiterModalHeader: {
+    alignItems: 'center',
+    padding: 24,
+    borderRadius: 16,
+    marginBottom: 16,
+  },
+  waiterModalAvatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  waiterModalName: {
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  waiterModalLocation: {
+    fontSize: 13,
+  },
+  waiterModalProgress: {
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+    marginTop: 16,
+  },
+  waiterProgressTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 10,
+  },
+  progressBar: {
+    height: 8,
+    borderRadius: 4,
+    flexDirection: 'row',
+    overflow: 'hidden',
+  },
+  progressFillCash: {
+    height: '100%',
+  },
+  progressFillCard: {
+    height: '100%',
+  },
+  progressLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  progressDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  progressLabelText: {
+    fontSize: 11,
   },
 });

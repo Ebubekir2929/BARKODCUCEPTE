@@ -1,4 +1,4 @@
-import { BranchSales, HourlySales, Product, ProductMovement, ProductLocationStock, Customer, CustomerMovement, TopProduct, CancelledReceipt, OpenTable } from '../types';
+import { BranchSales, HourlySales, Product, ProductMovement, ProductLocationStock, Customer, CustomerMovement, TopProduct, CancelledReceipt, OpenTable, WaiterSale, WaiterLocation } from '../types';
 
 // Branch data
 export const branches = [
@@ -547,6 +547,111 @@ const openTablesBySource: Record<DataSource, OpenTable[]> = {
   data3: openTablesData.filter(t => t.dataSource === 'Data 3'),
 };
 
+// Waiter Sales by Data Source - Lokasyon bazlı
+const waiterSalesBySource: Record<DataSource, WaiterLocation[]> = {
+  data1: [
+    {
+      location: 'Merkez Şube',
+      totalSales: 48970.50,
+      waiterCount: 3,
+      waiters: [
+        { id: 'w1', name: 'Ali Yıldız', location: 'Merkez Şube', totalSales: 18500.00, cashSales: 7200.00, cardSales: 11300.00, transactionCount: 85, averageTicket: 217.65, topProduct: 'Coca Cola 1L', workingHours: '08:00 - 17:00' },
+        { id: 'w2', name: 'Mehmet Acar', location: 'Merkez Şube', totalSales: 16200.00, cashSales: 6100.00, cardSales: 10100.00, transactionCount: 72, averageTicket: 225.00, topProduct: 'Simit', workingHours: '10:00 - 19:00' },
+        { id: 'w3', name: 'Zeynep Kara', location: 'Merkez Şube', totalSales: 14270.50, cashSales: 5800.00, cardSales: 8470.50, transactionCount: 68, averageTicket: 209.86, topProduct: 'Ekmek', workingHours: '12:00 - 21:00' },
+      ],
+    },
+    {
+      location: 'Kadıköy Şube',
+      totalSales: 38250.50,
+      waiterCount: 2,
+      waiters: [
+        { id: 'w4', name: 'Emre Demir', location: 'Kadıköy Şube', totalSales: 21500.00, cashSales: 8500.00, cardSales: 13000.00, transactionCount: 95, averageTicket: 226.32, topProduct: 'Su 500ml', workingHours: '08:00 - 17:00' },
+        { id: 'w5', name: 'Selin Öz', location: 'Kadıköy Şube', totalSales: 16750.50, cashSales: 6200.00, cardSales: 10550.50, transactionCount: 78, averageTicket: 214.75, topProduct: 'Çikolata Bar', workingHours: '11:00 - 20:00' },
+      ],
+    },
+    {
+      location: 'Beşiktaş Şube',
+      totalSales: 55800.00,
+      waiterCount: 3,
+      waiters: [
+        { id: 'w6', name: 'Burak Şen', location: 'Beşiktaş Şube', totalSales: 22400.00, cashSales: 9100.00, cardSales: 13300.00, transactionCount: 102, averageTicket: 219.61, topProduct: 'Coca Cola 1L', workingHours: '09:00 - 18:00' },
+        { id: 'w7', name: 'Aylin Koç', location: 'Beşiktaş Şube', totalSales: 18600.00, cashSales: 7400.00, cardSales: 11200.00, transactionCount: 88, averageTicket: 211.36, topProduct: 'Peynir 500g', workingHours: '08:00 - 17:00' },
+        { id: 'w8', name: 'Deniz Bal', location: 'Beşiktaş Şube', totalSales: 14800.00, cashSales: 5600.00, cardSales: 9200.00, transactionCount: 65, averageTicket: 227.69, topProduct: 'Simit', workingHours: '13:00 - 22:00' },
+      ],
+    },
+  ],
+  data2: [
+    {
+      location: 'Merkez Şube',
+      totalSales: 65500.00,
+      waiterCount: 3,
+      waiters: [
+        { id: 'w9', name: 'Hakan Yılmaz', location: 'Merkez Şube', totalSales: 25200.00, cashSales: 10500.00, cardSales: 14700.00, transactionCount: 110, averageTicket: 229.09, topProduct: 'Peynir 500g', workingHours: '08:00 - 17:00' },
+        { id: 'w10', name: 'Elif Arslan', location: 'Merkez Şube', totalSales: 22300.00, cashSales: 8800.00, cardSales: 13500.00, transactionCount: 98, averageTicket: 227.55, topProduct: 'Süt 1L', workingHours: '10:00 - 19:00' },
+        { id: 'w11', name: 'Can Öztürk', location: 'Merkez Şube', totalSales: 18000.00, cashSales: 7200.00, cardSales: 10800.00, transactionCount: 82, averageTicket: 219.51, topProduct: 'Coca Cola 1L', workingHours: '12:00 - 21:00' },
+      ],
+    },
+    {
+      location: 'Ataşehir Şube',
+      totalSales: 43400.00,
+      waiterCount: 2,
+      waiters: [
+        { id: 'w12', name: 'Serkan Kaya', location: 'Ataşehir Şube', totalSales: 24800.00, cashSales: 9600.00, cardSales: 15200.00, transactionCount: 105, averageTicket: 236.19, topProduct: 'Ekmek', workingHours: '08:00 - 17:00' },
+        { id: 'w13', name: 'Merve Çelik', location: 'Ataşehir Şube', totalSales: 18600.00, cashSales: 7100.00, cardSales: 11500.00, transactionCount: 80, averageTicket: 232.50, topProduct: 'Ayran 200ml', workingHours: '11:00 - 20:00' },
+      ],
+    },
+    {
+      location: 'Maltepe Şube',
+      totalSales: 49500.00,
+      waiterCount: 2,
+      waiters: [
+        { id: 'w14', name: 'Oğuz Tan', location: 'Maltepe Şube', totalSales: 28500.00, cashSales: 11200.00, cardSales: 17300.00, transactionCount: 115, averageTicket: 247.83, topProduct: 'Coca Cola 1L', workingHours: '08:00 - 17:00' },
+        { id: 'w15', name: 'Nisan Ak', location: 'Maltepe Şube', totalSales: 21000.00, cashSales: 8100.00, cardSales: 12900.00, transactionCount: 90, averageTicket: 233.33, topProduct: 'Simit', workingHours: '10:00 - 19:00' },
+      ],
+    },
+  ],
+  data3: [
+    {
+      location: 'Kadıköy Şube',
+      totalSales: 58800.00,
+      waiterCount: 3,
+      waiters: [
+        { id: 'w16', name: 'Barış Güneş', location: 'Kadıköy Şube', totalSales: 22800.00, cashSales: 9400.00, cardSales: 13400.00, transactionCount: 100, averageTicket: 228.00, topProduct: 'Ekmek', workingHours: '08:00 - 17:00' },
+        { id: 'w17', name: 'İrem Su', location: 'Kadıköy Şube', totalSales: 19200.00, cashSales: 7500.00, cardSales: 11700.00, transactionCount: 85, averageTicket: 225.88, topProduct: 'Simit', workingHours: '10:00 - 19:00' },
+        { id: 'w18', name: 'Tolga Ay', location: 'Kadıköy Şube', totalSales: 16800.00, cashSales: 6300.00, cardSales: 10500.00, transactionCount: 75, averageTicket: 224.00, topProduct: 'Su 500ml', workingHours: '12:00 - 21:00' },
+      ],
+    },
+    {
+      location: 'Beşiktaş Şube',
+      totalSales: 75500.00,
+      waiterCount: 3,
+      waiters: [
+        { id: 'w19', name: 'Arda Yıldırım', location: 'Beşiktaş Şube', totalSales: 30200.00, cashSales: 12500.00, cardSales: 17700.00, transactionCount: 125, averageTicket: 241.60, topProduct: 'Cips Paket', workingHours: '08:00 - 17:00' },
+        { id: 'w20', name: 'Pelin Aydın', location: 'Beşiktaş Şube', totalSales: 25100.00, cashSales: 10200.00, cardSales: 14900.00, transactionCount: 108, averageTicket: 232.41, topProduct: 'Dondurma', workingHours: '09:00 - 18:00' },
+        { id: 'w21', name: 'Mert Alp', location: 'Beşiktaş Şube', totalSales: 20200.00, cashSales: 8100.00, cardSales: 12100.00, transactionCount: 92, averageTicket: 219.57, topProduct: 'Ekmek', workingHours: '13:00 - 22:00' },
+      ],
+    },
+    {
+      location: 'Ataşehir Şube',
+      totalSales: 34200.00,
+      waiterCount: 2,
+      waiters: [
+        { id: 'w22', name: 'Kaan Ege', location: 'Ataşehir Şube', totalSales: 19800.00, cashSales: 7800.00, cardSales: 12000.00, transactionCount: 88, averageTicket: 225.00, topProduct: 'Simit', workingHours: '08:00 - 17:00' },
+        { id: 'w23', name: 'Sude Nil', location: 'Ataşehir Şube', totalSales: 14400.00, cashSales: 5500.00, cardSales: 8900.00, transactionCount: 65, averageTicket: 221.54, topProduct: 'Coca Cola 1L', workingHours: '11:00 - 20:00' },
+      ],
+    },
+    {
+      location: 'Maltepe Şube',
+      totalSales: 40400.00,
+      waiterCount: 2,
+      waiters: [
+        { id: 'w24', name: 'Yusuf Han', location: 'Maltepe Şube', totalSales: 23200.00, cashSales: 9100.00, cardSales: 14100.00, transactionCount: 100, averageTicket: 232.00, topProduct: 'Peynir 500g', workingHours: '08:00 - 17:00' },
+        { id: 'w25', name: 'Asya Nar', location: 'Maltepe Şube', totalSales: 17200.00, cashSales: 6600.00, cardSales: 10600.00, transactionCount: 78, averageTicket: 220.51, topProduct: 'Ekmek', workingHours: '10:00 - 19:00' },
+      ],
+    },
+  ],
+};
+
 // ===== GETTER FUNCTIONS =====
 export const getDataBySource = (source: DataSource) => ({
   branchSales: branchSalesBySource[source],
@@ -557,5 +662,6 @@ export const getDataBySource = (source: DataSource) => ({
   products: productsBySource[source],
   customers: customersBySource[source],
   openTables: openTablesBySource[source],
+  waiterLocations: waiterSalesBySource[source],
   branches: branchSalesBySource[source].map(b => ({ id: b.branchId, name: b.branchName })),
 });

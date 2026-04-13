@@ -124,3 +124,24 @@ export interface OpenTable {
   itemCount: number;     // Ürün sayısı
   dataSource: string;    // Veri kaynağı (Data 1, Data 2, Data 3)
 }
+
+
+export interface WaiterSale {
+  id: string;
+  name: string;
+  location: string;
+  totalSales: number;
+  cashSales: number;
+  cardSales: number;
+  transactionCount: number;
+  averageTicket: number;
+  topProduct: string;
+  workingHours: string;
+}
+
+export interface WaiterLocation {
+  location: string;
+  totalSales: number;
+  waiterCount: number;
+  waiters: WaiterSale[];
+}

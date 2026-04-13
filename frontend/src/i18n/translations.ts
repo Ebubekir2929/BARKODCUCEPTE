@@ -99,6 +99,21 @@ export const translations = {
     table_detail: 'Masa Detayı',
     customer_open_tables: 'Bu müşterinin açık masaları',
     
+    // Waiter Sales
+    waiter_sales: 'Garson Satışları',
+    waiter: 'Garson',
+    waiters: 'Garsonlar',
+    total_sales: 'Toplam Satış',
+    cash_sales: 'Nakit Satış',
+    card_sales: 'Kart Satış',
+    transaction_count: 'İşlem Sayısı',
+    average_ticket: 'Ortalama Fiş',
+    top_product: 'En Çok Satan Ürün',
+    working_hours: 'Çalışma Saati',
+    waiter_detail: 'Garson Detayı',
+    waiter_count: 'Garson',
+    transactions: 'İşlem',
+    
     // Stock
     stock: 'Stok',
     stock_management: 'Stok Yönetimi',
@@ -317,6 +332,21 @@ export const translations = {
     not_paid: 'Unpaid',
     table_detail: 'Table Detail',
     customer_open_tables: 'Open tables for this customer',
+    
+    // Waiter Sales
+    waiter_sales: 'Waiter Sales',
+    waiter: 'Waiter',
+    waiters: 'Waiters',
+    total_sales: 'Total Sales',
+    cash_sales: 'Cash Sales',
+    card_sales: 'Card Sales',
+    transaction_count: 'Transactions',
+    average_ticket: 'Avg. Ticket',
+    top_product: 'Top Product',
+    working_hours: 'Working Hours',
+    waiter_detail: 'Waiter Detail',
+    waiter_count: 'Waiter',
+    transactions: 'Transactions',
     
     // Stock
     stock: 'Stock',
