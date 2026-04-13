@@ -8,6 +8,8 @@ import {
   Switch,
   Platform,
   Modal,
+  TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -22,7 +24,7 @@ import notificationService from '../../src/services/notificationService';
 export default function SettingsScreen() {
   const router = useRouter();
   const { colors, isDark, toggleTheme } = useThemeStore();
-  const { user, logout } = useAuthStore();
+  const { user, logout, addTenant, updateTenantName, removeTenant } = useAuthStore();
   const { language, setLanguage, t, loadLanguage } = useLanguageStore();
   const { showSuccess, showError, showInfo, showWarning, alertProps } = useAlert();
   
@@ -31,6 +33,14 @@ export default function SettingsScreen() {
   const [salesAlert, setSalesAlert] = useState(true);
   const [cancellationAlert, setCancellationAlert] = useState(true);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
+
+  // Tenant Management State
+  const [showTenantModal, setShowTenantModal] = useState(false);
+  const [tenantModalMode, setTenantModalMode] = useState<'add' | 'edit'>('add');
+  const [editingTenantId, setEditingTenantId] = useState('');
+  const [tenantIdInput, setTenantIdInput] = useState('');
+  const [tenantNameInput, setTenantNameInput] = useState('');
+  const [tenantLoading, setTenantLoading] = useState(false);
 
   useEffect(() => {
     loadNotificationSettings();
@@ -145,6 +155,144 @@ export default function SettingsScreen() {
     ]);
   };
 
+  // === Tenant Management Functions ===
+  const openAddTenantModal = () => {
+    setTenantModalMode('add');
+    setTenantIdInput('');
+    setTenantNameInput('');
+    setEditingTenantId('');
+    setShowTenantModal(true);
+  };
+
+  const openEditTenantModal = (tenantId: string, currentName: string) => {
+    setTenantModalMode('edit');
+    setEditingTenantId(tenantId);
+    setTenantIdInput(tenantId);
+    setTenantNameInput(currentName);
+    setShowTenantModal(true);
+  };
+
+  const handleSaveTenant = async () => {
+    if (tenantModalMode === 'add') {
+      if (!tenantIdInput.trim()) {
+        showWarning('Uyarı', 'Tenant ID girin');
+        return;
+      }
+      if (!tenantNameInput.trim()) {
+        showWarning('Uyarı', 'Veri kaynağı adı girin');
+        return;
+      }
+      setTenantLoading(true);
+      const result = await addTenant(tenantIdInput.trim(), tenantNameInput.trim());
+      setTenantLoading(false);
+      if (result.success) {
+        showSuccess('Başarılı', 'Veri kaynağı eklendi');
+        setShowTenantModal(false);
+      } else {
+        showError('Hata', result.error || 'Eklenemedi');
+      }
+    } else {
+      if (!tenantNameInput.trim()) {
+        showWarning('Uyarı', 'Veri kaynağı adı girin');
+        return;
+      }
+      setTenantLoading(true);
+      const result = await updateTenantName(editingTenantId, tenantNameInput.trim());
+      setTenantLoading(false);
+      if (result.success) {
+        showSuccess('Başarılı', 'İsim güncellendi');
+        setShowTenantModal(false);
+      } else {
+        showError('Hata', result.error || 'Güncellenemedi');
+      }
+    }
+  };
+
+  const handleDeleteTenant = (tenantId: string, tenantName: string) => {
+    if ((user?.tenants?.length || 0) <= 1) {
+      showWarning('Uyarı', 'En az 1 veri kaynağı olmalıdır');
+      return;
+    }
+    showWarning('Veri Kaynağı Sil', `"${tenantName}" veri kaynağını silmek istediğinize emin misiniz?`, [
+      { text: 'İptal', style: 'cancel' },
+      {
+        text: 'Sil',
+        style: 'destructive',
+        onPress: async () => {
+          const result = await removeTenant(tenantId);
+          if (result.success) {
+            showSuccess('Başarılı', 'Veri kaynağı silindi');
+          } else {
+            showError('Hata', result.error || 'Silinemedi');
+          }
+        },
+      },
+    ]);
+  };
+
+  // === Render Tenant Management Section ===
+  const renderTenantSection = () => {
+    const tenants = user?.tenants || [];
+    
+    return (
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>VERİ KAYNAKLARI YÖNETİMİ</Text>
+        
+        <View style={[styles.tenantInfoBanner, { backgroundColor: colors.info + '15', borderColor: colors.info + '40' }]}>
+          <Ionicons name="information-circle-outline" size={18} color={colors.info} />
+          <Text style={[styles.tenantInfoText, { color: colors.info }]}>
+            Her Tenant ID bir veri kaynağını temsil eder. Uygulamadaki filtre butonları burada tanımlanan isimleri gösterir.
+          </Text>
+        </View>
+
+        {tenants.map((tenant, index) => (
+          <View
+            key={tenant.tenant_id}
+            style={[styles.tenantCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+          >
+            <View style={styles.tenantCardHeader}>
+              <View style={[styles.tenantIndex, { backgroundColor: colors.primary + '20' }]}>
+                <Text style={[styles.tenantIndexText, { color: colors.primary }]}>{index + 1}</Text>
+              </View>
+              <View style={styles.tenantCardInfo}>
+                <Text style={[styles.tenantName, { color: colors.text }]}>{tenant.name}</Text>
+                <View style={styles.tenantIdRow}>
+                  <Ionicons name="key-outline" size={12} color={colors.textSecondary} />
+                  <Text style={[styles.tenantIdText, { color: colors.textSecondary }]}>{tenant.tenant_id}</Text>
+                </View>
+              </View>
+              <View style={styles.tenantActions}>
+                <TouchableOpacity
+                  style={[styles.tenantActionBtn, { backgroundColor: colors.primary + '15' }]}
+                  onPress={() => openEditTenantModal(tenant.tenant_id, tenant.name)}
+                >
+                  <Ionicons name="pencil-outline" size={16} color={colors.primary} />
+                </TouchableOpacity>
+                {tenants.length > 1 && (
+                  <TouchableOpacity
+                    style={[styles.tenantActionBtn, { backgroundColor: colors.error + '15' }]}
+                    onPress={() => handleDeleteTenant(tenant.tenant_id, tenant.name)}
+                  >
+                    <Ionicons name="trash-outline" size={16} color={colors.error} />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          </View>
+        ))}
+
+        <TouchableOpacity
+          style={[styles.addTenantBtn, { borderColor: colors.primary }]}
+          onPress={openAddTenantModal}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="add-circle-outline" size={22} color={colors.primary} />
+          <Text style={[styles.addTenantText, { color: colors.primary }]}>Yeni Veri Kaynağı Ekle</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
@@ -163,13 +311,30 @@ export default function SettingsScreen() {
             <Text style={[styles.userEmail, { color: colors.textSecondary }]}>
               {user?.email || 'email@example.com'}
             </Text>
-            <View style={[styles.roleBadge, { backgroundColor: colors.success + '20' }]}>
-              <Text style={[styles.roleText, { color: colors.success }]}>
-                {user?.role === 'admin' ? t('admin') : t('user')}
-              </Text>
+            <View style={styles.userBadges}>
+              <View style={[styles.roleBadge, { backgroundColor: colors.success + '20' }]}>
+                <Text style={[styles.roleText, { color: colors.success }]}>
+                  {user?.role === 'admin' ? t('admin') : t('user')}
+                </Text>
+              </View>
+              {user?.business_type && (
+                <View style={[styles.roleBadge, { backgroundColor: colors.primary + '20' }]}>
+                  <Ionicons
+                    name={user.business_type === 'restoran' ? 'restaurant-outline' : 'storefront-outline'}
+                    size={11}
+                    color={colors.primary}
+                  />
+                  <Text style={[styles.roleText, { color: colors.primary, marginLeft: 4 }]}>
+                    {user.business_type === 'restoran' ? 'Restoran' : 'Normal'}
+                  </Text>
+                </View>
+              )}
             </View>
           </View>
         </View>
+
+        {/* Veri Kaynakları Yönetimi */}
+        {renderTenantSection()}
 
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('appearance')}</Text>
@@ -412,6 +577,79 @@ export default function SettingsScreen() {
         </View>
       </Modal>
 
+      {/* Tenant Add/Edit Modal */}
+      <Modal visible={showTenantModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                {tenantModalMode === 'add' ? 'Yeni Veri Kaynağı' : 'Veri Kaynağı Düzenle'}
+              </Text>
+              <TouchableOpacity onPress={() => setShowTenantModal(false)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.modalBody}>
+              {tenantModalMode === 'add' && (
+                <>
+                  <Text style={[styles.inputLabel, { color: colors.text }]}>Tenant ID</Text>
+                  <View style={[styles.modalInput, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <Ionicons name="key-outline" size={18} color={colors.textSecondary} />
+                    <TextInput
+                      style={[styles.modalInputField, { color: colors.text }]}
+                      placeholder="Windows tarafında oluşturulan ID"
+                      placeholderTextColor={colors.textSecondary}
+                      value={tenantIdInput}
+                      onChangeText={setTenantIdInput}
+                      autoCapitalize="none"
+                    />
+                  </View>
+                </>
+              )}
+
+              {tenantModalMode === 'edit' && (
+                <View style={[styles.editTenantIdDisplay, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                  <Ionicons name="key-outline" size={16} color={colors.textSecondary} />
+                  <Text style={[styles.editTenantIdText, { color: colors.textSecondary }]}>
+                    {editingTenantId}
+                  </Text>
+                </View>
+              )}
+
+              <Text style={[styles.inputLabel, { color: colors.text }]}>Veri Kaynağı Adı</Text>
+              <View style={[styles.modalInput, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Ionicons name="pricetag-outline" size={18} color={colors.textSecondary} />
+                <TextInput
+                  style={[styles.modalInputField, { color: colors.text }]}
+                  placeholder="Örn: Merkez Şube, Kadıköy Mağaza"
+                  placeholderTextColor={colors.textSecondary}
+                  value={tenantNameInput}
+                  onChangeText={setTenantNameInput}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[styles.saveTenantBtn, { backgroundColor: colors.primary }]}
+                onPress={handleSaveTenant}
+                disabled={tenantLoading}
+                activeOpacity={0.8}
+              >
+                {tenantLoading ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <>
+                    <Ionicons name={tenantModalMode === 'add' ? 'add-circle-outline' : 'checkmark-circle-outline'} size={20} color="#FFF" />
+                    <Text style={styles.saveTenantBtnText}>
+                      {tenantModalMode === 'add' ? 'Ekle' : 'Güncelle'}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <CustomAlert {...alertProps} />
     </SafeAreaView>
   );
@@ -465,7 +703,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 8,
   },
+  userBadges: {
+    flexDirection: 'row',
+    gap: 8,
+  },
   roleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
     alignSelf: 'flex-start',
     paddingHorizontal: 10,
     paddingVertical: 4,
@@ -529,6 +773,88 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  // Tenant Management Styles
+  tenantInfoBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 12,
+    gap: 8,
+  },
+  tenantInfoText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  tenantCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  tenantCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+  },
+  tenantIndex: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  tenantIndexText: {
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  tenantCardInfo: {
+    flex: 1,
+  },
+  tenantName: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  tenantIdRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  tenantIdText: {
+    fontSize: 12,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  tenantActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  tenantActionBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  addTenantBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    gap: 8,
+    marginTop: 4,
+  },
+  addTenantText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  // Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.35)',
@@ -552,6 +878,53 @@ const styles = StyleSheet.create({
   modalBody: {
     padding: 20,
     paddingBottom: 40,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  modalInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+    gap: 10,
+  },
+  modalInputField: {
+    flex: 1,
+    paddingVertical: 12,
+    fontSize: 15,
+  },
+  editTenantIdDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 16,
+    gap: 8,
+  },
+  editTenantIdText: {
+    fontSize: 13,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  saveTenantBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    gap: 8,
+    marginTop: 8,
+  },
+  saveTenantBtnText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '700',
   },
   languageOption: {
     flexDirection: 'row',
