@@ -28,10 +28,17 @@ export interface BranchSales {
   cancellations: CancelledReceipt[];
 }
 
+export interface HourlyProductSale {
+  productName: string;
+  quantity: number;
+  revenue: number;
+}
+
 export interface HourlySales {
   hour: string;
   amount: number;
   transactions: number;
+  products?: HourlyProductSale[];
 }
 
 export interface Product {

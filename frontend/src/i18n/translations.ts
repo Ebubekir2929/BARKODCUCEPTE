@@ -114,6 +114,16 @@ export const translations = {
     waiter_count: 'Garson',
     transactions: 'İşlem',
     
+    // Hourly Product Sales
+    hourly_products: 'Saatlik Ürün Satışları',
+    product_name: 'Ürün',
+    quantity: 'Adet',
+    revenue: 'Ciro',
+    sales_detail: 'Satış Detayı',
+    avg_transaction: 'Ortalama İşlem',
+    per_minute: 'Dakikada',
+    products: 'Ürünler',
+    
     // Stock
     stock: 'Stok',
     stock_management: 'Stok Yönetimi',
@@ -347,6 +357,16 @@ export const translations = {
     waiter_detail: 'Waiter Detail',
     waiter_count: 'Waiter',
     transactions: 'Transactions',
+    
+    // Hourly Product Sales
+    hourly_products: 'Hourly Product Sales',
+    product_name: 'Product',
+    quantity: 'Qty',
+    revenue: 'Revenue',
+    sales_detail: 'Sales Detail',
+    avg_transaction: 'Avg. Transaction',
+    per_minute: 'Per Minute',
+    products: 'Products',
     
     // Stock
     stock: 'Stock',

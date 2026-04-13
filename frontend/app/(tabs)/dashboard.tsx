@@ -633,39 +633,86 @@ export default function DashboardScreen() {
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
-                {selectedHour?.hour} Satış Detayı
+                {selectedHour?.hour} {t('sales_detail')}
               </Text>
               <TouchableOpacity onPress={() => { setShowHourDetail(false); setHighlightedHourIndex(null); }}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
             {selectedHour && (
-              <View style={[styles.modalBody, styles.modalBodyContent]}>
-                <View style={[styles.hourDetailCard, { backgroundColor: colors.primary + '15' }]}>
-                  <Ionicons name="time-outline" size={48} color={colors.primary} />
-                  <Text style={[styles.hourDetailTime, { color: colors.text }]}>{selectedHour.hour}</Text>
+              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
+                {/* Compact Hour Summary */}
+                <View style={[styles.hourDetailCompact, { backgroundColor: colors.primary + '10', borderColor: colors.border }]}>
+                  <View style={styles.hourDetailCompactLeft}>
+                    <Ionicons name="time-outline" size={28} color={colors.primary} />
+                    <View>
+                      <Text style={[styles.hourDetailTime, { color: colors.text, fontSize: 18 }]}>{selectedHour.hour}</Text>
+                      <Text style={[styles.hourDetailTx, { color: colors.textSecondary }]}>
+                        {selectedHour.transactions} {t('transactions').toLowerCase()}
+                      </Text>
+                    </View>
+                  </View>
                   <Text style={[styles.hourDetailAmount, { color: colors.primary }]}>
                     ₺{selectedHour.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                   </Text>
-                  <Text style={[styles.hourDetailTx, { color: colors.textSecondary }]}>
-                    {selectedHour.transactions} işlem gerçekleşti
-                  </Text>
                 </View>
+
                 <View style={styles.hourStats}>
                   <View style={[styles.hourStatItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <Text style={[styles.hourStatLabel, { color: colors.textSecondary }]}>Ortalama İşlem</Text>
+                    <Text style={[styles.hourStatLabel, { color: colors.textSecondary }]}>{t('avg_transaction')}</Text>
                     <Text style={[styles.hourStatValue, { color: colors.text }]}>
                       ₺{(selectedHour.amount / selectedHour.transactions).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                     </Text>
                   </View>
                   <View style={[styles.hourStatItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <Text style={[styles.hourStatLabel, { color: colors.textSecondary }]}>Dakikada</Text>
+                    <Text style={[styles.hourStatLabel, { color: colors.textSecondary }]}>{t('per_minute')}</Text>
                     <Text style={[styles.hourStatValue, { color: colors.text }]}>
-                      {(selectedHour.transactions / 60).toFixed(1)} işlem
+                      {(selectedHour.transactions / 60).toFixed(1)} {t('transactions').toLowerCase()}
                     </Text>
                   </View>
                 </View>
-              </View>
+
+                {/* Hourly Product Sales */}
+                {selectedHour.products && selectedHour.products.length > 0 && (
+                  <View style={styles.hourlyProductsSection}>
+                    <View style={styles.hourlyProductsHeader}>
+                      <Ionicons name="cart-outline" size={18} color={colors.primary} />
+                      <Text style={[styles.hourlyProductsTitle, { color: colors.text }]}>{t('hourly_products')}</Text>
+                    </View>
+                    
+                    {/* Table Header */}
+                    <View style={[styles.productTableHeader, { backgroundColor: colors.primary + '08', borderColor: colors.border }]}>
+                      <Text style={[styles.productTableHeaderText, { color: colors.textSecondary, flex: 2 }]}>{t('product_name')}</Text>
+                      <Text style={[styles.productTableHeaderText, { color: colors.textSecondary, flex: 1, textAlign: 'center' }]}>{t('quantity')}</Text>
+                      <Text style={[styles.productTableHeaderText, { color: colors.textSecondary, flex: 1, textAlign: 'right' }]}>{t('revenue')}</Text>
+                    </View>
+
+                    {selectedHour.products.map((product, idx) => (
+                      <View 
+                        key={idx} 
+                        style={[
+                          styles.productTableRow, 
+                          { borderBottomColor: colors.border },
+                          idx === 0 && { backgroundColor: colors.success + '06' },
+                        ]}
+                      >
+                        <View style={{ flex: 2, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          {idx === 0 && <Ionicons name="trophy" size={14} color={colors.warning} />}
+                          <Text style={[styles.productTableName, { color: colors.text }]} numberOfLines={1}>
+                            {product.productName}
+                          </Text>
+                        </View>
+                        <Text style={[styles.productTableQty, { color: colors.primary, flex: 1, textAlign: 'center' }]}>
+                          {product.quantity}
+                        </Text>
+                        <Text style={[styles.productTableRevenue, { color: colors.success, flex: 1, textAlign: 'right' }]}>
+                          ₺{product.revenue.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </ScrollView>
             )}
           </View>
         </View>
@@ -1191,7 +1238,7 @@ const styles = StyleSheet.create({
   modalContent: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '75%',
+    maxHeight: '85%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1206,6 +1253,7 @@ const styles = StyleSheet.create({
   },
   modalBody: {
     padding: 20,
+    flex: 1,
   },
   modalBodyContent: {
     paddingBottom: 50,
@@ -1264,6 +1312,20 @@ const styles = StyleSheet.create({
     padding: 32,
     borderRadius: 20,
     marginBottom: 16,
+  },
+  hourDetailCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 10,
+  },
+  hourDetailCompactLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   hourDetailTime: {
     fontSize: 28,
@@ -1854,5 +1916,50 @@ const styles = StyleSheet.create({
   },
   progressLabelText: {
     fontSize: 11,
+  },
+  // Hourly Product Table Styles
+  hourlyProductsSection: {
+    marginTop: 16,
+  },
+  hourlyProductsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  hourlyProductsTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  productTableHeader: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 2,
+  },
+  productTableHeaderText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  productTableRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+  },
+  productTableName: {
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  productTableQty: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  productTableRevenue: {
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

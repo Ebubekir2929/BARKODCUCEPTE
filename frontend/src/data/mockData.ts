@@ -414,9 +414,47 @@ const branchSalesBySource: Record<DataSource, BranchSales[]> = {
   ],
 };
 
-// Hourly Sales by Data Source
+// Hourly Sales by Data Source - with product details
+const hourlyProductTemplates = [
+  [
+    { productName: 'Coca Cola 1L', quantity: 12, revenue: 420.00 },
+    { productName: 'Simit', quantity: 18, revenue: 270.00 },
+    { productName: 'Ekmek', quantity: 15, revenue: 225.00 },
+    { productName: 'Su 500ml', quantity: 22, revenue: 220.00 },
+    { productName: 'Çikolata Bar', quantity: 8, revenue: 200.00 },
+    { productName: 'Peynir 500g', quantity: 3, revenue: 360.00 },
+  ],
+  [
+    { productName: 'Ekmek', quantity: 25, revenue: 375.00 },
+    { productName: 'Coca Cola 1L', quantity: 15, revenue: 525.00 },
+    { productName: 'Ayran 200ml', quantity: 20, revenue: 250.00 },
+    { productName: 'Peynir 500g', quantity: 5, revenue: 600.00 },
+    { productName: 'Süt 1L', quantity: 10, revenue: 250.00 },
+    { productName: 'Cips Paket', quantity: 7, revenue: 175.00 },
+  ],
+  [
+    { productName: 'Simit', quantity: 30, revenue: 450.00 },
+    { productName: 'Su 500ml', quantity: 25, revenue: 250.00 },
+    { productName: 'Dondurma', quantity: 12, revenue: 300.00 },
+    { productName: 'Coca Cola 1L', quantity: 10, revenue: 350.00 },
+    { productName: 'Ekmek', quantity: 20, revenue: 300.00 },
+    { productName: 'Çikolata Bar', quantity: 9, revenue: 225.00 },
+  ],
+];
+
+const addProductsToHourly = (hours: HourlySales[]): HourlySales[] => {
+  return hours.map((h, i) => ({
+    ...h,
+    products: hourlyProductTemplates[i % 3].map(p => ({
+      ...p,
+      quantity: Math.max(1, Math.round(p.quantity * (h.transactions / 60))),
+      revenue: Math.round(p.revenue * (h.amount / 10000) * 100) / 100,
+    })).sort((a, b) => b.revenue - a.revenue),
+  }));
+};
+
 const hourlySalesBySource: Record<DataSource, HourlySales[]> = {
-  data1: [
+  data1: addProductsToHourly([
     { hour: '08:00', amount: 2450.00, transactions: 15 },
     { hour: '09:00', amount: 4200.50, transactions: 28 },
     { hour: '10:00', amount: 6800.00, transactions: 42 },
@@ -432,8 +470,8 @@ const hourlySalesBySource: Record<DataSource, HourlySales[]> = {
     { hour: '20:00', amount: 8900.50, transactions: 54 },
     { hour: '21:00', amount: 5400.00, transactions: 32 },
     { hour: '22:00', amount: 2800.00, transactions: 18 },
-  ],
-  data2: [
+  ]),
+  data2: addProductsToHourly([
     { hour: '08:00', amount: 3100.00, transactions: 20 },
     { hour: '09:00', amount: 5800.00, transactions: 35 },
     { hour: '10:00', amount: 8200.00, transactions: 50 },
@@ -449,8 +487,8 @@ const hourlySalesBySource: Record<DataSource, HourlySales[]> = {
     { hour: '20:00', amount: 11200.00, transactions: 68 },
     { hour: '21:00', amount: 7500.00, transactions: 45 },
     { hour: '22:00', amount: 3900.00, transactions: 24 },
-  ],
-  data3: [
+  ]),
+  data3: addProductsToHourly([
     { hour: '08:00', amount: 1800.00, transactions: 12 },
     { hour: '09:00', amount: 3500.00, transactions: 22 },
     { hour: '10:00', amount: 5600.00, transactions: 35 },
@@ -466,7 +504,7 @@ const hourlySalesBySource: Record<DataSource, HourlySales[]> = {
     { hour: '20:00', amount: 7400.00, transactions: 46 },
     { hour: '21:00', amount: 4200.00, transactions: 26 },
     { hour: '22:00', amount: 2100.00, transactions: 14 },
-  ],
+  ]),
 };
 
 // Top Selling Products by Data Source
