@@ -582,9 +582,9 @@ export default function DashboardScreen() {
 
       {/* Card Type Location Modal */}
       <Modal visible={!!selectedCardType} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSelectedCardType(null)}>
+          <TouchableOpacity activeOpacity={1} style={[styles.modalContent]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 {getCardTypeLabel(selectedCardType || '')} - Lokasyon Dağılımı
               </Text>
@@ -592,7 +592,7 @@ export default function DashboardScreen() {
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
+            <View style={[styles.modalBody, { backgroundColor: colors.surface }]}>
               {sourceData.branchSales.map((branch) => {
                 const value = selectedCardType === 'cash' ? branch.sales.cash
                   : selectedCardType === 'card' ? branch.sales.card
@@ -624,16 +624,16 @@ export default function DashboardScreen() {
                   ₺{totals[selectedCardType || 'total'].toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                 </Text>
               </View>
-            </ScrollView>
-          </View>
-        </View>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
 
       {/* Hour Detail Modal */}
       <Modal visible={showHourDetail} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+          <View style={[styles.modalContent]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 {selectedHour?.hour} {t('sales_detail')}
               </Text>
@@ -642,7 +642,7 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             </View>
             {selectedHour && (
-              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
+              <ScrollView style={[styles.modalBody, { backgroundColor: colors.surface }]} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
                 {/* Compact Hour Summary */}
                 <View style={[styles.hourDetailCompact, { backgroundColor: colors.primary + '10', borderColor: colors.border }]}>
                   <View style={styles.hourDetailCompactLeft}>
@@ -723,8 +723,8 @@ export default function DashboardScreen() {
       {/* Cancellations List Modal */}
       <Modal visible={!!selectedBranchCancellations} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+          <View style={[styles.modalContent]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 {selectedBranchCancellations?.branch.branchName} - İptal Fişleri
               </Text>
@@ -732,7 +732,7 @@ export default function DashboardScreen() {
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
+            <ScrollView style={[styles.modalBody, { backgroundColor: colors.surface }]} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
               <View style={[styles.cancellationSummary, { backgroundColor: colors.error + '15' }]}>
                 <Ionicons name="alert-circle" size={24} color={colors.error} />
                 <View style={styles.cancellationSummaryText}>
@@ -779,8 +779,8 @@ export default function DashboardScreen() {
       {/* Receipt Detail Modal */}
       <Modal visible={!!selectedReceipt} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+          <View style={[styles.modalContent]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
               <TouchableOpacity onPress={() => setSelectedReceipt(null)}>
                 <Ionicons name="arrow-back" size={24} color={colors.text} />
               </TouchableOpacity>
@@ -790,7 +790,7 @@ export default function DashboardScreen() {
               <View style={{ width: 24 }} />
             </View>
             {selectedReceipt && (
-              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
+              <ScrollView style={[styles.modalBody, { backgroundColor: colors.surface }]} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
                 <View style={[styles.receiptHeader, { backgroundColor: colors.error + '15' }]}>
                   <Text style={[styles.receiptNo, { color: colors.error }]}>
                     {selectedReceipt.receiptNo}
@@ -832,8 +832,8 @@ export default function DashboardScreen() {
       {/* Open Table Detail Modal */}
       <Modal visible={!!selectedOpenTable} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+          <View style={[styles.modalContent]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 {t('table_detail')}
               </Text>
@@ -842,7 +842,7 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             </View>
             {selectedOpenTable && (
-              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
+              <ScrollView style={[styles.modalBody, { backgroundColor: colors.surface }]} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
                 {/* Table Info Card */}
                 <View style={[styles.tableDetailHeader, { backgroundColor: colors.primary + '10' }]}>
                   <View style={[styles.tableDetailIcon, { backgroundColor: getPaymentStatusColor(selectedOpenTable) + '20' }]}>
@@ -922,8 +922,8 @@ export default function DashboardScreen() {
       {/* Waiter Detail Modal */}
       <Modal visible={!!selectedWaiter} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+          <View style={[styles.modalContent]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 {t('waiter_detail')}
               </Text>
@@ -932,7 +932,7 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             </View>
             {selectedWaiter && (
-              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
+              <ScrollView style={[styles.modalBody, { backgroundColor: colors.surface }]} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
                 {/* Waiter Header */}
                 <View style={[styles.waiterModalHeader, { backgroundColor: colors.primary + '10' }]}>
                   <View style={[styles.waiterModalAvatar, { backgroundColor: colors.success + '20' }]}>
@@ -1240,9 +1240,10 @@ const styles = StyleSheet.create({
   modalContent: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    height: Platform.OS === 'web' ? undefined : screenHeight * 0.8,
     maxHeight: screenHeight * 0.85,
-    minHeight: screenHeight * 0.55,
+    overflow: 'hidden',
+    flexGrow: 0,
+    flexShrink: 1,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1257,10 +1258,10 @@ const styles = StyleSheet.create({
   },
   modalBody: {
     padding: 20,
-    flex: 1,
   },
   modalBodyContent: {
     paddingBottom: 50,
+    flexGrow: 0,
   },
   locationModalItem: {
     flexDirection: 'row',
