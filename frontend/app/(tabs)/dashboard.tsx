@@ -8,6 +8,7 @@ import {
   Modal,
   Dimensions,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +23,7 @@ import { getDataBySource } from '../../src/data/mockData';
 import { BranchSales, HourlySales, CancelledReceipt, OpenTable, WaiterSale, WaiterLocation } from '../../src/types';
 
 const screenWidth = Dimensions.get('window').width;
+const screenHeight = Dimensions.get('window').height;
 
 export default function DashboardScreen() {
   const { colors } = useThemeStore();
@@ -590,7 +592,7 @@ export default function DashboardScreen() {
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
+            <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
               {sourceData.branchSales.map((branch) => {
                 const value = selectedCardType === 'cash' ? branch.sales.cash
                   : selectedCardType === 'card' ? branch.sales.card
@@ -640,7 +642,7 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             </View>
             {selectedHour && (
-              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
+              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
                 {/* Compact Hour Summary */}
                 <View style={[styles.hourDetailCompact, { backgroundColor: colors.primary + '10', borderColor: colors.border }]}>
                   <View style={styles.hourDetailCompactLeft}>
@@ -730,7 +732,7 @@ export default function DashboardScreen() {
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
+            <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
               <View style={[styles.cancellationSummary, { backgroundColor: colors.error + '15' }]}>
                 <Ionicons name="alert-circle" size={24} color={colors.error} />
                 <View style={styles.cancellationSummaryText}>
@@ -788,7 +790,7 @@ export default function DashboardScreen() {
               <View style={{ width: 24 }} />
             </View>
             {selectedReceipt && (
-              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
+              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
                 <View style={[styles.receiptHeader, { backgroundColor: colors.error + '15' }]}>
                   <Text style={[styles.receiptNo, { color: colors.error }]}>
                     {selectedReceipt.receiptNo}
@@ -840,7 +842,7 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             </View>
             {selectedOpenTable && (
-              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
+              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
                 {/* Table Info Card */}
                 <View style={[styles.tableDetailHeader, { backgroundColor: colors.primary + '10' }]}>
                   <View style={[styles.tableDetailIcon, { backgroundColor: getPaymentStatusColor(selectedOpenTable) + '20' }]}>
@@ -930,7 +932,7 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             </View>
             {selectedWaiter && (
-              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
+              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
                 {/* Waiter Header */}
                 <View style={[styles.waiterModalHeader, { backgroundColor: colors.primary + '10' }]}>
                   <View style={[styles.waiterModalAvatar, { backgroundColor: colors.success + '20' }]}>
@@ -1238,7 +1240,9 @@ const styles = StyleSheet.create({
   modalContent: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '85%',
+    height: Platform.OS === 'web' ? undefined : screenHeight * 0.8,
+    maxHeight: screenHeight * 0.85,
+    minHeight: screenHeight * 0.55,
   },
   modalHeader: {
     flexDirection: 'row',
