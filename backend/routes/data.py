@@ -4,7 +4,7 @@ from routes.auth import get_current_user
 from typing import Optional
 import json
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -12,32 +12,30 @@ router = APIRouter(prefix="/data", tags=["data"])
 
 
 async def fetch_dataset(pool, tenant_id: str, dataset_key: str, filter_date: Optional[str] = None):
-    """Fetch dataset - if filter_date given, match by sdate in params_json, otherwise get latest"""
+    """Fetch dataset - if filter_date given, find record matching that date, otherwise get latest"""
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             if filter_date:
-                # Match records where sdate starts with the filter_date (YYYY-MM-DD)
+                # Fetch all records for this key and filter by date in Python
                 await cur.execute("""
                     SELECT data_json, row_count, synced_at, updated_at, params_json
                     FROM dataset_cache 
                     WHERE tenant_id = %s AND dataset_key = %s
-                      AND params_json LIKE %s
                     ORDER BY updated_at DESC
-                    LIMIT 1
-                """, (tenant_id, dataset_key, f'%"sdate":"{filter_date}%'))
-                row = await cur.fetchone()
+                """, (tenant_id, dataset_key))
+                rows = await cur.fetchall()
                 
-                if not row:
-                    # Try alternative format
-                    await cur.execute("""
-                        SELECT data_json, row_count, synced_at, updated_at, params_json
-                        FROM dataset_cache 
-                        WHERE tenant_id = %s AND dataset_key = %s
-                          AND JSON_EXTRACT(params_json, '$.sdate') LIKE %s
-                        ORDER BY updated_at DESC
-                        LIMIT 1
-                    """, (tenant_id, dataset_key, f'{filter_date}%'))
-                    row = await cur.fetchone()
+                # Find the row matching the filter_date
+                row = None
+                for r in rows:
+                    try:
+                        params = json.loads(r[4]) if r[4] else {}
+                        sdate_val = params.get('sdate', '')
+                        if sdate_val and sdate_val.startswith(filter_date):
+                            row = r
+                            break
+                    except (json.JSONDecodeError, TypeError):
+                        continue
             else:
                 # Get latest (real-time mode)
                 await cur.execute("""
@@ -102,81 +100,66 @@ async def get_dashboard_data(
     pool = await get_data_pool()
     result = {}
     
-    if sdate and edate and sdate != edate:
-        # Date RANGE: aggregate data across multiple days
-        try:
-            start = datetime.strptime(sdate, "%Y-%m-%d").date()
-            end = datetime.strptime(edate, "%Y-%m-%d").date()
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Tarih formatı hatalı (YYYY-MM-DD)")
+    if sdate:
+        # Filtered mode - single date or date range
+        if not edate:
+            edate = sdate
         
-        for key in dashboard_keys:
-            async with pool.acquire() as conn:
-                async with conn.cursor() as cur:
-                    # Get all records in date range
-                    await cur.execute("""
-                        SELECT data_json, row_count, synced_at, updated_at, params_json
-                        FROM dataset_cache 
-                        WHERE tenant_id = %s AND dataset_key = %s
-                          AND (
-                            JSON_EXTRACT(params_json, '$.sdate') >= %s
-                            AND JSON_EXTRACT(params_json, '$.sdate') <= %s
-                          )
-                        ORDER BY JSON_EXTRACT(params_json, '$.sdate') DESC
-                    """, (tenant_id, key, f'{sdate} 00:00:00', f'{edate} 23:59:59'))
-                    rows = await cur.fetchall()
+        if sdate == edate:
+            # Single date - simple LIKE query per key
+            filter_date = sdate
+            for key in dashboard_keys:
+                result[key] = await fetch_dataset(pool, tenant_id, key, filter_date)
+                if "params" in result[key]:
+                    del result[key]["params"]
+        else:
+            # Date range - aggregate
+            try:
+                start = datetime.strptime(sdate, "%Y-%m-%d").date()
+                end = datetime.strptime(edate, "%Y-%m-%d").date()
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Tarih formatı hatalı (YYYY-MM-DD)")
             
-            if rows:
-                # For financial data, aggregate across days
-                if key in ('financial_data', 'financial_data_location', 'cancel_data',
-                           'top10_stock_movements', 'down10_stock_movements',
-                           'hourly_data', 'hourly_location_data', 'iptal_ozet', 'iptal_detay'):
-                    all_data = []
-                    for r in rows:
-                        try:
-                            d = json.loads(r[0]) if r[0] else []
-                            if isinstance(d, list):
-                                all_data.extend(d)
-                            else:
-                                all_data.append(d)
-                        except json.JSONDecodeError:
-                            pass
-                    
-                    # For financial_data, aggregate totals
-                    if key == 'financial_data' and all_data:
-                        aggregated = {}
-                        for item in all_data:
-                            for k, v in item.items():
-                                try:
-                                    aggregated[k] = aggregated.get(k, 0) + float(v)
-                                except (ValueError, TypeError):
-                                    aggregated[k] = v
-                        # Convert back to string format
-                        for k, v in aggregated.items():
-                            if isinstance(v, float):
-                                aggregated[k] = f"{v:.8f}"
-                        all_data = [aggregated]
-                    
-                    result[key] = {
-                        "data": all_data,
-                        "row_count": len(all_data),
-                        "synced_at": rows[0][2].isoformat() if rows[0][2] else None,
-                        "updated_at": rows[0][3].isoformat() if rows[0][3] else None,
-                    }
-                else:
-                    # For acik_masalar etc, just get the latest
-                    try:
-                        data = json.loads(rows[0][0]) if rows[0][0] else []
-                    except json.JSONDecodeError:
-                        data = []
-                    result[key] = {
-                        "data": data,
-                        "row_count": rows[0][1],
-                        "synced_at": rows[0][2].isoformat() if rows[0][2] else None,
-                        "updated_at": rows[0][3].isoformat() if rows[0][3] else None,
-                    }
-            else:
-                result[key] = {"data": [], "row_count": 0, "synced_at": None, "updated_at": None}
+            for key in dashboard_keys:
+                all_data = []
+                latest_synced = None
+                latest_updated = None
+                
+                current = start
+                while current <= end:
+                    date_str = current.strftime("%Y-%m-%d")
+                    day_result = await fetch_dataset(pool, tenant_id, key, date_str)
+                    if day_result["data"]:
+                        if isinstance(day_result["data"], list):
+                            all_data.extend(day_result["data"])
+                        else:
+                            all_data.append(day_result["data"])
+                        if day_result.get("synced_at"):
+                            latest_synced = day_result["synced_at"]
+                        if day_result.get("updated_at"):
+                            latest_updated = day_result["updated_at"]
+                    current += timedelta(days=1)
+                
+                # For financial_data, aggregate numeric fields
+                if key == 'financial_data' and all_data:
+                    aggregated = {}
+                    for item in all_data:
+                        for k, v in item.items():
+                            try:
+                                aggregated[k] = aggregated.get(k, 0) + float(v)
+                            except (ValueError, TypeError):
+                                aggregated[k] = v
+                    for k, v in aggregated.items():
+                        if isinstance(v, float):
+                            aggregated[k] = f"{v:.8f}"
+                    all_data = [aggregated]
+                
+                result[key] = {
+                    "data": all_data,
+                    "row_count": len(all_data),
+                    "synced_at": latest_synced,
+                    "updated_at": latest_updated,
+                }
     else:
         # Single date or real-time
         filter_date = sdate if sdate else None
