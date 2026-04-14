@@ -138,9 +138,10 @@ export interface OpenTable {
   paidAmount: number;    // Ödenen tutar
   remainingAmount: number; // Kalan tutar
   location: string;      // Lokasyon/Şube
+  section: string;       // Bölüm (Salon, Bahçe vb.)
   openedAt: string;      // Açılış zamanı
   itemCount: number;     // Ürün sayısı
-  dataSource: string;    // Veri kaynağı (Data 1, Data 2, Data 3)
+  dataSource: string;    // Veri kaynağı
 }
 
 

@@ -32,15 +32,16 @@ export default function DashboardScreen() {
   const { t } = useLanguageStore();
   const { activeSource } = useDataSourceStore();
 
-  // Use live data hook with filter support
-  const { data: sourceData, isLoading: dataLoading, error: dataError, lastSynced, refresh: refreshData, isLive, isFilterActive: isDataFiltered } = useLiveData(filters);
-
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [filters, setFilters] = useState({
     branchId: null as string | null,
     startDate: new Date(),
     endDate: new Date(),
   });
+
+  // Use live data hook with filter support (must be after filters state)
+  const { data: sourceData, isLoading: dataLoading, error: dataError, lastSynced, refresh: refreshData, isLive, isFilterActive: isDataFiltered } = useLiveData(filters);
+
   const [refreshing, setRefreshing] = useState(false);
   const [selectedCardType, setSelectedCardType] = useState<'cash' | 'card' | 'openAccount' | 'total' | null>(null);
   const [selectedHour, setSelectedHour] = useState<HourlySales | null>(null);
@@ -392,6 +393,9 @@ export default function DashboardScreen() {
                         </View>
                         <View>
                           <Text style={[styles.openTableName, { color: colors.text }]}>Masa {table.tableNo}</Text>
+                          {table.section ? (
+                            <Text style={[styles.openTableLocation, { color: colors.textSecondary }]}>{table.section}</Text>
+                          ) : null}
                         </View>
                       </View>
                       <Text style={[styles.openTableStatValue, { color: colors.text }]}>
