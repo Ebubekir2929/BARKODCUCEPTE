@@ -51,10 +51,36 @@ export default function DashboardScreen() {
   
   // Open Tables state
   const [selectedOpenTable, setSelectedOpenTable] = useState<OpenTable | null>(null);
+  const [expandedLocation, setExpandedLocation] = useState<string | null>(null);
 
   // Waiter Sales state
   const [expandedWaiterLocation, setExpandedWaiterLocation] = useState<string | null>(null);
   const [selectedWaiter, setSelectedWaiter] = useState<WaiterSale | null>(null);
+
+  // Check if filter is active
+  const isFilterActive = useMemo(() => {
+    const today = new Date();
+    const isSameDay = (a: Date, b: Date) =>
+      a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
+    return filters.branchId !== null || !isSameDay(filters.startDate, today) || !isSameDay(filters.endDate, today);
+  }, [filters]);
+
+  const clearFilters = () => {
+    const today = new Date();
+    setFilters({ branchId: null, startDate: today, endDate: today });
+  };
+
+  // Group open tables by location
+  const openTablesByLocation = useMemo(() => {
+    const tables = sourceData?.openTables || [];
+    const grouped: Record<string, OpenTable[]> = {};
+    tables.forEach(table => {
+      const loc = table.location || 'Diğer';
+      if (!grouped[loc]) grouped[loc] = [];
+      grouped[loc].push(table);
+    });
+    return grouped;
+  }, [sourceData?.openTables]);
 
   // Calculate totals from all branches
   const totals = useMemo(() => {
@@ -182,6 +208,28 @@ export default function DashboardScreen() {
       {/* Global Data Source Selector */}
       <DataSourceSelector totals={{ [activeSource]: sourceData?.weeklyComparison?.thisWeek?.total || 0 }} />
 
+      {/* Active Filter Banner */}
+      {isFilterActive && (
+        <View style={[styles.filterBanner, { backgroundColor: colors.primary + '10', borderBottomColor: colors.border }]}>
+          <View style={styles.filterBannerLeft}>
+            <Ionicons name="funnel" size={14} color={colors.primary} />
+            <Text style={[styles.filterBannerText, { color: colors.primary }]} numberOfLines={1}>
+              {filters.branchId
+                ? (sourceData?.branchSales || []).find(b => b.branchId === filters.branchId)?.branchName || 'Şube'
+                : 'Tüm Şubeler'
+              }
+              {' · '}
+              {filters.startDate.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' })}
+              {' - '}
+              {filters.endDate.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' })}
+            </Text>
+          </View>
+          <TouchableOpacity style={styles.filterBannerClear} onPress={clearFilters}>
+            <Ionicons name="close-circle" size={20} color={colors.primary} />
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* Live data indicator */}
       {isLive && (
         <View style={[styles.liveIndicator, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
@@ -296,57 +344,59 @@ export default function DashboardScreen() {
             </View>
           </View>
 
-          {/* Open Tables List - Flat */}
-          {(sourceData?.openTables || []).map((table) => (
-            <TouchableOpacity
-              key={table.id}
-              style={[styles.openTableCard, { backgroundColor: colors.background, borderColor: colors.border }]}
-              onPress={() => setSelectedOpenTable(table)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.openTableCardTop}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <View style={[styles.tableIcon, { backgroundColor: getPaymentStatusColor(table) + '15' }]}>
-                    <Ionicons name="restaurant-outline" size={16} color={getPaymentStatusColor(table)} />
+          {/* Open Tables List - Grouped by Location */}
+          {Object.keys(openTablesByLocation).length > 0 ? (
+            Object.entries(openTablesByLocation).map(([location, tables]) => (
+              <View key={location}>
+                <TouchableOpacity
+                  style={[styles.locationGroupHeader, { backgroundColor: colors.background, borderColor: colors.border }]}
+                  onPress={() => setExpandedLocation(expandedLocation === location ? null : location)}
+                  activeOpacity={0.7}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Ionicons name="location-outline" size={18} color={colors.primary} />
+                    <Text style={[styles.locationGroupName, { color: colors.text }]}>{location}</Text>
+                    <View style={[styles.locationGroupCount, { backgroundColor: colors.primary + '15' }]}>
+                      <Text style={[styles.locationGroupCountText, { color: colors.primary }]}>{tables.length}</Text>
+                    </View>
                   </View>
-                  <View>
-                    <Text style={[styles.openTableName, { color: colors.text }]}>{table.tableNo}</Text>
-                    <Text style={[styles.openTableLocation, { color: colors.textSecondary }]}>
-                      <Ionicons name="location-outline" size={11} color={colors.textSecondary} /> {table.location}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={[styles.locationGroupTotal, { color: colors.textSecondary }]}>
+                      ₺{tables.reduce((s, t) => s + t.amount, 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                     </Text>
+                    <Ionicons
+                      name={expandedLocation === location ? 'chevron-up' : 'chevron-down'}
+                      size={18}
+                      color={colors.textSecondary}
+                    />
                   </View>
-                </View>
-                <View style={[styles.paymentBadge, { backgroundColor: getPaymentStatusColor(table) + '15' }]}>
-                  <Text style={[styles.paymentBadgeText, { color: getPaymentStatusColor(table) }]}>
-                    {getPaymentStatusText(table)}
-                  </Text>
-                </View>
-              </View>
+                </TouchableOpacity>
 
-              <View style={styles.openTableCardBottom}>
-                <View style={styles.openTableStat}>
-                  <Text style={[styles.openTableStatLabel, { color: colors.textSecondary }]}>{t('amount_label')}</Text>
-                  <Text style={[styles.openTableStatValue, { color: colors.text }]}>
-                    ₺{table.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                  </Text>
-                </View>
-                <View style={styles.openTableStat}>
-                  <Text style={[styles.openTableStatLabel, { color: colors.textSecondary }]}>{t('paid_amount')}</Text>
-                  <Text style={[styles.openTableStatValue, { color: colors.success }]}>
-                    ₺{table.paidAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                  </Text>
-                </View>
-                <View style={styles.openTableStat}>
-                  <Text style={[styles.openTableStatLabel, { color: colors.textSecondary }]}>{t('remaining_amount')}</Text>
-                  <Text style={[styles.openTableStatValue, { color: colors.error }]}>
-                    ₺{table.remainingAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                  </Text>
-                </View>
+                {expandedLocation === location && tables.map((table) => (
+                  <TouchableOpacity
+                    key={table.id}
+                    style={[styles.openTableCard, { backgroundColor: colors.background, borderColor: colors.border, marginLeft: 12 }]}
+                    onPress={() => setSelectedOpenTable(table)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.openTableCardTop}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <View style={[styles.tableIcon, { backgroundColor: getPaymentStatusColor(table) + '15' }]}>
+                          <Ionicons name="restaurant-outline" size={16} color={getPaymentStatusColor(table)} />
+                        </View>
+                        <View>
+                          <Text style={[styles.openTableName, { color: colors.text }]}>Masa {table.tableNo}</Text>
+                        </View>
+                      </View>
+                      <Text style={[styles.openTableStatValue, { color: colors.text }]}>
+                        ₺{table.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
               </View>
-            </TouchableOpacity>
-          ))}
-
-          {(sourceData?.openTables || []).length === 0 && (
+            ))
+          ) : (
             <View style={styles.emptyState}>
               <Ionicons name="restaurant-outline" size={40} color={colors.textSecondary} />
               <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>{t('no_open_tables')}</Text>
@@ -2057,5 +2107,57 @@ const styles = StyleSheet.create({
   },
   syncText: {
     fontSize: 11,
+  },
+  // Filter Banner
+  filterBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+  },
+  filterBannerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  filterBannerText: {
+    fontSize: 12,
+    fontWeight: '600',
+    flex: 1,
+  },
+  filterBannerClear: {
+    padding: 4,
+  },
+  // Location Group (Open Tables)
+  locationGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 6,
+    marginTop: 6,
+  },
+  locationGroupName: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  locationGroupCount: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  locationGroupCountText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  locationGroupTotal: {
+    fontSize: 13,
+    fontWeight: '600',
   },
 });
