@@ -199,6 +199,14 @@ export default function DashboardScreen() {
         </View>
       )}
 
+      {/* Loading state */}
+      {dataLoading && !sourceData?.weeklyComparison?.thisWeek?.total && (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Veriler yükleniyor...</Text>
+        </View>
+      )}
+
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
@@ -618,10 +626,11 @@ export default function DashboardScreen() {
         onClose={() => setShowFilterModal(false)}
         onApply={setFilters}
         currentFilters={filters}
+        branches={(sourceData?.branchSales || []).map(b => ({ id: b.branchId, name: b.branchName || b.branchId }))}
       />
 
       {/* Card Type Location Modal */}
-      <Modal visible={!!selectedCardType} animationType="slide" transparent>
+      <Modal visible={!!selectedCardType} animationType="slide" transparent statusBarTranslucent>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setSelectedCardType(null)}>
           <TouchableOpacity activeOpacity={1} style={[styles.modalContent]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
@@ -670,7 +679,7 @@ export default function DashboardScreen() {
       </Modal>
 
       {/* Hour Detail Modal */}
-      <Modal visible={showHourDetail} animationType="slide" transparent>
+      <Modal visible={showHourDetail} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
@@ -761,7 +770,7 @@ export default function DashboardScreen() {
       </Modal>
 
       {/* Cancellations List Modal */}
-      <Modal visible={!!selectedBranchCancellations} animationType="slide" transparent>
+      <Modal visible={!!selectedBranchCancellations} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
@@ -817,7 +826,7 @@ export default function DashboardScreen() {
       </Modal>
 
       {/* Receipt Detail Modal */}
-      <Modal visible={!!selectedReceipt} animationType="slide" transparent>
+      <Modal visible={!!selectedReceipt} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
@@ -870,7 +879,7 @@ export default function DashboardScreen() {
       </Modal>
 
       {/* Open Table Detail Modal */}
-      <Modal visible={!!selectedOpenTable} animationType="slide" transparent>
+      <Modal visible={!!selectedOpenTable} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
@@ -960,7 +969,7 @@ export default function DashboardScreen() {
       </Modal>
 
       {/* Waiter Detail Modal */}
-      <Modal visible={!!selectedWaiter} animationType="slide" transparent>
+      <Modal visible={!!selectedWaiter} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
@@ -1094,6 +1103,16 @@ const styles = StyleSheet.create({
   },
   statusBarLine: {
     height: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  loadingText: {
+    fontSize: 14,
+    marginTop: 12,
   },
   header: {
     flexDirection: 'row',

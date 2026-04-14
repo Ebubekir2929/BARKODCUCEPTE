@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,8 +11,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
-import { branches } from '../data/mockData';
 import DateTimePicker from '@react-native-community/datetimepicker';
+
+interface Branch {
+  id: string;
+  name: string;
+}
 
 interface FilterModalProps {
   visible: boolean;
@@ -23,6 +27,7 @@ interface FilterModalProps {
     startDate: Date;
     endDate: Date;
   };
+  branches?: Branch[];
 }
 
 export const FilterModal: React.FC<FilterModalProps> = ({
@@ -30,6 +35,7 @@ export const FilterModal: React.FC<FilterModalProps> = ({
   onClose,
   onApply,
   currentFilters,
+  branches = [],
 }) => {
   const { colors } = useThemeStore();
   const [selectedBranch, setSelectedBranch] = useState<string | null>(currentFilters.branchId);
@@ -41,6 +47,15 @@ export const FilterModal: React.FC<FilterModalProps> = ({
   const [endDateInput, setEndDateInput] = useState(formatDateForInput(currentFilters.endDate));
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
+
+  useEffect(() => {
+    if (visible) {
+      setSelectedBranch(currentFilters.branchId);
+      setDateRange({ start: currentFilters.startDate, end: currentFilters.endDate });
+      setStartDateInput(formatDateForInput(currentFilters.startDate));
+      setEndDateInput(formatDateForInput(currentFilters.endDate));
+    }
+  }, [visible]);
 
   function formatDateForInput(date: Date): string {
     const day = date.getDate().toString().padStart(2, '0');
@@ -67,40 +82,28 @@ export const FilterModal: React.FC<FilterModalProps> = ({
   };
 
   const quickDateOptions = [
-    { label: 'Bugün', days: 0 },
-    { label: 'Dün', days: 1 },
-    { label: 'Son 7 Gün', days: 7 },
-    { label: 'Son 30 Gün', days: 30 },
-    { label: 'Bu Ay', days: -1 },
+    { label: 'Bugün', getValue: () => { const d = new Date(); return { start: d, end: d }; } },
+    { label: 'Dün', getValue: () => { const d = new Date(); d.setDate(d.getDate() - 1); return { start: d, end: d }; } },
+    { label: 'Son 7 Gün', getValue: () => { const end = new Date(); const start = new Date(); start.setDate(start.getDate() - 7); return { start, end }; } },
+    { label: 'Son 30 Gün', getValue: () => { const end = new Date(); const start = new Date(); start.setDate(start.getDate() - 30); return { start, end }; } },
+    { label: 'Bu Ay', getValue: () => { const end = new Date(); const start = new Date(end.getFullYear(), end.getMonth(), 1); return { start, end }; } },
+    { label: 'Geçen Ay', getValue: () => { const now = new Date(); const start = new Date(now.getFullYear(), now.getMonth() - 1, 1); const end = new Date(now.getFullYear(), now.getMonth(), 0); return { start, end }; } },
   ];
 
-  const selectQuickDate = (days: number) => {
-    const end = new Date();
-    let start = new Date();
-    
-    if (days === -1) {
-      start = new Date(end.getFullYear(), end.getMonth(), 1);
-    } else if (days === 0) {
-      start = new Date();
-    } else {
-      start.setDate(start.getDate() - days);
-    }
-    
+  const selectQuickDate = (option: typeof quickDateOptions[0]) => {
+    const { start, end } = option.getValue();
     setDateRange({ start, end });
     setStartDateInput(formatDateForInput(start));
     setEndDateInput(formatDateForInput(end));
   };
 
   const parseDate = (input: string): Date | null => {
-    // Accept formats: DD/MM/YYYY, DD.MM.YYYY, DD-MM-YYYY
     const cleaned = input.replace(/[.\-]/g, '/');
     const parts = cleaned.split('/');
-    
     if (parts.length === 3) {
       const day = parseInt(parts[0]);
       const month = parseInt(parts[1]);
       const year = parseInt(parts[2]);
-      
       if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 2020 && year <= 2030) {
         return new Date(year, month - 1, day);
       }
@@ -111,17 +114,13 @@ export const FilterModal: React.FC<FilterModalProps> = ({
   const handleStartDateChange = (text: string) => {
     setStartDateInput(text);
     const parsed = parseDate(text);
-    if (parsed) {
-      setDateRange(prev => ({ ...prev, start: parsed }));
-    }
+    if (parsed) setDateRange(prev => ({ ...prev, start: parsed }));
   };
 
   const handleEndDateChange = (text: string) => {
     setEndDateInput(text);
     const parsed = parseDate(text);
-    if (parsed) {
-      setDateRange(prev => ({ ...prev, end: parsed }));
-    }
+    if (parsed) setDateRange(prev => ({ ...prev, end: parsed }));
   };
 
   const onStartDatePickerChange = (event: any, selectedDate?: Date) => {
@@ -141,7 +140,7 @@ export const FilterModal: React.FC<FilterModalProps> = ({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent>
+    <Modal visible={visible} animationType="slide" transparent statusBarTranslucent>
       <View style={styles.overlay}>
         <View style={[styles.container, { backgroundColor: colors.surface }]}>
           <View style={[styles.header, { borderBottomColor: colors.border }]}>
@@ -151,38 +150,42 @@ export const FilterModal: React.FC<FilterModalProps> = ({
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
-            {/* Branch Selection */}
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Şube Seçimi</Text>
-            <View style={styles.branchList}>
-              <TouchableOpacity
-                style={[
-                  styles.branchItem,
-                  { backgroundColor: colors.card, borderColor: colors.border },
-                  selectedBranch === null && { borderColor: colors.primary, backgroundColor: colors.primary + '20' },
-                ]}
-                onPress={() => setSelectedBranch(null)}
-              >
-                <Text style={[styles.branchText, { color: selectedBranch === null ? colors.primary : colors.text }]}>
-                  Tüm Şubeler
-                </Text>
-              </TouchableOpacity>
-              {branches.map((branch) => (
-                <TouchableOpacity
-                  key={branch.id}
-                  style={[
-                    styles.branchItem,
-                    { backgroundColor: colors.card, borderColor: colors.border },
-                    selectedBranch === branch.id && { borderColor: colors.primary, backgroundColor: colors.primary + '20' },
-                  ]}
-                  onPress={() => setSelectedBranch(branch.id)}
-                >
-                  <Text style={[styles.branchText, { color: selectedBranch === branch.id ? colors.primary : colors.text }]}>
-                    {branch.name}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+          <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
+            {/* Branch Selection - from live data */}
+            {branches.length > 0 && (
+              <>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>Şube Seçimi</Text>
+                <View style={styles.branchList}>
+                  <TouchableOpacity
+                    style={[
+                      styles.branchItem,
+                      { backgroundColor: colors.card, borderColor: colors.border },
+                      selectedBranch === null && { borderColor: colors.primary, backgroundColor: colors.primary + '20' },
+                    ]}
+                    onPress={() => setSelectedBranch(null)}
+                  >
+                    <Text style={[styles.branchText, { color: selectedBranch === null ? colors.primary : colors.text }]}>
+                      Tüm Şubeler
+                    </Text>
+                  </TouchableOpacity>
+                  {branches.map((branch) => (
+                    <TouchableOpacity
+                      key={branch.id}
+                      style={[
+                        styles.branchItem,
+                        { backgroundColor: colors.card, borderColor: colors.border },
+                        selectedBranch === branch.id && { borderColor: colors.primary, backgroundColor: colors.primary + '20' },
+                      ]}
+                      onPress={() => setSelectedBranch(branch.id)}
+                    >
+                      <Text style={[styles.branchText, { color: selectedBranch === branch.id ? colors.primary : colors.text }]}>
+                        {branch.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </>
+            )}
 
             {/* Quick Date Selection */}
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Hızlı Tarih</Text>
@@ -190,18 +193,15 @@ export const FilterModal: React.FC<FilterModalProps> = ({
               {quickDateOptions.map((option) => (
                 <TouchableOpacity
                   key={option.label}
-                  style={[
-                    styles.quickDateItem,
-                    { backgroundColor: colors.card, borderColor: colors.border },
-                  ]}
-                  onPress={() => selectQuickDate(option.days)}
+                  style={[styles.quickDateItem, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  onPress={() => selectQuickDate(option)}
                 >
                   <Text style={[styles.quickDateText, { color: colors.text }]}>{option.label}</Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            {/* Manual Date Entry with Picker */}
+            {/* Manual Date Entry */}
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Tarih Seçimi</Text>
             <View style={styles.dateInputsRow}>
               <View style={styles.dateInputWrapper}>
@@ -240,7 +240,6 @@ export const FilterModal: React.FC<FilterModalProps> = ({
               </View>
             </View>
 
-            {/* Date Pickers */}
             {showStartPicker && (
               <DateTimePicker
                 value={dateRange.start}
@@ -260,17 +259,12 @@ export const FilterModal: React.FC<FilterModalProps> = ({
               />
             )}
 
-            {/* Selected Date Display */}
             <View style={[styles.selectedDateDisplay, { backgroundColor: colors.background }]}>
               <Ionicons name="time-outline" size={18} color={colors.primary} />
               <Text style={[styles.selectedDateText, { color: colors.text }]}>
                 {dateRange.start.toLocaleDateString('tr-TR')} - {dateRange.end.toLocaleDateString('tr-TR')}
               </Text>
             </View>
-
-            <Text style={[styles.dateHint, { color: colors.textSecondary }]}>
-              Elle yazın veya takvim ikonuna tıklayın
-            </Text>
           </ScrollView>
 
           <View style={[styles.footer, { borderTopColor: colors.border }]}>
@@ -298,13 +292,14 @@ export const FilterModal: React.FC<FilterModalProps> = ({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
   },
   container: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '85%',
+    maxHeight: '90%',
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
   },
   header: {
     flexDirection: 'row',
@@ -321,7 +316,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   contentContainer: {
-    paddingBottom: 50,
+    paddingBottom: 20,
   },
   sectionTitle: {
     fontSize: 15,
@@ -397,16 +392,11 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 10,
     gap: 8,
-    marginBottom: 8,
+    marginTop: 8,
   },
   selectedDateText: {
     fontSize: 14,
     fontWeight: '600',
-  },
-  dateHint: {
-    fontSize: 11,
-    textAlign: 'center',
-    marginBottom: 10,
   },
   footer: {
     flexDirection: 'row',
