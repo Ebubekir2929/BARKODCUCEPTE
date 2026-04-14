@@ -255,13 +255,12 @@ export default function DashboardScreen() {
       )}
 
       {/* Loading state */}
-      {dataLoading && !sourceData?.weeklyComparison?.thisWeek?.total && (
+      {dataLoading && !sourceData?.weeklyComparison?.thisWeek?.total ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Veriler yükleniyor...</Text>
         </View>
-      )}
-
+      ) : (
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
@@ -679,6 +678,7 @@ export default function DashboardScreen() {
         {/* Bottom Spacing - Reduced */}
         <View style={{ height: 20 }} />
       </ScrollView>
+      )}
 
       {/* Filter Modal */}
       <FilterModal
@@ -1368,7 +1368,6 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     alignSelf: 'flex-end',
     width: '100%',
-    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
   },
   modalHeader: {
     flexDirection: 'row',
