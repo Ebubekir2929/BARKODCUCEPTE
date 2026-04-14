@@ -9,6 +9,12 @@ import {
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 const DATA_SOURCE_KEYS: DataSource[] = ['data1', 'data2', 'data3'];
 
+export interface DashboardFilter {
+  branchId: string | null;
+  startDate: Date;
+  endDate: Date;
+}
+
 export interface DashboardData {
   branchSales: BranchSales[];
   hourlySales: HourlySales[];
@@ -41,8 +47,19 @@ const EMPTY_DATA: DashboardData = {
   waiterLocations: [],
 };
 
+function formatDateParam(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function isSameDay(a: Date, b: Date): boolean {
+  return a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
+}
+
+function isToday(d: Date): boolean {
+  return isSameDay(d, new Date());
+}
+
 function transformApiData(apiData: any): DashboardData {
-  // Transform financial_data_location → branchSales
   const branchSales: BranchSales[] = [];
   const locationData = apiData?.financial_data_location?.data || [];
   locationData.forEach((loc: any, idx: number) => {
@@ -59,7 +76,6 @@ function transformApiData(apiData: any): DashboardData {
     });
   });
 
-  // financial_data → weeklyComparison (thisWeek)
   const financialData = apiData?.financial_data?.data?.[0] || {};
   const thisWeek = {
     cash: parseFloat(financialData.NAKIT || '0'),
@@ -68,7 +84,6 @@ function transformApiData(apiData: any): DashboardData {
     total: parseFloat(financialData.GENELTOPLAM || '0'),
   };
 
-  // hourly_data → hourlySales
   const hourlyRaw = apiData?.hourly_data?.data || [];
   const hourlySales: HourlySales[] = hourlyRaw.map((h: any, idx: number) => ({
     hour: h.SAAT_ADI || `${idx}:00`,
@@ -77,7 +92,6 @@ function transformApiData(apiData: any): DashboardData {
     products: [],
   }));
 
-  // top10 → topProducts / topSelling
   const topRaw = apiData?.top10_stock_movements?.data || [];
   const topProducts: TopProduct[] = topRaw.map((p: any, idx: number) => ({
     id: `top-${idx}`,
@@ -86,7 +100,6 @@ function transformApiData(apiData: any): DashboardData {
     revenue: parseFloat(p.TUTAR_CIKIS || '0'),
   }));
 
-  // down10 → worstProducts / leastSelling
   const downRaw = apiData?.down10_stock_movements?.data || [];
   const worstProducts: TopProduct[] = downRaw.slice().reverse().map((p: any, idx: number) => ({
     id: `down-${idx}`,
@@ -95,7 +108,6 @@ function transformApiData(apiData: any): DashboardData {
     revenue: parseFloat(p.TUTAR_CIKIS || '0'),
   }));
 
-  // acik_masalar → openTables
   const masalarRaw = apiData?.acik_masalar?.data || [];
   const openTables: OpenTable[] = masalarRaw.map((m: any, idx: number) => ({
     id: `table-${m.MASA_ID || idx}`,
@@ -106,32 +118,28 @@ function transformApiData(apiData: any): DashboardData {
     paidAmount: parseFloat(m.ODENEN_TUTAR || '0'),
     remainingAmount: parseFloat(m.KALAN_TUTAR || '0'),
     location: m.LOKASYON || '',
+    section: m.BOLUM || '',
     openedAt: m.TARIH || '',
     itemCount: 0,
     dataSource: '',
   }));
 
-  // cancel_data → cancelledReceipts
   const cancelRaw = apiData?.cancel_data?.data || [];
-  const cancelledReceipts: CancelledReceipt[] = cancelRaw.filter((c: any) => {
-    const amount = parseFloat(c.TUTAR_FIS || '0');
-    return amount > 0;
-  }).map((c: any, idx: number) => ({
-    id: `cancel-${idx}`,
-    receiptNo: `İPTAL-${idx + 1}`,
-    date: new Date().toISOString(),
-    amount: parseFloat(c.TUTAR_FIS || '0'),
-    reason: c.LOKASYON || 'Bilinmeyen',
-    items: [],
-  }));
+  const cancelledReceipts: CancelledReceipt[] = cancelRaw
+    .filter((c: any) => parseFloat(c.TUTAR_FIS || '0') > 0)
+    .map((c: any, idx: number) => ({
+      id: `cancel-${idx}`,
+      receiptNo: `İPTAL-${idx + 1}`,
+      date: new Date().toISOString(),
+      amount: parseFloat(c.TUTAR_FIS || '0'),
+      reason: c.LOKASYON || 'Bilinmeyen',
+      items: [],
+    }));
 
   return {
     branchSales,
     hourlySales,
-    weeklyComparison: {
-      thisWeek,
-      lastWeek: { cash: 0, card: 0, openAccount: 0, total: 0 },
-    },
+    weeklyComparison: { thisWeek, lastWeek: { cash: 0, card: 0, openAccount: 0, total: 0 } },
     cancelledReceipts,
     openTables,
     topSelling: topProducts,
@@ -142,7 +150,7 @@ function transformApiData(apiData: any): DashboardData {
   };
 }
 
-export function useLiveData() {
+export function useLiveData(filter?: DashboardFilter) {
   const { user, token } = useAuthStore();
   const { activeSource } = useDataSourceStore();
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
@@ -150,6 +158,11 @@ export function useLiveData() {
   const [error, setError] = useState<string | null>(null);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Determine if filter is active (not today's date)
+  const isFilterActive = filter
+    ? (filter.branchId !== null || !isToday(filter.startDate) || !isToday(filter.endDate))
+    : false;
 
   const activeTenantId = useCallback(() => {
     if (!user?.tenants || user.tenants.length === 0) return null;
@@ -172,15 +185,39 @@ export function useLiveData() {
     setError(null);
 
     try {
-      const response = await fetch(
-        `${API_URL}/api/data/dashboard?tenant_id=${encodeURIComponent(tenantId)}`,
-        { headers: { 'Authorization': `Bearer ${token}` } }
-      );
+      let url = `${API_URL}/api/data/dashboard?tenant_id=${encodeURIComponent(tenantId)}`;
+      
+      // Add date filter params if filter is active
+      if (isFilterActive && filter) {
+        const sdate = formatDateParam(filter.startDate);
+        const edate = formatDateParam(filter.endDate);
+        url += `&sdate=${sdate}&edate=${edate}`;
+      }
+
+      const response = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
 
       if (!response.ok) throw new Error(`API Error: ${response.status}`);
 
       const apiData = await response.json();
-      const transformed = transformApiData(apiData);
+      let transformed = transformApiData(apiData);
+      
+      // Apply branch filter on client side
+      if (filter?.branchId) {
+        const filteredBranch = transformed.branchSales.find(b => b.branchId === filter.branchId);
+        if (filteredBranch) {
+          transformed = {
+            ...transformed,
+            branchSales: [filteredBranch],
+            weeklyComparison: {
+              thisWeek: filteredBranch.sales,
+              lastWeek: { cash: 0, card: 0, openAccount: 0, total: 0 },
+            },
+          };
+        }
+      }
+      
       setData(transformed);
 
       const syncTimes = Object.values(apiData)
@@ -195,14 +232,26 @@ export function useLiveData() {
     } finally {
       setIsLoading(false);
     }
-  }, [activeTenantId, token, activeSource]);
+  }, [activeTenantId, token, activeSource, isFilterActive, filter?.branchId, filter?.startDate, filter?.endDate]);
 
   useEffect(() => {
     fetchDashboard();
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    intervalRef.current = setInterval(fetchDashboard, 30000);
-    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [fetchDashboard]);
+
+    // Clear previous interval
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+
+    // Only auto-refresh when filter is NOT active (real-time mode)
+    if (!isFilterActive) {
+      intervalRef.current = setInterval(fetchDashboard, 30000);
+    }
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [fetchDashboard, isFilterActive]);
 
   return {
     data,
@@ -210,6 +259,7 @@ export function useLiveData() {
     error,
     lastSynced,
     refresh: fetchDashboard,
-    isLive: !!activeTenantId(),
+    isLive: !!activeTenantId() && !isFilterActive,
+    isFilterActive,
   };
 }

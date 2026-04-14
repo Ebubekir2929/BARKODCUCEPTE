@@ -32,8 +32,8 @@ export default function DashboardScreen() {
   const { t } = useLanguageStore();
   const { activeSource } = useDataSourceStore();
 
-  // Use live data hook (auto-fetches from API, falls back to mock)
-  const { data: sourceData, isLoading: dataLoading, error: dataError, lastSynced, refresh: refreshData, isLive } = useLiveData();
+  // Use live data hook with filter support
+  const { data: sourceData, isLoading: dataLoading, error: dataError, lastSynced, refresh: refreshData, isLive, isFilterActive: isDataFiltered } = useLiveData(filters);
 
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [filters, setFilters] = useState({
@@ -57,13 +57,8 @@ export default function DashboardScreen() {
   const [expandedWaiterLocation, setExpandedWaiterLocation] = useState<string | null>(null);
   const [selectedWaiter, setSelectedWaiter] = useState<WaiterSale | null>(null);
 
-  // Check if filter is active
-  const isFilterActive = useMemo(() => {
-    const today = new Date();
-    const isSameDay = (a: Date, b: Date) =>
-      a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
-    return filters.branchId !== null || !isSameDay(filters.startDate, today) || !isSameDay(filters.endDate, today);
-  }, [filters]);
+  // Check if filter is active (from live data hook)
+  const isFilterActive = isDataFiltered;
 
   const clearFilters = () => {
     const today = new Date();
@@ -236,7 +231,7 @@ export default function DashboardScreen() {
           <View style={styles.liveIndicatorLeft}>
             <View style={[styles.liveDot, { backgroundColor: dataError ? '#EF4444' : '#10B981' }]} />
             <Text style={[styles.liveText, { color: dataError ? '#EF4444' : '#10B981' }]}>
-              {dataLoading ? 'Güncelleniyor...' : dataError ? 'Bağlantı hatası' : 'Canlı Veri'}
+              {dataLoading ? 'Güncelleniyor...' : dataError ? 'Bağlantı hatası' : 'Canlı Veri · 30sn'}
             </Text>
           </View>
           {lastSynced && (
@@ -244,6 +239,17 @@ export default function DashboardScreen() {
               Son: {new Date(lastSynced).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
             </Text>
           )}
+        </View>
+      )}
+      {isDataFiltered && (
+        <View style={[styles.liveIndicator, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+          <View style={styles.liveIndicatorLeft}>
+            <View style={[styles.liveDot, { backgroundColor: colors.warning }]} />
+            <Text style={[styles.liveText, { color: colors.warning }]}>
+              {dataLoading ? 'Filtreleniyor...' : 'Filtrelenmiş Veri'}
+            </Text>
+          </View>
+          <Text style={[styles.syncText, { color: colors.textSecondary }]}>Otomatik yenileme durdu</Text>
         </View>
       )}
 
