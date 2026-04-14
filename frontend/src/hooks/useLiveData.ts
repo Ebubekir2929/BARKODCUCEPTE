@@ -154,10 +154,11 @@ export function useLiveData(filter?: DashboardFilter) {
   const { user, token } = useAuthStore();
   const { activeSource } = useDataSourceStore();
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isFirstLoad, setIsFirstLoad] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const hasLoadedOnce = useRef(false);
 
   // Determine if filter is active (not today's date)
   const isFilterActive = filter
@@ -177,17 +178,16 @@ export function useLiveData(filter?: DashboardFilter) {
     const tenantId = activeTenantId();
     if (!tenantId || !token) {
       setData(EMPTY_DATA);
-      setIsLoading(false);
+      setIsFirstLoad(false);
       return;
     }
 
-    setIsLoading(true);
+    // Only show loading on first load
     setError(null);
 
     try {
       let url = `${API_URL}/api/data/dashboard?tenant_id=${encodeURIComponent(tenantId)}`;
       
-      // Add date filter params if filter is active
       if (isFilterActive && filter) {
         const sdate = formatDateParam(filter.startDate);
         const edate = formatDateParam(filter.endDate);
@@ -203,7 +203,6 @@ export function useLiveData(filter?: DashboardFilter) {
       const apiData = await response.json();
       let transformed = transformApiData(apiData);
       
-      // Apply branch filter on client side
       if (filter?.branchId) {
         const filteredBranch = transformed.branchSales.find(b => b.branchId === filter.branchId);
         if (filteredBranch) {
@@ -219,6 +218,7 @@ export function useLiveData(filter?: DashboardFilter) {
       }
       
       setData(transformed);
+      hasLoadedOnce.current = true;
 
       const syncTimes = Object.values(apiData)
         .map((v: any) => v?.synced_at)
@@ -230,7 +230,7 @@ export function useLiveData(filter?: DashboardFilter) {
       console.error('Dashboard fetch error:', err);
       setError(err.message || 'Veri çekilemedi');
     } finally {
-      setIsLoading(false);
+      setIsFirstLoad(false);
     }
   }, [activeTenantId, token, activeSource, isFilterActive, filter?.branchId, filter?.startDate, filter?.endDate]);
 
@@ -255,7 +255,7 @@ export function useLiveData(filter?: DashboardFilter) {
 
   return {
     data,
-    isLoading,
+    isLoading: isFirstLoad && !hasLoadedOnce.current,
     error,
     lastSynced,
     refresh: fetchDashboard,
