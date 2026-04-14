@@ -9,6 +9,7 @@ import {
   Dimensions,
   RefreshControl,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
@@ -19,7 +20,7 @@ import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { DataSourceSelector } from '../../src/components/DataSourceSelector';
 import { SummaryCard } from '../../src/components/SummaryCard';
 import { FilterModal } from '../../src/components/FilterModal';
-import { getDataBySource } from '../../src/data/mockData';
+import { useLiveData } from '../../src/hooks/useLiveData';
 import { BranchSales, HourlySales, CancelledReceipt, OpenTable, WaiterSale, WaiterLocation } from '../../src/types';
 
 const screenWidth = Dimensions.get('window').width;
@@ -31,8 +32,8 @@ export default function DashboardScreen() {
   const { t } = useLanguageStore();
   const { activeSource } = useDataSourceStore();
 
-  // Get data based on active source
-  const sourceData = useMemo(() => getDataBySource(activeSource), [activeSource]);
+  // Use live data hook (auto-fetches from API, falls back to mock)
+  const { data: sourceData, isLoading: dataLoading, error: dataError, lastSynced, refresh: refreshData, isLive } = useLiveData();
 
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [filters, setFilters] = useState({
@@ -77,9 +78,10 @@ export default function DashboardScreen() {
     return sourceData.hourlySales.reduce((max, hour) => hour.amount > max.amount ? hour : max, sourceData.hourlySales[0]);
   }, [sourceData]);
 
-  const onRefresh = () => {
+  const onRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 1000);
+    await refreshData();
+    setRefreshing(false);
   };
 
   // Calculate percentage changes for each payment type
@@ -170,6 +172,23 @@ export default function DashboardScreen() {
 
       {/* Global Data Source Selector */}
       <DataSourceSelector />
+
+      {/* Live data indicator */}
+      {isLive && (
+        <View style={[styles.liveIndicator, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+          <View style={styles.liveIndicatorLeft}>
+            <View style={[styles.liveDot, { backgroundColor: dataError ? '#EF4444' : '#10B981' }]} />
+            <Text style={[styles.liveText, { color: dataError ? '#EF4444' : '#10B981' }]}>
+              {dataLoading ? 'Güncelleniyor...' : dataError ? 'Bağlantı hatası' : 'Canlı Veri'}
+            </Text>
+          </View>
+          {lastSynced && (
+            <Text style={[styles.syncText, { color: colors.textSecondary }]}>
+              Son: {new Date(lastSynced).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+          )}
+        </View>
+      )}
 
       <ScrollView
         style={styles.scrollView}
@@ -1972,5 +1991,31 @@ const styles = StyleSheet.create({
   productTableRevenue: {
     fontSize: 13,
     fontWeight: '700',
+  },
+  // Live data indicator
+  liveIndicator: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+  },
+  liveIndicatorLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  liveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  liveText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  syncText: {
+    fontSize: 11,
   },
 });
