@@ -42,13 +42,18 @@ export default function DashboardScreen() {
   // Use live data hook with filter support (must be after filters state)
   const { data: sourceData, isLoading: dataLoading, error: dataError, lastSynced, refresh: refreshData, isLive, isFilterActive: isDataFiltered } = useLiveData(filters);
 
-  // Cache totals per data source so they persist during source switching
+  // Cache totals per data source - reset when source changes, update only with fresh data
   const [sourceTotals, setSourceTotals] = useState<Record<string, number>>({});
+  const prevSourceRef = React.useRef(activeSource);
+  
   useEffect(() => {
-    const total = sourceData?.weeklyComparison?.thisWeek?.total || 0;
-    if (total > 0) {
-      setSourceTotals(prev => ({ ...prev, [activeSource]: total }));
+    // When source changes, clear the new source's cached total first
+    if (prevSourceRef.current !== activeSource) {
+      prevSourceRef.current = activeSource;
+      return; // Wait for fresh data
     }
+    const total = sourceData?.weeklyComparison?.thisWeek?.total ?? 0;
+    setSourceTotals(prev => ({ ...prev, [activeSource]: total }));
   }, [activeSource, sourceData?.weeklyComparison?.thisWeek?.total]);
 
   const [refreshing, setRefreshing] = useState(false);
