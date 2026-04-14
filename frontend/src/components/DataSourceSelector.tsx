@@ -9,9 +9,7 @@ import { getDataBySource } from '../data/mockData';
 const DATA_SOURCE_KEYS: DataSource[] = ['data1', 'data2', 'data3'];
 
 const formatCurrency = (amount: number) => {
-  if (amount >= 1000000) return '₺' + (amount / 1000000).toFixed(1) + 'M';
-  if (amount >= 1000) return '₺' + (amount / 1000).toFixed(1) + 'K';
-  return '₺' + amount.toLocaleString('tr-TR', { maximumFractionDigits: 0 });
+  return '₺' + amount.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 };
 
 // === DASHBOARD: Compact interactive selector ===

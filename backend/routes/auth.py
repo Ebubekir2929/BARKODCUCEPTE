@@ -5,7 +5,7 @@ from jose import jwt, JWTError
 from datetime import datetime, timedelta
 from models.user import (
     UserRegister, UserLogin, UserInDB, UserResponse,
-    TenantSource, TenantAdd, TenantUpdate, TokenResponse
+    TenantSource, TenantAdd, TenantUpdate, TokenResponse, LicenseStatus
 )
 import os
 import logging
@@ -70,7 +70,31 @@ def user_to_response(user: UserInDB) -> UserResponse:
         business_type=user.business_type,
         tenants=user.tenants,
         role=user.role,
+        license_expiry=user.license_expiry,
         created_at=user.created_at,
+    )
+
+
+def get_license_status(user: UserInDB) -> LicenseStatus:
+    if user.license_expiry is None:
+        # No license set - give 30 day trial from creation
+        trial_expiry = user.created_at + timedelta(days=30)
+        now = datetime.utcnow()
+        days_remaining = (trial_expiry - now).days
+        return LicenseStatus(
+            is_valid=days_remaining > 0,
+            days_remaining=max(0, days_remaining),
+            expiry_date=trial_expiry,
+            warning=0 < days_remaining <= 7,
+        )
+    
+    now = datetime.utcnow()
+    days_remaining = (user.license_expiry - now).days
+    return LicenseStatus(
+        is_valid=days_remaining > 0,
+        days_remaining=max(0, days_remaining),
+        expiry_date=user.license_expiry,
+        warning=0 < days_remaining <= 7,
     )
 
 
@@ -122,6 +146,7 @@ async def register(data: UserRegister):
     return TokenResponse(
         access_token=token,
         user=user_to_response(user),
+        license=get_license_status(user),
     )
 
 
@@ -144,6 +169,11 @@ async def login(data: UserLogin):
     if not pwd_context.verify(data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="E-posta veya şifre hatalı")
     
+    # Check license
+    license_status = get_license_status(user)
+    if not license_status.is_valid:
+        raise HTTPException(status_code=403, detail="Lisans süreniz dolmuştur. Lütfen lisansınızı yenileyin.")
+    
     # Create token
     token = create_access_token({"user_id": user.id, "email": user.email})
     logger.info(f"User logged in: {user.email}")
@@ -151,6 +181,7 @@ async def login(data: UserLogin):
     return TokenResponse(
         access_token=token,
         user=user_to_response(user),
+        license=license_status,
     )
 
 

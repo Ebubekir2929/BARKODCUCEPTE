@@ -17,12 +17,14 @@ import { useAuthStore } from '../../src/store/authStore';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 
 export default function LoginScreen() {
   const router = useRouter();
   const { login } = useAuthStore();
   const { colors, isDark, toggleTheme } = useThemeStore();
-  const { showError, showSuccess, alertProps } = useAlert();
+  const { showError, showSuccess, showWarning, alertProps } = useAlert();
+  const [isOnline, setIsOnline] = useState(true);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -33,6 +35,11 @@ export default function LoginScreen() {
 
   useEffect(() => {
     loadRememberedEmail();
+    // Internet connectivity check
+    const unsubscribe = NetInfo.addEventListener(state => {
+      setIsOnline(state.isConnected ?? true);
+    });
+    return () => unsubscribe();
   }, []);
 
   const loadRememberedEmail = async () => {
@@ -53,6 +60,12 @@ export default function LoginScreen() {
       return;
     }
 
+    // Internet check
+    if (!isOnline) {
+      showError('Bağlantı Hatası', 'İnternet bağlantınız yok. Lütfen bağlantınızı kontrol edip tekrar deneyin.');
+      return;
+    }
+
     setIsLoading(true);
     try {
       // Save or remove email based on remember me
@@ -64,7 +77,21 @@ export default function LoginScreen() {
 
       const result = await login(email, password);
       if (result.success) {
-        router.replace('/(tabs)/dashboard');
+        if (result.licenseWarning && result.daysRemaining !== undefined) {
+          // Show license warning then navigate
+          showWarning(
+            'Lisans Uyarısı',
+            `Lisans sürenizin dolmasına ${result.daysRemaining} gün kaldı. Lütfen lisansınızı yenileyiniz.`,
+            [
+              {
+                text: 'Tamam',
+                onPress: () => router.replace('/(tabs)/dashboard'),
+              },
+            ]
+          );
+        } else {
+          router.replace('/(tabs)/dashboard');
+        }
       } else {
         showError('Giriş Başarısız', result.error || 'E-posta veya şifre hatalı');
       }
@@ -119,6 +146,12 @@ export default function LoginScreen() {
           </TouchableOpacity>
 
           {/* Logo/Title */}
+          {!isOnline && (
+            <View style={[styles.offlineBanner, { backgroundColor: '#EF4444' }]}>
+              <Ionicons name="cloud-offline-outline" size={18} color="#fff" />
+              <Text style={styles.offlineBannerText}>İnternet bağlantısı yok</Text>
+            </View>
+          )}
           <View style={styles.header}>
             <View style={[styles.logoContainer, { backgroundColor: colors.primary }]}>
               <Ionicons name="barcode-outline" size={48} color="#FFFFFF" />
@@ -268,6 +301,21 @@ const styles = StyleSheet.create({
     top: 16,
     right: 16,
     padding: 8,
+  },
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    marginBottom: 16,
+    gap: 8,
+  },
+  offlineBannerText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   header: {
     alignItems: 'center',

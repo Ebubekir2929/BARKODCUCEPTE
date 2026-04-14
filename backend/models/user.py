@@ -38,6 +38,7 @@ class UserInDB(BaseModel):
     tenants: List[TenantSource] = []
     terms_accepted: bool = True
     role: str = "user"
+    license_expiry: Optional[datetime] = None  # None = no license set yet
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -51,7 +52,15 @@ class UserResponse(BaseModel):
     business_type: str
     tenants: List[TenantSource]
     role: str
+    license_expiry: Optional[datetime] = None
     created_at: datetime
+
+
+class LicenseStatus(BaseModel):
+    is_valid: bool
+    days_remaining: Optional[int] = None
+    expiry_date: Optional[datetime] = None
+    warning: bool = False  # True if less than 7 days remaining
 
 
 class TenantAdd(BaseModel):
@@ -67,3 +76,4 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
+    license: LicenseStatus

@@ -4,6 +4,13 @@ import { User, TenantSource } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
+interface LicenseInfo {
+  is_valid: boolean;
+  days_remaining: number | null;
+  expiry_date: string | null;
+  warning: boolean;
+}
+
 interface RegisterData {
   full_name: string;
   username: string;
@@ -21,7 +28,8 @@ interface AuthStore {
   token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  license: LicenseInfo | null;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string; licenseWarning?: boolean; daysRemaining?: number }>;
   register: (data: RegisterData) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
@@ -37,6 +45,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   token: null,
   isAuthenticated: false,
   isLoading: true,
+  license: null,
 
   login: async (email: string, password: string) => {
     try {
@@ -48,24 +57,38 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 
       const data = await response.json();
 
+      if (response.status === 403) {
+        // License expired
+        return { success: false, error: data.detail || 'Lisans süreniz dolmuştur' };
+      }
+
       if (!response.ok) {
         return { success: false, error: data.detail || 'Giriş başarısız' };
       }
 
       await AsyncStorage.setItem('token', data.access_token);
       await AsyncStorage.setItem('user', JSON.stringify(data.user));
+      if (data.license) {
+        await AsyncStorage.setItem('license', JSON.stringify(data.license));
+      }
 
       set({
         user: data.user,
         token: data.access_token,
         isAuthenticated: true,
         isLoading: false,
+        license: data.license || null,
       });
+
+      // Check if license warning needed (< 7 days)
+      if (data.license?.warning) {
+        return { success: true, licenseWarning: true, daysRemaining: data.license.days_remaining };
+      }
 
       return { success: true };
     } catch (error) {
       console.error('Login error:', error);
-      return { success: false, error: 'Bağlantı hatası. Lütfen tekrar deneyin.' };
+      return { success: false, error: 'Bağlantı hatası. Lütfen internet bağlantınızı kontrol edin.' };
     }
   },
 

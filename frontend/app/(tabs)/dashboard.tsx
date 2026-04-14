@@ -220,7 +220,8 @@ export default function DashboardScreen() {
           </View>
         </View>
 
-        {/* Open Tables Section */}
+        {/* Open Tables Section - Only for Restoran */}
+        {user?.business_type === 'restoran' && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.sectionHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -316,8 +317,10 @@ export default function DashboardScreen() {
             </View>
           )}
         </View>
+        )}
 
-        {/* Waiter Sales Section */}
+        {/* Waiter Sales Section - Only for Restoran */}
+        {user?.business_type === 'restoran' && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>{t('waiter_sales')}</Text>
@@ -410,6 +413,7 @@ export default function DashboardScreen() {
             );
           })}
         </View>
+        )}
 
         {/* Hourly Sales Chart */}
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
