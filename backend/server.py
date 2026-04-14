@@ -10,19 +10,21 @@ from typing import List
 import uuid
 from datetime import datetime
 
-# Import auth routes
+# Import routes
 from routes.auth import router as auth_router, set_db as set_auth_db
+from routes.data import router as data_router
+from services import init_patron_pool, init_data_pool, close_pools
 
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
+# MongoDB connection (for tenant names + additional tenants)
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Set DB for auth routes
+# Set MongoDB for auth routes (tenant management)
 set_auth_db(db)
 
 # Create the main app without a prefix
@@ -58,11 +60,26 @@ async def get_status_checks():
     status_checks = await db.status_checks.find().to_list(1000)
     return [StatusCheck(**status_check) for status_check in status_checks]
 
-# Include auth routes under /api
+# Include auth and data routes under /api
 api_router.include_router(auth_router)
+api_router.include_router(data_router)
 
 # Include the router in the main app
 app.include_router(api_router)
+
+
+@app.on_event("startup")
+async def startup():
+    try:
+        await init_patron_pool()
+        logging.info("patron MySQL pool ready")
+    except Exception as e:
+        logging.error(f"Failed to init patron pool: {e}")
+    try:
+        await init_data_pool()
+        logging.info("kasacepteweb MySQL pool ready")
+    except Exception as e:
+        logging.error(f"Failed to init data pool: {e}")
 
 app.add_middleware(
     CORSMiddleware,
