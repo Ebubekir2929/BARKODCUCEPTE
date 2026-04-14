@@ -118,6 +118,8 @@ function transformApiData(apiData: any): DashboardData {
     },
     cancelledReceipts,
     openTables,
+    topSelling: topProducts,
+    leastSelling: worstProducts,
     topProducts,
     worstProducts,
     waiterLocations: [],

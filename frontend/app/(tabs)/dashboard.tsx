@@ -58,9 +58,10 @@ export default function DashboardScreen() {
 
   // Calculate totals from all branches
   const totals = useMemo(() => {
+    const branches = sourceData?.branchSales || [];
     const filteredBranches = filters.branchId
-      ? sourceData.branchSales.filter((b) => b.branchId === filters.branchId)
-      : sourceData.branchSales;
+      ? branches.filter((b) => b.branchId === filters.branchId)
+      : branches;
 
     return filteredBranches.reduce(
       (acc, branch) => ({
@@ -75,7 +76,9 @@ export default function DashboardScreen() {
 
   // Best selling hour
   const bestSellingHour = useMemo(() => {
-    return sourceData.hourlySales.reduce((max, hour) => hour.amount > max.amount ? hour : max, sourceData.hourlySales[0]);
+    const hours = sourceData?.hourlySales || [];
+    if (hours.length === 0) return { hour: '-', amount: 0, transactions: 0 };
+    return hours.reduce((max, hour) => hour.amount > max.amount ? hour : max, hours[0]);
   }, [sourceData]);
 
   const onRefresh = async () => {
@@ -97,11 +100,15 @@ export default function DashboardScreen() {
     };
   }, [totals, sourceData]);
 
-  const maxHourAmount = useMemo(() => Math.max(...sourceData.hourlySales.map(h => h.amount)), [sourceData]);
+  const maxHourAmount = useMemo(() => {
+    const hours = sourceData?.hourlySales || [];
+    if (hours.length === 0) return 1;
+    return Math.max(...hours.map(h => h.amount));
+  }, [sourceData]);
 
   // Open Tables computed values
   const openTableTotals = useMemo(() => {
-    return sourceData.openTables.reduce(
+    return (sourceData?.openTables || []).reduce(
       (acc, table) => ({
         amount: acc.amount + table.amount,
         paid: acc.paid + table.paidAmount,
@@ -154,7 +161,9 @@ export default function DashboardScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      {/* Status bar separator */}
+      <View style={[styles.statusBarLine, { backgroundColor: colors.border }]} />
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <View>
@@ -251,7 +260,7 @@ export default function DashboardScreen() {
               </View>
             </View>
             <View style={[styles.openTableCount, { backgroundColor: colors.primary + '15' }]}>
-              <Text style={[styles.openTableCountText, { color: colors.primary }]}>{sourceData.openTables.length}</Text>
+              <Text style={[styles.openTableCountText, { color: colors.primary }]}>{(sourceData?.openTables || []).length}</Text>
             </View>
           </View>
 
@@ -280,7 +289,7 @@ export default function DashboardScreen() {
           </View>
 
           {/* Open Tables List - Flat */}
-          {sourceData.openTables.map((table) => (
+          {(sourceData?.openTables || []).map((table) => (
             <TouchableOpacity
               key={table.id}
               style={[styles.openTableCard, { backgroundColor: colors.background, borderColor: colors.border }]}
@@ -329,7 +338,7 @@ export default function DashboardScreen() {
             </TouchableOpacity>
           ))}
 
-          {sourceData.openTables.length === 0 && (
+          {(sourceData?.openTables || []).length === 0 && (
             <View style={styles.emptyState}>
               <Ionicons name="restaurant-outline" size={40} color={colors.textSecondary} />
               <Text style={[styles.emptyStateText, { color: colors.textSecondary }]}>{t('no_open_tables')}</Text>
@@ -345,12 +354,12 @@ export default function DashboardScreen() {
             <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>{t('waiter_sales')}</Text>
             <View style={[styles.openTableCount, { backgroundColor: colors.primary + '15' }]}>
               <Text style={[styles.openTableCountText, { color: colors.primary }]}>
-                {sourceData.waiterLocations.reduce((sum, loc) => sum + loc.waiterCount, 0)} {t('waiter_count')}
+                {(sourceData?.waiterLocations || []).reduce((sum, loc) => sum + loc.waiterCount, 0)} {t('waiter_count')}
               </Text>
             </View>
           </View>
 
-          {sourceData.waiterLocations.map((loc) => {
+          {(sourceData?.waiterLocations || []).map((loc) => {
             const isExpanded = expandedWaiterLocation === loc.location;
             return (
               <View key={loc.location} style={[styles.waiterLocationCard, { borderColor: colors.border }]}>
@@ -449,7 +458,7 @@ export default function DashboardScreen() {
           {/* Bar Chart */}
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chartScroll}>
             <View style={styles.barChart}>
-              {sourceData.hourlySales.map((hour, index) => {
+              {(sourceData?.hourlySales || []).map((hour, index) => {
                 const barHeight = (hour.amount / maxHourAmount) * 150;
                 const isHighlighted = highlightedHourIndex === index;
                 const isBest = hour.hour === bestSellingHour.hour;
@@ -491,7 +500,7 @@ export default function DashboardScreen() {
         {/* Top Selling Products */}
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>En Çok Satan Ürünler</Text>
-          {sourceData.topSelling.slice(0, 5).map((product, index) => (
+          {(sourceData.topSelling || []).slice(0, 5).map((product, index) => (
             <View key={product.id} style={[styles.productItem, { borderBottomColor: colors.border }]}>
               <View style={[styles.productRank, { backgroundColor: colors.success + '20' }]}>
                 <Text style={[styles.productRankText, { color: colors.success }]}>{index + 1}</Text>
@@ -512,7 +521,7 @@ export default function DashboardScreen() {
         {/* Least Selling Products */}
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>En Az Satan Ürünler</Text>
-          {sourceData.leastSelling.slice(0, 5).map((product, index) => (
+          {(sourceData.leastSelling || []).slice(0, 5).map((product, index) => (
             <View key={product.id} style={[styles.productItem, { borderBottomColor: colors.border }]}>
               <View style={[styles.productRank, { backgroundColor: colors.error + '20' }]}>
                 <Text style={[styles.productRankText, { color: colors.error }]}>{index + 1}</Text>
@@ -533,13 +542,13 @@ export default function DashboardScreen() {
         {/* Location Summary */}
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Lokasyon Özeti</Text>
-          {sourceData.branchSales.map((branch, index) => (
+          {(sourceData?.branchSales || []).map((branch, index) => (
             <View 
               key={branch.branchId} 
               style={[
                 styles.locationCard, 
                 { borderBottomColor: colors.border },
-                index === sourceData.branchSales.length - 1 && { borderBottomWidth: 0 }
+                index === (sourceData?.branchSales || []).length - 1 && { borderBottomWidth: 0 }
               ]}
             >
               <Text style={[styles.locationName, { color: colors.text }]}>{branch.branchName}</Text>
@@ -616,7 +625,7 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             </View>
             <View style={[styles.modalBody, { backgroundColor: colors.surface }]}>
-              {sourceData.branchSales.map((branch) => {
+              {(sourceData?.branchSales || []).map((branch) => {
                 const value = selectedCardType === 'cash' ? branch.sales.cash
                   : selectedCardType === 'card' ? branch.sales.card
                   : selectedCardType === 'openAccount' ? branch.sales.openAccount
@@ -1074,6 +1083,9 @@ export default function DashboardScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  statusBarLine: {
+    height: 1,
   },
   header: {
     flexDirection: 'row',
