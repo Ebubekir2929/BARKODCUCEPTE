@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -41,6 +41,15 @@ export default function DashboardScreen() {
 
   // Use live data hook with filter support (must be after filters state)
   const { data: sourceData, isLoading: dataLoading, error: dataError, lastSynced, refresh: refreshData, isLive, isFilterActive: isDataFiltered } = useLiveData(filters);
+
+  // Cache totals per data source so they persist during source switching
+  const [sourceTotals, setSourceTotals] = useState<Record<string, number>>({});
+  useEffect(() => {
+    const total = sourceData?.weeklyComparison?.thisWeek?.total || 0;
+    if (total > 0) {
+      setSourceTotals(prev => ({ ...prev, [activeSource]: total }));
+    }
+  }, [activeSource, sourceData?.weeklyComparison?.thisWeek?.total]);
 
   const [refreshing, setRefreshing] = useState(false);
   const [selectedCardType, setSelectedCardType] = useState<'cash' | 'card' | 'openAccount' | 'total' | null>(null);
@@ -202,7 +211,7 @@ export default function DashboardScreen() {
       </View>
 
       {/* Global Data Source Selector */}
-      <DataSourceSelector totals={{ [activeSource]: sourceData?.weeklyComparison?.thisWeek?.total || 0 }} />
+      <DataSourceSelector totals={sourceTotals} />
 
       {/* Active Filter Banner */}
       {isFilterActive && (
