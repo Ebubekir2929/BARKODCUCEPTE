@@ -11,6 +11,110 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/data", tags=["data"])
 
 
+def _sum_float(val):
+    """Safely parse a numeric string/value to float"""
+    try:
+        return float(val) if val is not None else 0.0
+    except (ValueError, TypeError):
+        return 0.0
+
+
+def aggregate_dataset(key: str, raw_items: list) -> list:
+    """Aggregate multiple days of data into summarized results"""
+    if not raw_items:
+        return []
+    
+    if key == 'financial_data':
+        # Sum all numeric fields across days → single row
+        agg = {}
+        for item in raw_items:
+            for k, v in item.items():
+                agg[k] = agg.get(k, 0) + _sum_float(v)
+        for k, v in agg.items():
+            agg[k] = f"{v:.8f}"
+        return [agg]
+    
+    elif key == 'financial_data_location':
+        # Group by LOKASYON, sum numeric fields
+        loc_map = {}
+        numeric_fields = ['GENELTOPLAM', 'NAKIT', 'KREDI_KARTI', 'VERESIYE', 'TOPLAM', 'KDV', 'FISTOPLAM', 'NETCIRO']
+        for item in raw_items:
+            loc = item.get('LOKASYON', 'Bilinmeyen')
+            if loc not in loc_map:
+                loc_map[loc] = {k: v for k, v in item.items()}
+                for f in numeric_fields:
+                    loc_map[loc][f] = _sum_float(item.get(f))
+            else:
+                for f in numeric_fields:
+                    loc_map[loc][f] = loc_map[loc].get(f, 0) + _sum_float(item.get(f))
+        # Convert back to string format
+        result = []
+        for loc, data in loc_map.items():
+            row = dict(data)
+            for f in numeric_fields:
+                if f in row and isinstance(row[f], (int, float)):
+                    row[f] = f"{row[f]:.8f}"
+            result.append(row)
+        return result
+    
+    elif key == 'hourly_data':
+        # Group by SAAT_ADI, sum TOPLAM
+        hour_map = {}
+        for item in raw_items:
+            hour = item.get('SAAT_ADI', '')
+            if hour not in hour_map:
+                hour_map[hour] = dict(item)
+                hour_map[hour]['TOPLAM'] = _sum_float(item.get('TOPLAM'))
+            else:
+                hour_map[hour]['TOPLAM'] = hour_map[hour].get('TOPLAM', 0) + _sum_float(item.get('TOPLAM'))
+        result = []
+        for h, data in sorted(hour_map.items()):
+            row = dict(data)
+            row['TOPLAM'] = f"{row['TOPLAM']:.8f}" if isinstance(row['TOPLAM'], (int, float)) else row['TOPLAM']
+            result.append(row)
+        return result
+    
+    elif key in ('top10_stock_movements', 'down10_stock_movements'):
+        # Group by STOK_AD, sum MIKTAR_CIKIS and TUTAR_CIKIS
+        stock_map = {}
+        for item in raw_items:
+            name = item.get('STOK_AD', '')
+            if name not in stock_map:
+                stock_map[name] = dict(item)
+                stock_map[name]['MIKTAR_CIKIS'] = _sum_float(item.get('MIKTAR_CIKIS'))
+                stock_map[name]['TUTAR_CIKIS'] = _sum_float(item.get('TUTAR_CIKIS'))
+            else:
+                stock_map[name]['MIKTAR_CIKIS'] = stock_map[name].get('MIKTAR_CIKIS', 0) + _sum_float(item.get('MIKTAR_CIKIS'))
+                stock_map[name]['TUTAR_CIKIS'] = stock_map[name].get('TUTAR_CIKIS', 0) + _sum_float(item.get('TUTAR_CIKIS'))
+        
+        result = list(stock_map.values())
+        result.sort(key=lambda x: x.get('TUTAR_CIKIS', 0), reverse=(key == 'top10_stock_movements'))
+        for row in result:
+            for f in ('MIKTAR_CIKIS', 'TUTAR_CIKIS'):
+                if isinstance(row.get(f), (int, float)):
+                    row[f] = f"{row[f]:.6f}"
+        return result[:10]
+    
+    elif key == 'cancel_data':
+        # Group by LOKASYON, sum amounts
+        loc_map = {}
+        for item in raw_items:
+            loc = item.get('LOKASYON', 'Bilinmeyen')
+            if loc not in loc_map:
+                loc_map[loc] = dict(item)
+                loc_map[loc]['TUTAR_FIS'] = _sum_float(item.get('TUTAR_FIS'))
+                loc_map[loc]['TUTAR_SATIR'] = _sum_float(item.get('TUTAR_SATIR'))
+            else:
+                loc_map[loc]['TUTAR_FIS'] = loc_map[loc].get('TUTAR_FIS', 0) + _sum_float(item.get('TUTAR_FIS'))
+                loc_map[loc]['TUTAR_SATIR'] = loc_map[loc].get('TUTAR_SATIR', 0) + _sum_float(item.get('TUTAR_SATIR'))
+        return list(loc_map.values())
+    
+    else:
+        # For acik_masalar, iptal_ozet etc. - just return latest day's data (no aggregation)
+        return raw_items
+
+
+
 async def fetch_dataset(pool, tenant_id: str, dataset_key: str, filter_date: Optional[str] = None):
     """Fetch dataset - if filter_date given, find record matching that date, otherwise get latest"""
     async with pool.acquire() as conn:
@@ -101,64 +205,73 @@ async def get_dashboard_data(
     result = {}
     
     if sdate:
-        # Filtered mode - single date or date range
         if not edate:
             edate = sdate
         
         if sdate == edate:
-            # Single date - simple LIKE query per key
-            filter_date = sdate
+            # Single date
             for key in dashboard_keys:
-                result[key] = await fetch_dataset(pool, tenant_id, key, filter_date)
-                if "params" in result[key]:
-                    del result[key]["params"]
+                result[key] = await fetch_dataset(pool, tenant_id, key, sdate)
+                result[key].pop("params", None)
         else:
-            # Date range - aggregate
-            try:
-                start = datetime.strptime(sdate, "%Y-%m-%d").date()
-                end = datetime.strptime(edate, "%Y-%m-%d").date()
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Tarih formatı hatalı (YYYY-MM-DD)")
+            # Date range - fetch ALL records once and filter/aggregate in Python
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("""
+                        SELECT dataset_key, data_json, row_count, synced_at, updated_at, params_json
+                        FROM dataset_cache 
+                        WHERE tenant_id = %s
+                        ORDER BY updated_at DESC
+                    """, (tenant_id,))
+                    all_rows = await cur.fetchall()
             
+            # Group rows by dataset_key, filtered by date range
+            from collections import defaultdict
+            keyed_data = defaultdict(list)
+            keyed_meta = {}
+            
+            for row in all_rows:
+                dk, data_json, row_count, synced_at, updated_at, params_json = row
+                if dk not in dashboard_keys:
+                    continue
+                try:
+                    params = json.loads(params_json) if params_json else {}
+                except (json.JSONDecodeError, TypeError):
+                    params = {}
+                
+                sdate_val = params.get('sdate', '') if isinstance(params, dict) else ''
+                if not sdate_val:
+                    continue
+                
+                # Check if this record's date falls within the range
+                record_date = sdate_val[:10]  # "2026-04-13"
+                if sdate <= record_date <= edate:
+                    try:
+                        data = json.loads(data_json) if data_json else []
+                    except json.JSONDecodeError:
+                        data = []
+                    
+                    if isinstance(data, list):
+                        keyed_data[dk].extend(data)
+                    else:
+                        keyed_data[dk].append(data)
+                    
+                    if dk not in keyed_meta:
+                        keyed_meta[dk] = {
+                            "synced_at": synced_at.isoformat() if synced_at else None,
+                            "updated_at": updated_at.isoformat() if updated_at else None,
+                        }
+            
+            # Aggregate each dataset
             for key in dashboard_keys:
-                all_data = []
-                latest_synced = None
-                latest_updated = None
+                raw = keyed_data.get(key, [])
+                meta = keyed_meta.get(key, {"synced_at": None, "updated_at": None})
                 
-                current = start
-                while current <= end:
-                    date_str = current.strftime("%Y-%m-%d")
-                    day_result = await fetch_dataset(pool, tenant_id, key, date_str)
-                    if day_result["data"]:
-                        if isinstance(day_result["data"], list):
-                            all_data.extend(day_result["data"])
-                        else:
-                            all_data.append(day_result["data"])
-                        if day_result.get("synced_at"):
-                            latest_synced = day_result["synced_at"]
-                        if day_result.get("updated_at"):
-                            latest_updated = day_result["updated_at"]
-                    current += timedelta(days=1)
-                
-                # For financial_data, aggregate numeric fields
-                if key == 'financial_data' and all_data:
-                    aggregated = {}
-                    for item in all_data:
-                        for k, v in item.items():
-                            try:
-                                aggregated[k] = aggregated.get(k, 0) + float(v)
-                            except (ValueError, TypeError):
-                                aggregated[k] = v
-                    for k, v in aggregated.items():
-                        if isinstance(v, float):
-                            aggregated[k] = f"{v:.8f}"
-                    all_data = [aggregated]
-                
+                aggregated = aggregate_dataset(key, raw)
                 result[key] = {
-                    "data": all_data,
-                    "row_count": len(all_data),
-                    "synced_at": latest_synced,
-                    "updated_at": latest_updated,
+                    "data": aggregated,
+                    "row_count": len(aggregated),
+                    **meta,
                 }
     else:
         # Single date or real-time
