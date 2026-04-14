@@ -4,7 +4,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
 import { useDataSourceStore, DataSource } from '../store/dataSourceStore';
 import { useAuthStore } from '../store/authStore';
-import { getDataBySource } from '../data/mockData';
 
 const DATA_SOURCE_KEYS: DataSource[] = ['data1', 'data2', 'data3'];
 
@@ -12,8 +11,12 @@ const formatCurrency = (amount: number) => {
   return '₺' + amount.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 };
 
+interface DataSourceSelectorProps {
+  totals?: Record<string, number>; // key → total amount from live data
+}
+
 // === DASHBOARD: Compact interactive selector ===
-export const DataSourceSelector: React.FC = () => {
+export const DataSourceSelector: React.FC<DataSourceSelectorProps> = ({ totals }) => {
   const { colors } = useThemeStore();
   const { activeSource, setActiveSource } = useDataSourceStore();
   const { user } = useAuthStore();
@@ -22,17 +25,14 @@ export const DataSourceSelector: React.FC = () => {
     if (user?.tenants && user.tenants.length > 0) {
       return user.tenants.slice(0, 10).map((tenant, index) => {
         const key = DATA_SOURCE_KEYS[index] || (`data${index + 1}` as DataSource);
-        const sourceData = getDataBySource(key);
-        const total = sourceData?.weeklyComparison?.thisWeek?.total || 0;
+        const total = totals?.[key] ?? 0;
         return { key, label: tenant.name || `Data ${index + 1}`, total };
       });
     }
-    return DATA_SOURCE_KEYS.map((key, index) => {
-      const sourceData = getDataBySource(key);
-      const total = sourceData?.weeklyComparison?.thisWeek?.total || 0;
-      return { key, label: `Data ${index + 1}`, total };
-    });
-  }, [user?.tenants]);
+    return [];
+  }, [user?.tenants, totals]);
+
+  if (dataSources.length === 0) return null;
 
   return (
     <View style={[styles.container, { borderBottomColor: colors.border }]}>
@@ -68,12 +68,14 @@ export const DataSourceSelector: React.FC = () => {
                 >
                   {src.label}
                 </Text>
-                <Text
-                  style={[styles.chipTotal, { color: isActive ? 'rgba(255,255,255,0.8)' : colors.textSecondary }]}
-                  numberOfLines={1}
-                >
-                  {formatCurrency(src.total)}
-                </Text>
+                {src.total > 0 && (
+                  <Text
+                    style={[styles.chipTotal, { color: isActive ? 'rgba(255,255,255,0.8)' : colors.textSecondary }]}
+                    numberOfLines={1}
+                  >
+                    {formatCurrency(src.total)}
+                  </Text>
+                )}
               </View>
             </TouchableOpacity>
           );
@@ -96,9 +98,10 @@ export const ActiveSourceIndicator: React.FC = () => {
         return user.tenants[index].name;
       }
     }
-    const idx = DATA_SOURCE_KEYS.indexOf(activeSource);
-    return `Data ${idx + 1}`;
+    return null;
   }, [user?.tenants, activeSource]);
+
+  if (!activeLabel) return null;
 
   return (
     <View style={[styles.indicatorBar, { borderBottomColor: colors.border }]}>
@@ -110,7 +113,6 @@ export const ActiveSourceIndicator: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  // Dashboard selector
   container: {
     borderBottomWidth: 1,
     paddingVertical: 10,
@@ -138,7 +140,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 1,
   },
-  // Other pages indicator
   indicatorBar: {
     flexDirection: 'row',
     alignItems: 'center',

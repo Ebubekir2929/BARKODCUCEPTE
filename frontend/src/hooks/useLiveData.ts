@@ -1,17 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuthStore } from '../store/authStore';
 import { useDataSourceStore, DataSource } from '../store/dataSourceStore';
-import { getDataBySource } from '../data/mockData';
 import {
   BranchSales, HourlySales, CancelledReceipt, OpenTable,
-  TopProduct, WaiterLocation, WaiterSale,
+  TopProduct, WaiterLocation,
 } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
-
 const DATA_SOURCE_KEYS: DataSource[] = ['data1', 'data2', 'data3'];
 
-interface DashboardData {
+export interface DashboardData {
   branchSales: BranchSales[];
   hourlySales: HourlySales[];
   weeklyComparison: {
@@ -20,10 +18,28 @@ interface DashboardData {
   };
   cancelledReceipts: CancelledReceipt[];
   openTables: OpenTable[];
+  topSelling: TopProduct[];
+  leastSelling: TopProduct[];
   topProducts: TopProduct[];
   worstProducts: TopProduct[];
   waiterLocations: WaiterLocation[];
 }
+
+const EMPTY_DATA: DashboardData = {
+  branchSales: [],
+  hourlySales: [],
+  weeklyComparison: {
+    thisWeek: { cash: 0, card: 0, openAccount: 0, total: 0 },
+    lastWeek: { cash: 0, card: 0, openAccount: 0, total: 0 },
+  },
+  cancelledReceipts: [],
+  openTables: [],
+  topSelling: [],
+  leastSelling: [],
+  topProducts: [],
+  worstProducts: [],
+  waiterLocations: [],
+};
 
 function transformApiData(apiData: any): DashboardData {
   // Transform financial_data_location → branchSales
@@ -43,7 +59,7 @@ function transformApiData(apiData: any): DashboardData {
     });
   });
 
-  // Transform financial_data → weeklyComparison (thisWeek)
+  // financial_data → weeklyComparison (thisWeek)
   const financialData = apiData?.financial_data?.data?.[0] || {};
   const thisWeek = {
     cash: parseFloat(financialData.NAKIT || '0'),
@@ -52,7 +68,7 @@ function transformApiData(apiData: any): DashboardData {
     total: parseFloat(financialData.GENELTOPLAM || '0'),
   };
 
-  // Transform hourly_data → hourlySales
+  // hourly_data → hourlySales
   const hourlyRaw = apiData?.hourly_data?.data || [];
   const hourlySales: HourlySales[] = hourlyRaw.map((h: any, idx: number) => ({
     hour: h.SAAT_ADI || `${idx}:00`,
@@ -61,7 +77,7 @@ function transformApiData(apiData: any): DashboardData {
     products: [],
   }));
 
-  // Transform top10_stock_movements → topProducts
+  // top10 → topProducts / topSelling
   const topRaw = apiData?.top10_stock_movements?.data || [];
   const topProducts: TopProduct[] = topRaw.map((p: any, idx: number) => ({
     id: `top-${idx}`,
@@ -70,19 +86,16 @@ function transformApiData(apiData: any): DashboardData {
     revenue: parseFloat(p.TUTAR_CIKIS || '0'),
   }));
 
-  // Transform down10_stock_movements → worstProducts
+  // down10 → worstProducts / leastSelling
   const downRaw = apiData?.down10_stock_movements?.data || [];
-  const worstProducts: TopProduct[] = downRaw
-    .slice()
-    .reverse()
-    .map((p: any, idx: number) => ({
-      id: `down-${idx}`,
-      name: p.STOK_AD || 'Ürün',
-      quantity: parseFloat(p.MIKTAR_CIKIS || '0'),
-      revenue: parseFloat(p.TUTAR_CIKIS || '0'),
-    }));
+  const worstProducts: TopProduct[] = downRaw.slice().reverse().map((p: any, idx: number) => ({
+    id: `down-${idx}`,
+    name: p.STOK_AD || 'Ürün',
+    quantity: parseFloat(p.MIKTAR_CIKIS || '0'),
+    revenue: parseFloat(p.TUTAR_CIKIS || '0'),
+  }));
 
-  // Transform acik_masalar → openTables
+  // acik_masalar → openTables
   const masalarRaw = apiData?.acik_masalar?.data || [];
   const openTables: OpenTable[] = masalarRaw.map((m: any, idx: number) => ({
     id: `table-${m.MASA_ID || idx}`,
@@ -98,9 +111,12 @@ function transformApiData(apiData: any): DashboardData {
     dataSource: '',
   }));
 
-  // Cancel data → cancelledReceipts
+  // cancel_data → cancelledReceipts
   const cancelRaw = apiData?.cancel_data?.data || [];
-  const cancelledReceipts: CancelledReceipt[] = cancelRaw.map((c: any, idx: number) => ({
+  const cancelledReceipts: CancelledReceipt[] = cancelRaw.filter((c: any) => {
+    const amount = parseFloat(c.TUTAR_FIS || '0');
+    return amount > 0;
+  }).map((c: any, idx: number) => ({
     id: `cancel-${idx}`,
     receiptNo: `İPTAL-${idx + 1}`,
     date: new Date().toISOString(),
@@ -129,13 +145,12 @@ function transformApiData(apiData: any): DashboardData {
 export function useLiveData() {
   const { user, token } = useAuthStore();
   const { activeSource } = useDataSourceStore();
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [data, setData] = useState<DashboardData>(EMPTY_DATA);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Resolve tenant_id from active data source
   const activeTenantId = useCallback(() => {
     if (!user?.tenants || user.tenants.length === 0) return null;
     const index = DATA_SOURCE_KEYS.indexOf(activeSource);
@@ -148,9 +163,8 @@ export function useLiveData() {
   const fetchDashboard = useCallback(async () => {
     const tenantId = activeTenantId();
     if (!tenantId || !token) {
-      // No tenant → use mock data
-      const mock = getDataBySource(activeSource);
-      setData(mock);
+      setData(EMPTY_DATA);
+      setIsLoading(false);
       return;
     }
 
@@ -163,49 +177,35 @@ export function useLiveData() {
         { headers: { 'Authorization': `Bearer ${token}` } }
       );
 
-      if (!response.ok) {
-        throw new Error(`API Error: ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`API Error: ${response.status}`);
 
       const apiData = await response.json();
       const transformed = transformApiData(apiData);
       setData(transformed);
 
-      // Get latest sync time
       const syncTimes = Object.values(apiData)
         .map((v: any) => v?.synced_at)
         .filter(Boolean)
         .sort()
         .reverse();
-      if (syncTimes.length > 0) {
-        setLastSynced(syncTimes[0] as string);
-      }
+      if (syncTimes.length > 0) setLastSynced(syncTimes[0] as string);
     } catch (err: any) {
       console.error('Dashboard fetch error:', err);
       setError(err.message || 'Veri çekilemedi');
-      // Fallback to mock
-      const mock = getDataBySource(activeSource);
-      setData(mock);
     } finally {
       setIsLoading(false);
     }
   }, [activeTenantId, token, activeSource]);
 
-  // Initial fetch + auto refresh every 30 seconds
   useEffect(() => {
     fetchDashboard();
-
-    // Auto refresh
     if (intervalRef.current) clearInterval(intervalRef.current);
     intervalRef.current = setInterval(fetchDashboard, 30000);
-
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [fetchDashboard]);
 
   return {
-    data: data || getDataBySource(activeSource),
+    data,
     isLoading,
     error,
     lastSynced,

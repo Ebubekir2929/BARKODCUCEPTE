@@ -180,7 +180,7 @@ export default function DashboardScreen() {
       </View>
 
       {/* Global Data Source Selector */}
-      <DataSourceSelector />
+      <DataSourceSelector totals={{ [activeSource]: sourceData?.weeklyComparison?.thisWeek?.total || 0 }} />
 
       {/* Live data indicator */}
       {isLive && (
@@ -444,6 +444,7 @@ export default function DashboardScreen() {
         )}
 
         {/* Hourly Sales Chart */}
+        {(sourceData?.hourlySales || []).length > 0 && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>Saatlik Satışlar</Text>
@@ -496,8 +497,10 @@ export default function DashboardScreen() {
             Saate dokunarak detay görüntüleyin
           </Text>
         </View>
+        )}
 
         {/* Top Selling Products */}
+        {(sourceData?.topSelling || []).length > 0 && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>En Çok Satan Ürünler</Text>
           {(sourceData.topSelling || []).slice(0, 5).map((product, index) => (
@@ -517,8 +520,10 @@ export default function DashboardScreen() {
             </View>
           ))}
         </View>
+        )}
 
         {/* Least Selling Products */}
+        {(sourceData?.leastSelling || []).length > 0 && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>En Az Satan Ürünler</Text>
           {(sourceData.leastSelling || []).slice(0, 5).map((product, index) => (
@@ -538,8 +543,10 @@ export default function DashboardScreen() {
             </View>
           ))}
         </View>
+        )}
 
         {/* Location Summary */}
+        {(sourceData?.branchSales || []).length > 0 && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Lokasyon Özeti</Text>
           {(sourceData?.branchSales || []).map((branch, index) => (
@@ -599,6 +606,7 @@ export default function DashboardScreen() {
             </View>
           ))}
         </View>
+        )}
 
         {/* Bottom Spacing - Reduced */}
         <View style={{ height: 20 }} />
@@ -1269,7 +1277,7 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'flex-end',
   },
   modalContent: {
@@ -1281,6 +1289,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     alignSelf: 'flex-end',
     width: '100%',
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
   },
   modalHeader: {
     flexDirection: 'row',
