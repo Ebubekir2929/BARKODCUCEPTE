@@ -19,6 +19,23 @@ def _sum_float(val):
         return 0.0
 
 
+def _fix_large_ints(data):
+    """Convert large integers to strings to prevent JavaScript precision loss"""
+    if isinstance(data, list):
+        return [_fix_large_ints(item) for item in data]
+    elif isinstance(data, dict):
+        result = {}
+        for k, v in data.items():
+            if isinstance(v, int) and (v > 9007199254740991 or v < -9007199254740991):
+                result[k] = str(v)
+            elif isinstance(v, (dict, list)):
+                result[k] = _fix_large_ints(v)
+            else:
+                result[k] = v
+        return result
+    return data
+
+
 def aggregate_dataset(key: str, raw_items: list) -> list:
     """Aggregate multiple days of data into summarized results"""
     if not raw_items:
@@ -163,6 +180,9 @@ async def fetch_dataset(pool, tenant_id: str, dataset_key: str, filter_date: Opt
         params = json.loads(row[4]) if row[4] else {}
     except json.JSONDecodeError:
         params = {}
+    
+    # Fix large integers for JavaScript safety
+    data = _fix_large_ints(data)
     
     return {
         "data": data,
@@ -447,7 +467,7 @@ async def get_table_detail(
                 return {
                     "ok": True,
                     "request_uid": request_uid,
-                    "data": data if isinstance(data, list) else [],
+                    "data": _fix_large_ints(data) if isinstance(data, list) else [],
                 }
             
             if status == "error":
