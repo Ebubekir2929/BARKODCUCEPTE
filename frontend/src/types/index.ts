@@ -134,14 +134,15 @@ export interface OpenTable {
   tableNo: string;
   customerName: string;
   customerId: string;
-  amount: number;        // Tutar (toplam hesap)
-  paidAmount: number;    // Ödenen tutar
-  remainingAmount: number; // Kalan tutar
-  location: string;      // Lokasyon/Şube
-  section: string;       // Bölüm (Salon, Bahçe vb.)
-  openedAt: string;      // Açılış zamanı
-  itemCount: number;     // Ürün sayısı
-  dataSource: string;    // Veri kaynağı
+  posId: string;           // POS_ID for detail request
+  amount: number;
+  paidAmount: number;
+  remainingAmount: number;
+  location: string;
+  section: string;
+  openedAt: string;
+  itemCount: number;
+  dataSource: string;
 }
 
 

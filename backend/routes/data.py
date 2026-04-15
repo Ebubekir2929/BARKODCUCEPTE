@@ -377,3 +377,111 @@ async def get_available_dataset_keys(
             for r in rows
         ],
     }
+
+
+# === On-demand sync requests (via sync.php) ===
+
+import httpx
+import asyncio
+
+SYNC_URL = "https://kasaceptetransfer.berkyazilim.com/api/sync.php"
+
+
+async def sync_post(payload: dict, tenant_id: str) -> dict:
+    """Post to sync.php API"""
+    payload["tenant_id"] = tenant_id
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            SYNC_URL,
+            json=payload,
+            headers={"Content-Type": "application/json; charset=utf-8"},
+        )
+    data = resp.json()
+    if resp.status_code >= 400:
+        msg = data.get("error", data.get("message", f"HTTP {resp.status_code}"))
+        raise HTTPException(status_code=502, detail=msg)
+    if isinstance(data, dict) and data.get("ok") is False:
+        msg = data.get("error", data.get("message", "Bilinmeyen sync hatası"))
+        raise HTTPException(status_code=502, detail=msg)
+    return data
+
+
+@router.post("/table-detail")
+async def get_table_detail(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """On-demand: Request open table detail from POS via sync.php"""
+    tenant_id = body.get("tenant_id", "")
+    pos_id = body.get("pos_id")
+    
+    if not tenant_id or pos_id is None:
+        raise HTTPException(status_code=400, detail="tenant_id ve pos_id gerekli")
+    
+    try:
+        # Step 1: Create request
+        create_resp = await sync_post({
+            "action": "request_create",
+            "dataset_key": "acik_masa_detay",
+            "params": {"POS_ID": int(pos_id)},
+            "priority_no": 1,
+            "requested_by": "mobile",
+        }, tenant_id)
+        
+        request_uid = create_resp.get("request_uid", "")
+        if not request_uid:
+            raise HTTPException(status_code=502, detail="Detay isteği oluşturulamadı")
+        
+        # Step 2: Poll for result (max 35 seconds)
+        for _ in range(50):  # 50 * 0.7s = 35s max
+            status_resp = await sync_post({
+                "action": "request_status",
+                "request_uid": request_uid,
+                "include_data": True,
+            }, tenant_id)
+            
+            status = status_resp.get("status", "unknown")
+            
+            if status == "done":
+                data = status_resp.get("cache", {}).get("data", [])
+                return {
+                    "ok": True,
+                    "request_uid": request_uid,
+                    "data": data if isinstance(data, list) else [],
+                }
+            
+            if status == "error":
+                error_text = status_resp.get("error_text", "Bilinmeyen hata")
+                raise HTTPException(status_code=502, detail=f"POS hatası: {error_text}")
+            
+            await asyncio.sleep(0.7)
+        
+        raise HTTPException(status_code=504, detail="Detay zamanında gelmedi. Lütfen tekrar deneyin.")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Table detail error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sync-request")
+async def sync_request(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """Generic sync request proxy - for future on-demand queries"""
+    tenant_id = body.get("tenant_id", "")
+    action = body.get("action", "")
+    
+    if not tenant_id or not action:
+        raise HTTPException(status_code=400, detail="tenant_id ve action gerekli")
+    
+    try:
+        result = await sync_post(body, tenant_id)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Sync request error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

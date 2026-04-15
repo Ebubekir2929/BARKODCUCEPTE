@@ -114,6 +114,7 @@ function transformApiData(apiData: any): DashboardData {
     tableNo: String(m.MASA || idx + 1),
     customerName: '',
     customerId: '',
+    posId: String(m.POS_ID || ''),
     amount: parseFloat(m.TUTAR || '0'),
     paidAmount: parseFloat(m.ODENEN_TUTAR || '0'),
     remainingAmount: parseFloat(m.KALAN_TUTAR || '0'),

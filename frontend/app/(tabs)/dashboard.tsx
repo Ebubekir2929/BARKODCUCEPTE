@@ -67,6 +67,8 @@ export default function DashboardScreen() {
   // Open Tables state
   const [selectedOpenTable, setSelectedOpenTable] = useState<OpenTable | null>(null);
   const [expandedLocation, setExpandedLocation] = useState<string | null>(null);
+  const [tableDetailItems, setTableDetailItems] = useState<any[]>([]);
+  const [tableDetailLoading, setTableDetailLoading] = useState(false);
 
   // Waiter Sales state
   const [expandedWaiterLocation, setExpandedWaiterLocation] = useState<string | null>(null);
@@ -91,6 +93,41 @@ export default function DashboardScreen() {
     });
     return grouped;
   }, [sourceData?.openTables]);
+
+  // Fetch table detail from POS via sync
+  const fetchTableDetail = useCallback(async (table: OpenTable) => {
+    setSelectedOpenTable(table);
+    setTableDetailItems([]);
+    setTableDetailLoading(true);
+    
+    const tenantId = user?.tenants?.[0]?.tenant_id;
+    if (!tenantId || !table.posId) {
+      setTableDetailLoading(false);
+      return;
+    }
+    
+    try {
+      const { token: authToken } = useAuthStore.getState();
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/data/table-detail`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ tenant_id: tenantId, pos_id: table.posId }),
+      });
+      
+      const data = await response.json();
+      if (data.ok && data.data) {
+        setTableDetailItems(data.data);
+      }
+    } catch (err) {
+      console.error('Table detail error:', err);
+    } finally {
+      setTableDetailLoading(false);
+    }
+  }, [user?.tenants]);
+
 
   // Calculate totals from all branches
   const totals = useMemo(() => {
@@ -396,7 +433,7 @@ export default function DashboardScreen() {
                   <TouchableOpacity
                     key={table.id}
                     style={[styles.openTableCard, { backgroundColor: colors.background, borderColor: colors.border, marginLeft: 12 }]}
-                    onPress={() => setSelectedOpenTable(table)}
+                    onPress={() => fetchTableDetail(table)}
                     activeOpacity={0.7}
                   >
                     <View style={styles.openTableCardTop}>
@@ -955,87 +992,83 @@ export default function DashboardScreen() {
       {/* Open Table Detail Modal */}
       <Modal visible={!!selectedOpenTable} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent]}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
-                {t('table_detail')}
+                Masa Detayı
               </Text>
-              <TouchableOpacity onPress={() => setSelectedOpenTable(null)}>
+              <TouchableOpacity onPress={() => { setSelectedOpenTable(null); setTableDetailItems([]); }}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
             {selectedOpenTable && (
               <ScrollView style={[styles.modalBody, { backgroundColor: colors.surface }]} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
-                {/* Table Info Card */}
+                {/* Table Info */}
                 <View style={[styles.tableDetailHeader, { backgroundColor: colors.primary + '10' }]}>
-                  <View style={[styles.tableDetailIcon, { backgroundColor: getPaymentStatusColor(selectedOpenTable) + '20' }]}>
-                    <Ionicons name="restaurant" size={32} color={getPaymentStatusColor(selectedOpenTable)} />
+                  <View style={[styles.tableDetailIcon, { backgroundColor: colors.primary + '20' }]}>
+                    <Ionicons name="restaurant" size={32} color={colors.primary} />
                   </View>
-                  <Text style={[styles.tableDetailTitle, { color: colors.text }]}>{selectedOpenTable.tableNo}</Text>
-                  <Text style={[styles.tableDetailCustomer, { color: colors.textSecondary }]}>{selectedOpenTable.customerName}</Text>
-                  <View style={[styles.paymentBadge, { backgroundColor: getPaymentStatusColor(selectedOpenTable) + '15', marginTop: 8 }]}>
-                    <Text style={[styles.paymentBadgeText, { color: getPaymentStatusColor(selectedOpenTable) }]}>
-                      {getPaymentStatusText(selectedOpenTable)}
-                    </Text>
-                  </View>
+                  <Text style={[styles.tableDetailTitle, { color: colors.text }]}>Masa {selectedOpenTable.tableNo}</Text>
+                  {selectedOpenTable.section ? (
+                    <Text style={[styles.tableDetailCustomer, { color: colors.textSecondary }]}>{selectedOpenTable.section} · {selectedOpenTable.location}</Text>
+                  ) : (
+                    <Text style={[styles.tableDetailCustomer, { color: colors.textSecondary }]}>{selectedOpenTable.location}</Text>
+                  )}
+                  <Text style={[{ fontSize: 22, fontWeight: '800', color: colors.primary, marginTop: 8 }]}>
+                    ₺{selectedOpenTable.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                  </Text>
                 </View>
 
-                {/* Amount Details */}
-                <View style={styles.tableDetailGrid}>
-                  <View style={[styles.tableDetailGridItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <Ionicons name="receipt-outline" size={20} color={colors.primary} />
-                    <Text style={[styles.tableDetailGridLabel, { color: colors.textSecondary }]}>{t('amount_label')}</Text>
-                    <Text style={[styles.tableDetailGridValue, { color: colors.text }]}>
-                      ₺{selectedOpenTable.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                    </Text>
+                {/* Detail Items */}
+                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 16, marginBottom: 8 }]}>Sipariş Detayı</Text>
+                
+                {tableDetailLoading ? (
+                  <View style={{ alignItems: 'center', paddingVertical: 30 }}>
+                    <ActivityIndicator size="large" color={colors.primary} />
+                    <Text style={[{ color: colors.textSecondary, marginTop: 12, fontSize: 14 }]}>POS'tan veri alınıyor...</Text>
                   </View>
-                  <View style={[styles.tableDetailGridItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <Ionicons name="checkmark-circle-outline" size={20} color={colors.success} />
-                    <Text style={[styles.tableDetailGridLabel, { color: colors.textSecondary }]}>{t('paid_amount')}</Text>
-                    <Text style={[styles.tableDetailGridValue, { color: colors.success }]}>
-                      ₺{selectedOpenTable.paidAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                    </Text>
-                  </View>
-                  <View style={[styles.tableDetailGridItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <Ionicons name="time-outline" size={20} color={colors.error} />
-                    <Text style={[styles.tableDetailGridLabel, { color: colors.textSecondary }]}>{t('remaining_amount')}</Text>
-                    <Text style={[styles.tableDetailGridValue, { color: colors.error }]}>
-                      ₺{selectedOpenTable.remainingAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                    </Text>
-                  </View>
-                  <View style={[styles.tableDetailGridItem, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <Ionicons name="cube-outline" size={20} color={colors.info} />
-                    <Text style={[styles.tableDetailGridLabel, { color: colors.textSecondary }]}>{t('items_count')}</Text>
-                    <Text style={[styles.tableDetailGridValue, { color: colors.text }]}>
-                      {selectedOpenTable.itemCount}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Info Rows */}
-                <View style={[styles.tableDetailInfo, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <View style={[styles.tableDetailInfoRow, { borderBottomColor: colors.border }]}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Ionicons name="location-outline" size={18} color={colors.primary} />
-                      <Text style={[styles.tableDetailInfoLabel, { color: colors.textSecondary }]}>{t('location')}</Text>
+                ) : tableDetailItems.length > 0 ? (
+                  <View style={[{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }]}>
+                    {/* Table Header */}
+                    <View style={[{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 12, backgroundColor: colors.background }]}>
+                      <Text style={[{ flex: 3, fontSize: 12, fontWeight: '700', color: colors.textSecondary }]}>Ürün</Text>
+                      <Text style={[{ flex: 1, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>Miktar</Text>
+                      <Text style={[{ flex: 1.5, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>Tutar</Text>
                     </View>
-                    <Text style={[styles.tableDetailInfoValue, { color: colors.text }]}>{selectedOpenTable.location}</Text>
-                  </View>
-                  <View style={[styles.tableDetailInfoRow, { borderBottomColor: colors.border }]}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Ionicons name="time-outline" size={18} color={colors.primary} />
-                      <Text style={[styles.tableDetailInfoLabel, { color: colors.textSecondary }]}>{t('opened_at')}</Text>
+                    {tableDetailItems.map((item: any, idx: number) => {
+                      const tutar = item.TUTAR ? parseFloat(item.TUTAR) : (parseFloat(item.MIKTAR || '0') * parseFloat(item.FIYAT || '0'));
+                      return (
+                        <View key={idx} style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border, alignItems: 'center' }]}>
+                          <View style={{ flex: 3 }}>
+                            <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]}>{item.AD || 'Ürün'}</Text>
+                            <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>₺{parseFloat(item.FIYAT || '0').toFixed(2)} / {item.STOK_BIRIM_AD || 'Adet'}</Text>
+                          </View>
+                          <Text style={[{ flex: 1, fontSize: 14, fontWeight: '600', color: colors.text, textAlign: 'center' }]}>
+                            {parseFloat(item.MIKTAR || '0').toFixed(item.STOK_BIRIM_AD === 'Kg' ? 3 : 0)}
+                          </Text>
+                          <Text style={[{ flex: 1.5, fontSize: 14, fontWeight: '700', color: colors.primary, textAlign: 'right' }]}>
+                            ₺{tutar.toFixed(2)}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                    {/* Total row */}
+                    <View style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 2, borderTopColor: colors.border, backgroundColor: colors.background }]}>
+                      <Text style={[{ flex: 4, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>Toplam</Text>
+                      <Text style={[{ flex: 1.5, fontSize: 16, fontWeight: '800', color: colors.primary, textAlign: 'right' }]}>
+                        ₺{tableDetailItems.reduce((sum: number, item: any) => {
+                          const tutar = item.TUTAR ? parseFloat(item.TUTAR) : (parseFloat(item.MIKTAR || '0') * parseFloat(item.FIYAT || '0'));
+                          return sum + tutar;
+                        }, 0).toFixed(2)}
+                      </Text>
                     </View>
-                    <Text style={[styles.tableDetailInfoValue, { color: colors.text }]}>{selectedOpenTable.openedAt}</Text>
                   </View>
-                  <View style={styles.tableDetailInfoRow}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Ionicons name="server-outline" size={18} color={colors.primary} />
-                      <Text style={[styles.tableDetailInfoLabel, { color: colors.textSecondary }]}>{t('data_source')}</Text>
-                    </View>
-                    <Text style={[styles.tableDetailInfoValue, { color: colors.text }]}>{selectedOpenTable.dataSource}</Text>
+                ) : (
+                  <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+                    <Ionicons name="document-outline" size={32} color={colors.textSecondary} />
+                    <Text style={[{ color: colors.textSecondary, marginTop: 8, fontSize: 14 }]}>Detay bilgisi bulunamadı</Text>
                   </View>
-                </View>
+                )}
               </ScrollView>
             )}
           </View>
