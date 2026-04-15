@@ -73,6 +73,8 @@ export default function DashboardScreen() {
   const [iptalDetailLoading, setIptalDetailLoading] = useState(false);
   const [showIptalListModal, setShowIptalListModal] = useState(false);
   const [iptalListLocation, setIptalListLocation] = useState<string>('');
+  const [iptalListItems, setIptalListItems] = useState<any[]>([]);
+  const [iptalListLoading, setIptalListLoading] = useState(false);
 
   // Open Tables state
   const [selectedOpenTable, setSelectedOpenTable] = useState<OpenTable | null>(null);
@@ -272,11 +274,32 @@ export default function DashboardScreen() {
     }
   }, [activeTenantId]);
 
-  // Lokasyon bazlı iptal listesini aç
-  const openLocationIptalList = (locationName: string) => {
+  // Lokasyon bazlı iptal listesini aç ve POS'tan tam listeyi çek
+  const openLocationIptalList = useCallback(async (locationName: string) => {
     setIptalListLocation(locationName);
+    setIptalListItems([]);
+    setIptalListLoading(true);
     setShowIptalListModal(true);
-  };
+    
+    try {
+      const { token: authToken } = useAuthStore.getState();
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/data/iptal-list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
+        body: JSON.stringify({ tenant_id: activeTenantId }),
+      });
+      const data = await response.json();
+      if (data.ok && data.data) {
+        // Filter by location
+        const filtered = data.data.filter((d: any) => d.LOKASYON === locationName);
+        setIptalListItems(filtered);
+      }
+    } catch (err) {
+      console.error('Iptal list error:', err);
+    } finally {
+      setIptalListLoading(false);
+    }
+  }, [activeTenantId]);
 
   const getCardTypeLabel = (type: string) => {
     switch (type) {
@@ -869,11 +892,12 @@ export default function DashboardScreen() {
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 {iptalListLocation} - İptal Fişleri
               </Text>
-              <TouchableOpacity onPress={() => setShowIptalListModal(false)}>
+              <TouchableOpacity onPress={() => { setShowIptalListModal(false); setIptalListItems([]); }}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
             <ScrollView style={[styles.modalBody, { backgroundColor: colors.surface }]} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
+              {/* Özet */}
               {(() => {
                 const locOzetRows = (sourceData?.iptalOzet || []).filter(
                   (o: any) => o.LOKASYON && o.LOKASYON === iptalListLocation
@@ -884,42 +908,60 @@ export default function DashboardScreen() {
                 const totalSatirAdet = locOzetRows.reduce((s: number, o: any) => s + parseInt(o.SATIR_IPTAL_ADET || '0'), 0);
                 
                 return (
-                  <>
-                    <View style={[styles.cancellationSummary, { backgroundColor: colors.error + '15' }]}>
-                      <Ionicons name="alert-circle" size={24} color={colors.error} />
-                      <View style={styles.cancellationSummaryText}>
-                        <Text style={[styles.cancellationCount, { color: colors.error }]}>
-                          {totalFisAdet + totalSatirAdet} İptal ({totalFisAdet} fiş, {totalSatirAdet} satır)
-                        </Text>
-                        <Text style={[styles.cancellationTotal, { color: colors.text }]}>
-                          Fiş: ₺{totalFisTutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} · Satır: ₺{totalSatirTutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                        </Text>
-                      </View>
+                  <View style={[styles.cancellationSummary, { backgroundColor: colors.error + '15' }]}>
+                    <Ionicons name="alert-circle" size={24} color={colors.error} />
+                    <View style={styles.cancellationSummaryText}>
+                      <Text style={[styles.cancellationCount, { color: colors.error }]}>
+                        {totalFisAdet + totalSatirAdet} İptal ({totalFisAdet} fiş, {totalSatirAdet} satır)
+                      </Text>
+                      <Text style={[styles.cancellationTotal, { color: colors.text }]}>
+                        Toplam: ₺{(totalFisTutar + totalSatirTutar).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                      </Text>
                     </View>
-                    
-                    {locOzetRows.map((item: any, idx: number) => (
-                      <View
-                        key={idx}
-                        style={[styles.receiptCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-                      >
-                        <View style={styles.receiptCardHeader}>
-                          <View style={{ flex: 1 }}>
-                            <Text style={[styles.receiptCardNo, { color: colors.text }]}>{item.PERSONEL_AD || 'Personel'}</Text>
-                            <Text style={[styles.receiptCardDate, { color: colors.textSecondary }]}>
-                              {parseInt(item.FIS_IPTAL_ADET || '0')} fiş iptal · {parseInt(item.SATIR_IPTAL_ADET || '0')} satır iptal
-                            </Text>
-                          </View>
-                          <View style={{ alignItems: 'flex-end' }}>
-                            <Text style={[styles.receiptCardAmount, { color: colors.error }]}>
-                              ₺{(parseFloat(item.FIS_IPTAL_TUTAR || '0') + parseFloat(item.SATIR_IPTAL_TUTAR || '0')).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                            </Text>
-                          </View>
-                        </View>
-                      </View>
-                    ))}
-                  </>
+                  </View>
                 );
               })()}
+
+              {/* İptal Fiş Listesi - POS'tan çekilmiş */}
+              {iptalListLoading ? (
+                <View style={{ alignItems: 'center', paddingVertical: 30 }}>
+                  <ActivityIndicator size="large" color={colors.error} />
+                  <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>İptal listesi yükleniyor...</Text>
+                </View>
+              ) : iptalListItems.length > 0 ? (
+                iptalListItems.map((item: any, idx: number) => (
+                  <TouchableOpacity
+                    key={idx}
+                    style={[styles.receiptCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                    onPress={() => fetchIptalDetail(String(item.IPTAL_ID), item)}
+                  >
+                    <View style={styles.receiptCardHeader}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.receiptCardNo, { color: colors.text }]}>{item.PERSONEL_AD || 'Personel'}</Text>
+                        <Text style={[styles.receiptCardDate, { color: colors.textSecondary }]}>
+                          {item.IPTAL_TIPI || 'İptal'} · {item.DETAY_SATIR_SAYISI || 0} satır
+                        </Text>
+                      </View>
+                      <Text style={[styles.receiptCardAmount, { color: colors.error }]}>
+                        ₺{parseFloat(item.TUTAR || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                      </Text>
+                    </View>
+                    <View style={styles.receiptCardFooter}>
+                      <Text style={[styles.receiptCardReason, { color: colors.textSecondary }]} numberOfLines={1}>
+                        {item.TARIH_IPTAL || item.TARIH || ''}
+                      </Text>
+                      <View style={styles.receiptCardAction}>
+                        <Text style={[styles.receiptCardActionText, { color: colors.primary }]}>Detay</Text>
+                        <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+                  <Text style={[{ color: colors.textSecondary }]}>İptal fişi bulunamadı</Text>
+                </View>
+              )}
             </ScrollView>
           </View>
         </View>
