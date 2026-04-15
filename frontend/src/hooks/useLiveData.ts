@@ -18,6 +18,7 @@ export interface DashboardFilter {
 export interface DashboardData {
   branchSales: BranchSales[];
   hourlySales: HourlySales[];
+  hourlyLocationSales: any[];
   weeklyComparison: {
     thisWeek: { cash: number; card: number; openAccount: number; total: number };
     lastWeek: { cash: number; card: number; openAccount: number; total: number };
@@ -29,11 +30,15 @@ export interface DashboardData {
   topProducts: TopProduct[];
   worstProducts: TopProduct[];
   waiterLocations: WaiterLocation[];
+  waiterSales: any[];
+  iptalOzet: any[];
+  iptalDetay: any[];
 }
 
 const EMPTY_DATA: DashboardData = {
   branchSales: [],
   hourlySales: [],
+  hourlyLocationSales: [],
   weeklyComparison: {
     thisWeek: { cash: 0, card: 0, openAccount: 0, total: 0 },
     lastWeek: { cash: 0, card: 0, openAccount: 0, total: 0 },
@@ -45,6 +50,9 @@ const EMPTY_DATA: DashboardData = {
   topProducts: [],
   worstProducts: [],
   waiterLocations: [],
+  waiterSales: [],
+  iptalOzet: [],
+  iptalDetay: [],
 };
 
 function formatDateParam(d: Date): string {
@@ -140,6 +148,7 @@ function transformApiData(apiData: any): DashboardData {
   return {
     branchSales,
     hourlySales,
+    hourlyLocationSales: apiData?.hourly_location_data?.data || [],
     weeklyComparison: { thisWeek, lastWeek: { cash: 0, card: 0, openAccount: 0, total: 0 } },
     cancelledReceipts,
     openTables,
@@ -148,6 +157,9 @@ function transformApiData(apiData: any): DashboardData {
     topProducts,
     worstProducts,
     waiterLocations: [],
+    waiterSales: apiData?.garson_satis_ozet?.data || [],
+    iptalOzet: apiData?.iptal_ozet?.data || [],
+    iptalDetay: apiData?.iptal_detay?.data || [],
   };
 }
 

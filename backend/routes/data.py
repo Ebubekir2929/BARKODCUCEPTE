@@ -219,6 +219,7 @@ async def get_dashboard_data(
         "hourly_data", "hourly_location_data",
         "cancel_data", "top10_stock_movements", "down10_stock_movements",
         "acik_masalar", "iptal_ozet", "iptal_detay",
+        "garson_satis_ozet",
     ]
     
     pool = await get_data_pool()
@@ -504,4 +505,124 @@ async def sync_request(
         raise
     except Exception as e:
         logger.error(f"Sync request error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, timeout_sec: int = 35):
+    """Generic on-demand: request_create → poll request_status → return data"""
+    # Step 1: Create request
+    create_resp = await sync_post({
+        "action": "request_create",
+        "dataset_key": dataset_key,
+        "params": params,
+        "priority_no": 1,
+        "requested_by": "mobile",
+    }, tenant_id)
+    
+    request_uid = create_resp.get("request_uid", "")
+    if not request_uid:
+        raise HTTPException(status_code=502, detail="İstek oluşturulamadı")
+    
+    # Step 2: Poll for result
+    for _ in range(int(timeout_sec / 0.7)):
+        status_resp = await sync_post({
+            "action": "request_status",
+            "request_uid": request_uid,
+            "include_data": True,
+        }, tenant_id)
+        
+        status = status_resp.get("status", "unknown")
+        
+        if status == "done":
+            data = status_resp.get("cache", {}).get("data", [])
+            return {
+                "ok": True,
+                "request_uid": request_uid,
+                "data": _fix_large_ints(data) if isinstance(data, list) else [],
+            }
+        
+        if status == "error":
+            error_text = status_resp.get("error_text", "Bilinmeyen hata")
+            raise HTTPException(status_code=502, detail=f"POS hatası: {error_text}")
+        
+        await asyncio.sleep(0.7)
+    
+    raise HTTPException(status_code=504, detail="Detay zamanında gelmedi. Lütfen tekrar deneyin.")
+
+
+@router.post("/hourly-detail")
+async def get_hourly_stock_detail(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """On-demand: Hourly stock detail - products sold in a specific hour"""
+    tenant_id = body.get("tenant_id", "")
+    hour_label = body.get("hour_label", "")  # e.g. "10:00 - 11:00"
+    filter_date = body.get("date", "")  # YYYY-MM-DD
+    lokasyon_id = body.get("lokasyon_id")  # optional
+    
+    if not tenant_id or not hour_label:
+        raise HTTPException(status_code=400, detail="tenant_id ve hour_label gerekli")
+    
+    if not filter_date:
+        from datetime import date as date_cls
+        filter_date = date_cls.today().strftime("%Y-%m-%d")
+    
+    # Parse hour label: "10:00 - 11:00" → start_hour=10
+    import re
+    match = re.match(r'^\s*(\d{1,2})\s*:\s*00\s*-\s*(\d{1,2})\s*:\s*00\s*$', hour_label)
+    if not match:
+        # Try simpler format: "10:00"
+        match2 = re.match(r'^\s*(\d{1,2})\s*:\s*00\s*$', hour_label)
+        if match2:
+            start_hour = int(match2.group(1))
+        else:
+            raise HTTPException(status_code=400, detail=f"Geçersiz saat formatı: {hour_label}")
+    else:
+        start_hour = int(match.group(1))
+    
+    params = {
+        "sdate": f"{filter_date} {start_hour:02d}:00:00",
+        "edate": f"{filter_date} {start_hour:02d}:59:59",
+        "lokasyonID": int(lokasyon_id) if lokasyon_id else None,
+    }
+    
+    try:
+        return await _on_demand_request(tenant_id, "hourly_stock_detail", params)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Hourly detail error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/iptal-detail")
+async def get_iptal_detail(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """On-demand: Cancel receipt detail - items in a specific cancelled receipt"""
+    tenant_id = body.get("tenant_id", "")
+    iptal_id = body.get("iptal_id")
+    filter_date = body.get("date", "")
+    
+    if not tenant_id or iptal_id is None:
+        raise HTTPException(status_code=400, detail="tenant_id ve iptal_id gerekli")
+    
+    if not filter_date:
+        from datetime import date as date_cls
+        filter_date = date_cls.today().strftime("%Y-%m-%d")
+    
+    params = {
+        "sdate": f"{filter_date} 00:00:00",
+        "edate": f"{filter_date} 23:59:59",
+        "IPTAL_ID": int(iptal_id),
+    }
+    
+    try:
+        return await _on_demand_request(tenant_id, "iptal_detay", params)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Iptal detail error: {e}")
         raise HTTPException(status_code=500, detail=str(e))

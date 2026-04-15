@@ -10,7 +10,7 @@ import sys
 from typing import Dict, Any, Optional
 
 # Backend URL from environment
-BACKEND_URL = "https://kas-modali.preview.emergentagent.com/api"
+BACKEND_URL = "https://kasap-management.preview.emergentagent.com/api"
 
 class AuthAPITester:
     def __init__(self):
