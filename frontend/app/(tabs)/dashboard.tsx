@@ -642,15 +642,14 @@ export default function DashboardScreen() {
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Lokasyon Özeti</Text>
           {(sourceData?.branchSales || []).map((branch, index) => {
-            // Find iptal data for this location
-            const locIptaller = (sourceData?.iptalDetay || []).filter(
-              (d: any) => d.LOKASYON && d.LOKASYON === branch.branchName
-            );
-            const locIptalOzet = (sourceData?.iptalOzet || []).find(
+            // Find iptal data for this location from iptal_ozet
+            const locOzetRows = (sourceData?.iptalOzet || []).filter(
               (o: any) => o.LOKASYON && o.LOKASYON === branch.branchName
             );
-            const iptalTutar = locIptalOzet ? parseFloat(locIptalOzet.FIS_IPTAL_TUTAR || '0') + parseFloat(locIptalOzet.SATIR_IPTAL_TUTAR || '0') : 0;
-            const iptalAdet = locIptaller.length;
+            const iptalAdet = locOzetRows.reduce((s: number, o: any) => 
+              s + parseInt(o.FIS_IPTAL_ADET || '0') + parseInt(o.SATIR_IPTAL_ADET || '0'), 0);
+            const iptalTutar = locOzetRows.reduce((s: number, o: any) => 
+              s + parseFloat(o.FIS_IPTAL_TUTAR || '0') + parseFloat(o.SATIR_IPTAL_TUTAR || '0'), 0);
             
             return (
             <View 
@@ -875,16 +874,14 @@ export default function DashboardScreen() {
               </TouchableOpacity>
             </View>
             <ScrollView style={[styles.modalBody, { backgroundColor: colors.surface }]} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
-              {/* İptal Özet */}
               {(() => {
-                const locIptaller = (sourceData?.iptalDetay || []).filter(
-                  (d: any) => d.LOKASYON && d.LOKASYON === iptalListLocation
-                );
-                const locOzet = (sourceData?.iptalOzet || []).find(
+                const locOzetRows = (sourceData?.iptalOzet || []).filter(
                   (o: any) => o.LOKASYON && o.LOKASYON === iptalListLocation
                 );
-                const fisTutar = locOzet ? parseFloat(locOzet.FIS_IPTAL_TUTAR || '0') : 0;
-                const satirTutar = locOzet ? parseFloat(locOzet.SATIR_IPTAL_TUTAR || '0') : 0;
+                const totalFisTutar = locOzetRows.reduce((s: number, o: any) => s + parseFloat(o.FIS_IPTAL_TUTAR || '0'), 0);
+                const totalSatirTutar = locOzetRows.reduce((s: number, o: any) => s + parseFloat(o.SATIR_IPTAL_TUTAR || '0'), 0);
+                const totalFisAdet = locOzetRows.reduce((s: number, o: any) => s + parseInt(o.FIS_IPTAL_ADET || '0'), 0);
+                const totalSatirAdet = locOzetRows.reduce((s: number, o: any) => s + parseInt(o.SATIR_IPTAL_ADET || '0'), 0);
                 
                 return (
                   <>
@@ -892,41 +889,33 @@ export default function DashboardScreen() {
                       <Ionicons name="alert-circle" size={24} color={colors.error} />
                       <View style={styles.cancellationSummaryText}>
                         <Text style={[styles.cancellationCount, { color: colors.error }]}>
-                          {locIptaller.length} İptal Fişi
+                          {totalFisAdet + totalSatirAdet} İptal ({totalFisAdet} fiş, {totalSatirAdet} satır)
                         </Text>
                         <Text style={[styles.cancellationTotal, { color: colors.text }]}>
-                          Fiş: ₺{fisTutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} · Satır: ₺{satirTutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                          Fiş: ₺{totalFisTutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} · Satır: ₺{totalSatirTutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                         </Text>
                       </View>
                     </View>
                     
-                    {locIptaller.map((item: any, idx: number) => (
-                      <TouchableOpacity
+                    {locOzetRows.map((item: any, idx: number) => (
+                      <View
                         key={idx}
                         style={[styles.receiptCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-                        onPress={() => fetchIptalDetail(String(item.IPTAL_ID), item)}
                       >
                         <View style={styles.receiptCardHeader}>
                           <View style={{ flex: 1 }}>
                             <Text style={[styles.receiptCardNo, { color: colors.text }]}>{item.PERSONEL_AD || 'Personel'}</Text>
                             <Text style={[styles.receiptCardDate, { color: colors.textSecondary }]}>
-                              {item.IPTAL_TIPI || 'İptal'} · {item.DETAY_SATIR_SAYISI || 0} satır
+                              {parseInt(item.FIS_IPTAL_ADET || '0')} fiş iptal · {parseInt(item.SATIR_IPTAL_ADET || '0')} satır iptal
                             </Text>
                           </View>
-                          <Text style={[styles.receiptCardAmount, { color: colors.error }]}>
-                            ₺{parseFloat(item.TUTAR || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                          </Text>
-                        </View>
-                        <View style={styles.receiptCardFooter}>
-                          <Text style={[styles.receiptCardReason, { color: colors.textSecondary }]} numberOfLines={1}>
-                            {item.TARIH_IPTAL || item.TARIH || ''}
-                          </Text>
-                          <View style={styles.receiptCardAction}>
-                            <Text style={[styles.receiptCardActionText, { color: colors.primary }]}>Detay</Text>
-                            <Ionicons name="chevron-forward" size={14} color={colors.primary} />
+                          <View style={{ alignItems: 'flex-end' }}>
+                            <Text style={[styles.receiptCardAmount, { color: colors.error }]}>
+                              ₺{(parseFloat(item.FIS_IPTAL_TUTAR || '0') + parseFloat(item.SATIR_IPTAL_TUTAR || '0')).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                            </Text>
                           </View>
                         </View>
-                      </TouchableOpacity>
+                      </View>
                     ))}
                   </>
                 );

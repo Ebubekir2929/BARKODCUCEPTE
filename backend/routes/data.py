@@ -626,3 +626,43 @@ async def get_iptal_detail(
     except Exception as e:
         logger.error(f"Iptal detail error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.post("/iptal-list")
+async def get_iptal_list(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """Fetch full list of cancellations via sync.php dataset_get (IPTAL_ID=null)"""
+    tenant_id = body.get("tenant_id", "")
+    filter_date = body.get("date", "")
+    
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id gerekli")
+    
+    if not filter_date:
+        from datetime import date as date_cls
+        filter_date = date_cls.today().strftime("%Y-%m-%d")
+    
+    try:
+        resp = await sync_post({
+            "action": "dataset_get",
+            "dataset_key": "iptal_detay",
+            "params": {
+                "sdate": f"{filter_date} 00:00:00",
+                "edate": f"{filter_date} 23:59:59",
+                "IPTAL_ID": None,
+            },
+        }, tenant_id)
+        
+        data = resp.get("data", [])
+        return {
+            "ok": True,
+            "data": _fix_large_ints(data) if isinstance(data, list) else [],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Iptal list error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

@@ -194,17 +194,25 @@ export const CancellationSection: React.FC<{ ozet: any[]; detay: any[]; tenantId
   );
 };
 
-// === Lokasyon Bazlı Saatlik Satış Grafiği ===
+// === Lokasyon Bazlı Saatlik Satış Grafiği (Dikey Bar Chart) ===
 export const HourlyLocationSection: React.FC<{ data: any[]; tenantId: string }> = ({ data, tenantId }) => {
   const { colors } = useThemeStore();
   const [detailData, setDetailData] = useState<any[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any | null>(null);
+  const [expandedLoc, setExpandedLoc] = useState<string | null>(null);
 
   if (!data || data.length === 0) return null;
 
-  const maxAmount = Math.max(...data.map((r: any) => parseFloat(r.TOPLAM || '0')), 1);
   const totalAmount = data.reduce((s: number, r: any) => s + parseFloat(r.TOPLAM || '0'), 0);
+
+  // Group by LOKASYON
+  const byLocation: Record<string, any[]> = {};
+  data.forEach((r: any) => {
+    const loc = r.LOKASYON || 'Bilinmeyen';
+    if (!byLocation[loc]) byLocation[loc] = [];
+    byLocation[loc].push(r);
+  });
 
   const fetchDetail = useCallback(async (hourLabel: string, lokasyonId: any, lokasyonName: string) => {
     setSelectedItem({ hourLabel, lokasyonName });
@@ -236,28 +244,63 @@ export const HourlyLocationSection: React.FC<{ data: any[]; tenantId: string }> 
         </View>
       </View>
 
-      {data.map((item: any, idx: number) => {
-        const amount = parseFloat(item.TOPLAM || '0');
-        const barWidth = maxAmount > 0 ? (amount / maxAmount) * 100 : 0;
+      {Object.entries(byLocation).map(([locName, hours]) => {
+        const locTotal = hours.reduce((s: number, r: any) => s + parseFloat(r.TOPLAM || '0'), 0);
+        const locMax = Math.max(...hours.map((r: any) => parseFloat(r.TOPLAM || '0')), 1);
+        const isExpanded = expandedLoc === locName;
+        
         return (
-          <TouchableOpacity
-            key={idx}
-            style={[styles.hourlyRow, { borderBottomColor: colors.border }]}
-            onPress={() => fetchDetail(item.SAAT_ADI || '', item.LOKASYON_ID || null, item.LOKASYON || 'Tüm')}
-          >
-            <View style={{ width: 60 }}>
-              <Text style={[{ fontSize: 12, fontWeight: '600', color: colors.text }]}>{item.SAAT_ADI || ''}</Text>
-            </View>
-            <View style={{ width: 80 }}>
-              <Text style={[{ fontSize: 11, color: colors.textSecondary }]} numberOfLines={1}>{item.LOKASYON || ''}</Text>
-            </View>
-            <View style={[styles.barTrack, { backgroundColor: colors.border + '60', flex: 1 }]}>
-              <View style={[styles.barFill, { width: `${barWidth}%`, backgroundColor: colors.primary }]} />
-            </View>
-            <Text style={[{ fontSize: 12, fontWeight: '700', color: colors.text, minWidth: 70, textAlign: 'right' }]}>
-              ₺{amount.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-            </Text>
-          </TouchableOpacity>
+          <View key={locName}>
+            <TouchableOpacity
+              style={[styles.groupHeader, { backgroundColor: isExpanded ? colors.primary + '08' : colors.background, borderColor: colors.border }]}
+              onPress={() => setExpandedLoc(isExpanded ? null : locName)}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="location-outline" size={18} color={colors.primary} />
+                <Text style={[styles.groupName, { color: colors.text }]}>{locName}</Text>
+                <View style={[styles.countBadge, { backgroundColor: colors.primary + '15' }]}>
+                  <Text style={[styles.countText, { color: colors.primary }]}>{hours.length} saat</Text>
+                </View>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={[styles.groupTotal, { color: colors.textSecondary }]}>
+                  ₺{locTotal.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                </Text>
+                <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
+              </View>
+            </TouchableOpacity>
+
+            {isExpanded && (
+              <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingVertical: 8, gap: 4, minHeight: 180 }}>
+                    {hours.map((hour: any, idx: number) => {
+                      const amount = parseFloat(hour.TOPLAM || '0');
+                      const barHeight = Math.max((amount / locMax) * 130, 4);
+                      return (
+                        <TouchableOpacity
+                          key={idx}
+                          style={{ alignItems: 'center', width: 42 }}
+                          onPress={() => fetchDetail(hour.SAAT_ADI || '', hour.LOKASYON_ID || null, locName)}
+                        >
+                          <Text style={{ fontSize: 9, color: colors.textSecondary, marginBottom: 2 }}>
+                            {amount >= 1000 ? `${(amount / 1000).toFixed(0)}K` : amount.toFixed(0)}
+                          </Text>
+                          <View style={{ width: 24, height: barHeight, borderRadius: 6, backgroundColor: colors.primary + '70' }} />
+                          <Text style={{ fontSize: 9, color: colors.textSecondary, marginTop: 3 }}>
+                            {(hour.SAAT_ADI || '').slice(0, 5)}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
+                <Text style={{ fontSize: 11, color: colors.textSecondary, textAlign: 'center', marginTop: 4 }}>
+                  Saate dokunarak ürün detayı görüntüleyin
+                </Text>
+              </View>
+            )}
+          </View>
         );
       })}
 
@@ -302,6 +345,13 @@ export const HourlyLocationSection: React.FC<{ data: any[]; tenantId: string }> 
                       <Text style={[{ flex: 1.5, fontSize: 14, fontWeight: '700', color: colors.primary, textAlign: 'right' }]}>₺{parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0').toFixed(2)}</Text>
                     </View>
                   ))}
+                  {/* Total row */}
+                  <View style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 2, borderTopColor: colors.border, backgroundColor: colors.background }]}>
+                    <Text style={[{ flex: 4, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>Toplam</Text>
+                    <Text style={[{ flex: 1.5, fontSize: 16, fontWeight: '800', color: colors.primary, textAlign: 'right' }]}>
+                      ₺{detailData.reduce((sum: number, item: any) => sum + parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0'), 0).toFixed(2)}
+                    </Text>
+                  </View>
                 </View>
               ) : (
                 <View style={{ alignItems: 'center', paddingVertical: 20, marginTop: 12 }}>
