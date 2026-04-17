@@ -508,7 +508,7 @@ async def sync_request(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, timeout_sec: int = 35):
+async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, timeout_sec: int = 35, raw_cache: bool = False):
     """Generic on-demand: request_create → poll request_status → return data"""
     # Step 1: Create request
     create_resp = await sync_post({
@@ -534,7 +534,10 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
         status = status_resp.get("status", "unknown")
         
         if status == "done":
-            data = status_resp.get("cache", {}).get("data", [])
+            cache = status_resp.get("cache", {})
+            if raw_cache:
+                return {"ok": True, "request_uid": request_uid, "cache": cache}
+            data = cache.get("data", [])
             return {
                 "ok": True,
                 "request_uid": request_uid,
@@ -820,7 +823,7 @@ async def get_fis_detail(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Fetch fis_detay_toplam for a specific receipt"""
+    """Fetch fis_detay_toplam for a specific receipt - handles result_sets structure"""
     tenant_id = body.get("tenant_id", "")
     fis_id = body.get("fis_id")
     
@@ -828,9 +831,46 @@ async def get_fis_detail(
         raise HTTPException(status_code=400, detail="tenant_id ve fis_id gerekli")
     
     try:
-        return await _on_demand_request(tenant_id, "fis_detay_toplam", {
+        result = await _on_demand_request(tenant_id, "fis_detay_toplam", {
             "FisId": int(fis_id),
-        }, timeout_sec=35)
+        }, timeout_sec=35, raw_cache=True)
+        
+        cache = result.get("cache", {})
+        data = cache.get("data", [])
+        
+        detail_rows = []
+        total_row = {}
+        
+        # Handle multiple response structures (like PHP normalize_fis_multi_result)
+        if isinstance(data, dict):
+            # Structure: {"result_sets": [[details], [totals]]}
+            if "result_sets" in data:
+                rs = data["result_sets"]
+                if isinstance(rs, list) and len(rs) >= 1:
+                    detail_rows = rs[0] if isinstance(rs[0], list) else []
+                if isinstance(rs, list) and len(rs) >= 2:
+                    totals = rs[1] if isinstance(rs[1], list) else []
+                    total_row = totals[0] if totals else {}
+            # Structure: {"details": [...], "totals": [...]}
+            elif "details" in data:
+                detail_rows = data.get("details", [])
+                totals = data.get("totals", data.get("summary", []))
+                total_row = totals[0] if isinstance(totals, list) and totals else {}
+        elif isinstance(data, list):
+            if len(data) >= 2 and isinstance(data[0], list):
+                # Structure: [[details], [totals]]
+                detail_rows = data[0]
+                total_row = data[1][0] if isinstance(data[1], list) and data[1] else {}
+            else:
+                # Flat list - all rows are details
+                detail_rows = data
+        
+        return {
+            "ok": True,
+            "request_uid": result.get("request_uid", ""),
+            "details": _fix_large_ints(detail_rows) if isinstance(detail_rows, list) else [],
+            "totals": _fix_large_ints([total_row]) if total_row else [],
+        }
     except HTTPException:
         raise
     except Exception as e:

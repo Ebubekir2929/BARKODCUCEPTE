@@ -11,7 +11,7 @@ import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -108,7 +108,14 @@ export default function CustomersScreen() {
         body: JSON.stringify({ tenant_id: activeTenantId, cari_id: cariId, doviz_ad: cari.DOVIZ_AD_ID || 1, tarih_baslangic: sd, tarih_bitis: ed }),
       });
       const data = await resp.json();
-      if (data.ok && data.data) setExtreData(data.data);
+      if (data.ok && data.data) {
+        // Sort by date ascending (en eski en üstte)
+        const sorted = [...data.data].sort((a: any, b: any) => {
+          const da = a.TARIH || ''; const db = b.TARIH || '';
+          return da.localeCompare(db);
+        });
+        setExtreData(sorted);
+      }
     } catch (err) { console.error(err); }
     finally { setExtreLoading(false); }
   }, [activeTenantId, extreStart, extreEnd]);
@@ -127,13 +134,12 @@ export default function CustomersScreen() {
         body: JSON.stringify({ tenant_id: activeTenantId, fis_id: fisId }),
       });
       const data = await resp.json();
-      if (data.ok && data.data) {
-        const rows = data.data;
-        const last = rows.length > 0 ? rows[rows.length - 1] : null;
-        if (last && (last.SATIR_TOPLAM !== undefined || last.GENELTOPLAM !== undefined)) { setFisTotals(last); setFisDetail(rows.slice(0, -1)); }
-        else setFisDetail(rows);
+      if (data.ok) {
+        // New response: {details: [...], totals: [...]}
+        setFisDetail(data.details || []);
+        setFisTotals(data.totals && data.totals.length > 0 ? data.totals[0] : null);
       }
-    } catch (err) { console.error(err); }
+    } catch (err) { console.error('Fis detail error:', err); }
     finally { setFisLoading(false); }
   }, [activeTenantId]);
 
