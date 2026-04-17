@@ -13,7 +13,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -506,20 +506,13 @@ export default function StockScreen() {
                     </TouchableOpacity>
                     <TouchableOpacity disabled={exportLoading} style={[{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.success + '15', opacity: exportLoading ? 0.5 : 1 }]} onPress={async () => {
                       setExportLoading(true); showToast('Excel hazırlanıyor...');
-                      const name = (selectedStock?.AD || 'Stok').replace(/[^a-zA-Z0-9]/g, '_');
-                      let csv = '\uFEFFTarih;Belge No;Lokasyon;Cari;Fiş Türü;Giriş;Çıkış;Bakiye\n';
-                      detailExtre.forEach((r:any) => { csv += `${r.TARIH||''};${r.BELGENO||''};${r.LOKASYON_AD||''};${(r.CARI_AD||'').replace(/;/g,',')};${r.FIS_TURU||''};${parseFloat(r.MIKTAR_GIRIS||'0').toFixed(2)};${parseFloat(r.MIKTAR_CIKIS||'0').toFixed(2)};${parseFloat(r.BAKIYE||'0').toFixed(2)}\n`; });
-                      try { 
-                        const path = `${FileSystem.cacheDirectory}${name}_ekstre.csv`; 
-                        await FileSystem.writeAsStringAsync(path, csv); 
-                        const isAvailable = await Sharing.isAvailableAsync();
-                        if (isAvailable) {
-                          await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: 'Excel Paylaş', UTI: 'public.comma-separated-values-text' }); 
-                          showToast('Excel oluşturuldu');
-                        } else {
-                          showToast('Paylaşım bu cihazda kullanılamıyor');
-                        }
-                      } catch(e) { console.error('CSV export error:', e); showToast('Excel oluşturulamadı: ' + String(e)); }
+                      const name = selectedStock?.AD || 'Stok';
+                      const html = `<html><head><meta charset="utf-8"><style>table{border-collapse:collapse}th,td{border:1px solid #000;padding:4px;font-size:11px}</style></head><body><table><thead><tr><th>Tarih</th><th>Belge No</th><th>Lokasyon</th><th>Cari</th><th>Fiş Türü</th><th>Giriş</th><th>Çıkış</th><th>Bakiye</th></tr></thead><tbody>${detailExtre.map((r:any) => `<tr><td>${r.TARIH||''}</td><td>${r.BELGENO||''}</td><td>${r.LOKASYON_AD||''}</td><td>${r.CARI_AD||''}</td><td>${r.FIS_TURU||''}</td><td>${parseFloat(r.MIKTAR_GIRIS||'0').toFixed(2)}</td><td>${parseFloat(r.MIKTAR_CIKIS||'0').toFixed(2)}</td><td>${parseFloat(r.BAKIYE||'0').toFixed(2)}</td></tr>`).join('')}</tbody></table></body></html>`;
+                      try {
+                        const { uri } = await Print.printToFileAsync({ html });
+                        await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: `${name} Excel` });
+                        showToast('Excel oluşturuldu');
+                      } catch(e) { console.error('Excel error:', e); showToast('Excel oluşturulamadı'); }
                       finally { setExportLoading(false); }
                     }}>
                       {exportLoading ? <ActivityIndicator size="small" color={colors.success} /> : <Ionicons name="grid-outline" size={14} color={colors.success} />}

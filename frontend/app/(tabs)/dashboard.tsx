@@ -400,6 +400,14 @@ export default function DashboardScreen() {
           <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Veriler yükleniyor...</Text>
         </View>
       ) : (
+      <>
+      {/* Filter loading banner */}
+      {dataLoading && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, gap: 8, backgroundColor: colors.primary + '10' }}>
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text style={[{ fontSize: 13, color: colors.primary, fontWeight: '600' }]}>Filtreleniyor...</Text>
+        </View>
+      )}
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
@@ -744,6 +752,7 @@ export default function DashboardScreen() {
         {/* Bottom Spacing - Reduced */}
         <View style={{ height: 20 }} />
       </ScrollView>
+      </>
       )}
 
       {/* Filter Modal */}

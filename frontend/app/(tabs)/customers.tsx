@@ -11,7 +11,7 @@ import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system/legacy';
+import * as FileSystem from 'expo-file-system';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -169,16 +169,13 @@ export default function CustomersScreen() {
   const exportExtreCsv = async () => {
     if (!selectedCari || extreData.length === 0) return;
     setExportLoading(true);
-    const name = (selectedCari.AD || selectedCari.CARI_ADI || 'Cari').replace(/\s/g, '_');
-    let csv = '\uFEFFTarih;Belge No;Açıklama;Borç;Alacak;Bakiye\n';
-    extreData.forEach((r: any) => { csv += `${r.TARIH || ''};${r.BELGENO || ''};${(r.ACIKLAMA || r.AD || '').replace(/;/g, ',')};${parseFloat(r.BORC || '0').toFixed(2)};${parseFloat(r.ALACAK || '0').toFixed(2)};${parseFloat(r.BAKIYE || '0').toFixed(2)}\n`; });
+    const name = selectedCari.AD || selectedCari.CARI_ADI || 'Cari';
+    const html = `<html><head><meta charset="utf-8"><style>table{border-collapse:collapse}th,td{border:1px solid #000;padding:4px;font-size:11px}</style></head><body><h3>${name} - Ekstre</h3><table><thead><tr><th>Tarih</th><th>Belge No</th><th>Açıklama</th><th>Borç</th><th>Alacak</th><th>Bakiye</th></tr></thead><tbody>${extreData.map((r: any) => `<tr><td>${r.TARIH || ''}</td><td>${r.BELGENO || ''}</td><td>${r.ACIKLAMA || r.AD || ''}</td><td>${parseFloat(r.BORC || '0').toFixed(2)}</td><td>${parseFloat(r.ALACAK || '0').toFixed(2)}</td><td>${parseFloat(r.BAKIYE || '0').toFixed(2)}</td></tr>`).join('')}</tbody></table></body></html>`;
     try {
-      const path = `${FileSystem.cacheDirectory}${name}_ekstre.csv`;
-      await FileSystem.writeAsStringAsync(path, csv);
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (isAvailable) { await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: 'Ekstre CSV' }); showToast('Excel oluşturuldu'); }
-      else showToast('Paylaşım desteklenmiyor');
-    } catch (err) { console.error('CSV export error:', err); showToast('Excel oluşturulamadı'); }
+      const { uri } = await Print.printToFileAsync({ html });
+      await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: `${name} Excel` });
+      showToast('Excel oluşturuldu');
+    } catch (err) { console.error('Excel error:', err); showToast('Excel oluşturulamadı'); }
     finally { setExportLoading(false); }
   };
 
