@@ -13,158 +13,233 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
+import { useAuthStore } from '../../src/store/authStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
-import { getDataBySource, getCustomerMovements } from '../../src/data/mockData';
-import { Customer, CustomerMovement, InvoiceDetail } from '../../src/types';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const CACHE_KEY = 'cached_customers';
+const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 export default function CustomersScreen() {
   const { colors } = useThemeStore();
+  const { user } = useAuthStore();
   const { activeSource } = useDataSourceStore();
-  const sourceData = useMemo(() => getDataBySource(activeSource), [activeSource]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState<'all' | 'debit' | 'credit'>('all');
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
-  const [customerMovements, setCustomerMovements] = useState<CustomerMovement[]>([]);
-  const [selectedInvoice, setSelectedInvoice] = useState<CustomerMovement | null>(null);
-  const [showFilterModal, setShowFilterModal] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [customers, setCustomers] = useState<Customer[]>([]);
 
+  const activeTenantId = useMemo(() => {
+    if (!user?.tenants || user.tenants.length === 0) return '';
+    const keys = ['data1', 'data2', 'data3'];
+    const idx = keys.indexOf(activeSource);
+    if (idx >= 0 && idx < user.tenants.length) return user.tenants[idx].tenant_id || '';
+    return user.tenants[0]?.tenant_id || '';
+  }, [user?.tenants, activeSource]);
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterType, setFilterType] = useState<'all' | 'borclu' | 'alacakli'>('all');
+  const [cariList, setCariList] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // Ekstre modal
+  const [selectedCari, setSelectedCari] = useState<any | null>(null);
+  const [extreData, setExtreData] = useState<any[]>([]);
+  const [extreLoading, setExtreLoading] = useState(false);
+
+  // Fiş detail modal
+  const [selectedFis, setSelectedFis] = useState<any | null>(null);
+  const [fisDetail, setFisDetail] = useState<any[]>([]);
+  const [fisTotals, setFisTotals] = useState<any | null>(null);
+  const [fisLoading, setFisLoading] = useState(false);
+
+  // Fetch cari list
   useEffect(() => {
-    const loadCustomers = async () => {
+    if (!activeTenantId) return;
+    const fetchCariList = async () => {
+      setLoading(true);
       try {
-        setCustomers(sourceData.customers);
-      } catch (error) {
-        setCustomers(sourceData.customers);
+        const { token } = useAuthStore.getState();
+        const resp = await fetch(`${API_URL}/api/data/cari-list`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ tenant_id: activeTenantId }),
+        });
+        const data = await resp.json();
+        if (data.ok && data.data) setCariList(data.data);
+      } catch (err) {
+        console.error('Cari list error:', err);
       } finally {
         setLoading(false);
       }
     };
-    loadCustomers();
-  }, [sourceData]);
+    fetchCariList();
+  }, [activeTenantId]);
 
-  const filteredCustomers = useMemo(() => {
-    let filtered = customers;
-
+  // Filter cari list
+  const filteredCaris = useMemo(() => {
+    let filtered = cariList;
     if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        (c) =>
-          c.name.toLowerCase().includes(query) ||
-          c.phone?.includes(query) ||
-          c.email?.toLowerCase().includes(query)
+      const q = searchQuery.toLowerCase();
+      filtered = filtered.filter((c: any) =>
+        (c.AD || c.CARI_ADI || '').toLowerCase().includes(q) ||
+        (c.KOD || c.CARI_KODU || '').toLowerCase().includes(q)
       );
     }
+    if (filterType === 'borclu') {
+      filtered = filtered.filter((c: any) => parseFloat(c.BAKIYE || '0') > 0);
+    } else if (filterType === 'alacakli') {
+      filtered = filtered.filter((c: any) => parseFloat(c.BAKIYE || '0') < 0);
+    }
+    return filtered;
+  }, [cariList, searchQuery, filterType]);
 
-    if (filterType === 'debit') {
-      filtered = filtered.filter((c) => c.balance < 0);
-    } else if (filterType === 'credit') {
-      filtered = filtered.filter((c) => c.balance >= 0);
+  // Summary
+  const summary = useMemo(() => {
+    const total = cariList.reduce((s: number, c: any) => s + parseFloat(c.BAKIYE || '0'), 0);
+    const borclu = cariList.filter((c: any) => parseFloat(c.BAKIYE || '0') > 0).length;
+    const alacakli = cariList.filter((c: any) => parseFloat(c.BAKIYE || '0') < 0).length;
+    return { total, borclu, alacakli };
+  }, [cariList]);
+
+  // Open cari detail (ekstre)
+  const openCariDetail = useCallback(async (cari: any) => {
+    setSelectedCari(cari);
+    setExtreData([]);
+    setExtreLoading(true);
+
+    const cariId = cari.KART || cari.ID;
+    if (!cariId || !activeTenantId) {
+      setExtreLoading(false);
+      return;
     }
 
-    return filtered;
-  }, [customers, searchQuery, filterType]);
+    try {
+      const { token } = useAuthStore.getState();
+      const resp = await fetch(`${API_URL}/api/data/cari-extre`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          tenant_id: activeTenantId,
+          cari_id: cariId,
+          doviz_ad: cari.DOVIZ_AD_ID || 1,
+        }),
+      });
+      const data = await resp.json();
+      if (data.ok && data.data) setExtreData(data.data);
+    } catch (err) {
+      console.error('Cari extre error:', err);
+    } finally {
+      setExtreLoading(false);
+    }
+  }, [activeTenantId]);
 
-  const totals = useMemo(() => {
-    return customers.reduce(
-      (acc, c) => ({
-        totalDebt: acc.totalDebt + (c.balance < 0 ? Math.abs(c.balance) : 0),
-        totalCredit: acc.totalCredit + (c.balance > 0 ? c.balance : 0),
-      }),
-      { totalDebt: 0, totalCredit: 0 }
-    );
-  }, [customers]);
+  // Open fiş detail
+  const openFisDetail = useCallback(async (row: any) => {
+    const fisId = row.BELGE_ID;
+    if (!fisId || !activeTenantId) return;
 
-  const handleCustomerPress = useCallback((customer: Customer) => {
-    setSelectedCustomer(customer);
-    setCustomerMovements(getCustomerMovements(customer.id));
-  }, []);
+    setSelectedFis(row);
+    setFisDetail([]);
+    setFisTotals(null);
+    setFisLoading(true);
 
-  const renderCustomer = useCallback(
-    ({ item }: { item: Customer }) => (
+    try {
+      const { token } = useAuthStore.getState();
+      const resp = await fetch(`${API_URL}/api/data/fis-detail`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ tenant_id: activeTenantId, fis_id: fisId }),
+      });
+      const data = await resp.json();
+      if (data.ok && data.data) {
+        const rows = data.data;
+        // Last row often has totals
+        const lastRow = rows.length > 0 ? rows[rows.length - 1] : null;
+        if (lastRow && (lastRow.SATIR_TOPLAM !== undefined || lastRow.GENELTOPLAM !== undefined)) {
+          setFisTotals(lastRow);
+          setFisDetail(rows.slice(0, -1));
+        } else {
+          setFisDetail(rows);
+        }
+      }
+    } catch (err) {
+      console.error('Fis detail error:', err);
+    } finally {
+      setFisLoading(false);
+    }
+  }, [activeTenantId]);
+
+  const renderCariItem = useCallback(({ item }: { item: any }) => {
+    const name = item.AD || item.CARI_ADI || 'Cari';
+    const code = item.KOD || item.CARI_KODU || '';
+    const bakiye = parseFloat(item.BAKIYE || '0');
+    const doviz = item.DOVIZ_ADI || 'TL';
+
+    return (
       <TouchableOpacity
-        style={[styles.customerCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-        onPress={() => handleCustomerPress(item)}
+        style={[styles.cariCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+        onPress={() => openCariDetail(item)}
+        activeOpacity={0.7}
       >
-        <View style={styles.customerHeader}>
-          <View style={[styles.avatar, { backgroundColor: colors.primary + '20' }]}>
-            <Text style={[styles.avatarText, { color: colors.primary }]}>
-              {item.name.charAt(0)}
+        <View style={styles.cariCardTop}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.cariName, { color: colors.text }]} numberOfLines={1}>{name}</Text>
+            <Text style={[styles.cariCode, { color: colors.textSecondary }]}>{code}</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={[styles.cariBakiye, { color: bakiye >= 0 ? colors.error : colors.success }]}>
+              {bakiye >= 0 ? '' : ''}₺{Math.abs(bakiye).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
             </Text>
+            <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{bakiye >= 0 ? 'Borçlu' : 'Alacaklı'} · {doviz}</Text>
           </View>
-          <View style={styles.customerInfo}>
-            <Text style={[styles.customerName, { color: colors.text }]}>{item.name}</Text>
-            {item.phone && (
-              <Text style={[styles.customerPhone, { color: colors.textSecondary }]}>{item.phone}</Text>
-            )}
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </View>
-        <View style={[styles.balanceRow, { borderTopColor: colors.border }]}>
-          <Text style={[styles.balanceLabel, { color: colors.textSecondary }]}>Bakiye:</Text>
-          <Text
-            style={[
-              styles.balanceValue,
-              { color: item.balance >= 0 ? colors.success : colors.error },
-            ]}
-          >
-            {item.balance >= 0 ? '+' : ''}₺{item.balance.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-          </Text>
+        <View style={[styles.cariCardBottom, { borderTopColor: colors.border }]}>
+          <Text style={[{ fontSize: 12, color: colors.primary }]}>Ekstre Görüntüle</Text>
+          <Ionicons name="chevron-forward" size={16} color={colors.primary} />
         </View>
       </TouchableOpacity>
-    ),
-    [colors, handleCustomerPress]
-  );
+    );
+  }, [colors, openCariDetail]);
 
-  if (loading) {
+  if (!activeTenantId) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-            Cariler yükleniyor...
-          </Text>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+        <ActiveSourceIndicator />
+        <View style={styles.emptyContainer}>
+          <Ionicons name="people-outline" size={48} color={colors.textSecondary} />
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Veri kaynağı seçilmedi</Text>
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Global Data Source Selector */}
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <ActiveSourceIndicator />
+
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Cari Kartlar</Text>
-        <TouchableOpacity
-          style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border }]}
-          onPress={() => setShowFilterModal(true)}
-        >
-          <Ionicons name="filter" size={20} color={colors.primary} />
-          {filterType !== 'all' && <View style={[styles.filterDot, { backgroundColor: colors.primary }]} />}
-        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>Cariler</Text>
       </View>
 
       {/* Summary Cards */}
       <View style={styles.summaryRow}>
-        <View style={[styles.summaryCard, { backgroundColor: colors.error + '15', borderColor: colors.error + '30' }]}>
-          <Ionicons name="trending-down" size={20} color={colors.error} />
-          <Text style={[styles.summaryLabel, { color: colors.error }]}>Toplam Borç</Text>
-          <Text style={[styles.summaryValue, { color: colors.error }]}>
-            ₺{totals.totalDebt.toLocaleString('tr-TR')}
+        <View style={[styles.summaryCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Toplam Bakiye</Text>
+          <Text style={[styles.summaryValue, { color: summary.total >= 0 ? colors.error : colors.success }]}>
+            ₺{Math.abs(summary.total).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
           </Text>
         </View>
-        <View style={[styles.summaryCard, { backgroundColor: colors.success + '15', borderColor: colors.success + '30' }]}>
-          <Ionicons name="trending-up" size={20} color={colors.success} />
-          <Text style={[styles.summaryLabel, { color: colors.success }]}>Toplam Alacak</Text>
-          <Text style={[styles.summaryValue, { color: colors.success }]}>
-            ₺{totals.totalCredit.toLocaleString('tr-TR')}
-          </Text>
-        </View>
+        <TouchableOpacity
+          style={[styles.summaryCard, { backgroundColor: filterType === 'borclu' ? colors.error + '15' : colors.card, borderColor: filterType === 'borclu' ? colors.error : colors.border }]}
+          onPress={() => setFilterType(filterType === 'borclu' ? 'all' : 'borclu')}
+        >
+          <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Borçlu</Text>
+          <Text style={[styles.summaryValue, { color: colors.error }]}>{summary.borclu}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.summaryCard, { backgroundColor: filterType === 'alacakli' ? colors.success + '15' : colors.card, borderColor: filterType === 'alacakli' ? colors.success : colors.border }]}
+          onPress={() => setFilterType(filterType === 'alacakli' ? 'all' : 'alacakli')}
+        >
+          <Text style={[styles.summaryLabel, { color: colors.textSecondary }]}>Alacaklı</Text>
+          <Text style={[styles.summaryValue, { color: colors.success }]}>{summary.alacakli}</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Search */}
@@ -173,7 +248,7 @@ export default function CustomersScreen() {
           <Ionicons name="search" size={20} color={colors.textSecondary} />
           <TextInput
             style={[styles.searchText, { color: colors.text }]}
-            placeholder="Cari ara..."
+            placeholder="Cari adı veya kodu ara..."
             placeholderTextColor={colors.textSecondary}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -186,270 +261,175 @@ export default function CustomersScreen() {
         </View>
       </View>
 
-      {/* Filter Type */}
-      {filterType !== 'all' && (
-        <View style={styles.selectedFilterRow}>
-          <View
-            style={[
-              styles.selectedFilter,
-              { backgroundColor: filterType === 'debit' ? colors.error + '20' : colors.success + '20' },
-            ]}
-          >
-            <Text
-              style={[
-                styles.selectedFilterText,
-                { color: filterType === 'debit' ? colors.error : colors.success },
-              ]}
-            >
-              {filterType === 'debit' ? 'Borçlu Cariler' : 'Alacaklı Cariler'}
-            </Text>
-            <TouchableOpacity onPress={() => setFilterType('all')}>
-              <Ionicons
-                name="close"
-                size={16}
-                color={filterType === 'debit' ? colors.error : colors.success}
-              />
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/* Customer Count */}
+      {/* Count */}
       <View style={styles.countRow}>
         <Text style={[styles.countText, { color: colors.textSecondary }]}>
-          {filteredCustomers.length} cari listeleniyor
+          {loading ? 'Yükleniyor...' : `${filteredCaris.length} cari`}
         </Text>
       </View>
 
-      {/* Customer List */}
-      <FlatList
-        data={filteredCustomers}
-        renderItem={renderCustomer}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-      />
+      {/* Loading or List */}
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Cari listesi yükleniyor...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredCaris}
+          renderItem={renderCariItem}
+          keyExtractor={(item, idx) => String(item.KART || item.ID || idx)}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={15}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="people-outline" size={48} color={colors.textSecondary} />
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Cari bulunamadı</Text>
+            </View>
+          }
+        />
+      )}
 
-      {/* Filter Modal */}
-      <Modal visible={showFilterModal} animationType="slide" transparent>
+      {/* Cari Ekstre Modal */}
+      <Modal visible={!!selectedCari} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Filtre</Text>
-              <TouchableOpacity onPress={() => setShowFilterModal(false)}>
+              <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>
+                {selectedCari?.AD || selectedCari?.CARI_ADI || 'Cari Ekstre'}
+              </Text>
+              <TouchableOpacity onPress={() => { setSelectedCari(null); setExtreData([]); }}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <View style={styles.modalBody}>
-              {(['all', 'debit', 'credit'] as const).map((type) => (
-                <TouchableOpacity
-                  key={type}
-                  style={[
-                    styles.filterItem,
-                    { borderColor: colors.border },
-                    filterType === type && { backgroundColor: colors.primary + '20', borderColor: colors.primary },
-                  ]}
-                  onPress={() => {
-                    setFilterType(type);
-                    setShowFilterModal(false);
-                  }}
-                >
-                  <Ionicons
-                    name={
-                      type === 'all'
-                        ? 'people'
-                        : type === 'debit'
-                        ? 'trending-down'
-                        : 'trending-up'
-                    }
-                    size={20}
-                    color={filterType === type ? colors.primary : colors.textSecondary}
-                  />
-                  <Text
-                    style={[
-                      styles.filterItemText,
-                      { color: filterType === type ? colors.primary : colors.text },
-                    ]}
-                  >
-                    {type === 'all' ? 'Tüm Cariler' : type === 'debit' ? 'Borçlu Cariler' : 'Alacaklı Cariler'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        </View>
-      </Modal>
 
-      {/* Customer Detail Modal */}
-      <Modal visible={!!selectedCustomer} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '85%' }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>{selectedCustomer?.name}</Text>
-              <TouchableOpacity onPress={() => setSelectedCustomer(null)}>
-                <Ionicons name="close" size={24} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
-              {/* Customer Info */}
-              {selectedCustomer && (
-                <View style={[styles.customerDetail, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <View style={styles.customerDetailRow}>
-                    <Ionicons name="call-outline" size={18} color={colors.textSecondary} />
-                    <Text style={[styles.customerDetailText, { color: colors.text }]}>
-                      {selectedCustomer.phone || '-'}
-                    </Text>
-                  </View>
-                  <View style={styles.customerDetailRow}>
-                    <Ionicons name="mail-outline" size={18} color={colors.textSecondary} />
-                    <Text style={[styles.customerDetailText, { color: colors.text }]}>
-                      {selectedCustomer.email || '-'}
-                    </Text>
-                  </View>
-                  <View style={[styles.balanceBig, { borderTopColor: colors.border }]}>
-                    <Text style={[styles.balanceBigLabel, { color: colors.textSecondary }]}>Bakiye</Text>
-                    <Text
-                      style={[
-                        styles.balanceBigValue,
-                        { color: selectedCustomer.balance >= 0 ? colors.success : colors.error },
-                      ]}
+            {selectedCari && (
+              <View style={[{ padding: 12, backgroundColor: colors.primary + '08', borderBottomWidth: 1, borderBottomColor: colors.border }]}>
+                <Text style={[{ fontSize: 13, color: colors.textSecondary }]}>{selectedCari.KOD || selectedCari.CARI_KODU || ''}</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
+                  <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]}>Bakiye:</Text>
+                  <Text style={[{ fontSize: 18, fontWeight: '800', color: parseFloat(selectedCari.BAKIYE || '0') >= 0 ? colors.error : colors.success }]}>
+                    ₺{Math.abs(parseFloat(selectedCari.BAKIYE || '0')).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
+              {extreLoading ? (
+                <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                  <ActivityIndicator size="large" color={colors.primary} />
+                  <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>Ekstre yükleniyor...</Text>
+                </View>
+              ) : extreData.length > 0 ? (
+                extreData.map((row: any, idx: number) => {
+                  const borc = parseFloat(row.BORC || '0');
+                  const alacak = parseFloat(row.ALACAK || '0');
+                  const bakiye = parseFloat(row.BAKIYE || '0');
+                  const hasBelgeId = row.BELGE_ID && row.BELGE_ID !== '0';
+
+                  return (
+                    <TouchableOpacity
+                      key={idx}
+                      style={[styles.extreRow, { backgroundColor: colors.card, borderColor: colors.border }]}
+                      onPress={() => hasBelgeId ? openFisDetail(row) : null}
+                      disabled={!hasBelgeId}
+                      activeOpacity={hasBelgeId ? 0.7 : 1}
                     >
-                      {selectedCustomer.balance >= 0 ? '+' : ''}₺
-                      {selectedCustomer.balance.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                    </Text>
-                  </View>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <Text style={[{ fontSize: 12, fontWeight: '600', color: colors.text }]}>{row.TARIH || ''}</Text>
+                        <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{row.BELGENO || ''}</Text>
+                      </View>
+                      <Text style={[{ fontSize: 12, color: colors.textSecondary, marginBottom: 6 }]} numberOfLines={1}>
+                        {row.ACIKLAMA || row.AD || '-'}
+                      </Text>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                        <View style={{ flexDirection: 'row', gap: 16 }}>
+                          {borc > 0 && <Text style={[{ fontSize: 13, fontWeight: '600', color: colors.error }]}>B: ₺{borc.toFixed(2)}</Text>}
+                          {alacak > 0 && <Text style={[{ fontSize: 13, fontWeight: '600', color: colors.success }]}>A: ₺{alacak.toFixed(2)}</Text>}
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <Text style={[{ fontSize: 13, fontWeight: '700', color: colors.text }]}>₺{bakiye.toFixed(2)}</Text>
+                          {hasBelgeId && <Ionicons name="chevron-forward" size={14} color={colors.primary} />}
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
+              ) : (
+                <View style={{ alignItems: 'center', paddingVertical: 30 }}>
+                  <Text style={[{ color: colors.textSecondary }]}>Ekstre bilgisi bulunamadı</Text>
                 </View>
               )}
-
-              {/* Movements */}
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Hareketler</Text>
-              {customerMovements.map((mov) => (
-                <TouchableOpacity
-                  key={mov.id}
-                  style={[styles.movementItem, { backgroundColor: colors.card, borderColor: colors.border }]}
-                  onPress={() => mov.invoiceDetails && setSelectedInvoice(mov)}
-                  disabled={!mov.invoiceDetails}
-                >
-                  <View style={styles.movementHeader}>
-                    <View
-                      style={[
-                        styles.movementType,
-                        {
-                          backgroundColor:
-                            mov.type === 'invoice'
-                              ? colors.error + '20'
-                              : mov.type === 'payment'
-                              ? colors.success + '20'
-                              : colors.warning + '20',
-                        },
-                      ]}
-                    >
-                      <Ionicons
-                        name={
-                          mov.type === 'invoice'
-                            ? 'document-text-outline'
-                            : mov.type === 'payment'
-                            ? 'cash-outline'
-                            : 'arrow-undo-outline'
-                        }
-                        size={14}
-                        color={
-                          mov.type === 'invoice'
-                            ? colors.error
-                            : mov.type === 'payment'
-                            ? colors.success
-                            : colors.warning
-                        }
-                      />
-                      <Text
-                        style={[
-                          styles.movementTypeText,
-                          {
-                            color:
-                              mov.type === 'invoice'
-                                ? colors.error
-                                : mov.type === 'payment'
-                                ? colors.success
-                                : colors.warning,
-                          },
-                        ]}
-                      >
-                        {mov.type === 'invoice' ? 'Fatura' : mov.type === 'payment' ? 'Ödeme' : 'İade'}
-                      </Text>
-                    </View>
-                    <Text
-                      style={[
-                        styles.movementAmount,
-                        { color: mov.amount > 0 ? colors.success : colors.error },
-                      ]}
-                    >
-                      {mov.amount > 0 ? '+' : ''}₺{mov.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-                    </Text>
-                  </View>
-                  <Text style={[styles.movementDesc, { color: colors.text }]}>{mov.description}</Text>
-                  <View style={styles.movementFooter}>
-                    <Text style={[styles.movementDate, { color: colors.textSecondary }]}>{mov.date}</Text>
-                    {mov.invoiceDetails && (
-                      <View style={styles.viewDetail}>
-                        <Text style={[styles.viewDetailText, { color: colors.primary }]}>Detay</Text>
-                        <Ionicons name="chevron-forward" size={14} color={colors.primary} />
-                      </View>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              ))}
             </ScrollView>
           </View>
         </View>
       </Modal>
 
-      {/* Invoice Detail Modal */}
-      <Modal visible={!!selectedInvoice} animationType="slide" transparent>
+      {/* Fiş Detail Modal */}
+      <Modal visible={!!selectedFis} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Fatura Detayı</Text>
-              <TouchableOpacity onPress={() => setSelectedInvoice(null)}>
-                <Ionicons name="close" size={24} color={colors.text} />
+              <TouchableOpacity onPress={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }}>
+                <Ionicons name="arrow-back" size={24} color={colors.text} />
               </TouchableOpacity>
+              <Text style={[styles.modalTitle, { color: colors.text, flex: 1, textAlign: 'center' }]}>Fiş Detayı</Text>
+              <View style={{ width: 24 }} />
             </View>
-            {selectedInvoice && (
-              <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
-                <View style={[styles.invoiceHeader, { backgroundColor: colors.primary + '15' }]}>
-                  <Text style={[styles.invoiceNo, { color: colors.primary }]}>
-                    {selectedInvoice.description}
-                  </Text>
-                  <Text style={[styles.invoiceDate, { color: colors.textSecondary }]}>
-                    {selectedInvoice.date}
-                  </Text>
-                </View>
-                <Text style={[styles.itemsTitle, { color: colors.text }]}>Ürünler</Text>
-                {selectedInvoice.invoiceDetails?.map((item, index) => (
-                  <View
-                    key={index}
-                    style={[styles.invoiceItem, { borderBottomColor: colors.border }]}
-                  >
-                    <View style={styles.invoiceItemInfo}>
-                      <Text style={[styles.invoiceItemName, { color: colors.text }]}>
-                        {item.productName}
-                      </Text>
-                      <Text style={[styles.invoiceItemQty, { color: colors.textSecondary }]}>
-                        {item.quantity} x ₺{item.unitPrice.toFixed(2)}
-                      </Text>
-                    </View>
-                    <Text style={[styles.invoiceItemTotal, { color: colors.text }]}>
-                      ₺{item.total.toFixed(2)}
-                    </Text>
-                  </View>
-                ))}
-                <View style={[styles.invoiceTotal, { borderTopColor: colors.border }]}>
-                  <Text style={[styles.invoiceTotalLabel, { color: colors.text }]}>Toplam</Text>
-                  <Text style={[styles.invoiceTotalValue, { color: colors.primary }]}>
-                    ₺{Math.abs(selectedInvoice.amount).toFixed(2)}
-                  </Text>
-                </View>
-              </ScrollView>
+
+            {selectedFis && (
+              <View style={[{ padding: 12, backgroundColor: colors.primary + '08', borderBottomWidth: 1, borderBottomColor: colors.border }]}>
+                <Text style={[{ fontSize: 13, fontWeight: '600', color: colors.text }]}>{selectedFis.BELGENO || ''}</Text>
+                <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>{selectedFis.TARIH || ''} · {selectedFis.ACIKLAMA || ''}</Text>
+              </View>
             )}
+
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
+              {fisLoading ? (
+                <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                  <ActivityIndicator size="large" color={colors.primary} />
+                  <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>Fiş detayı yükleniyor...</Text>
+                </View>
+              ) : fisDetail.length > 0 ? (
+                <>
+                  {fisDetail.map((item: any, idx: number) => (
+                    <View key={idx} style={[styles.fisRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <Text style={[{ fontSize: 13, fontWeight: '600', color: colors.text, flex: 1 }]} numberOfLines={1}>{item.STOK || 'Ürün'}</Text>
+                        <Text style={[{ fontSize: 13, fontWeight: '700', color: colors.primary }]}>₺{parseFloat(item.DAHIL_TUTAR || item.TUTAR || '0').toFixed(2)}</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 12 }}>
+                        <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{item.BIRIM || ''}</Text>
+                        <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>Miktar: {parseFloat(item.MIKTAR_FIS || '0').toFixed(2)}</Text>
+                        <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>Fiyat: ₺{parseFloat(item.DAHIL_FIYAT || item.FIYAT || '0').toFixed(2)}</Text>
+                      </View>
+                    </View>
+                  ))}
+                  {fisTotals && (
+                    <View style={[styles.fisTotals, { backgroundColor: colors.primary + '10', borderColor: colors.border }]}>
+                      <View style={styles.fisTotalRow}>
+                        <Text style={[{ color: colors.textSecondary }]}>Satır Toplam</Text>
+                        <Text style={[{ fontWeight: '600', color: colors.text }]}>₺{parseFloat(fisTotals.SATIR_TOPLAM || '0').toFixed(2)}</Text>
+                      </View>
+                      <View style={styles.fisTotalRow}>
+                        <Text style={[{ color: colors.textSecondary }]}>KDV</Text>
+                        <Text style={[{ fontWeight: '600', color: colors.text }]}>₺{parseFloat(fisTotals.KDV_TOPLAM || '0').toFixed(2)}</Text>
+                      </View>
+                      <View style={[styles.fisTotalRow, { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 8 }]}>
+                        <Text style={[{ fontSize: 16, fontWeight: '800', color: colors.text }]}>Genel Toplam</Text>
+                        <Text style={[{ fontSize: 18, fontWeight: '800', color: colors.primary }]}>₺{parseFloat(fisTotals.GENELTOPLAM || '0').toFixed(2)}</Text>
+                      </View>
+                    </View>
+                  )}
+                </>
+              ) : (
+                <View style={{ alignItems: 'center', paddingVertical: 30 }}>
+                  <Text style={[{ color: colors.textSecondary }]}>Fiş detayı bulunamadı</Text>
+                </View>
+              )}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -458,334 +438,35 @@ export default function CustomersScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  filterButton: {
-    padding: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    position: 'relative',
-  },
-  filterDot: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    padding: 16,
-    gap: 12,
-  },
-  summaryCard: {
-    flex: 1,
-    padding: 14,
-    borderRadius: 16,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  summaryLabel: {
-    fontSize: 12,
-    marginTop: 6,
-  },
-  summaryValue: {
-    fontSize: 16,
-    fontWeight: '700',
-    marginTop: 4,
-  },
-  searchContainer: {
-    paddingHorizontal: 16,
-  },
-  searchInput: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 10,
-  },
-  searchText: {
-    flex: 1,
-    fontSize: 15,
-  },
-  selectedFilterRow: {
-    paddingHorizontal: 16,
-    marginTop: 12,
-  },
-  selectedFilter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    gap: 6,
-  },
-  selectedFilterText: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  countRow: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  countText: {
-    fontSize: 13,
-  },
-  listContent: {
-    padding: 16,
-    paddingTop: 0,
-  },
-  customerCard: {
-    borderRadius: 16,
-    borderWidth: 1,
-    marginBottom: 12,
-    overflow: 'hidden',
-  },
-  customerHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  avatarText: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  customerInfo: {
-    flex: 1,
-  },
-  customerName: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  customerPhone: {
-    fontSize: 13,
-  },
-  balanceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 14,
-    borderTopWidth: 1,
-  },
-  balanceLabel: {
-    fontSize: 13,
-  },
-  balanceValue: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '70%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  modalBody: {
-    padding: 20,
-  },
-  modalBodyContent: {
-    paddingBottom: 50,
-  },
-  filterItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 8,
-    gap: 12,
-  },
-  filterItemText: {
-    fontSize: 15,
-    fontWeight: '500',
-  },
-  customerDetail: {
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    marginBottom: 20,
-  },
-  customerDetailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 10,
-  },
-  customerDetailText: {
-    fontSize: 14,
-  },
-  balanceBig: {
-    alignItems: 'center',
-    paddingTop: 16,
-    marginTop: 6,
-    borderTopWidth: 1,
-  },
-  balanceBigLabel: {
-    fontSize: 13,
-    marginBottom: 4,
-  },
-  balanceBigValue: {
-    fontSize: 24,
-    fontWeight: '800',
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  movementItem: {
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 8,
-  },
-  movementHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  movementType: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    gap: 4,
-  },
-  movementTypeText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  movementAmount: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  movementDesc: {
-    fontSize: 14,
-    marginBottom: 8,
-  },
-  movementFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  movementDate: {
-    fontSize: 12,
-  },
-  viewDetail: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  viewDetailText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  invoiceHeader: {
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-  },
-  invoiceNo: {
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  invoiceDate: {
-    fontSize: 13,
-  },
-  itemsTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  invoiceItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-  },
-  invoiceItemInfo: {
-    flex: 1,
-  },
-  invoiceItemName: {
-    fontSize: 14,
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  invoiceItemQty: {
-    fontSize: 12,
-  },
-  invoiceItemTotal: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  invoiceTotal: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 12,
-    marginTop: 8,
-    borderTopWidth: 1,
-  },
-  invoiceTotalLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  invoiceTotalValue: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
+  container: { flex: 1 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
+  headerTitle: { fontSize: 20, fontWeight: '800' },
+  summaryRow: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 10, gap: 8 },
+  summaryCard: { flex: 1, borderRadius: 12, borderWidth: 1, padding: 10, alignItems: 'center' },
+  summaryLabel: { fontSize: 11 },
+  summaryValue: { fontSize: 16, fontWeight: '800', marginTop: 2 },
+  searchContainer: { paddingHorizontal: 16, paddingTop: 10 },
+  searchInput: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, borderWidth: 1, gap: 8 },
+  searchText: { flex: 1, fontSize: 14 },
+  countRow: { paddingHorizontal: 16, paddingVertical: 8 },
+  countText: { fontSize: 13 },
+  listContent: { paddingHorizontal: 16, paddingBottom: 100 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  loadingText: { fontSize: 14 },
+  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 60, gap: 12 },
+  emptyText: { fontSize: 15 },
+  cariCard: { borderRadius: 12, borderWidth: 1, marginBottom: 8, overflow: 'hidden' },
+  cariCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, gap: 12 },
+  cariName: { fontSize: 14, fontWeight: '600' },
+  cariCode: { fontSize: 12, marginTop: 2 },
+  cariBakiye: { fontSize: 16, fontWeight: '700' },
+  cariCardBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '90%', flex: 1 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1 },
+  modalTitle: { fontSize: 18, fontWeight: '700' },
+  extreRow: { marginHorizontal: 12, marginTop: 8, borderRadius: 10, borderWidth: 1, padding: 10 },
+  fisRow: { marginHorizontal: 12, marginTop: 8, borderRadius: 10, borderWidth: 1, padding: 10 },
+  fisTotals: { margin: 12, borderRadius: 12, borderWidth: 1, padding: 14, gap: 6 },
+  fisTotalRow: { flexDirection: 'row', justifyContent: 'space-between' },
 });

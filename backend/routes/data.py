@@ -666,3 +666,230 @@ async def get_iptal_list(
     except Exception as e:
         logger.error(f"Iptal list error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# === STOK ENDPOINTS ===
+
+@router.post("/stock-price-names")
+async def get_stock_price_names(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """Fetch stok_fiyat_adlari (price name list) via sync.php dataset_get"""
+    tenant_id = body.get("tenant_id", "")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id gerekli")
+    
+    try:
+        resp = await sync_post({
+            "action": "dataset_get",
+            "dataset_key": "stok_fiyat_adlari",
+            "params": {},
+        }, tenant_id)
+        data = resp.get("data", [])
+        return {"ok": True, "data": data if isinstance(data, list) else []}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Stock price names error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/stock-list")
+async def get_stock_list_sync(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """Fetch stock_list via sync.php request_create (on-demand with FIYAT_AD)"""
+    tenant_id = body.get("tenant_id", "")
+    fiyat_ad = body.get("fiyat_ad", "")
+    
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id gerekli")
+    
+    try:
+        return await _on_demand_request(tenant_id, "stock_list", {"FIYAT_AD": fiyat_ad}, timeout_sec=60)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Stock list error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/stock-detail")
+async def get_stock_detail(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """Fetch stok_bilgi_miktar and stok_extre for a specific stock item"""
+    tenant_id = body.get("tenant_id", "")
+    stock_id = body.get("stock_id")
+    
+    if not tenant_id or stock_id is None:
+        raise HTTPException(status_code=400, detail="tenant_id ve stock_id gerekli")
+    
+    try:
+        # Fetch both miktar and extre in parallel
+        miktar_task = _on_demand_request(tenant_id, "stok_bilgi_miktar", {"ID": int(stock_id), "LOKASYON": 0}, timeout_sec=35)
+        extre_task = _on_demand_request(tenant_id, "stok_extre", {"ID": int(stock_id)}, timeout_sec=35)
+        
+        miktar_result, extre_result = await asyncio.gather(miktar_task, extre_task, return_exceptions=True)
+        
+        miktar_data = miktar_result.get("data", []) if isinstance(miktar_result, dict) else []
+        extre_data = extre_result.get("data", []) if isinstance(extre_result, dict) else []
+        
+        return {
+            "ok": True,
+            "miktar": _fix_large_ints(miktar_data) if isinstance(miktar_data, list) else [],
+            "extre": _fix_large_ints(extre_data) if isinstance(extre_data, list) else [],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Stock detail error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# === CARİ ENDPOINTS ===
+
+@router.post("/cari-list")
+async def get_cari_list_sync(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """Fetch cari_bakiye_liste via sync.php dataset_get"""
+    tenant_id = body.get("tenant_id", "")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id gerekli")
+    
+    try:
+        resp = await sync_post({
+            "action": "dataset_get",
+            "dataset_key": "cari_bakiye_liste",
+            "params": {},
+        }, tenant_id)
+        data = resp.get("data", [])
+        return {"ok": True, "data": _fix_large_ints(data) if isinstance(data, list) else []}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Cari list error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/cari-extre")
+async def get_cari_extre(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """Fetch kart_extre_cari for a specific customer"""
+    tenant_id = body.get("tenant_id", "")
+    cari_id = body.get("cari_id")
+    doviz_ad = body.get("doviz_ad", 1)
+    tarih_baslangic = body.get("tarih_baslangic", "")
+    tarih_bitis = body.get("tarih_bitis", "")
+    devir = body.get("devir", "Devreden")
+    
+    if not tenant_id or cari_id is None:
+        raise HTTPException(status_code=400, detail="tenant_id ve cari_id gerekli")
+    
+    if not tarih_baslangic:
+        from datetime import date as date_cls
+        tarih_baslangic = date_cls.today().replace(day=1).strftime("%Y-%m-%d")
+    if not tarih_bitis:
+        from datetime import date as date_cls
+        tarih_bitis = date_cls.today().strftime("%Y-%m-%d")
+    
+    try:
+        return await _on_demand_request(tenant_id, "kart_extre_cari", {
+            "ID": int(cari_id),
+            "DOVIZ_AD": int(doviz_ad),
+            "TARIH_BASLANGIC": tarih_baslangic,
+            "TARIH_BITIS": tarih_bitis,
+            "DEVIR": devir,
+        }, timeout_sec=45)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Cari extre error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/fis-detail")
+async def get_fis_detail(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """Fetch fis_detay_toplam for a specific receipt"""
+    tenant_id = body.get("tenant_id", "")
+    fis_id = body.get("fis_id")
+    
+    if not tenant_id or fis_id is None:
+        raise HTTPException(status_code=400, detail="tenant_id ve fis_id gerekli")
+    
+    try:
+        return await _on_demand_request(tenant_id, "fis_detay_toplam", {
+            "FisId": int(fis_id),
+        }, timeout_sec=35)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Fis detail error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# === RAPOR ENDPOINTS ===
+
+@router.post("/report-run")
+async def run_report(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """Run any report via sync.php request_create with given dataset_key and params"""
+    tenant_id = body.get("tenant_id", "")
+    dataset_key = body.get("dataset_key", "")
+    params = body.get("params", {})
+    
+    if not tenant_id or not dataset_key:
+        raise HTTPException(status_code=400, detail="tenant_id ve dataset_key gerekli")
+    
+    # Validate allowed report keys
+    allowed_keys = [
+        "rap_fiyat_listeleri_web", "rap_satis_adet_kar_web", "rap_stok_envanter_web",
+        "rap_lm_gelir_tablosu", "rap_personel_satis_ozet_web",
+        "rap_fis_kalem_listesi_web", "rap_cari_hesap_ekstresi_web",
+    ]
+    if dataset_key not in allowed_keys:
+        raise HTTPException(status_code=400, detail=f"Geçersiz rapor: {dataset_key}")
+    
+    try:
+        return await _on_demand_request(tenant_id, dataset_key, params, timeout_sec=90)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Report run error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/report-filter-options")
+async def get_report_filter_options(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """Fetch filter dropdown options via rap_filtre_lookup"""
+    tenant_id = body.get("tenant_id", "")
+    source = body.get("source", "")
+    
+    if not tenant_id or not source:
+        raise HTTPException(status_code=400, detail="tenant_id ve source gerekli")
+    
+    try:
+        return await _on_demand_request(tenant_id, "rap_filtre_lookup", {
+            "Kaynak": source,
+            "Q": "",
+        }, timeout_sec=30)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Report filter options error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

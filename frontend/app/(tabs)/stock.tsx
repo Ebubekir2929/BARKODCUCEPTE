@@ -10,248 +10,224 @@ import {
   ActivityIndicator,
   FlatList,
   Alert,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
+import { useAuthStore } from '../../src/store/authStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
-import {
-  getDataBySource,
-  getProductLocationStocks,
-  getProductMovements,
-} from '../../src/data/mockData';
-import { Product, ProductLocationStock, ProductMovement } from '../../src/types';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { CameraView, useCameraPermissions } from 'expo-camera';
 
-const CACHE_KEY = 'cached_products';
-
-interface StockFilters {
-  group: string | null;
-  profitType: 'all' | 'profit' | 'loss';
-  quantityType: 'all' | 'low' | 'medium' | 'high';
-  kdvType: 'all' | '1' | '10' | '20';
-}
+const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 export default function StockScreen() {
   const { colors } = useThemeStore();
+  const { user } = useAuthStore();
   const { activeSource } = useDataSourceStore();
-  const sourceData = useMemo(() => getDataBySource(activeSource), [activeSource]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filters, setFilters] = useState<StockFilters>({
-    group: null,
-    profitType: 'all',
-    quantityType: 'all',
-    kdvType: 'all',
-  });
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [productLocations, setProductLocations] = useState<ProductLocationStock[]>([]);
-  const [productMovements, setProductMovements] = useState<ProductMovement[]>([]);
-  const [showFilterModal, setShowFilterModal] = useState(false);
-  const [showScanner, setShowScanner] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [permission, requestPermission] = useCameraPermissions();
 
+  // Compute active tenant ID
+  const activeTenantId = useMemo(() => {
+    if (!user?.tenants || user.tenants.length === 0) return '';
+    const keys = ['data1', 'data2', 'data3'];
+    const idx = keys.indexOf(activeSource);
+    if (idx >= 0 && idx < user.tenants.length) return user.tenants[idx].tenant_id || '';
+    return user.tenants[0]?.tenant_id || '';
+  }, [user?.tenants, activeSource]);
+
+  // State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [priceNames, setPriceNames] = useState<any[]>([]);
+  const [selectedPriceName, setSelectedPriceName] = useState<string>('');
+  const [stockList, setStockList] = useState<any[]>([]);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [showPriceModal, setShowPriceModal] = useState(false);
+
+  // Detail modal
+  const [selectedStock, setSelectedStock] = useState<any | null>(null);
+  const [detailMiktar, setDetailMiktar] = useState<any[]>([]);
+  const [detailExtre, setDetailExtre] = useState<any[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailTab, setDetailTab] = useState<'miktar' | 'extre'>('miktar');
+
+  // Fetch price names on mount
   useEffect(() => {
-    const loadProducts = async () => {
+    if (!activeTenantId) return;
+    const fetchPriceNames = async () => {
+      setLoading(true);
       try {
-        setProducts(sourceData.products);
-      } catch (error) {
-        setProducts(sourceData.products);
+        const { token } = useAuthStore.getState();
+        const resp = await fetch(`${API_URL}/api/data/stock-price-names`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ tenant_id: activeTenantId }),
+        });
+        const data = await resp.json();
+        if (data.ok && data.data) {
+          setPriceNames(data.data);
+          // Auto-select first
+          if (data.data.length > 0 && !selectedPriceName) {
+            const first = data.data[0];
+            setSelectedPriceName(String(first.ID || first.AD || ''));
+          }
+        }
+      } catch (err) {
+        console.error('Price names error:', err);
       } finally {
         setLoading(false);
       }
     };
-    loadProducts();
-  }, [sourceData]);
+    fetchPriceNames();
+  }, [activeTenantId]);
 
-  const groups = useMemo(() => {
-    const uniqueGroups = [...new Set(products.map((p) => p.group))];
-    return uniqueGroups;
-  }, [products]);
-
-  const filteredProducts = useMemo(() => {
-    let filtered = products;
-
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        (p) =>
-          p.name.toLowerCase().includes(query) ||
-          p.barcode.includes(query)
-      );
-    }
-
-    if (filters.group) {
-      filtered = filtered.filter((p) => p.group === filters.group);
-    }
-
-    if (filters.profitType === 'profit') {
-      filtered = filtered.filter((p) => p.profit >= 0);
-    } else if (filters.profitType === 'loss') {
-      filtered = filtered.filter((p) => p.profit < 0);
-    }
-
-    if (filters.quantityType === 'low') {
-      filtered = filtered.filter((p) => p.quantity < 50);
-    } else if (filters.quantityType === 'medium') {
-      filtered = filtered.filter((p) => p.quantity >= 50 && p.quantity < 200);
-    } else if (filters.quantityType === 'high') {
-      filtered = filtered.filter((p) => p.quantity >= 200);
-    }
-
-    if (filters.kdvType !== 'all') {
-      filtered = filtered.filter((p) => p.kdv === parseInt(filters.kdvType));
-    }
-
-    return filtered;
-  }, [products, searchQuery, filters]);
-
-  const activeFilterCount = useMemo(() => {
-    let count = 0;
-    if (filters.group) count++;
-    if (filters.profitType !== 'all') count++;
-    if (filters.quantityType !== 'all') count++;
-    if (filters.kdvType !== 'all') count++;
-    return count;
-  }, [filters]);
-
-  const handleProductPress = useCallback((product: Product) => {
-    setSelectedProduct(product);
-    setProductLocations(getProductLocationStocks(product.id));
-    setProductMovements(getProductMovements(product.id));
-  }, []);
-
-  const handleBarCodeScanned = ({ data }: { data: string }) => {
-    setShowScanner(false);
-    setSearchQuery(data);
-    const found = products.find(p => p.barcode === data);
-    if (found) {
-      handleProductPress(found);
-    } else {
-      Alert.alert('Ürün Bulunamadı', `"${data}" barkodlu ürün bulunamadı.`);
-    }
-  };
-
-  const openScanner = async () => {
-    if (!permission?.granted) {
-      const result = await requestPermission();
-      if (!result.granted) {
-        Alert.alert('İzin Gerekli', 'Barkod tarama için kamera izni gereklidir.');
-        return;
+  // Fetch stock list when price name selected
+  useEffect(() => {
+    if (!activeTenantId || !selectedPriceName) return;
+    const fetchStockList = async () => {
+      setStockLoading(true);
+      setStockList([]);
+      try {
+        const { token } = useAuthStore.getState();
+        const resp = await fetch(`${API_URL}/api/data/stock-list`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ tenant_id: activeTenantId, fiyat_ad: selectedPriceName }),
+        });
+        const data = await resp.json();
+        if (data.ok && data.data) {
+          setStockList(data.data);
+        }
+      } catch (err) {
+        console.error('Stock list error:', err);
+      } finally {
+        setStockLoading(false);
       }
+    };
+    fetchStockList();
+  }, [activeTenantId, selectedPriceName]);
+
+  // Open stock detail
+  const openStockDetail = useCallback(async (stock: any) => {
+    setSelectedStock(stock);
+    setDetailMiktar([]);
+    setDetailExtre([]);
+    setDetailLoading(true);
+    setDetailTab('miktar');
+
+    const stockId = stock.ID || stock.STOK_ID;
+    if (!stockId || !activeTenantId) {
+      setDetailLoading(false);
+      return;
     }
-    setShowScanner(true);
-  };
 
-  const resetFilters = () => {
-    setFilters({
-      group: null,
-      profitType: 'all',
-      quantityType: 'all',
-      kdvType: 'all',
-    });
-  };
+    try {
+      const { token } = useAuthStore.getState();
+      const resp = await fetch(`${API_URL}/api/data/stock-detail`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ tenant_id: activeTenantId, stock_id: stockId }),
+      });
+      const data = await resp.json();
+      if (data.ok) {
+        setDetailMiktar(data.miktar || []);
+        setDetailExtre(data.extre || []);
+      }
+    } catch (err) {
+      console.error('Stock detail error:', err);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [activeTenantId]);
 
-  const renderProduct = useCallback(
-    ({ item }: { item: Product }) => (
-      <TouchableOpacity
-        style={[styles.productCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-        onPress={() => handleProductPress(item)}
-      >
-        <View style={styles.productHeader}>
-          <View style={styles.productInfo}>
-            <Text style={[styles.productName, { color: colors.text }]}>{item.name}</Text>
-            <Text style={[styles.productBarcode, { color: colors.textSecondary }]}>
-              {item.barcode}
-            </Text>
-          </View>
-          <View style={[styles.groupBadge, { backgroundColor: colors.primary + '20' }]}>
-            <Text style={[styles.groupText, { color: colors.primary }]}>{item.group}</Text>
-          </View>
-        </View>
+  // Filter stock list
+  const filteredStocks = useMemo(() => {
+    if (!searchQuery) return stockList;
+    const q = searchQuery.toLowerCase();
+    return stockList.filter((s: any) =>
+      (s.AD || s.STOK_ADI || '').toLowerCase().includes(q) ||
+      (s.KOD || s.STOK_KODU || '').toLowerCase().includes(q) ||
+      (s.BARKOD || '').includes(q)
+    );
+  }, [stockList, searchQuery]);
 
-        <View style={styles.productDetails}>
-          <View style={styles.detailColumn}>
-            <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>KDV</Text>
-            <Text style={[styles.detailValue, { color: colors.text }]}>%{item.kdv}</Text>
-          </View>
-          <View style={styles.detailColumn}>
-            <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Alış</Text>
-            <Text style={[styles.detailValue, { color: colors.text }]}>
-              ₺{item.purchasePrice.toFixed(2)}
-            </Text>
-          </View>
-          <View style={styles.detailColumn}>
-            <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Satış</Text>
-            <Text style={[styles.detailValue, { color: colors.text }]}>
-              ₺{item.salesPrice.toFixed(2)}
-            </Text>
-          </View>
-          <View style={styles.detailColumn}>
-            <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Miktar</Text>
-            <Text style={[styles.detailValue, { color: item.quantity < 50 ? colors.warning : colors.text }]}>{item.quantity}</Text>
-          </View>
-        </View>
+  const selectedPriceLabel = useMemo(() => {
+    const found = priceNames.find((p: any) => String(p.ID) === selectedPriceName || String(p.AD) === selectedPriceName);
+    return found ? (found.AD || `Fiyat #${found.ID}`) : 'Fiyat Adı Seç';
+  }, [priceNames, selectedPriceName]);
 
-        <View style={[styles.profitRow, { borderTopColor: colors.border }]}>
-          <Text style={[styles.profitLabel, { color: colors.textSecondary }]}>Kar/Zarar:</Text>
-          <Text
-            style={[
-              styles.profitValue,
-              { color: item.profit >= 0 ? colors.success : colors.error },
-            ]}
-          >
-            {item.profit >= 0 ? '+' : ''}₺{item.profit.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
-          </Text>
-        </View>
-      </TouchableOpacity>
-    ),
-    [colors, handleProductPress]
-  );
+  // Render stock item
+  const renderStockItem = useCallback(({ item }: { item: any }) => {
+    const name = item.AD || item.STOK_ADI || 'Ürün';
+    const code = item.KOD || item.STOK_KODU || '';
+    const barcode = item.BARKOD || '';
+    const price = parseFloat(item.FIYAT || '0');
+    const priceIncl = parseFloat(item.DAHIL_FIYAT || '0');
 
-  if (loading) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
-            Stoklar yükleniyor...
-          </Text>
+      <TouchableOpacity
+        style={[styles.stockCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+        onPress={() => openStockDetail(item)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.stockCardTop}>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.stockName, { color: colors.text }]} numberOfLines={2}>{name}</Text>
+            <Text style={[styles.stockCode, { color: colors.textSecondary }]}>{code}</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={[styles.stockPrice, { color: colors.primary }]}>₺{priceIncl > 0 ? priceIncl.toFixed(2) : price.toFixed(2)}</Text>
+            {priceIncl > 0 && price > 0 && priceIncl !== price && (
+              <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>KDV Hariç: ₺{price.toFixed(2)}</Text>
+            )}
+          </View>
+        </View>
+        {barcode ? (
+          <View style={[styles.barcodeRow, { borderTopColor: colors.border }]}>
+            <Ionicons name="barcode-outline" size={14} color={colors.textSecondary} />
+            <Text style={[styles.barcodeText, { color: colors.textSecondary }]}>{barcode}</Text>
+            <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+          </View>
+        ) : null}
+      </TouchableOpacity>
+    );
+  }, [colors, openStockDetail]);
+
+  // No tenant
+  if (!activeTenantId) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+        <ActiveSourceIndicator />
+        <View style={styles.emptyContainer}>
+          <Ionicons name="cube-outline" size={48} color={colors.textSecondary} />
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Veri kaynağı seçilmedi</Text>
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Global Data Source Selector */}
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <ActiveSourceIndicator />
+
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Stok Yönetimi</Text>
-        <View style={styles.headerActions}>
-          <TouchableOpacity
-            style={[styles.scanButton, { backgroundColor: colors.success + '20' }]}
-            onPress={openScanner}
-          >
-            <Ionicons name="barcode-outline" size={22} color={colors.success} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border }]}
-            onPress={() => setShowFilterModal(true)}
-          >
-            <Ionicons name="filter" size={20} color={colors.primary} />
-            {activeFilterCount > 0 && (
-              <View style={[styles.filterBadge, { backgroundColor: colors.primary }]}>
-                <Text style={styles.filterBadgeText}>{activeFilterCount}</Text>
-              </View>
-            )}
-          </TouchableOpacity>
-        </View>
       </View>
+
+      {/* Price Name Selector */}
+      <TouchableOpacity
+        style={[styles.priceSelector, { backgroundColor: colors.card, borderColor: colors.border }]}
+        onPress={() => setShowPriceModal(true)}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+          <Ionicons name="pricetag-outline" size={18} color={colors.primary} />
+          <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text, flex: 1 }]} numberOfLines={1}>
+            {loading ? 'Yükleniyor...' : selectedPriceLabel}
+          </Text>
+        </View>
+        <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
+      </TouchableOpacity>
 
       {/* Search */}
       <View style={styles.searchContainer}>
@@ -259,7 +235,7 @@ export default function StockScreen() {
           <Ionicons name="search" size={20} color={colors.textSecondary} />
           <TextInput
             style={[styles.searchText, { color: colors.text }]}
-            placeholder="Barkod veya ürün adı ara..."
+            placeholder="Barkod, kod veya ürün adı ara..."
             placeholderTextColor={colors.textSecondary}
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -272,356 +248,197 @@ export default function StockScreen() {
         </View>
       </View>
 
-      {/* Active Filters */}
-      {activeFilterCount > 0 && (
-        <View style={styles.activeFiltersRow}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.activeFiltersContent}>
-            {filters.group && (
-              <View style={[styles.activeFilter, { backgroundColor: colors.primary + '20' }]}>
-                <Text style={[styles.activeFilterText, { color: colors.primary }]}>{filters.group}</Text>
-                <TouchableOpacity onPress={() => setFilters(prev => ({ ...prev, group: null }))}>
-                  <Ionicons name="close" size={14} color={colors.primary} />
-                </TouchableOpacity>
-              </View>
-            )}
-            {filters.profitType !== 'all' && (
-              <View style={[styles.activeFilter, { backgroundColor: filters.profitType === 'profit' ? colors.success + '20' : colors.error + '20' }]}>
-                <Text style={[styles.activeFilterText, { color: filters.profitType === 'profit' ? colors.success : colors.error }]}>
-                  {filters.profitType === 'profit' ? 'Karlı' : 'Zararlı'}
-                </Text>
-                <TouchableOpacity onPress={() => setFilters(prev => ({ ...prev, profitType: 'all' }))}>
-                  <Ionicons name="close" size={14} color={filters.profitType === 'profit' ? colors.success : colors.error} />
-                </TouchableOpacity>
-              </View>
-            )}
-            {filters.quantityType !== 'all' && (
-              <View style={[styles.activeFilter, { backgroundColor: colors.warning + '20' }]}>
-                <Text style={[styles.activeFilterText, { color: colors.warning }]}>
-                  {filters.quantityType === 'low' ? 'Düşük Stok' : filters.quantityType === 'medium' ? 'Orta Stok' : 'Yüksek Stok'}
-                </Text>
-                <TouchableOpacity onPress={() => setFilters(prev => ({ ...prev, quantityType: 'all' }))}>
-                  <Ionicons name="close" size={14} color={colors.warning} />
-                </TouchableOpacity>
-              </View>
-            )}
-            {filters.kdvType !== 'all' && (
-              <View style={[styles.activeFilter, { backgroundColor: colors.info + '20' }]}>
-                <Text style={[styles.activeFilterText, { color: colors.info }]}>KDV %{filters.kdvType}</Text>
-                <TouchableOpacity onPress={() => setFilters(prev => ({ ...prev, kdvType: 'all' }))}>
-                  <Ionicons name="close" size={14} color={colors.info} />
-                </TouchableOpacity>
-              </View>
-            )}
-            <TouchableOpacity
-              style={[styles.clearAllBtn, { borderColor: colors.error }]}
-              onPress={resetFilters}
-            >
-              <Text style={[styles.clearAllText, { color: colors.error }]}>Temizle</Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
-      )}
-
-      {/* Product Count */}
+      {/* Count */}
       <View style={styles.countRow}>
         <Text style={[styles.countText, { color: colors.textSecondary }]}>
-          {filteredProducts.length} ürün listeleniyor
+          {stockLoading ? 'POS\'tan yükleniyor...' : `${filteredStocks.length} ürün`}
         </Text>
       </View>
 
-      {/* Product List */}
-      <FlatList
-        data={filteredProducts}
-        renderItem={renderProduct}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        initialNumToRender={10}
-        maxToRenderPerBatch={10}
-        windowSize={10}
-        removeClippedSubviews={true}
-      />
+      {/* Loading or List */}
+      {stockLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+            POS'tan stok listesi alınıyor...
+          </Text>
+        </View>
+      ) : (
+        <FlatList
+          data={filteredStocks}
+          renderItem={renderStockItem}
+          keyExtractor={(item, idx) => String(item.ID || item.STOK_ID || idx)}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={15}
+          maxToRenderPerBatch={10}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Ionicons name="cube-outline" size={48} color={colors.textSecondary} />
+              <Text style={[styles.emptyText, { color: colors.textSecondary }]}>Stok bulunamadı</Text>
+            </View>
+          }
+        />
+      )}
 
-      {/* Filter Modal */}
-      <Modal visible={showFilterModal} animationType="slide" transparent>
+      {/* Price Name Selection Modal */}
+      <Modal visible={showPriceModal} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Filtreler</Text>
-              <TouchableOpacity onPress={() => setShowFilterModal(false)}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>Fiyat Adı Seç</Text>
+              <TouchableOpacity onPress={() => setShowPriceModal(false)}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalBody}>
-              {/* Group Filter */}
-              <Text style={[styles.filterSectionTitle, { color: colors.text }]}>Grup</Text>
-              <View style={styles.filterOptions}>
-                <TouchableOpacity
-                  style={[
-                    styles.filterOption,
-                    { borderColor: colors.border },
-                    filters.group === null && { backgroundColor: colors.primary + '20', borderColor: colors.primary },
-                  ]}
-                  onPress={() => setFilters(prev => ({ ...prev, group: null }))}
-                >
-                  <Text style={[styles.filterOptionText, { color: filters.group === null ? colors.primary : colors.text }]}>
-                    Tümü
-                  </Text>
-                </TouchableOpacity>
-                {groups.map((group) => (
+            <ScrollView style={{ padding: 16 }} contentContainerStyle={{ paddingBottom: 30 }}>
+              {priceNames.map((pn: any, idx: number) => {
+                const isSelected = String(pn.ID) === selectedPriceName || String(pn.AD) === selectedPriceName;
+                return (
                   <TouchableOpacity
-                    key={group}
-                    style={[
-                      styles.filterOption,
-                      { borderColor: colors.border },
-                      filters.group === group && { backgroundColor: colors.primary + '20', borderColor: colors.primary },
-                    ]}
-                    onPress={() => setFilters(prev => ({ ...prev, group }))}
+                    key={idx}
+                    style={[styles.priceOption, { backgroundColor: isSelected ? colors.primary + '15' : colors.card, borderColor: isSelected ? colors.primary : colors.border }]}
+                    onPress={() => {
+                      setSelectedPriceName(String(pn.ID || pn.AD || ''));
+                      setShowPriceModal(false);
+                    }}
                   >
-                    <Text style={[styles.filterOptionText, { color: filters.group === group ? colors.primary : colors.text }]}>
-                      {group}
+                    <Text style={[{ fontSize: 15, fontWeight: isSelected ? '700' : '500', color: isSelected ? colors.primary : colors.text }]}>
+                      {pn.AD || `Fiyat #${pn.ID}`}
                     </Text>
+                    {isSelected && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}
                   </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* Profit Filter */}
-              <Text style={[styles.filterSectionTitle, { color: colors.text }]}>Kar/Zarar</Text>
-              <View style={styles.filterOptions}>
-                {(['all', 'profit', 'loss'] as const).map((type) => (
-                  <TouchableOpacity
-                    key={type}
-                    style={[
-                      styles.filterOption,
-                      { borderColor: colors.border },
-                      filters.profitType === type && { 
-                        backgroundColor: type === 'profit' ? colors.success + '20' : type === 'loss' ? colors.error + '20' : colors.primary + '20',
-                        borderColor: type === 'profit' ? colors.success : type === 'loss' ? colors.error : colors.primary,
-                      },
-                    ]}
-                    onPress={() => setFilters(prev => ({ ...prev, profitType: type }))}
-                  >
-                    <Ionicons
-                      name={type === 'profit' ? 'trending-up' : type === 'loss' ? 'trending-down' : 'swap-horizontal'}
-                      size={16}
-                      color={
-                        filters.profitType === type
-                          ? type === 'profit' ? colors.success : type === 'loss' ? colors.error : colors.primary
-                          : colors.textSecondary
-                      }
-                    />
-                    <Text style={[styles.filterOptionText, { 
-                      color: filters.profitType === type 
-                        ? type === 'profit' ? colors.success : type === 'loss' ? colors.error : colors.primary
-                        : colors.text 
-                    }]}>
-                      {type === 'all' ? 'Tümü' : type === 'profit' ? 'Karlı' : 'Zararlı'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* Quantity Filter */}
-              <Text style={[styles.filterSectionTitle, { color: colors.text }]}>Stok Miktarı</Text>
-              <View style={styles.filterOptions}>
-                {(['all', 'low', 'medium', 'high'] as const).map((type) => (
-                  <TouchableOpacity
-                    key={type}
-                    style={[
-                      styles.filterOption,
-                      { borderColor: colors.border },
-                      filters.quantityType === type && { backgroundColor: colors.warning + '20', borderColor: colors.warning },
-                    ]}
-                    onPress={() => setFilters(prev => ({ ...prev, quantityType: type }))}
-                  >
-                    <Text style={[styles.filterOptionText, { color: filters.quantityType === type ? colors.warning : colors.text }]}>
-                      {type === 'all' ? 'Tümü' : type === 'low' ? '< 50' : type === 'medium' ? '50-200' : '> 200'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* KDV Filter */}
-              <Text style={[styles.filterSectionTitle, { color: colors.text }]}>KDV Oranı</Text>
-              <View style={styles.filterOptions}>
-                {(['all', '1', '10', '20'] as const).map((type) => (
-                  <TouchableOpacity
-                    key={type}
-                    style={[
-                      styles.filterOption,
-                      { borderColor: colors.border },
-                      filters.kdvType === type && { backgroundColor: colors.info + '20', borderColor: colors.info },
-                    ]}
-                    onPress={() => setFilters(prev => ({ ...prev, kdvType: type }))}
-                  >
-                    <Text style={[styles.filterOptionText, { color: filters.kdvType === type ? colors.info : colors.text }]}>
-                      {type === 'all' ? 'Tümü' : `%${type}`}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+                );
+              })}
             </ScrollView>
-            <View style={[styles.modalFooter, { borderTopColor: colors.border }]}>
-              <TouchableOpacity
-                style={[styles.resetBtn, { borderColor: colors.border }]}
-                onPress={() => {
-                  resetFilters();
-                  setShowFilterModal(false);
-                }}
-              >
-                <Text style={[styles.resetBtnText, { color: colors.text }]}>Sıfırla</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.applyBtn, { backgroundColor: colors.primary }]}
-                onPress={() => setShowFilterModal(false)}
-              >
-                <Text style={styles.applyBtnText}>Uygula</Text>
-              </TouchableOpacity>
-            </View>
           </View>
         </View>
       </Modal>
 
-      {/* Barcode Scanner Modal */}
-      <Modal visible={showScanner} animationType="slide">
-        <View style={[styles.scannerContainer, { backgroundColor: colors.background }]}>
-          <View style={[styles.scannerHeader, { backgroundColor: colors.surface }]}>
-            <TouchableOpacity onPress={() => setShowScanner(false)} style={styles.scannerCloseBtn}>
-              <Ionicons name="close" size={28} color={colors.text} />
-            </TouchableOpacity>
-            <Text style={[styles.scannerTitle, { color: colors.text }]}>Barkod Tara</Text>
-            <View style={{ width: 28 }} />
-          </View>
-          <CameraView
-            style={styles.scanner}
-            facing="back"
-            barcodeScannerSettings={{
-              barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e', 'code128', 'code39'],
-            }}
-            onBarcodeScanned={handleBarCodeScanned}
-          />
-          <View style={styles.scannerOverlay}>
-            <View style={[styles.scannerFrame, { borderColor: colors.primary }]} />
-            <Text style={[styles.scannerHint, { color: '#FFF' }]}>
-              Barkodu çerçevenin içine hizalayın
-            </Text>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Product Detail Modal */}
-      <Modal visible={!!selectedProduct} animationType="slide" transparent>
+      {/* Stock Detail Modal */}
+      <Modal visible={!!selectedStock} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '85%' }]}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>
-                {selectedProduct?.name}
+                {selectedStock?.AD || selectedStock?.STOK_ADI || 'Stok Detayı'}
               </Text>
-              <TouchableOpacity onPress={() => setSelectedProduct(null)}>
+              <TouchableOpacity onPress={() => { setSelectedStock(null); setDetailMiktar([]); setDetailExtre([]); }}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
-              {/* Location Stocks */}
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>Lokasyon Dağılımı</Text>
-              {productLocations.map((loc) => (
-                <View
-                  key={loc.branchId}
-                  style={[styles.locationItem, { backgroundColor: colors.card, borderColor: colors.border }]}
-                >
-                  <View style={styles.locationInfo}>
-                    <Ionicons name="storefront-outline" size={18} color={colors.primary} />
-                    <Text style={[styles.locationName, { color: colors.text }]}>{loc.branchName}</Text>
-                  </View>
-                  <View style={[styles.quantityBadge, { backgroundColor: colors.success + '20' }]}>
-                    <Text style={[styles.quantityText, { color: colors.success }]}>{loc.quantity} adet</Text>
-                  </View>
-                </View>
-              ))}
 
-              {/* Movements */}
-              <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 20 }]}>
-                Stok Hareketleri
-              </Text>
-              {productMovements.map((mov) => (
-                <View
-                  key={mov.id}
-                  style={[styles.movementItem, { backgroundColor: colors.card, borderColor: colors.border }]}
-                >
-                  <View style={styles.movementHeader}>
-                    <View
-                      style={[
-                        styles.movementType,
-                        {
-                          backgroundColor:
-                            mov.type === 'sale'
-                              ? colors.error + '20'
-                              : mov.type === 'purchase'
-                              ? colors.success + '20'
-                              : colors.warning + '20',
-                        },
-                      ]}
-                    >
-                      <Ionicons
-                        name={
-                          mov.type === 'sale'
-                            ? 'cart-outline'
-                            : mov.type === 'purchase'
-                            ? 'cube-outline'
-                            : mov.type === 'transfer'
-                            ? 'swap-horizontal'
-                            : 'create-outline'
-                        }
-                        size={14}
-                        color={
-                          mov.type === 'sale'
-                            ? colors.error
-                            : mov.type === 'purchase'
-                            ? colors.success
-                            : colors.warning
-                        }
-                      />
-                      <Text
-                        style={[
-                          styles.movementTypeText,
-                          {
-                            color:
-                              mov.type === 'sale'
-                                ? colors.error
-                                : mov.type === 'purchase'
-                                ? colors.success
-                                : colors.warning,
-                          },
-                        ]}
-                      >
-                        {mov.type === 'sale'
-                          ? 'Satış'
-                          : mov.type === 'purchase'
-                          ? 'Alım'
-                          : mov.type === 'transfer'
-                          ? 'Transfer'
-                          : 'Düzeltme'}
-                      </Text>
+            {/* Stock Info Header */}
+            {selectedStock && (
+              <View style={[{ padding: 16, backgroundColor: colors.primary + '08', borderBottomWidth: 1, borderBottomColor: colors.border }]}>
+                <Text style={[{ fontSize: 13, color: colors.textSecondary }]}>{selectedStock.KOD || selectedStock.STOK_KODU || ''}</Text>
+                <Text style={[{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }]}>Barkod: {selectedStock.BARKOD || '-'}</Text>
+                <View style={{ flexDirection: 'row', gap: 16, marginTop: 8 }}>
+                  <View>
+                    <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>Fiyat</Text>
+                    <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.primary }]}>₺{parseFloat(selectedStock.FIYAT || '0').toFixed(2)}</Text>
+                  </View>
+                  {parseFloat(selectedStock.DAHIL_FIYAT || '0') > 0 && (
+                    <View>
+                      <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>KDV Dahil</Text>
+                      <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.success }]}>₺{parseFloat(selectedStock.DAHIL_FIYAT || '0').toFixed(2)}</Text>
                     </View>
-                    <Text
-                      style={[
-                        styles.movementQty,
-                        { color: mov.quantity > 0 ? colors.success : colors.error },
-                      ]}
-                    >
-                      {mov.quantity > 0 ? '+' : ''}
-                      {mov.quantity}
-                    </Text>
-                  </View>
-                  <Text style={[styles.movementDesc, { color: colors.text }]}>{mov.description}</Text>
-                  <View style={styles.movementFooter}>
-                    <Text style={[styles.movementBranch, { color: colors.textSecondary }]}>
-                      {mov.branchName}
-                    </Text>
-                    <Text style={[styles.movementDate, { color: colors.textSecondary }]}>{mov.date}</Text>
-                  </View>
+                  )}
                 </View>
-              ))}
+              </View>
+            )}
+
+            {/* Tabs */}
+            <View style={[{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.border }]}>
+              <TouchableOpacity
+                style={[styles.tab, detailTab === 'miktar' && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
+                onPress={() => setDetailTab('miktar')}
+              >
+                <Text style={[{ fontSize: 14, fontWeight: '600', color: detailTab === 'miktar' ? colors.primary : colors.textSecondary }]}>Miktar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.tab, detailTab === 'extre' && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
+                onPress={() => setDetailTab('extre')}
+              >
+                <Text style={[{ fontSize: 14, fontWeight: '600', color: detailTab === 'extre' ? colors.primary : colors.textSecondary }]}>Ekstre</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Content */}
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
+              {detailLoading ? (
+                <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                  <ActivityIndicator size="large" color={colors.primary} />
+                  <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>POS'tan veri alınıyor...</Text>
+                </View>
+              ) : detailTab === 'miktar' ? (
+                /* Miktar Tab */
+                detailMiktar.length > 0 ? (
+                  <View style={{ padding: 16 }}>
+                    {detailMiktar.map((loc: any, idx: number) => (
+                      <View key={idx} style={[styles.miktarCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                        <Text style={[{ fontSize: 14, fontWeight: '700', color: colors.text, marginBottom: 8 }]}>{loc.AD || 'Lokasyon'}</Text>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                          <View style={styles.miktarItem}>
+                            <Text style={[styles.miktarLabel, { color: colors.textSecondary }]}>Mevcut</Text>
+                            <Text style={[styles.miktarValue, { color: colors.text }]}>{parseFloat(loc.MIKTAR || '0').toFixed(2)}</Text>
+                          </View>
+                          <View style={styles.miktarItem}>
+                            <Text style={[styles.miktarLabel, { color: colors.textSecondary }]}>Giriş</Text>
+                            <Text style={[styles.miktarValue, { color: colors.success }]}>{parseFloat(loc.MIKTAR_GIRIS || '0').toFixed(2)}</Text>
+                          </View>
+                          <View style={styles.miktarItem}>
+                            <Text style={[styles.miktarLabel, { color: colors.textSecondary }]}>Çıkış</Text>
+                            <Text style={[styles.miktarValue, { color: colors.error }]}>{parseFloat(loc.MIKTAR_CIKIS || '0').toFixed(2)}</Text>
+                          </View>
+                          <View style={styles.miktarItem}>
+                            <Text style={[styles.miktarLabel, { color: colors.textSecondary }]}>Satış</Text>
+                            <Text style={[styles.miktarValue, { color: colors.primary }]}>{parseFloat(loc.SATIS || '0').toFixed(2)}</Text>
+                          </View>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <View style={{ alignItems: 'center', paddingVertical: 30 }}>
+                    <Text style={[{ color: colors.textSecondary }]}>Miktar bilgisi bulunamadı</Text>
+                  </View>
+                )
+              ) : (
+                /* Ekstre Tab */
+                detailExtre.length > 0 ? (
+                  <View style={{ padding: 12 }}>
+                    {detailExtre.map((row: any, idx: number) => (
+                      <View key={idx} style={[styles.extreRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <Text style={[{ fontSize: 12, fontWeight: '600', color: colors.text }]}>{row.TARIH || ''}</Text>
+                          <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{row.FIS_TURU || ''}</Text>
+                        </View>
+                        <Text style={[{ fontSize: 12, color: colors.textSecondary, marginBottom: 4 }]} numberOfLines={1}>
+                          {row.CARI_AD || row.ACIKLAMA || row.BELGENO || '-'}
+                        </Text>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                          <View style={{ flexDirection: 'row', gap: 12 }}>
+                            {parseFloat(row.MIKTAR_GIRIS || '0') > 0 && (
+                              <Text style={[{ fontSize: 12, color: colors.success }]}>+{parseFloat(row.MIKTAR_GIRIS).toFixed(2)}</Text>
+                            )}
+                            {parseFloat(row.MIKTAR_CIKIS || '0') > 0 && (
+                              <Text style={[{ fontSize: 12, color: colors.error }]}>-{parseFloat(row.MIKTAR_CIKIS).toFixed(2)}</Text>
+                            )}
+                          </View>
+                          <Text style={[{ fontSize: 12, fontWeight: '700', color: colors.text }]}>
+                            Bakiye: {parseFloat(row.BAKIYE || '0').toFixed(2)}
+                          </Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <View style={{ alignItems: 'center', paddingVertical: 30 }}>
+                    <Text style={[{ color: colors.textSecondary }]}>Ekstre bilgisi bulunamadı</Text>
+                  </View>
+                )
+              )}
             </ScrollView>
           </View>
         </View>
@@ -631,373 +448,36 @@ export default function StockScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-  },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  scanButton: {
-    padding: 10,
-    borderRadius: 12,
-  },
-  filterButton: {
-    padding: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    position: 'relative',
-  },
-  filterBadge: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  filterBadgeText: {
-    color: '#FFF',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  searchContainer: {
-    padding: 16,
-    paddingBottom: 8,
-  },
-  searchInput: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    gap: 10,
-  },
-  searchText: {
-    flex: 1,
-    fontSize: 15,
-  },
-  activeFiltersRow: {
-    paddingHorizontal: 16,
-    marginBottom: 8,
-  },
-  activeFiltersContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  activeFilter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    gap: 6,
-  },
-  activeFilterText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  clearAllBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    borderWidth: 1,
-  },
-  clearAllText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  countRow: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  countText: {
-    fontSize: 13,
-  },
-  listContent: {
-    padding: 16,
-    paddingTop: 0,
-  },
-  productCard: {
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    marginBottom: 12,
-  },
-  productHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  productInfo: {
-    flex: 1,
-    marginRight: 12,
-  },
-  productName: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  productBarcode: {
-    fontSize: 13,
-  },
-  groupBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  groupText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  productDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  detailColumn: {
-    alignItems: 'center',
-  },
-  detailLabel: {
-    fontSize: 11,
-    marginBottom: 2,
-  },
-  detailValue: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  profitRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 12,
-    borderTopWidth: 1,
-  },
-  profitLabel: {
-    fontSize: 13,
-  },
-  profitValue: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    justifyContent: 'flex-end',
-  },
-  modalContent: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '80%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    flex: 1,
-    marginRight: 12,
-  },
-  modalBody: {
-    padding: 20,
-  },
-  modalBodyContent: {
-    paddingBottom: 50,
-  },
-  filterSectionTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  filterOptions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 20,
-  },
-  filterOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    gap: 6,
-  },
-  filterOptionText: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  modalFooter: {
-    flexDirection: 'row',
-    padding: 20,
-    borderTopWidth: 1,
-    gap: 12,
-  },
-  resetBtn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  resetBtnText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  applyBtn: {
-    flex: 2,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  applyBtnText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FFF',
-  },
-  scannerContainer: {
-    flex: 1,
-  },
-  scannerHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    paddingTop: 50,
-  },
-  scannerCloseBtn: {
-    padding: 4,
-  },
-  scannerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  scanner: {
-    flex: 1,
-  },
-  scannerOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    marginTop: 90,
-  },
-  scannerFrame: {
-    width: 280,
-    height: 180,
-    borderWidth: 3,
-    borderRadius: 16,
-  },
-  scannerHint: {
-    marginTop: 24,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
-  },
-  locationItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 8,
-  },
-  locationInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  locationName: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  quantityBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  quantityText: {
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  movementItem: {
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    marginBottom: 8,
-  },
-  movementHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  movementType: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    gap: 4,
-  },
-  movementTypeText: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  movementQty: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  movementDesc: {
-    fontSize: 14,
-    marginBottom: 8,
-  },
-  movementFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  movementBranch: {
-    fontSize: 12,
-  },
-  movementDate: {
-    fontSize: 12,
-  },
+  container: { flex: 1 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1 },
+  headerTitle: { fontSize: 20, fontWeight: '800' },
+  priceSelector: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 16, marginTop: 10, padding: 12, borderRadius: 12, borderWidth: 1 },
+  searchContainer: { paddingHorizontal: 16, paddingTop: 10 },
+  searchInput: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 12, borderWidth: 1, gap: 8 },
+  searchText: { flex: 1, fontSize: 14 },
+  countRow: { paddingHorizontal: 16, paddingVertical: 8 },
+  countText: { fontSize: 13 },
+  listContent: { paddingHorizontal: 16, paddingBottom: 100 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  loadingText: { fontSize: 14 },
+  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 60, gap: 12 },
+  emptyText: { fontSize: 15 },
+  stockCard: { borderRadius: 12, borderWidth: 1, marginBottom: 8, overflow: 'hidden' },
+  stockCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', padding: 12, gap: 12 },
+  stockName: { fontSize: 14, fontWeight: '600' },
+  stockCode: { fontSize: 12, marginTop: 2 },
+  stockPrice: { fontSize: 16, fontWeight: '700' },
+  barcodeRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderTopWidth: 1, gap: 6 },
+  barcodeText: { flex: 1, fontSize: 12 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalContent: { borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '90%', flex: 1 },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1 },
+  modalTitle: { fontSize: 18, fontWeight: '700', flex: 1 },
+  priceOption: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderRadius: 12, borderWidth: 1, marginBottom: 8 },
+  tab: { flex: 1, paddingVertical: 12, alignItems: 'center' },
+  miktarCard: { borderRadius: 12, borderWidth: 1, padding: 14, marginBottom: 10 },
+  miktarItem: { minWidth: 80 },
+  miktarLabel: { fontSize: 11 },
+  miktarValue: { fontSize: 15, fontWeight: '700' },
+  extreRow: { borderRadius: 10, borderWidth: 1, padding: 10, marginBottom: 6 },
 });
