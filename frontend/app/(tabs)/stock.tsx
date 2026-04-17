@@ -507,7 +507,7 @@ export default function StockScreen() {
                       detailExtre.forEach((r:any) => { csv += `${r.TARIH||''};${r.BELGENO||''};${r.LOKASYON_AD||''};${(r.CARI_AD||'').replace(/;/g,',')};${r.FIS_TURU||''};${parseFloat(r.MIKTAR_GIRIS||'0').toFixed(2)};${parseFloat(r.MIKTAR_CIKIS||'0').toFixed(2)};${parseFloat(r.BAKIYE||'0').toFixed(2)}\n`; });
                       try { 
                         const path = `${FileSystem.cacheDirectory}${name}_ekstre.csv`; 
-                        await FileSystem.writeAsStringAsync(path, csv, { encoding: FileSystem.EncodingType.UTF8 }); 
+                        await FileSystem.writeAsStringAsync(path, csv); 
                         const isAvailable = await Sharing.isAvailableAsync();
                         if (isAvailable) {
                           await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: 'Excel Paylaş', UTI: 'public.comma-separated-values-text' }); 
@@ -543,6 +543,16 @@ export default function StockScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Export Loading Overlay */}
+      {exportLoading && (
+        <View style={styles.exportOverlay}>
+          <View style={[styles.exportBox, { backgroundColor: colors.card }]}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={[{ color: colors.text, fontSize: 14, fontWeight: '600', marginTop: 12 }]}>Dışa aktarılıyor...</Text>
+          </View>
+        </View>
+      )}
 
       {/* Toast */}
       {toastVisible && (
@@ -590,4 +600,6 @@ const styles = StyleSheet.create({
   miktarCard: { borderRadius: 10, borderWidth: 1, padding: 12, marginBottom: 8 },
   extreRow: { borderRadius: 8, borderWidth: 1, padding: 8, marginBottom: 4 },
   toast: { position: 'absolute', bottom: 90, left: 20, right: 20, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, zIndex: 9999 },
+  exportOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 9998 },
+  exportBox: { borderRadius: 16, padding: 30, alignItems: 'center', minWidth: 200 },
 });

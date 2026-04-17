@@ -160,7 +160,7 @@ export default function CustomersScreen() {
     extreData.forEach((r: any) => { csv += `${r.TARIH || ''};${r.BELGENO || ''};${(r.ACIKLAMA || r.AD || '').replace(/;/g, ',')};${parseFloat(r.BORC || '0').toFixed(2)};${parseFloat(r.ALACAK || '0').toFixed(2)};${parseFloat(r.BAKIYE || '0').toFixed(2)}\n`; });
     try {
       const path = `${FileSystem.cacheDirectory}${name}_ekstre.csv`;
-      await FileSystem.writeAsStringAsync(path, csv, { encoding: FileSystem.EncodingType.UTF8 });
+      await FileSystem.writeAsStringAsync(path, csv);
       const isAvailable = await Sharing.isAvailableAsync();
       if (isAvailable) await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: 'Ekstre CSV' });
     } catch (err) { console.error('CSV export error:', err); }
