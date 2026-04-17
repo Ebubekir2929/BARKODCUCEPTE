@@ -11,6 +11,9 @@ import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Clipboard from 'expo-clipboard';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -105,7 +108,10 @@ export default function StockScreen() {
 
   const kdvValues = useMemo(() => {
     const s = new Set<string>();
-    stockList.forEach((i: any) => { const v = String(i.KDV || i.VERGI || i.KDV_ORANI || ''); if (v && v !== '0' && v !== '') s.add(v); });
+    stockList.forEach((i: any) => { 
+      const v = String(i.KDV_PAREKENDE || i.KDV || '').replace('.00', ''); 
+      if (v && v !== '0' && v !== '' && v !== 'null') s.add(v); 
+    });
     return Array.from(s).sort((a, b) => parseFloat(a) - parseFloat(b));
   }, [stockList]);
 
@@ -115,26 +121,29 @@ export default function StockScreen() {
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       list = list.filter((s: any) =>
-        (s.AD || s.STOK_ADI || '').toLowerCase().includes(q) ||
-        (s.KOD || s.STOK_KODU || '').toLowerCase().includes(q) ||
+        (s.AD || '').toLowerCase().includes(q) ||
+        (s.KOD || '').toLowerCase().includes(q) ||
         (s.BARKOD || '').includes(q)
       );
     }
-    if (filterGroup) list = list.filter((s: any) => (s.STOK_GRUP || s.GRUP || '') === filterGroup);
+    if (filterGroup) list = list.filter((s: any) => (s.STOK_GRUP || '') === filterGroup);
     if (filterProfit === 'profit') list = list.filter((s: any) => {
-      const sell = parseFloat(s.DAHIL_FIYAT || s.FIYAT || '0');
-      const buy = parseFloat(s.ALIS_FIYAT || s.SON_ALIS || '0');
-      return sell > buy;
+      const sell = parseFloat(s.FIYAT || '0');
+      const buy = parseFloat(s.SON_ALIS_FIYAT || '0');
+      return sell > 0 && buy > 0 && sell > buy;
     });
     if (filterProfit === 'loss') list = list.filter((s: any) => {
-      const sell = parseFloat(s.DAHIL_FIYAT || s.FIYAT || '0');
-      const buy = parseFloat(s.ALIS_FIYAT || s.SON_ALIS || '0');
+      const sell = parseFloat(s.FIYAT || '0');
+      const buy = parseFloat(s.SON_ALIS_FIYAT || '0');
       return buy > 0 && sell <= buy;
     });
-    if (filterQty === 'low') list = list.filter((s: any) => parseFloat(s.MEVCUT || s.MIKTAR || '0') < 10);
-    if (filterQty === 'mid') list = list.filter((s: any) => { const m = parseFloat(s.MEVCUT || s.MIKTAR || '0'); return m >= 10 && m < 100; });
-    if (filterQty === 'high') list = list.filter((s: any) => parseFloat(s.MEVCUT || s.MIKTAR || '0') >= 100);
-    if (filterKdv) list = list.filter((s: any) => String(s.KDV || s.VERGI || '') === filterKdv);
+    if (filterQty === 'low') list = list.filter((s: any) => { const m = parseFloat(s.MIKTAR || '0'); return m > 0 && m < 10; });
+    if (filterQty === 'mid') list = list.filter((s: any) => { const m = parseFloat(s.MIKTAR || '0'); return m >= 10 && m < 100; });
+    if (filterQty === 'high') list = list.filter((s: any) => parseFloat(s.MIKTAR || '0') >= 100);
+    if (filterKdv) list = list.filter((s: any) => {
+      const v = String(s.KDV_PAREKENDE || s.KDV || '').replace('.00', '');
+      return v === filterKdv;
+    });
     return list;
   }, [stockList, searchQuery, filterGroup, filterProfit, filterQty, filterKdv]);
 
@@ -188,15 +197,16 @@ export default function StockScreen() {
   }, [activeTenantId]);
 
   const renderStockItem = useCallback(({ item }: { item: any }) => {
-    const name = item.AD || item.STOK_ADI || 'Ürün';
-    const code = item.KOD || item.STOK_KODU || '';
+    const name = item.AD || 'Ürün';
+    const code = item.KOD || '';
     const barcode = item.BARKOD || '';
     const price = parseFloat(item.FIYAT || '0');
-    const priceIncl = parseFloat(item.DAHIL_FIYAT || '0');
-    const buyPrice = parseFloat(item.ALIS_FIYAT || item.SON_ALIS || '0');
-    const kdv = item.KDV || item.VERGI || item.KDV_ORANI || '';
-    const grup = item.STOK_GRUP || item.GRUP || '';
-    const profit = priceIncl > 0 && buyPrice > 0 ? priceIncl - buyPrice : 0;
+    const buyPrice = parseFloat(item.SON_ALIS_FIYAT || '0');
+    const kdvRate = String(item.KDV_PAREKENDE || '').replace('.00', '').replace('.0', '');
+    const grup = item.STOK_GRUP || '';
+    const miktar = parseFloat(item.MIKTAR || '0');
+    const profit = price > 0 && buyPrice > 0 ? price - buyPrice : 0;
+    const profitPct = buyPrice > 0 ? ((profit / buyPrice) * 100) : 0;
 
     return (
       <TouchableOpacity
@@ -204,49 +214,45 @@ export default function StockScreen() {
         onPress={() => openStockDetail(item)}
         activeOpacity={0.7}
       >
+        {/* Üst satır: İsim + Fiyat */}
         <View style={styles.stockCardTop}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.stockName, { color: colors.text }]} numberOfLines={2}>{name}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
-              <Text style={[styles.stockCode, { color: colors.textSecondary }]}>{code}</Text>
+              {code ? <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{code}</Text> : null}
               {grup ? <View style={[{ backgroundColor: colors.primary + '15', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }]}><Text style={[{ fontSize: 9, color: colors.primary, fontWeight: '600' }]}>{grup}</Text></View> : null}
+              {kdvRate ? <View style={[{ backgroundColor: colors.warning + '15', paddingHorizontal: 5, paddingVertical: 1, borderRadius: 4 }]}><Text style={[{ fontSize: 9, color: colors.warning, fontWeight: '600' }]}>KDV %{kdvRate}</Text></View> : null}
             </View>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
-            <Text style={[styles.stockPrice, { color: colors.primary }]}>₺{priceIncl > 0 ? priceIncl.toFixed(2) : price.toFixed(2)}</Text>
-            {priceIncl > 0 && price > 0 && priceIncl !== price && (
-              <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>KDV Hariç: ₺{price.toFixed(2)}</Text>
-            )}
+            <Text style={[styles.stockPrice, { color: colors.primary }]}>₺{price > 0 ? price.toFixed(2) : '0.00'}</Text>
+            {miktar !== 0 && <Text style={[{ fontSize: 11, fontWeight: '700', color: miktar > 0 ? colors.success : colors.error }]}>Stok: {miktar.toFixed(0)}</Text>}
           </View>
         </View>
+
+        {/* Alt satır: Alış + Kar + Barkod */}
         <View style={[styles.detailRow, { borderTopColor: colors.border }]}>
-          {buyPrice > 0 && (
+          {buyPrice > 0 ? (
             <View style={styles.detailItem}>
-              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Alış</Text>
-              <Text style={[styles.detailValue, { color: colors.text }]}>₺{buyPrice.toFixed(2)}</Text>
-            </View>
-          )}
-          {kdv ? (
-            <View style={styles.detailItem}>
-              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>KDV</Text>
-              <Text style={[styles.detailValue, { color: colors.text }]}>{kdv}</Text>
+              <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Alış</Text>
+              <Text style={[{ fontSize: 12, fontWeight: '700', color: colors.warning }]}>₺{buyPrice.toFixed(2)}</Text>
             </View>
           ) : null}
-          {profit !== 0 && (
+          {profit !== 0 ? (
             <View style={styles.detailItem}>
-              <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Kar</Text>
-              <Text style={[styles.detailValue, { color: profit >= 0 ? colors.success : colors.error }]}>
-                {profit >= 0 ? '+' : ''}₺{profit.toFixed(2)}
+              <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Kar</Text>
+              <Text style={[{ fontSize: 12, fontWeight: '700', color: profit >= 0 ? colors.success : colors.error }]}>
+                {profit >= 0 ? '+' : ''}₺{profit.toFixed(2)} ({profitPct >= 0 ? '+' : ''}{profitPct.toFixed(0)}%)
               </Text>
             </View>
-          )}
+          ) : null}
           {barcode ? (
-            <View style={[styles.detailItem, { flex: 1.5 }]}>
-              <Ionicons name="barcode-outline" size={12} color={colors.textSecondary} />
-              <TouchableOpacity onPress={() => { Clipboard.setStringAsync(barcode); Alert.alert('Kopyalandı', barcode); }}>
-                <Text style={[{ fontSize: 11, color: colors.primary, textDecorationLine: 'underline' }]} numberOfLines={1}>{barcode}</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity style={[styles.detailItem, { flexDirection: 'row', gap: 4, flex: 1.5 }]}
+              onPress={(e) => { e.stopPropagation(); Clipboard.setStringAsync(barcode); Alert.alert('Kopyalandı', `${barcode} panoya kopyalandı`); }}>
+              <Ionicons name="barcode-outline" size={12} color={colors.primary} />
+              <Text style={[{ fontSize: 11, color: colors.primary, textDecorationLine: 'underline' }]} numberOfLines={1}>{barcode}</Text>
+              <Ionicons name="copy-outline" size={10} color={colors.primary} />
+            </TouchableOpacity>
           ) : null}
         </View>
       </TouchableOpacity>
@@ -438,10 +444,11 @@ export default function StockScreen() {
             {selectedStock && (
               <View style={[{ padding: 12, backgroundColor: colors.primary + '08', borderBottomWidth: 1, borderBottomColor: colors.border }]}>
                 <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>{selectedStock.KOD || ''} · Barkod: {selectedStock.BARKOD || '-'}</Text>
-                <View style={{ flexDirection: 'row', gap: 16, marginTop: 6 }}>
-                  <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Fiyat</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: colors.primary }]}>₺{parseFloat(selectedStock.FIYAT || '0').toFixed(2)}</Text></View>
-                  {parseFloat(selectedStock.DAHIL_FIYAT || '0') > 0 && <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>KDV Dahil</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: colors.success }]}>₺{parseFloat(selectedStock.DAHIL_FIYAT || '0').toFixed(2)}</Text></View>}
-                  {parseFloat(selectedStock.ALIS_FIYAT || selectedStock.SON_ALIS || '0') > 0 && <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Alış</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: colors.warning }]}>₺{parseFloat(selectedStock.ALIS_FIYAT || selectedStock.SON_ALIS || '0').toFixed(2)}</Text></View>}
+                <View style={{ flexDirection: 'row', gap: 16, marginTop: 6, flexWrap: 'wrap' }}>
+                  <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Satış</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: colors.primary }]}>₺{parseFloat(selectedStock.FIYAT || '0').toFixed(2)}</Text></View>
+                  {parseFloat(selectedStock.SON_ALIS_FIYAT || '0') > 0 && <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Alış</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: colors.warning }]}>₺{parseFloat(selectedStock.SON_ALIS_FIYAT || '0').toFixed(2)}</Text></View>}
+                  {selectedStock.KDV_PAREKENDE && <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>KDV</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text }]}>%{String(selectedStock.KDV_PAREKENDE).replace('.00','')}</Text></View>}
+                  <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Stok</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: parseFloat(selectedStock.MIKTAR || '0') > 0 ? colors.success : colors.error }]}>{parseFloat(selectedStock.MIKTAR || '0').toFixed(0)}</Text></View>
                 </View>
               </View>
             )}
@@ -468,7 +475,26 @@ export default function StockScreen() {
                   </View>
                 ))}</View> : <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>Miktar bilgisi bulunamadı</Text></View>
               ) : (
-                detailExtre.length > 0 ? <View style={{ padding: 12 }}>{detailExtre.map((row: any, idx: number) => (
+                detailExtre.length > 0 ? <View style={{ padding: 12 }}>
+                  {/* Export buttons for ekstre */}
+                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+                    <TouchableOpacity style={[{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.error + '15' }]} onPress={async () => {
+                      const name = selectedStock?.AD || 'Stok';
+                      const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:6px;font-size:11px}th{background:#f5f5f5}</style></head><body><h2>${name} - Stok Ekstre</h2><table><thead><tr><th>Tarih</th><th>Belge No</th><th>Lokasyon</th><th>Cari</th><th>Fiş Türü</th><th>Giriş</th><th>Çıkış</th><th>Bakiye</th></tr></thead><tbody>${detailExtre.map((r:any) => `<tr><td>${r.TARIH||''}</td><td>${r.BELGENO||''}</td><td>${r.LOKASYON_AD||''}</td><td>${r.CARI_AD||''}</td><td>${r.FIS_TURU||''}</td><td>${parseFloat(r.MIKTAR_GIRIS||'0').toFixed(2)}</td><td>${parseFloat(r.MIKTAR_CIKIS||'0').toFixed(2)}</td><td>${parseFloat(r.BAKIYE||'0').toFixed(2)}</td></tr>`).join('')}</tbody></table></body></html>`;
+                      try { const { uri } = await Print.printToFileAsync({ html }); await Sharing.shareAsync(uri, { mimeType: 'application/pdf' }); } catch(e) { console.error(e); }
+                    }}>
+                      <Ionicons name="document-text-outline" size={14} color={colors.error} /><Text style={[{ fontSize: 11, color: colors.error, fontWeight: '600' }]}>PDF</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.success + '15' }]} onPress={async () => {
+                      const name = selectedStock?.AD || 'Stok';
+                      let csv = 'Tarih;Belge No;Lokasyon;Cari;Fiş Türü;Giriş;Çıkış;Bakiye\n';
+                      detailExtre.forEach((r:any) => { csv += `${r.TARIH||''};${r.BELGENO||''};${r.LOKASYON_AD||''};${(r.CARI_AD||'').replace(/;/g,',')};${r.FIS_TURU||''};${parseFloat(r.MIKTAR_GIRIS||'0').toFixed(2)};${parseFloat(r.MIKTAR_CIKIS||'0').toFixed(2)};${parseFloat(r.BAKIYE||'0').toFixed(2)}\n`; });
+                      try { const path = `${FileSystem.cacheDirectory}${name}_ekstre.csv`; await FileSystem.writeAsStringAsync(path, csv); await Sharing.shareAsync(path, { mimeType: 'text/csv' }); } catch(e) { console.error(e); }
+                    }}>
+                      <Ionicons name="grid-outline" size={14} color={colors.success} /><Text style={[{ fontSize: 11, color: colors.success, fontWeight: '600' }]}>Excel</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {detailExtre.map((row: any, idx: number) => (
                   <View key={idx} style={[styles.extreRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
                       <Text style={[{ fontSize: 11, fontWeight: '600', color: colors.text }]}>{row.TARIH || ''}</Text>
