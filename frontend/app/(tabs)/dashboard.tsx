@@ -283,14 +283,21 @@ export default function DashboardScreen() {
     
     try {
       const { token: authToken } = useAuthStore.getState();
+      // Include date filter if active
+      const body: any = { tenant_id: activeTenantId };
+      if (filters?.startDate) {
+        const y = filters.startDate.getFullYear();
+        const m = String(filters.startDate.getMonth() + 1).padStart(2, '0');
+        const d = String(filters.startDate.getDate()).padStart(2, '0');
+        body.date = `${y}-${m}-${d}`;
+      }
       const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/data/iptal-list`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-        body: JSON.stringify({ tenant_id: activeTenantId }),
+        body: JSON.stringify(body),
       });
       const data = await response.json();
       if (data.ok && data.data) {
-        // Filter by location
         const filtered = data.data.filter((d: any) => d.LOKASYON === locationName);
         setIptalListItems(filtered);
       }
@@ -299,7 +306,7 @@ export default function DashboardScreen() {
     } finally {
       setIptalListLoading(false);
     }
-  }, [activeTenantId]);
+  }, [activeTenantId, filters]);
 
   const getCardTypeLabel = (type: string) => {
     switch (type) {
@@ -813,6 +820,28 @@ export default function DashboardScreen() {
                   ₺{totals[selectedCardType || 'total'].toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                 </Text>
               </View>
+              {/* Geçen hafta karşılaştırma */}
+              {(() => {
+                const lw = sourceData?.weeklyComparison?.lastWeek;
+                const lwValue = selectedCardType === 'cash' ? (lw?.cash || 0) : selectedCardType === 'card' ? (lw?.card || 0) : selectedCardType === 'openAccount' ? (lw?.openAccount || 0) : (lw?.total || 0);
+                const currentValue = totals[selectedCardType || 'total'];
+                const diff = currentValue - lwValue;
+                const pct = lwValue > 0 ? ((diff / lwValue) * 100) : 0;
+                return lwValue > 0 ? (
+                  <View style={[{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, marginTop: 8, borderRadius: 12, backgroundColor: diff >= 0 ? colors.success + '10' : colors.error + '10' }]}>
+                    <View>
+                      <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>Geçen Hafta</Text>
+                      <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text }]}>₺{lwValue.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>Fark</Text>
+                      <Text style={[{ fontSize: 14, fontWeight: '700', color: diff >= 0 ? colors.success : colors.error }]}>
+                        {diff >= 0 ? '+' : ''}₺{diff.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ({pct >= 0 ? '+' : ''}{pct.toFixed(1)}%)
+                      </Text>
+                    </View>
+                  </View>
+                ) : null;
+              })()}
             </View>
           </TouchableOpacity>
         </TouchableOpacity>

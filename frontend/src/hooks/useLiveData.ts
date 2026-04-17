@@ -175,6 +175,7 @@ export function useLiveData(filter?: DashboardFilter) {
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
   const [isFirstLoad, setIsFirstLoad] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const lastFilterRef = useRef<string>('');
   const [error, setError] = useState<string | null>(null);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -202,8 +203,12 @@ export function useLiveData(filter?: DashboardFilter) {
       return;
     }
 
-    // Show refreshing spinner when data already loaded
-    if (hasLoadedOnce.current) setIsRefreshing(true);
+    // Only show refreshing spinner when filter changes, not auto-refresh
+    const currentFilterKey = JSON.stringify(filter || {});
+    if (hasLoadedOnce.current && currentFilterKey !== lastFilterRef.current) {
+      setIsRefreshing(true);
+    }
+    lastFilterRef.current = currentFilterKey;
     setError(null);
 
     try {
