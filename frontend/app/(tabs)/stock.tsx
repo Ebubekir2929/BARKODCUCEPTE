@@ -415,7 +415,7 @@ export default function StockScreen() {
       {/* Price Name Modal */}
       <Modal visible={showPriceModal} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '60%' }]}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '75%' }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>Fiyat Adı Seç</Text>
               <TouchableOpacity onPress={() => setShowPriceModal(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
@@ -578,7 +578,7 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: 17, fontWeight: '700', flex: 1 },
   filterLabel: { fontSize: 14, fontWeight: '700', marginBottom: 8 },
   filterChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#ddd' },
-  priceOpt: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 6 },
+  priceOpt: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderRadius: 12, borderWidth: 1, marginBottom: 8 },
   tab: { flex: 1, paddingVertical: 10, alignItems: 'center' },
   miktarCard: { borderRadius: 10, borderWidth: 1, padding: 12, marginBottom: 8 },
   extreRow: { borderRadius: 8, borderWidth: 1, padding: 8, marginBottom: 4 },
