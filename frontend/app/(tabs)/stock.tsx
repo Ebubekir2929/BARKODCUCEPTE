@@ -10,6 +10,7 @@ import { useAuthStore } from '../../src/store/authStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as Clipboard from 'expo-clipboard';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -41,6 +42,7 @@ export default function StockScreen() {
   const [filterGroup, setFilterGroup] = useState<string>('');
   const [filterProfit, setFilterProfit] = useState<'all' | 'profit' | 'loss'>('all');
   const [filterQty, setFilterQty] = useState<'all' | 'low' | 'mid' | 'high'>('all');
+  const [filterKdv, setFilterKdv] = useState<string>('');
 
   // Detail modal
   const [selectedStock, setSelectedStock] = useState<any | null>(null);
@@ -126,16 +128,18 @@ export default function StockScreen() {
     if (filterQty === 'low') list = list.filter((s: any) => parseFloat(s.MEVCUT || s.MIKTAR || '0') < 10);
     if (filterQty === 'mid') list = list.filter((s: any) => { const m = parseFloat(s.MEVCUT || s.MIKTAR || '0'); return m >= 10 && m < 100; });
     if (filterQty === 'high') list = list.filter((s: any) => parseFloat(s.MEVCUT || s.MIKTAR || '0') >= 100);
+    if (filterKdv) list = list.filter((s: any) => String(s.KDV || s.VERGI || '') === filterKdv);
     return list;
-  }, [stockList, searchQuery, filterGroup, filterProfit, filterQty]);
+  }, [stockList, searchQuery, filterGroup, filterProfit, filterQty, filterKdv]);
 
   const activeFilterCount = useMemo(() => {
     let c = 0;
     if (filterGroup) c++;
     if (filterProfit !== 'all') c++;
     if (filterQty !== 'all') c++;
+    if (filterKdv) c++;
     return c;
-  }, [filterGroup, filterProfit, filterQty]);
+  }, [filterGroup, filterProfit, filterQty, filterKdv]);
 
   const selectedPriceLabel = useMemo(() => {
     const f = priceNames.find((p: any) => String(p.ID) === selectedPriceName || String(p.AD) === selectedPriceName);
@@ -229,7 +233,9 @@ export default function StockScreen() {
           {barcode ? (
             <View style={[styles.detailItem, { flex: 1.5 }]}>
               <Ionicons name="barcode-outline" size={12} color={colors.textSecondary} />
-              <Text style={[{ fontSize: 11, color: colors.textSecondary }]} numberOfLines={1}>{barcode}</Text>
+              <TouchableOpacity onPress={() => { Clipboard.setStringAsync(barcode); Alert.alert('Kopyalandı', barcode); }}>
+                <Text style={[{ fontSize: 11, color: colors.primary, textDecorationLine: 'underline' }]} numberOfLines={1}>{barcode}</Text>
+              </TouchableOpacity>
             </View>
           ) : null}
         </View>
@@ -291,7 +297,8 @@ export default function StockScreen() {
           {filterGroup ? <View style={[styles.chip, { backgroundColor: colors.primary + '15' }]}><Text style={[styles.chipText, { color: colors.primary }]}>{filterGroup}</Text><TouchableOpacity onPress={() => setFilterGroup('')}><Ionicons name="close" size={12} color={colors.primary} /></TouchableOpacity></View> : null}
           {filterProfit !== 'all' ? <View style={[styles.chip, { backgroundColor: filterProfit === 'profit' ? colors.success + '15' : colors.error + '15' }]}><Text style={[styles.chipText, { color: filterProfit === 'profit' ? colors.success : colors.error }]}>{filterProfit === 'profit' ? 'Karlı' : 'Zararlı'}</Text><TouchableOpacity onPress={() => setFilterProfit('all')}><Ionicons name="close" size={12} color={filterProfit === 'profit' ? colors.success : colors.error} /></TouchableOpacity></View> : null}
           {filterQty !== 'all' ? <View style={[styles.chip, { backgroundColor: colors.warning + '15' }]}><Text style={[styles.chipText, { color: colors.warning }]}>{filterQty === 'low' ? 'Düşük Stok' : filterQty === 'mid' ? 'Orta Stok' : 'Yüksek Stok'}</Text><TouchableOpacity onPress={() => setFilterQty('all')}><Ionicons name="close" size={12} color={colors.warning} /></TouchableOpacity></View> : null}
-          <TouchableOpacity onPress={() => { setFilterGroup(''); setFilterProfit('all'); setFilterQty('all'); }}><Text style={[{ fontSize: 12, color: colors.error }]}>Temizle</Text></TouchableOpacity>
+          {filterKdv ? <View style={[styles.chip, { backgroundColor: colors.info + '15' }]}><Text style={[styles.chipText, { color: colors.info }]}>KDV %{filterKdv}</Text><TouchableOpacity onPress={() => setFilterKdv('')}><Ionicons name="close" size={12} color={colors.info} /></TouchableOpacity></View> : null}
+          <TouchableOpacity onPress={() => { setFilterGroup(''); setFilterProfit('all'); setFilterQty('all'); setFilterKdv(''); }}><Text style={[{ fontSize: 12, color: colors.error }]}>Temizle</Text></TouchableOpacity>
         </ScrollView>
       )}
 
@@ -351,6 +358,19 @@ export default function StockScreen() {
                   </TouchableOpacity>
                 ))}
               </View>
+
+              {/* KDV */}
+              <Text style={[styles.filterLabel, { color: colors.text }]}>KDV Oranı</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }} contentContainerStyle={{ gap: 6 }}>
+                <TouchableOpacity style={[styles.filterChip, filterKdv === '' && { backgroundColor: colors.primary, borderColor: colors.primary }]} onPress={() => setFilterKdv('')}>
+                  <Text style={[{ fontSize: 12, color: filterKdv === '' ? '#fff' : colors.text }]}>Tümü</Text>
+                </TouchableOpacity>
+                {['1', '8', '10', '18', '20'].map(k => (
+                  <TouchableOpacity key={k} style={[styles.filterChip, filterKdv === k && { backgroundColor: colors.primary, borderColor: colors.primary }, { borderColor: colors.border }]} onPress={() => setFilterKdv(k)}>
+                    <Text style={[{ fontSize: 12, color: filterKdv === k ? '#fff' : colors.text }]}>%{k}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
 
               <TouchableOpacity style={[{ backgroundColor: colors.primary, borderRadius: 10, padding: 14, alignItems: 'center' }]} onPress={() => setShowFilterModal(false)}>
                 <Text style={[{ color: '#fff', fontWeight: '700' }]}>Uygula</Text>

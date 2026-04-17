@@ -296,7 +296,7 @@ export default function CustomersScreen() {
                   const borc = parseFloat(row.BORC || '0');
                   const alacak = parseFloat(row.ALACAK || '0');
                   const bakiye = parseFloat(row.BAKIYE || '0');
-                  const hasFis = row.BELGE_ID && String(row.BELGE_ID) !== '0';
+                  const hasFis = row.BELGE_ID && String(row.BELGE_ID).trim() !== '' && String(row.BELGE_ID) !== '0' && String(row.BELGE_ID) !== 'null';
                   return (
                     <TouchableOpacity key={idx} style={[styles.extreRow, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => hasFis ? openFisDetail(row) : null} disabled={!hasFis} activeOpacity={hasFis ? 0.7 : 1}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
