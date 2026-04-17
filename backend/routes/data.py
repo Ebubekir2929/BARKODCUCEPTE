@@ -311,30 +311,63 @@ async def get_dashboard_data(
     try:
         from datetime import datetime, timedelta
         today = datetime.now()
-        if sdate:
-            current_date = datetime.strptime(sdate, "%Y-%m-%d")
+        
+        if sdate and edate:
+            # Date range filter: last week = same range shifted 7 days back
+            start_dt = datetime.strptime(sdate, "%Y-%m-%d")
+            end_dt = datetime.strptime(edate, "%Y-%m-%d")
+            lw_start = (start_dt - timedelta(days=7)).strftime("%Y-%m-%d")
+            lw_end = (end_dt - timedelta(days=7)).strftime("%Y-%m-%d")
+            
+            # Fetch each day in the last week range
+            lw_items = []
+            cur_dt = start_dt - timedelta(days=7)
+            end_lw_dt = end_dt - timedelta(days=7)
+            while cur_dt <= end_lw_dt:
+                day_str = cur_dt.strftime("%Y-%m-%d")
+                try:
+                    day_data = await fetch_dataset(pool, tenant_id, "financial_data_location", day_str)
+                    day_items = day_data.get("data", [])
+                    if isinstance(day_items, list):
+                        lw_items.extend(day_items)
+                except:
+                    pass
+                cur_dt += timedelta(days=1)
+        elif sdate:
+            lw_date = (datetime.strptime(sdate, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
+            lw_data = await fetch_dataset(pool, tenant_id, "financial_data_location", lw_date)
+            lw_items = lw_data.get("data", [])
         else:
-            current_date = today
-        
-        last_week_date = (current_date - timedelta(days=7)).strftime("%Y-%m-%d")
-        
-        lw_financial = await fetch_dataset(pool, tenant_id, "financial_data_location", last_week_date)
-        lw_items = lw_financial.get("data", [])
+            lw_date = (today - timedelta(days=7)).strftime("%Y-%m-%d")
+            lw_data = await fetch_dataset(pool, tenant_id, "financial_data_location", lw_date)
+            lw_items = lw_data.get("data", [])
         
         lw_cash = sum(_sum_float(i.get("NAKIT")) for i in lw_items)
         lw_card = sum(_sum_float(i.get("KREDI_KARTI")) for i in lw_items)
         lw_open = sum(_sum_float(i.get("VERESIYE")) + _sum_float(i.get("ACIK_HESAP")) for i in lw_items)
         lw_total = sum(_sum_float(i.get("TOPLAM")) for i in lw_items)
         
+        # Location breakdown for last week
+        lw_locations = {}
+        for item in lw_items:
+            loc = item.get("LOKASYON", "Bilinmeyen")
+            if loc not in lw_locations:
+                lw_locations[loc] = {"cash": 0, "card": 0, "openAccount": 0, "total": 0}
+            lw_locations[loc]["cash"] += _sum_float(item.get("NAKIT"))
+            lw_locations[loc]["card"] += _sum_float(item.get("KREDI_KARTI"))
+            lw_locations[loc]["openAccount"] += _sum_float(item.get("VERESIYE")) + _sum_float(item.get("ACIK_HESAP"))
+            lw_locations[loc]["total"] += _sum_float(item.get("TOPLAM"))
+        
         result["last_week"] = {
             "cash": round(lw_cash, 2),
             "card": round(lw_card, 2),
             "openAccount": round(lw_open, 2),
             "total": round(lw_total, 2),
+            "locations": {k: {kk: round(vv, 2) for kk, vv in v.items()} for k, v in lw_locations.items()},
         }
     except Exception as e:
         logger.warning(f"Last week data error: {e}")
-        result["last_week"] = {"cash": 0, "card": 0, "openAccount": 0, "total": 0}
+        result["last_week"] = {"cash": 0, "card": 0, "openAccount": 0, "total": 0, "locations": {}}
     
     # --- Fetch all available locations ---
     try:
@@ -696,32 +729,63 @@ async def get_iptal_list(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Fetch full list of cancellations via sync.php dataset_get (IPTAL_ID=null)"""
+    """Fetch full list of cancellations - for date ranges, fetch each day and merge"""
     tenant_id = body.get("tenant_id", "")
     filter_date = body.get("date", "")
+    sdate = body.get("sdate", "")
+    edate = body.get("edate", "")
     
     if not tenant_id:
         raise HTTPException(status_code=400, detail="tenant_id gerekli")
     
-    if not filter_date:
-        from datetime import date as date_cls
-        filter_date = date_cls.today().strftime("%Y-%m-%d")
-    
     try:
-        resp = await sync_post({
-            "action": "dataset_get",
-            "dataset_key": "iptal_detay",
-            "params": {
-                "sdate": f"{filter_date} 00:00:00",
-                "edate": f"{filter_date} 23:59:59",
-                "IPTAL_ID": None,
-            },
-        }, tenant_id)
+        from datetime import datetime, timedelta
         
-        data = resp.get("data", [])
+        dates_to_fetch = []
+        if sdate and edate:
+            start = datetime.strptime(sdate, "%Y-%m-%d")
+            end = datetime.strptime(edate, "%Y-%m-%d")
+            current = start
+            while current <= end:
+                dates_to_fetch.append(current.strftime("%Y-%m-%d"))
+                current += timedelta(days=1)
+        elif filter_date:
+            dates_to_fetch = [filter_date]
+        else:
+            from datetime import date as date_cls
+            dates_to_fetch = [date_cls.today().strftime("%Y-%m-%d")]
+        
+        all_data = []
+        for dt in dates_to_fetch:
+            try:
+                resp = await sync_post({
+                    "action": "dataset_get",
+                    "dataset_key": "iptal_detay",
+                    "params": {
+                        "sdate": f"{dt} 00:00:00",
+                        "edate": f"{dt} 23:59:59",
+                        "IPTAL_ID": None,
+                    },
+                }, tenant_id)
+                day_data = resp.get("data", [])
+                if isinstance(day_data, list):
+                    all_data.extend(day_data)
+            except Exception as e:
+                logger.warning(f"Iptal list for {dt}: {e}")
+                continue
+        
+        # Deduplicate by IPTAL_ID
+        seen = set()
+        unique_data = []
+        for item in all_data:
+            iptal_id = item.get("IPTAL_ID")
+            if iptal_id and iptal_id not in seen:
+                seen.add(iptal_id)
+                unique_data.append(item)
+        
         return {
             "ok": True,
-            "data": _fix_large_ints(data) if isinstance(data, list) else [],
+            "data": _fix_large_ints(unique_data),
         }
     except HTTPException:
         raise

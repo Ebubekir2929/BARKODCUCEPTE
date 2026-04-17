@@ -283,14 +283,18 @@ export default function DashboardScreen() {
     
     try {
       const { token: authToken } = useAuthStore.getState();
-      // Include date filter if active
       const body: any = { tenant_id: activeTenantId };
-      if (filters?.startDate) {
-        const y = filters.startDate.getFullYear();
-        const m = String(filters.startDate.getMonth() + 1).padStart(2, '0');
-        const d = String(filters.startDate.getDate()).padStart(2, '0');
-        body.date = `${y}-${m}-${d}`;
+      
+      // Send date range if filter is active
+      if (filters?.startDate && filters?.endDate) {
+        const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        body.sdate = fmt(filters.startDate);
+        body.edate = fmt(filters.endDate);
+      } else if (filters?.startDate) {
+        const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        body.date = fmt(filters.startDate);
       }
+      
       const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/data/iptal-list`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
@@ -828,17 +832,34 @@ export default function DashboardScreen() {
                 const diff = currentValue - lwValue;
                 const pct = lwValue > 0 ? ((diff / lwValue) * 100) : 0;
                 return lwValue > 0 ? (
-                  <View style={[{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, marginTop: 8, borderRadius: 12, backgroundColor: diff >= 0 ? colors.success + '10' : colors.error + '10' }]}>
-                    <View>
-                      <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>Geçen Hafta</Text>
-                      <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text }]}>₺{lwValue.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</Text>
+                  <View>
+                    <View style={[{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, marginTop: 8, borderRadius: 12, backgroundColor: diff >= 0 ? colors.success + '10' : colors.error + '10' }]}>
+                      <View>
+                        <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>Geçen Hafta</Text>
+                        <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text }]}>₺{lwValue.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>Fark</Text>
+                        <Text style={[{ fontSize: 14, fontWeight: '700', color: diff >= 0 ? colors.success : colors.error }]}>
+                          {diff >= 0 ? '+' : ''}₺{diff.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ({pct >= 0 ? '+' : ''}{pct.toFixed(1)}%)
+                        </Text>
+                      </View>
                     </View>
-                    <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>Fark</Text>
-                      <Text style={[{ fontSize: 14, fontWeight: '700', color: diff >= 0 ? colors.success : colors.error }]}>
-                        {diff >= 0 ? '+' : ''}₺{diff.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ({pct >= 0 ? '+' : ''}{pct.toFixed(1)}%)
-                      </Text>
-                    </View>
+                    {/* Lokasyon dağılımı - geçen hafta */}
+                    {lw?.locations && Object.keys(lw.locations).length > 0 && (
+                      <View style={[{ marginTop: 8, borderRadius: 12, padding: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }]}>
+                        <Text style={[{ fontSize: 12, fontWeight: '700', color: colors.textSecondary, marginBottom: 6 }]}>Geçen Hafta Lokasyon Dağılımı</Text>
+                        {Object.entries(lw.locations as Record<string, any>).map(([locName, locData]: [string, any]) => {
+                          const locVal = selectedCardType === 'cash' ? locData.cash : selectedCardType === 'card' ? locData.card : selectedCardType === 'openAccount' ? locData.openAccount : locData.total;
+                          return locVal > 0 ? (
+                            <View key={locName} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
+                              <Text style={[{ fontSize: 12, color: colors.text }]}>{locName}</Text>
+                              <Text style={[{ fontSize: 12, fontWeight: '600', color: colors.textSecondary }]}>₺{locVal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</Text>
+                            </View>
+                          ) : null;
+                        })}
+                      </View>
+                    )}
                   </View>
                 ) : null;
               })()}
