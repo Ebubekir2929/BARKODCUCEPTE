@@ -139,12 +139,15 @@ export default function ReportsScreen() {
       });
       const data = await resp.json();
       if (data.ok && data.data) {
-        const opts = data.data.map((r: any) => ({ value: r.ID || r.AD || r.KOD || '', label: r.AD || r.KOD || String(r.ID || '') }));
+        const opts = data.data.map((r: any) => ({ 
+          value: String(r.ID ?? r.KOD ?? r.AD ?? ''), 
+          label: String(r.AD || r.KOD || r.ID || '') 
+        }));
         setLookupCache(prev => ({ ...prev, [source]: opts }));
       }
     } catch (err) { console.error('Lookup error:', err); }
     finally { setLookupLoading(prev => ({ ...prev, [source]: false })); }
-  }, [activeTenantId, lookupCache, lookupLoading]);
+  }, [activeTenantId]);
 
   const openReportFilter = (report: ReportDef) => {
     const dd = getDefDates();
@@ -167,8 +170,13 @@ export default function ReportsScreen() {
     setShowFilterModal(false); setShowResultModal(true);
     setReportLoading(true); setReportData([]);
 
-    const params = { ...selectedReport.defaultParams };
-    Object.entries(filterValues).forEach(([k, v]) => { if (v !== undefined && v !== null) params[k] = v; });
+    const params: Record<string, any> = {};
+    // Copy defaults
+    Object.entries(selectedReport.defaultParams).forEach(([k, v]) => { params[k] = v; });
+    // Override with filter values, skip empty strings for multiselect
+    Object.entries(filterValues).forEach(([k, v]) => { 
+      if (v !== undefined && v !== null && v !== '') params[k] = v;
+    });
 
     try {
       const { token } = useAuthStore.getState();
@@ -178,7 +186,8 @@ export default function ReportsScreen() {
       });
       const data = await resp.json();
       if (data.ok && data.data) setReportData(data.data);
-    } catch (err) { console.error(err); }
+      else if (!data.ok) Alert.alert('Rapor Hatası', data.detail || data.message || 'Veri alınamadı');
+    } catch (err) { console.error(err); Alert.alert('Hata', 'Rapor çalıştırılamadı'); }
     finally { setReportLoading(false); }
   }, [activeTenantId, selectedReport, filterValues]);
 

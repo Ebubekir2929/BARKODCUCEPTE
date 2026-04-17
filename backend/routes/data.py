@@ -863,7 +863,11 @@ async def run_report(
         raise HTTPException(status_code=400, detail=f"Geçersiz rapor: {dataset_key}")
     
     try:
-        return await _on_demand_request(tenant_id, dataset_key, params, timeout_sec=90)
+        logger.info(f"Running report: {dataset_key} with params: {params}")
+        result = await _on_demand_request(tenant_id, dataset_key, params, timeout_sec=90)
+        data_count = len(result.get("data", [])) if isinstance(result.get("data"), list) else 0
+        logger.info(f"Report result: {dataset_key} -> {data_count} rows")
+        return result
     except HTTPException:
         raise
     except Exception as e:

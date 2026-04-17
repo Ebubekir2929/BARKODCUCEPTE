@@ -79,8 +79,8 @@ export default function StockScreen() {
   // Fetch stock list
   useEffect(() => {
     if (!activeTenantId || !selectedPriceName) return;
+    setStockLoading(true); setStockList([]);
     const fetchList = async () => {
-      setStockLoading(true); setStockList([]);
       try {
         const { token } = useAuthStore.getState();
         const resp = await fetch(`${API_URL}/api/data/stock-list`, {
@@ -96,11 +96,17 @@ export default function StockScreen() {
     fetchList();
   }, [activeTenantId, selectedPriceName]);
 
-  // Groups for filter
+  // Groups and KDV values for filter
   const groups = useMemo(() => {
     const s = new Set<string>();
     stockList.forEach((i: any) => { if (i.STOK_GRUP || i.GRUP) s.add(i.STOK_GRUP || i.GRUP); });
     return Array.from(s).sort();
+  }, [stockList]);
+
+  const kdvValues = useMemo(() => {
+    const s = new Set<string>();
+    stockList.forEach((i: any) => { const v = String(i.KDV || i.VERGI || i.KDV_ORANI || ''); if (v && v !== '0' && v !== '') s.add(v); });
+    return Array.from(s).sort((a, b) => parseFloat(a) - parseFloat(b));
   }, [stockList]);
 
   // Filtered list
@@ -188,7 +194,8 @@ export default function StockScreen() {
     const price = parseFloat(item.FIYAT || '0');
     const priceIncl = parseFloat(item.DAHIL_FIYAT || '0');
     const buyPrice = parseFloat(item.ALIS_FIYAT || item.SON_ALIS || '0');
-    const kdv = item.KDV || item.VERGI || '';
+    const kdv = item.KDV || item.VERGI || item.KDV_ORANI || '';
+    const grup = item.STOK_GRUP || item.GRUP || '';
     const profit = priceIncl > 0 && buyPrice > 0 ? priceIncl - buyPrice : 0;
 
     return (
@@ -200,7 +207,10 @@ export default function StockScreen() {
         <View style={styles.stockCardTop}>
           <View style={{ flex: 1 }}>
             <Text style={[styles.stockName, { color: colors.text }]} numberOfLines={2}>{name}</Text>
-            <Text style={[styles.stockCode, { color: colors.textSecondary }]}>{code}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+              <Text style={[styles.stockCode, { color: colors.textSecondary }]}>{code}</Text>
+              {grup ? <View style={[{ backgroundColor: colors.primary + '15', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }]}><Text style={[{ fontSize: 9, color: colors.primary, fontWeight: '600' }]}>{grup}</Text></View> : null}
+            </View>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={[styles.stockPrice, { color: colors.primary }]}>₺{priceIncl > 0 ? priceIncl.toFixed(2) : price.toFixed(2)}</Text>
@@ -365,7 +375,7 @@ export default function StockScreen() {
                 <TouchableOpacity style={[styles.filterChip, filterKdv === '' && { backgroundColor: colors.primary, borderColor: colors.primary }]} onPress={() => setFilterKdv('')}>
                   <Text style={[{ fontSize: 12, color: filterKdv === '' ? '#fff' : colors.text }]}>Tümü</Text>
                 </TouchableOpacity>
-                {['1', '8', '10', '18', '20'].map(k => (
+                {kdvValues.map(k => (
                   <TouchableOpacity key={k} style={[styles.filterChip, filterKdv === k && { backgroundColor: colors.primary, borderColor: colors.primary }, { borderColor: colors.border }]} onPress={() => setFilterKdv(k)}>
                     <Text style={[{ fontSize: 12, color: filterKdv === k ? '#fff' : colors.text }]}>%{k}</Text>
                   </TouchableOpacity>
