@@ -297,9 +297,6 @@ export default function CustomersScreen() {
               <TouchableOpacity style={[styles.exportBtn, { backgroundColor: colors.error + '15' }]} onPress={exportExtrePdf}>
                 <Ionicons name="document-text-outline" size={14} color={colors.error} /><Text style={[{ fontSize: 11, color: colors.error, fontWeight: '600' }]}>PDF</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.exportBtn, { backgroundColor: colors.success + '15' }]} onPress={exportExtreCsv}>
-                <Ionicons name="grid-outline" size={14} color={colors.success} /><Text style={[{ fontSize: 11, color: colors.success, fontWeight: '600' }]}>Excel</Text>
-              </TouchableOpacity>
             </View>
 
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>

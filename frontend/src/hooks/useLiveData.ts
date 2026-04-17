@@ -174,6 +174,7 @@ export function useLiveData(filter?: DashboardFilter) {
   const { activeSource } = useDataSourceStore();
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
   const [isFirstLoad, setIsFirstLoad] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -201,7 +202,8 @@ export function useLiveData(filter?: DashboardFilter) {
       return;
     }
 
-    // Only show loading on first load
+    // Show refreshing spinner when data already loaded
+    if (hasLoadedOnce.current) setIsRefreshing(true);
     setError(null);
 
     try {
@@ -250,6 +252,7 @@ export function useLiveData(filter?: DashboardFilter) {
       setError(err.message || 'Veri çekilemedi');
     } finally {
       setIsFirstLoad(false);
+      setIsRefreshing(false);
     }
   }, [activeTenantId, token, activeSource, isFilterActive, filter?.branchId, filter?.startDate, filter?.endDate]);
 
@@ -275,6 +278,7 @@ export function useLiveData(filter?: DashboardFilter) {
   return {
     data,
     isLoading: isFirstLoad && !hasLoadedOnce.current,
+    isRefreshing,
     error,
     lastSynced,
     refresh: fetchDashboard,

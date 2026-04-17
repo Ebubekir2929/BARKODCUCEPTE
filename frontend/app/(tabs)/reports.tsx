@@ -317,7 +317,6 @@ export default function ReportsScreen() {
                 <TextInput style={[{ flex: 1, fontSize: 12, color: colors.text }]} placeholder="Filtrele..." placeholderTextColor={colors.textSecondary} value={searchFilter} onChangeText={setSearchFilter} />
               </View>
               <TouchableOpacity style={[styles.exportBtn, { backgroundColor: colors.error + '15' }]} onPress={exportPdf}><Ionicons name="document-text-outline" size={14} color={colors.error} /><Text style={[{ fontSize: 10, color: colors.error, fontWeight: '600' }]}>PDF</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.exportBtn, { backgroundColor: colors.success + '15' }]} onPress={exportCsv}><Ionicons name="grid-outline" size={14} color={colors.success} /><Text style={[{ fontSize: 10, color: colors.success, fontWeight: '600' }]}>Excel</Text></TouchableOpacity>
             </View>
             {selectedReport && !reportLoading && processedData.length > 0 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 32, borderBottomWidth: 1, borderBottomColor: colors.border }}>
