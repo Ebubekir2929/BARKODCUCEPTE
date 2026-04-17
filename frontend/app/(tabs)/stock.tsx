@@ -31,15 +31,23 @@ export default function StockScreen() {
   }, [user?.tenants, activeSource]);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // Start with loading true
   const [priceNames, setPriceNames] = useState<any[]>([]);
   const [selectedPriceName, setSelectedPriceName] = useState<string>('');
   const [stockList, setStockList] = useState<any[]>([]);
-  const [stockLoading, setStockLoading] = useState(false);
+  const [stockLoading, setStockLoading] = useState(true); // Start with loading true
   const [showPriceModal, setShowPriceModal] = useState(false);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
+  const [toastMsg, setToastMsg] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
+
+  const showToast = (msg: string) => {
+    setToastMsg(msg);
+    setToastVisible(true);
+    setTimeout(() => setToastVisible(false), 2000);
+  };
 
   // Filters
   const [filterGroup, setFilterGroup] = useState<string>('');
@@ -247,10 +255,10 @@ export default function StockScreen() {
             </View>
           ) : null}
           {barcode ? (
-            <TouchableOpacity style={[styles.detailItem, { flexDirection: 'row', gap: 4, flex: 1.5 }]}
-              onPress={(e) => { e.stopPropagation(); Clipboard.setStringAsync(barcode); Alert.alert('Kopyalandı', `${barcode} panoya kopyalandı`); }}>
+            <TouchableOpacity style={[{ flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1 }]}
+              onPress={(e) => { e.stopPropagation(); Clipboard.setStringAsync(barcode); showToast(`${barcode} kopyalandı`); }}>
               <Ionicons name="barcode-outline" size={12} color={colors.primary} />
-              <Text style={[{ fontSize: 11, color: colors.primary, textDecorationLine: 'underline' }]} numberOfLines={1}>{barcode}</Text>
+              <Text style={[{ fontSize: 11, color: colors.primary }]} numberOfLines={1} ellipsizeMode="middle">{barcode}</Text>
               <Ionicons name="copy-outline" size={10} color={colors.primary} />
             </TouchableOpacity>
           ) : null}
@@ -489,7 +497,16 @@ export default function StockScreen() {
                       const name = selectedStock?.AD || 'Stok';
                       let csv = 'Tarih;Belge No;Lokasyon;Cari;Fiş Türü;Giriş;Çıkış;Bakiye\n';
                       detailExtre.forEach((r:any) => { csv += `${r.TARIH||''};${r.BELGENO||''};${r.LOKASYON_AD||''};${(r.CARI_AD||'').replace(/;/g,',')};${r.FIS_TURU||''};${parseFloat(r.MIKTAR_GIRIS||'0').toFixed(2)};${parseFloat(r.MIKTAR_CIKIS||'0').toFixed(2)};${parseFloat(r.BAKIYE||'0').toFixed(2)}\n`; });
-                      try { const path = `${FileSystem.cacheDirectory}${name}_ekstre.csv`; await FileSystem.writeAsStringAsync(path, csv); await Sharing.shareAsync(path, { mimeType: 'text/csv' }); } catch(e) { console.error(e); }
+                      try { 
+                        const path = `${FileSystem.cacheDirectory}${name.replace(/\s/g,'_')}_ekstre.csv`; 
+                        await FileSystem.writeAsStringAsync(path, csv, { encoding: FileSystem.EncodingType.UTF8 }); 
+                        const isAvailable = await Sharing.isAvailableAsync();
+                        if (isAvailable) {
+                          await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: 'Excel Paylaş' }); 
+                        } else {
+                          showToast('Paylaşım bu cihazda desteklenmiyor');
+                        }
+                      } catch(e) { console.error('CSV export error:', e); showToast('Export hatası'); }
                     }}>
                       <Ionicons name="grid-outline" size={14} color={colors.success} /><Text style={[{ fontSize: 11, color: colors.success, fontWeight: '600' }]}>Excel</Text>
                     </TouchableOpacity>
@@ -515,6 +532,14 @@ export default function StockScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Toast */}
+      {toastVisible && (
+        <View style={[styles.toast, { backgroundColor: colors.text }]}>
+          <Ionicons name="checkmark-circle" size={16} color="#fff" />
+          <Text style={[{ color: '#fff', fontSize: 13, fontWeight: '600' }]}>{toastMsg}</Text>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -553,4 +578,5 @@ const styles = StyleSheet.create({
   tab: { flex: 1, paddingVertical: 10, alignItems: 'center' },
   miktarCard: { borderRadius: 10, borderWidth: 1, padding: 12, marginBottom: 8 },
   extreRow: { borderRadius: 8, borderWidth: 1, padding: 8, marginBottom: 4 },
+  toast: { position: 'absolute', bottom: 90, left: 20, right: 20, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, zIndex: 9999 },
 });

@@ -155,14 +155,15 @@ export default function CustomersScreen() {
 
   const exportExtreCsv = async () => {
     if (!selectedCari || extreData.length === 0) return;
-    const name = selectedCari.AD || selectedCari.CARI_ADI || 'Cari';
+    const name = (selectedCari.AD || selectedCari.CARI_ADI || 'Cari').replace(/\s/g, '_');
     let csv = 'Tarih;Belge No;Açıklama;Borç;Alacak;Bakiye\n';
     extreData.forEach((r: any) => { csv += `${r.TARIH || ''};${r.BELGENO || ''};${(r.ACIKLAMA || r.AD || '').replace(/;/g, ',')};${parseFloat(r.BORC || '0').toFixed(2)};${parseFloat(r.ALACAK || '0').toFixed(2)};${parseFloat(r.BAKIYE || '0').toFixed(2)}\n`; });
     try {
       const path = `${FileSystem.cacheDirectory}${name}_ekstre.csv`;
-      await FileSystem.writeAsStringAsync(path, csv);
-      await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: 'Ekstre CSV' });
-    } catch (err) { console.error(err); }
+      await FileSystem.writeAsStringAsync(path, csv, { encoding: FileSystem.EncodingType.UTF8 });
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: 'Ekstre CSV' });
+    } catch (err) { console.error('CSV export error:', err); }
   };
 
   const renderCariItem = useCallback(({ item }: { item: any }) => {
