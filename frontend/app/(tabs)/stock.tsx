@@ -61,6 +61,7 @@ export default function StockScreen() {
   const [detailExtre, setDetailExtre] = useState<any[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailTab, setDetailTab] = useState<'miktar' | 'extre'>('miktar');
+  const [exportLoading, setExportLoading] = useState(false);
 
   // Fetch price names
   useEffect(() => {
@@ -255,11 +256,14 @@ export default function StockScreen() {
             </View>
           ) : null}
           {barcode ? (
-            <TouchableOpacity style={[{ flexDirection: 'row', alignItems: 'center', gap: 4, flex: 1 }]}
+            <TouchableOpacity 
+              style={[{ flexDirection: 'row', alignItems: 'center', gap: 6 }]}
               onPress={(e) => { e.stopPropagation(); Clipboard.setStringAsync(barcode); showToast(`${barcode} kopyalandı`); }}>
-              <Ionicons name="barcode-outline" size={12} color={colors.primary} />
-              <Text style={[{ fontSize: 11, color: colors.primary }]} numberOfLines={1} ellipsizeMode="middle">{barcode}</Text>
-              <Ionicons name="copy-outline" size={10} color={colors.primary} />
+              <Ionicons name="barcode-outline" size={14} color={colors.primary} />
+              <Text style={[{ fontSize: 12, color: colors.primary, flexShrink: 1 }]} numberOfLines={1}>{barcode}</Text>
+              <View style={[{ backgroundColor: colors.primary + '20', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }]}>
+                <Ionicons name="copy-outline" size={12} color={colors.primary} />
+              </View>
             </TouchableOpacity>
           ) : null}
         </View>
@@ -336,7 +340,7 @@ export default function StockScreen() {
           <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>POS'tan stok listesi alınıyor...</Text>
         </View>
       ) : (
-        <FlatList data={filteredStocks} renderItem={renderStockItem} keyExtractor={(item, idx) => String(item.ID || item.STOK_ID || idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false} initialNumToRender={15}
+        <FlatList data={filteredStocks} renderItem={renderStockItem} keyExtractor={(_, idx) => String(idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false} initialNumToRender={15}
           ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="cube-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>Stok bulunamadı</Text></View>}
         />
       )}
@@ -486,29 +490,36 @@ export default function StockScreen() {
                 detailExtre.length > 0 ? <View style={{ padding: 12 }}>
                   {/* Export buttons for ekstre */}
                   <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
-                    <TouchableOpacity style={[{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.error + '15' }]} onPress={async () => {
+                    <TouchableOpacity disabled={exportLoading} style={[{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.error + '15', opacity: exportLoading ? 0.5 : 1 }]} onPress={async () => {
+                      setExportLoading(true); showToast('PDF hazırlanıyor...');
                       const name = selectedStock?.AD || 'Stok';
                       const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:6px;font-size:11px}th{background:#f5f5f5}</style></head><body><h2>${name} - Stok Ekstre</h2><table><thead><tr><th>Tarih</th><th>Belge No</th><th>Lokasyon</th><th>Cari</th><th>Fiş Türü</th><th>Giriş</th><th>Çıkış</th><th>Bakiye</th></tr></thead><tbody>${detailExtre.map((r:any) => `<tr><td>${r.TARIH||''}</td><td>${r.BELGENO||''}</td><td>${r.LOKASYON_AD||''}</td><td>${r.CARI_AD||''}</td><td>${r.FIS_TURU||''}</td><td>${parseFloat(r.MIKTAR_GIRIS||'0').toFixed(2)}</td><td>${parseFloat(r.MIKTAR_CIKIS||'0').toFixed(2)}</td><td>${parseFloat(r.BAKIYE||'0').toFixed(2)}</td></tr>`).join('')}</tbody></table></body></html>`;
-                      try { const { uri } = await Print.printToFileAsync({ html }); await Sharing.shareAsync(uri, { mimeType: 'application/pdf' }); } catch(e) { console.error(e); }
+                      try { const { uri } = await Print.printToFileAsync({ html }); await Sharing.shareAsync(uri, { mimeType: 'application/pdf' }); showToast('PDF oluşturuldu'); } catch(e) { console.error('PDF error:', e); showToast('PDF oluşturulamadı'); }
+                      finally { setExportLoading(false); }
                     }}>
-                      <Ionicons name="document-text-outline" size={14} color={colors.error} /><Text style={[{ fontSize: 11, color: colors.error, fontWeight: '600' }]}>PDF</Text>
+                      {exportLoading ? <ActivityIndicator size="small" color={colors.error} /> : <Ionicons name="document-text-outline" size={14} color={colors.error} />}
+                      <Text style={[{ fontSize: 11, color: colors.error, fontWeight: '600' }]}>PDF</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.success + '15' }]} onPress={async () => {
-                      const name = selectedStock?.AD || 'Stok';
-                      let csv = 'Tarih;Belge No;Lokasyon;Cari;Fiş Türü;Giriş;Çıkış;Bakiye\n';
+                    <TouchableOpacity disabled={exportLoading} style={[{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.success + '15', opacity: exportLoading ? 0.5 : 1 }]} onPress={async () => {
+                      setExportLoading(true); showToast('Excel hazırlanıyor...');
+                      const name = (selectedStock?.AD || 'Stok').replace(/[^a-zA-Z0-9]/g, '_');
+                      let csv = '\uFEFFTarih;Belge No;Lokasyon;Cari;Fiş Türü;Giriş;Çıkış;Bakiye\n';
                       detailExtre.forEach((r:any) => { csv += `${r.TARIH||''};${r.BELGENO||''};${r.LOKASYON_AD||''};${(r.CARI_AD||'').replace(/;/g,',')};${r.FIS_TURU||''};${parseFloat(r.MIKTAR_GIRIS||'0').toFixed(2)};${parseFloat(r.MIKTAR_CIKIS||'0').toFixed(2)};${parseFloat(r.BAKIYE||'0').toFixed(2)}\n`; });
                       try { 
-                        const path = `${FileSystem.cacheDirectory}${name.replace(/\s/g,'_')}_ekstre.csv`; 
+                        const path = `${FileSystem.cacheDirectory}${name}_ekstre.csv`; 
                         await FileSystem.writeAsStringAsync(path, csv, { encoding: FileSystem.EncodingType.UTF8 }); 
                         const isAvailable = await Sharing.isAvailableAsync();
                         if (isAvailable) {
-                          await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: 'Excel Paylaş' }); 
+                          await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: 'Excel Paylaş', UTI: 'public.comma-separated-values-text' }); 
+                          showToast('Excel oluşturuldu');
                         } else {
-                          showToast('Paylaşım bu cihazda desteklenmiyor');
+                          showToast('Paylaşım bu cihazda kullanılamıyor');
                         }
-                      } catch(e) { console.error('CSV export error:', e); showToast('Export hatası'); }
+                      } catch(e) { console.error('CSV export error:', e); showToast('Excel oluşturulamadı: ' + String(e)); }
+                      finally { setExportLoading(false); }
                     }}>
-                      <Ionicons name="grid-outline" size={14} color={colors.success} /><Text style={[{ fontSize: 11, color: colors.success, fontWeight: '600' }]}>Excel</Text>
+                      {exportLoading ? <ActivityIndicator size="small" color={colors.success} /> : <Ionicons name="grid-outline" size={14} color={colors.success} />}
+                      <Text style={[{ fontSize: 11, color: colors.success, fontWeight: '600' }]}>Excel</Text>
                     </TouchableOpacity>
                   </View>
                   {detailExtre.map((row: any, idx: number) => (
