@@ -53,6 +53,10 @@ export default function CustomersScreen() {
   const [fisDetail, setFisDetail] = useState<any[]>([]);
   const [fisTotals, setFisTotals] = useState<any | null>(null);
   const [fisLoading, setFisLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [toastMsg, setToastMsg] = useState('');
+  const [toastVisible, setToastVisible] = useState(false);
+  const showToast = (msg: string) => { setToastMsg(msg); setToastVisible(true); setTimeout(() => setToastVisible(false), 2000); };
 
   // Fetch cari list
   useEffect(() => {
@@ -146,6 +150,7 @@ export default function CustomersScreen() {
   // Export functions
   const exportExtrePdf = async () => {
     if (!selectedCari || extreData.length === 0) return;
+    setExportLoading(true);
     const name = selectedCari.AD || selectedCari.CARI_ADI || 'Cari';
     const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:8px;font-size:12px;text-align:left}th{background:#f5f5f5}</style></head><body>
     <h2>${name} - Cari Ekstre</h2><p>${extreStart} / ${extreEnd}</p>
@@ -156,20 +161,25 @@ export default function CustomersScreen() {
     try {
       const { uri } = await Print.printToFileAsync({ html });
       await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Ekstre PDF' });
-    } catch (err) { console.error(err); }
+      showToast('PDF oluşturuldu');
+    } catch (err) { console.error(err); showToast('PDF oluşturulamadı'); }
+    finally { setExportLoading(false); }
   };
 
   const exportExtreCsv = async () => {
     if (!selectedCari || extreData.length === 0) return;
+    setExportLoading(true);
     const name = (selectedCari.AD || selectedCari.CARI_ADI || 'Cari').replace(/\s/g, '_');
-    let csv = 'Tarih;Belge No;Açıklama;Borç;Alacak;Bakiye\n';
+    let csv = '\uFEFFTarih;Belge No;Açıklama;Borç;Alacak;Bakiye\n';
     extreData.forEach((r: any) => { csv += `${r.TARIH || ''};${r.BELGENO || ''};${(r.ACIKLAMA || r.AD || '').replace(/;/g, ',')};${parseFloat(r.BORC || '0').toFixed(2)};${parseFloat(r.ALACAK || '0').toFixed(2)};${parseFloat(r.BAKIYE || '0').toFixed(2)}\n`; });
     try {
       const path = `${FileSystem.cacheDirectory}${name}_ekstre.csv`;
       await FileSystem.writeAsStringAsync(path, csv);
       const isAvailable = await Sharing.isAvailableAsync();
-      if (isAvailable) await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: 'Ekstre CSV' });
-    } catch (err) { console.error('CSV export error:', err); }
+      if (isAvailable) { await Sharing.shareAsync(path, { mimeType: 'text/csv', dialogTitle: 'Ekstre CSV' }); showToast('Excel oluşturuldu'); }
+      else showToast('Paylaşım desteklenmiyor');
+    } catch (err) { console.error('CSV export error:', err); showToast('Excel oluşturulamadı'); }
+    finally { setExportLoading(false); }
   };
 
   const renderCariItem = useCallback(({ item }: { item: any }) => {
@@ -212,15 +222,15 @@ export default function CustomersScreen() {
       <View style={styles.summaryRow}>
         <View style={[styles.summaryCard, { backgroundColor: colors.error + '10', borderColor: colors.border }]}>
           <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Toplam Borç</Text>
-          <Text style={[{ fontSize: 14, fontWeight: '800', color: colors.error }]}>₺{summary.borc.toLocaleString('tr-TR', { minimumFractionDigits: 0 })}</Text>
+          <Text style={[{ fontSize: 12, fontWeight: '800', color: colors.error }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>₺{summary.borc.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</Text>
         </View>
         <View style={[styles.summaryCard, { backgroundColor: colors.success + '10', borderColor: colors.border }]}>
           <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Toplam Alacak</Text>
-          <Text style={[{ fontSize: 14, fontWeight: '800', color: colors.success }]}>₺{summary.alacak.toLocaleString('tr-TR', { minimumFractionDigits: 0 })}</Text>
+          <Text style={[{ fontSize: 12, fontWeight: '800', color: colors.success }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>₺{summary.alacak.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</Text>
         </View>
         <View style={[styles.summaryCard, { backgroundColor: colors.primary + '10', borderColor: colors.border }]}>
           <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Bakiye</Text>
-          <Text style={[{ fontSize: 14, fontWeight: '800', color: colors.primary }]}>₺{Math.abs(summary.bakiye).toLocaleString('tr-TR', { minimumFractionDigits: 0 })}</Text>
+          <Text style={[{ fontSize: 12, fontWeight: '800', color: colors.primary }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>₺{Math.abs(summary.bakiye).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</Text>
         </View>
       </View>
 
@@ -380,6 +390,23 @@ export default function CustomersScreen() {
           </View>
         </View>
       </Modal>
+      {/* Export Loading Overlay */}
+      {exportLoading && (
+        <View style={styles.exportOverlay}>
+          <View style={[styles.exportBox, { backgroundColor: colors.card }]}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={[{ color: colors.text, fontSize: 14, fontWeight: '600', marginTop: 12 }]}>Dışa aktarılıyor...</Text>
+          </View>
+        </View>
+      )}
+
+      {/* Toast */}
+      {toastVisible && (
+        <View style={[styles.toast, { backgroundColor: colors.text }]}>
+          <Ionicons name="checkmark-circle" size={16} color="#fff" />
+          <Text style={[{ color: '#fff', fontSize: 13, fontWeight: '600' }]}>{toastMsg}</Text>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -413,4 +440,7 @@ const styles = StyleSheet.create({
   fisRow: { marginHorizontal: 12, marginTop: 6, borderRadius: 8, borderWidth: 1, padding: 8 },
   fisTotals: { margin: 12, borderRadius: 10, borderWidth: 1, padding: 12, gap: 4 },
   fisTotalRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  exportOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 9998 },
+  exportBox: { borderRadius: 16, padding: 30, alignItems: 'center', minWidth: 200 },
+  toast: { position: 'absolute', bottom: 90, left: 20, right: 20, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, zIndex: 9999 },
 });

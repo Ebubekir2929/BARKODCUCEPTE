@@ -235,7 +235,7 @@ export default function StockScreen() {
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={[styles.stockPrice, { color: colors.primary }]}>₺{price > 0 ? price.toFixed(2) : '0.00'}</Text>
-            {miktar !== 0 && <Text style={[{ fontSize: 11, fontWeight: '700', color: miktar > 0 ? colors.success : colors.error }]}>Stok: {miktar.toFixed(0)}</Text>}
+            {miktar !== 0 && <Text style={[{ fontSize: 11, fontWeight: '700', color: miktar > 0 ? colors.success : colors.error }]}>Stok: {miktar.toFixed(2)}</Text>}
           </View>
         </View>
 
@@ -321,13 +321,17 @@ export default function StockScreen() {
 
       {/* Active Filters */}
       {activeFilterCount > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 36, marginHorizontal: 16 }} contentContainerStyle={{ gap: 6, alignItems: 'center' }}>
-          {filterGroup ? <View style={[styles.chip, { backgroundColor: colors.primary + '15' }]}><Text style={[styles.chipText, { color: colors.primary }]}>{filterGroup}</Text><TouchableOpacity onPress={() => setFilterGroup('')}><Ionicons name="close" size={12} color={colors.primary} /></TouchableOpacity></View> : null}
-          {filterProfit !== 'all' ? <View style={[styles.chip, { backgroundColor: filterProfit === 'profit' ? colors.success + '15' : colors.error + '15' }]}><Text style={[styles.chipText, { color: filterProfit === 'profit' ? colors.success : colors.error }]}>{filterProfit === 'profit' ? 'Karlı' : 'Zararlı'}</Text><TouchableOpacity onPress={() => setFilterProfit('all')}><Ionicons name="close" size={12} color={filterProfit === 'profit' ? colors.success : colors.error} /></TouchableOpacity></View> : null}
-          {filterQty !== 'all' ? <View style={[styles.chip, { backgroundColor: colors.warning + '15' }]}><Text style={[styles.chipText, { color: colors.warning }]}>{filterQty === 'low' ? 'Düşük Stok' : filterQty === 'mid' ? 'Orta Stok' : 'Yüksek Stok'}</Text><TouchableOpacity onPress={() => setFilterQty('all')}><Ionicons name="close" size={12} color={colors.warning} /></TouchableOpacity></View> : null}
-          {filterKdv ? <View style={[styles.chip, { backgroundColor: colors.info + '15' }]}><Text style={[styles.chipText, { color: colors.info }]}>KDV %{filterKdv}</Text><TouchableOpacity onPress={() => setFilterKdv('')}><Ionicons name="close" size={12} color={colors.info} /></TouchableOpacity></View> : null}
-          <TouchableOpacity onPress={() => { setFilterGroup(''); setFilterProfit('all'); setFilterQty('all'); setFilterKdv(''); }}><Text style={[{ fontSize: 12, color: colors.error }]}>Temizle</Text></TouchableOpacity>
-        </ScrollView>
+        <View style={{ paddingHorizontal: 16, marginTop: 6 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, alignItems: 'center', paddingRight: 60 }}>
+            {filterGroup ? <View style={[styles.chip, { backgroundColor: colors.primary + '15' }]}><Text style={[styles.chipText, { color: colors.primary }]}>{filterGroup}</Text><TouchableOpacity onPress={() => setFilterGroup('')}><Ionicons name="close" size={12} color={colors.primary} /></TouchableOpacity></View> : null}
+            {filterProfit !== 'all' ? <View style={[styles.chip, { backgroundColor: filterProfit === 'profit' ? colors.success + '15' : colors.error + '15' }]}><Text style={[styles.chipText, { color: filterProfit === 'profit' ? colors.success : colors.error }]}>{filterProfit === 'profit' ? 'Karlı' : 'Zararlı'}</Text><TouchableOpacity onPress={() => setFilterProfit('all')}><Ionicons name="close" size={12} color={filterProfit === 'profit' ? colors.success : colors.error} /></TouchableOpacity></View> : null}
+            {filterQty !== 'all' ? <View style={[styles.chip, { backgroundColor: colors.warning + '15' }]}><Text style={[styles.chipText, { color: colors.warning }]}>{filterQty === 'low' ? 'Düşük Stok' : filterQty === 'mid' ? 'Orta Stok' : 'Yüksek Stok'}</Text><TouchableOpacity onPress={() => setFilterQty('all')}><Ionicons name="close" size={12} color={colors.warning} /></TouchableOpacity></View> : null}
+            {filterKdv ? <View style={[styles.chip, { backgroundColor: colors.info + '15' }]}><Text style={[styles.chipText, { color: colors.info }]}>KDV %{filterKdv}</Text><TouchableOpacity onPress={() => setFilterKdv('')}><Ionicons name="close" size={12} color={colors.info} /></TouchableOpacity></View> : null}
+          </ScrollView>
+          <TouchableOpacity style={{ position: 'absolute', right: 16, top: 4, backgroundColor: colors.error + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }} onPress={() => { setFilterGroup(''); setFilterProfit('all'); setFilterQty('all'); setFilterKdv(''); }}>
+            <Text style={[{ fontSize: 12, color: colors.error, fontWeight: '700' }]}>Temizle</Text>
+          </TouchableOpacity>
+        </View>
       )}
 
       <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}>
@@ -460,7 +464,7 @@ export default function StockScreen() {
                   <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Satış</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: colors.primary }]}>₺{parseFloat(selectedStock.FIYAT || '0').toFixed(2)}</Text></View>
                   {parseFloat(selectedStock.SON_ALIS_FIYAT || '0') > 0 && <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Alış</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: colors.warning }]}>₺{parseFloat(selectedStock.SON_ALIS_FIYAT || '0').toFixed(2)}</Text></View>}
                   {selectedStock.KDV_PAREKENDE && <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>KDV</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text }]}>%{String(selectedStock.KDV_PAREKENDE).replace('.00','')}</Text></View>}
-                  <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Stok</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: parseFloat(selectedStock.MIKTAR || '0') > 0 ? colors.success : colors.error }]}>{parseFloat(selectedStock.MIKTAR || '0').toFixed(0)}</Text></View>
+                  <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Stok</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: parseFloat(selectedStock.MIKTAR || '0') > 0 ? colors.success : colors.error }]}>{parseFloat(selectedStock.MIKTAR || '0').toFixed(2)}</Text></View>
                 </View>
               </View>
             )}
