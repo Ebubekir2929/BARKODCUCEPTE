@@ -33,6 +33,7 @@ export interface DashboardData {
   waiterSales: any[];
   iptalOzet: any[];
   iptalDetay: any[];
+  allLocations: string[];
 }
 
 const EMPTY_DATA: DashboardData = {
@@ -53,6 +54,7 @@ const EMPTY_DATA: DashboardData = {
   waiterSales: [],
   iptalOzet: [],
   iptalDetay: [],
+  allLocations: [],
 };
 
 function formatDateParam(d: Date): string {
@@ -149,7 +151,10 @@ function transformApiData(apiData: any): DashboardData {
     branchSales,
     hourlySales,
     hourlyLocationSales: apiData?.hourly_location_data?.data || [],
-    weeklyComparison: { thisWeek, lastWeek: { cash: 0, card: 0, openAccount: 0, total: 0 } },
+    weeklyComparison: { 
+      thisWeek, 
+      lastWeek: apiData?.last_week || { cash: 0, card: 0, openAccount: 0, total: 0 } 
+    },
     cancelledReceipts,
     openTables,
     topSelling: topProducts,
@@ -160,6 +165,7 @@ function transformApiData(apiData: any): DashboardData {
     waiterSales: apiData?.garson_satis_ozet?.data || [],
     iptalOzet: apiData?.iptal_ozet?.data || [],
     iptalDetay: apiData?.iptal_detay?.data || [],
+    allLocations: apiData?.all_locations || [],
   };
 }
 

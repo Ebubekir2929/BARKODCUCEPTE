@@ -752,7 +752,12 @@ export default function DashboardScreen() {
         onClose={() => setShowFilterModal(false)}
         onApply={setFilters}
         currentFilters={filters}
-        branches={(sourceData?.branchSales || []).map(b => ({ id: b.branchId, name: b.branchName || b.branchId }))}
+        branches={[
+          ...(sourceData?.allLocations || []).map((loc: string) => ({ id: loc, name: loc })),
+          ...(sourceData?.branchSales || [])
+            .filter(b => !(sourceData?.allLocations || []).includes(b.branchName))
+            .map(b => ({ id: b.branchId, name: b.branchName || b.branchId })),
+        ]}
       />
 
       {/* Card Type Location Modal */}

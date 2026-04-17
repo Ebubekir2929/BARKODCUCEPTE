@@ -225,6 +225,10 @@ async def get_dashboard_data(
     pool = await get_data_pool()
     result = {}
     
+    # Also fetch last week data for comparison + all locations
+    last_week_data = {}
+    all_locations = []
+    
     if sdate:
         if not edate:
             edate = sdate
@@ -302,6 +306,61 @@ async def get_dashboard_data(
             # Remove params from response to reduce size
             if "params" in result[key]:
                 del result[key]["params"]
+    
+    # --- Fetch last week data for comparison ---
+    try:
+        from datetime import datetime, timedelta
+        today = datetime.now()
+        if sdate:
+            current_date = datetime.strptime(sdate, "%Y-%m-%d")
+        else:
+            current_date = today
+        
+        last_week_date = (current_date - timedelta(days=7)).strftime("%Y-%m-%d")
+        
+        lw_financial = await fetch_dataset(pool, tenant_id, "financial_data_location", last_week_date)
+        lw_items = lw_financial.get("data", [])
+        
+        lw_cash = sum(_sum_float(i.get("NAKIT")) for i in lw_items)
+        lw_card = sum(_sum_float(i.get("KREDI_KARTI")) for i in lw_items)
+        lw_open = sum(_sum_float(i.get("VERESIYE")) + _sum_float(i.get("ACIK_HESAP")) for i in lw_items)
+        lw_total = sum(_sum_float(i.get("TOPLAM")) for i in lw_items)
+        
+        result["last_week"] = {
+            "cash": round(lw_cash, 2),
+            "card": round(lw_card, 2),
+            "openAccount": round(lw_open, 2),
+            "total": round(lw_total, 2),
+        }
+    except Exception as e:
+        logger.warning(f"Last week data error: {e}")
+        result["last_week"] = {"cash": 0, "card": 0, "openAccount": 0, "total": 0}
+    
+    # --- Fetch all available locations ---
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("""
+                    SELECT DISTINCT data_json FROM dataset_cache 
+                    WHERE tenant_id = %s AND dataset_key = 'financial_data_location'
+                    ORDER BY updated_at DESC LIMIT 30
+                """, (tenant_id,))
+                loc_rows = await cur.fetchall()
+        
+        all_locs = set()
+        for r in loc_rows:
+            try:
+                items = json.loads(r[0]) if r[0] else []
+                for item in items:
+                    loc = item.get("LOKASYON", "")
+                    if loc:
+                        all_locs.add(loc)
+            except:
+                pass
+        result["all_locations"] = sorted(list(all_locs))
+    except Exception as e:
+        logger.warning(f"All locations error: {e}")
+        result["all_locations"] = []
     
     return result
 
