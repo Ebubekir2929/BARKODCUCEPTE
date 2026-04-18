@@ -13,6 +13,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as XLSX from 'xlsx';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -123,6 +124,12 @@ const STOK_FILTERS_UI: FilterDef[] = [
 const today = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const formatDateTR = (iso: string): string => {
+  if (!iso) return '';
+  const parts = iso.split('-');
+  if (parts.length !== 3) return iso;
+  return `${parts[2]}.${parts[1]}.${parts[0]}`;
 };
 const firstOfYear = () => {
   const d = new Date();
@@ -250,6 +257,106 @@ const SATIS_ADET_KAR: ReportDef = {
 
 const OTHER_REPORTS: ReportDef[] = [
   SATIS_ADET_KAR,
+  // === STOK ENVANTER — Envanter Raporu ===
+  {
+    key: 'stok_envanter',
+    title: 'Stok Envanter',
+    icon: 'cube-outline',
+    description: 'Anlık stok miktar, maliyet ve değer raporu',
+    datasetKey: 'rap_stok_envanter_web',
+    defaultParams: {
+      SONTARIH: today(),
+      Lokasyon: '', Durum: 0, FiyatId: 0, Aktif: '',
+      Tedarikci: '', KdvDahil: 1, LokasyonDagilim: 0,
+      Page: 1, PageSize: 500,
+      ...STOK_FILTER_DEFAULTS,
+    },
+    requireNarrowing: false,
+    requiredFilters: ['Lokasyon'],
+    summary: {
+      cols: [
+        { key: 'MEVCUT', label: 'Mevcut', type: 'number' },
+        { key: 'FIFO___TUTAR', label: 'FIFO Tutar', type: 'money' },
+        { key: 'AGIRLIKLI_ORTALAMA___TUTAR', label: 'Ağ. Ort. Tutar', type: 'money' },
+        { key: 'SON_ALIS_TUTAR', label: 'Toplam Alış', type: 'money' },
+        { key: 'SATIS_TUTARI___YEREL', label: 'Toplam Satış', type: 'money' },
+      ],
+      // No POS-provided totals for this dataset — compute from rows
+    },
+    cardLayout: {
+      title: 'AD',
+      code: 'KOD',
+      amount: 'SATIS_TUTARI___YEREL',
+      amountType: 'money',
+      amountLabel: 'Satış Değeri',
+      chips: [
+        { key: 'MEVCUT', label: 'Mevcut', type: 'number' },
+        { key: 'STOK_BIRIM' },
+        { key: 'LOKASYON' },
+      ],
+      meta: [
+        { key: 'SATIS_FIYATI', label: 'Satış Fiyatı', type: 'money' },
+        { key: 'SON_ALIS_FIYATI', label: 'Son Alış Fiyatı', type: 'money' },
+        { key: 'SON_ALIS_TUTAR', label: 'Son Alış Tutar', type: 'money' },
+        { key: 'FIFO___FIYAT', label: 'FIFO Fiyat', type: 'money' },
+        { key: 'FIFO___TUTAR', label: 'FIFO Tutar', type: 'money' },
+        { key: 'AGIRLIKLI_ORTALAMA___FIYAT', label: 'Ağ. Ort. Fiyat', type: 'money' },
+        { key: 'AGIRLIKLI_ORTALAMA___TUTAR', label: 'Ağ. Ort. Tutar', type: 'money' },
+      ],
+    },
+    columns: [
+      { key: 'KOD', label: 'Kod' },
+      { key: 'AD', label: 'Ürün' },
+      { key: 'LOKASYON', label: 'Lokasyon' },
+      { key: 'MEVCUT', label: 'Mevcut', type: 'number' },
+      { key: 'STOK_BIRIM', label: 'Birim' },
+      { key: 'FIFO___FIYAT', label: 'FIFO Fiyat', type: 'money' },
+      { key: 'FIFO___TUTAR', label: 'FIFO Tutar', type: 'money' },
+      { key: 'AGIRLIKLI_ORTALAMA___FIYAT', label: 'Ağ.Ort. Fiyat', type: 'money' },
+      { key: 'AGIRLIKLI_ORTALAMA___TUTAR', label: 'Ağ.Ort. Tutar', type: 'money' },
+      { key: 'SON_ALIS_FIYATI', label: 'Son Alış Fiyatı', type: 'money' },
+      { key: 'SON_ALIS_TUTAR', label: 'Son Alış Tutar', type: 'money' },
+      { key: 'SATIS_FIYATI', label: 'Satış Fiyatı', type: 'money' },
+      { key: 'SATIS_TUTARI___YEREL', label: 'Satış Tutarı', type: 'money' },
+    ],
+    filters: [
+      { name: 'SONTARIH', label: 'Son Tarih', type: 'date', group: 'Tarih' },
+      { name: 'Aktif', label: 'Aktif Durumu', type: 'select_static', group: 'Seçenekler',
+        options: [
+          { value: '', label: 'Tümü' },
+          { value: 1, label: 'Sadece Aktif' },
+          { value: 0, label: 'Sadece Pasif' },
+        ] },
+      { name: 'Durum', label: 'Stok Durumu', type: 'select_static', group: 'Seçenekler',
+        options: [
+          { value: 0, label: 'Tümü' },
+          { value: 1, label: 'Stokta Olanlar (>0)' },
+          { value: 2, label: 'Tükenmişler (=0)' },
+          { value: 3, label: 'Eksi Stoklar (<0)' },
+        ] },
+      { name: 'KdvDahil', label: 'KDV Dahil Göster', type: 'select_static', group: 'Seçenekler',
+        options: [{ value: 1, label: 'KDV Dahil' }, { value: 0, label: 'KDV Hariç' }] },
+      { name: 'LokasyonDagilim', label: 'Lokasyon Dağılımı', type: 'select_static', group: 'Seçenekler',
+        options: [{ value: 0, label: 'Toplu (Tüm Lokasyonlar)' }, { value: 1, label: 'Lokasyon Bazında' }] },
+      { name: 'FiyatId', label: 'Fiyat Adı', type: 'multiselect', source: 'STOK_FIYAT_AD', group: 'Filtreler' },
+      { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtreler', required: true },
+      { name: 'Tedarikci', label: 'Tedarikçi', type: 'multiselect', source: 'TEDARIKCI', group: 'Filtreler' },
+      { name: 'Stoklar', label: 'Stok (Ürün)', type: 'multiselect', source: 'STOK', group: 'Filtreler' },
+      { name: 'StokGrup', label: 'Stok Grup', type: 'multiselect', source: 'STOK_GRUP', group: 'Filtreler' },
+      { name: 'StokCinsi', label: 'Stok Cinsi', type: 'multiselect', source: 'STOK_CINSI', group: 'Filtreler' },
+      { name: 'StokMarka', label: 'Stok Marka', type: 'multiselect', source: 'STOK_MARKA', group: 'Filtreler' },
+      { name: 'StokVergi', label: 'KDV (Vergi)', type: 'multiselect', source: 'STOK_VERGI', group: 'Filtreler' },
+      { name: 'StokOzelKod1', label: 'Özel Kod 1', type: 'multiselect', source: 'STOK_OZEL_KOD_1', group: 'Özel Kodlar' },
+      { name: 'StokOzelKod2', label: 'Özel Kod 2', type: 'multiselect', source: 'STOK_OZEL_KOD_2', group: 'Özel Kodlar' },
+      { name: 'StokOzelKod3', label: 'Özel Kod 3', type: 'multiselect', source: 'STOK_OZEL_KOD_3', group: 'Özel Kodlar' },
+      { name: 'StokOzelKod4', label: 'Özel Kod 4', type: 'multiselect', source: 'STOK_OZEL_KOD_4', group: 'Özel Kodlar' },
+      { name: 'StokOzelKod5', label: 'Özel Kod 5', type: 'multiselect', source: 'STOK_OZEL_KOD_5', group: 'Özel Kodlar' },
+      { name: 'StokOzelKod6', label: 'Özel Kod 6', type: 'multiselect', source: 'STOK_OZEL_KOD_6', group: 'Özel Kodlar' },
+      { name: 'StokOzelKod7', label: 'Özel Kod 7', type: 'multiselect', source: 'STOK_OZEL_KOD_7', group: 'Özel Kodlar' },
+      { name: 'StokOzelKod8', label: 'Özel Kod 8', type: 'multiselect', source: 'STOK_OZEL_KOD_8', group: 'Özel Kodlar' },
+      { name: 'StokOzelKod9', label: 'Özel Kod 9', type: 'multiselect', source: 'STOK_OZEL_KOD_9', group: 'Özel Kodlar' },
+    ],
+  },
   { key: 'stok_envanter', title: 'Stok Envanter', icon: 'cube-outline', description: 'Güncel stok durumu', datasetKey: 'rap_stok_envanter_web', defaultParams: { SONTARIH: '', KdvDahil: 1, Page: 1, PageSize: 500 }, columns: [{ key: 'KOD', label: 'Kod' }, { key: 'AD', label: 'Ürün' }, { key: 'MEVCUT', label: 'Mevcut', type: 'number' }, { key: 'LOKASYON', label: 'Lokasyon' }, { key: 'AGIRLIKLI_ORTALAMA___FIYAT', label: 'Ort.Fiyat', type: 'money' }], filters: [{ name: 'SONTARIH', label: 'Son Tarih', type: 'date', group: 'Tarih' }, { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre' }, { name: 'StokGrup', label: 'Stok Grup', type: 'multiselect', source: 'STOK_GRUP', group: 'Filtre' }] },
   { key: 'gelir_tablosu', title: 'Gelir Tablosu', icon: 'stats-chart-outline', description: 'Gelir ve gider analizi', datasetKey: 'rap_lm_gelir_tablosu', defaultParams: { BASTARIH: '', BITTARIH: '', KdvDahil: 1 }, columns: [{ key: 'AD', label: 'Kalem' }, { key: 'TUTAR', label: 'Tutar', type: 'money' }, { key: 'ORAN', label: 'Oran %', type: 'number' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }] },
   { key: 'personel_satis', title: 'Personel Satış Özet', icon: 'people-outline', description: 'Personel satış performansı', datasetKey: 'rap_personel_satis_ozet_web', defaultParams: { BASTARIH: '', BITTARIH: '', Page: 1, PageSize: 500 }, columns: [{ key: 'PERSONEL', label: 'Personel' }, { key: 'TOPLAM', label: 'Toplam', type: 'money' }, { key: 'NAKIT', label: 'Nakit', type: 'money' }, { key: 'KREDI_KARTI', label: 'K.Kartı', type: 'money' }, { key: 'FIS_SAYISI', label: 'Fiş', type: 'number' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }, { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre' }] },
@@ -293,6 +400,7 @@ export default function ReportsScreen() {
   const [searchFilter, setSearchFilter] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [exportLoading, setExportLoading] = useState(false);
+  const [datePickerFor, setDatePickerFor] = useState<string | null>(null); // filter name currently using picker
   const runTokenRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
@@ -726,12 +834,15 @@ export default function ReportsScreen() {
                     {filter.label} {filter.required && <Text style={{ color: colors.error }}>*</Text>}
                   </Text>
                   {filter.type === 'date' ? (
-                    <TextInput
-                      style={[styles.filterInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
-                      value={filterValues[filter.name] || ''}
-                      onChangeText={v => setFilterValues(prev => ({ ...prev, [filter.name]: v }))}
-                      placeholder="YYYY-MM-DD" placeholderTextColor={colors.textSecondary}
-                    />
+                    <TouchableOpacity
+                      style={[styles.filterInput, { backgroundColor: colors.card, borderColor: colors.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}
+                      onPress={() => setDatePickerFor(filter.name)}
+                    >
+                      <Text style={[{ fontSize: 13, color: filterValues[filter.name] ? colors.text : colors.textSecondary }]}>
+                        {filterValues[filter.name] ? formatDateTR(filterValues[filter.name]) : 'Tarih Seçin'}
+                      </Text>
+                      <Ionicons name="calendar-outline" size={16} color={colors.primary} />
+                    </TouchableOpacity>
                   ) : filter.type === 'select_static' ? (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                       {filter.options?.map(opt => (
@@ -770,7 +881,46 @@ export default function ReportsScreen() {
         </View>
       </Modal>
 
-      {/* PICKER MODAL (multiselect on-demand) — auto-sizes to content */}
+      {/* DATE PICKER MODAL */}
+      {datePickerFor && (Platform.OS === 'web' ? (
+        <Modal visible animationType="fade" transparent statusBarTranslucent>
+          <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center', padding: 30 }]}>
+            <View style={{ backgroundColor: colors.card, padding: 20, borderRadius: 16, width: '90%', maxWidth: 320, gap: 16 }}>
+              <Text style={[{ fontSize: 15, fontWeight: '700', color: colors.text }]}>Tarih Seçin</Text>
+              <TextInput
+                style={[styles.filterInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.text, fontSize: 16, letterSpacing: 1 }]}
+                value={filterValues[datePickerFor] || today()}
+                onChangeText={(v) => setFilterValues(prev => ({ ...prev, [datePickerFor]: v }))}
+                placeholder="YYYY-MM-DD" placeholderTextColor={colors.textSecondary}
+              />
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TouchableOpacity
+                  style={{ flex: 1, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' }}
+                  onPress={() => setDatePickerFor(null)}
+                ><Text style={[{ color: colors.text, fontWeight: '600' }]}>İptal</Text></TouchableOpacity>
+                <TouchableOpacity
+                  style={{ flex: 1, padding: 12, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center' }}
+                  onPress={() => setDatePickerFor(null)}
+                ><Text style={[{ color: '#fff', fontWeight: '700' }]}>Tamam</Text></TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      ) : (
+        <DateTimePicker
+          value={filterValues[datePickerFor] ? new Date(filterValues[datePickerFor]) : new Date()}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={(event, selectedDate) => {
+            if (Platform.OS === 'android') setDatePickerFor(null);
+            if (event.type === 'set' && selectedDate) {
+              const iso = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+              setFilterValues(prev => ({ ...prev, [datePickerFor]: iso }));
+            }
+          }}
+        />
+      ))}
+
       <Modal visible={showPickerModal} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>
           <View style={[{ backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%' }]}>
@@ -1131,6 +1281,13 @@ const ReportSummaryPanelComp: React.FC<ReportSummaryPanelProps> = ({ data, confi
 
   return (
     <View style={[summaryStyles.wrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <View style={[summaryStyles.hintRow, { borderBottomColor: colors.border }]}>
+        <Ionicons name="stats-chart-outline" size={13} color={colors.primary} />
+        <Text style={[summaryStyles.hintText, { color: colors.text }]}>Rapor Özeti</Text>
+        <View style={{ flex: 1 }} />
+        <Ionicons name="swap-horizontal" size={12} color={colors.textSecondary} />
+        <Text style={[summaryStyles.hintMuted, { color: colors.textSecondary }]}>Kaydırın</Text>
+      </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
         <View>
           {/* Column header row */}
@@ -1181,5 +1338,8 @@ const summaryStyles = StyleSheet.create({
   cell: { minWidth: 96, paddingHorizontal: 6, alignItems: 'flex-end' },
   colLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3, textAlign: 'right' },
   cellVal: { fontSize: 12, fontWeight: '700', textAlign: 'right', fontVariant: ['tabular-nums'] },
+  hintRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1 },
+  hintText: { fontSize: 12, fontWeight: '700' },
+  hintMuted: { fontSize: 10, fontWeight: '600', letterSpacing: 0.3 },
 });
 
