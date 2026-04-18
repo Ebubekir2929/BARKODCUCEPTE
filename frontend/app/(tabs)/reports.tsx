@@ -559,7 +559,6 @@ const OTHER_REPORTS: ReportDef[] = [
     key: 'cari_ekstre', title: 'Cari Hesap Ekstresi', icon: 'wallet-outline',
     description: 'Cari bazlı borç / alacak / bakiye hareketleri',
     datasetKey: 'rap_cari_hesap_ekstresi_web',
-    disableSort: true,
     defaultParams: {
       BASTARIH: firstOfYear(), BITTARIH: `${today()} 23:59:59`,
       BakiyeTip: 0, Proje: '', Lokasyon: '', AktifDurum: '',
@@ -570,7 +569,7 @@ const OTHER_REPORTS: ReportDef[] = [
       MinBakiye: -99999999, MaxBakiye: 99999999,
       Page: 1, PageSize: 500,
     },
-    requireNarrowing: false, requiredFilters: ['Cariler'],
+    requireNarrowing: false, requiredFilters: [],
     summary: {
       cols: [
         { key: 'BORC', label: 'Borç', type: 'money' },
@@ -586,22 +585,22 @@ const OTHER_REPORTS: ReportDef[] = [
       },
     },
     cardLayout: {
-      title: 'AD', code: 'KOD',
+      title: 'FINANS_ISLEM_TURU', code: 'BELGENO',
       amount: 'RP_BAKIYE', amountType: 'money', amountLabel: 'Bakiye',
       amountCurrency: 'DOVIZ_AD',
       chips: [
-        { key: 'CARI_TUR' },
-        { key: 'FINANS_ISLEM_TURU' },
+        { key: 'TARIH', label: 'Tarih' },
         { key: 'BA', label: 'B/A' },
+        { key: 'CARI_TUR' },
       ],
       meta: [
-        { key: 'TARIH', label: 'Tarih' },
-        { key: 'BELGENO', label: 'Belge No' },
+        { key: 'AD', label: 'Cari' },
+        { key: 'KOD', label: 'Cari Kod' },
         { key: 'BORC', label: 'Borç', type: 'money' },
         { key: 'ALACAK', label: 'Alacak', type: 'money' },
-        { key: 'ACIK_FATURA', label: 'Açık Fat.', type: 'money' },
+        { key: 'VADE_TARIHI', label: 'Vade Tarihi' },
         { key: 'LOKASYON', label: 'Lokasyon' },
-        { key: 'CARI_PERSONEL', label: 'Personel' },
+        { key: 'ACIK_FATURA', label: 'Açık Fat.', type: 'money' },
       ],
     },
     columns: [
