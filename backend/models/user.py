@@ -27,6 +27,10 @@ class UserLogin(BaseModel):
     password: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
 class UserInDB(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     full_name: str

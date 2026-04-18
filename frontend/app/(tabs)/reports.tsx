@@ -146,6 +146,20 @@ export default function ReportsScreen() {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [exportLoading, setExportLoading] = useState(false);
   const runTokenRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+
+  // Result cache: key = `${reportKey}|${JSON.stringify(filterValues)}` -> { data, loadedPages }
+  const resultCacheRef = useRef<Map<string, { data: any[]; pages: number }>>(new Map());
+
+  // Cancel in-flight requests when component unmounts or tab changes
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) {
+        try { abortRef.current.abort(); } catch(_) {}
+      }
+      runTokenRef.current++; // invalidate any pending runs
+    };
+  }, []);
 
   // Debounce search input (300ms) so we don't filter on every keystroke
   useEffect(() => {
@@ -252,14 +266,33 @@ export default function ReportsScreen() {
     }
 
     setShowFilterModal(false); setShowResultModal(true);
-    setReportLoading(true); setReportData([]); setLoadedPages(0); setMoreLoading(false);
-    const token_id = ++runTokenRef.current;
 
+    // Build cache key from report key + filter values
     const baseParams: Record<string, any> = { ...selectedReport.defaultParams };
     Object.entries(filterValues).forEach(([k, v]) => {
       if (v !== undefined && v !== null && v !== '') baseParams[k] = v;
     });
     const pageSize = Number(baseParams.PageSize || 500);
+    const cacheKey = `${selectedReport.key}|${JSON.stringify(filterValues)}`;
+
+    // Cancel any previous in-flight request + invalidate its run token
+    if (abortRef.current) { try { abortRef.current.abort(); } catch(_){} }
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const token_id = ++runTokenRef.current;
+
+    // Check cache — if same filters used before, restore instantly
+    const cached = resultCacheRef.current.get(cacheKey);
+    if (cached && cached.data.length > 0) {
+      setReportData(cached.data);
+      setLoadedPages(cached.pages);
+      setReportLoading(false);
+      setMoreLoading(false);
+      return;
+    }
+
+    setReportLoading(true); setReportData([]); setLoadedPages(0); setMoreLoading(false);
+
     // Precompute searchable text on each row ONCE so filter is O(1) per row later
     const indexRow = (row: any) => {
       const parts: string[] = [];
@@ -277,35 +310,39 @@ export default function ReportsScreen() {
       const firstResp = await fetch(`${API_URL}/api/data/report-run`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ tenant_id: activeTenantId, dataset_key: selectedReport.datasetKey, params: { ...baseParams, Page: 1, PageSize: pageSize }, fetch_all: false }),
+        signal: controller.signal,
       });
       const first = await firstResp.json();
-      if (runTokenRef.current !== token_id) return; // aborted
+      if (runTokenRef.current !== token_id || controller.signal.aborted) return; // aborted
       if (!first.ok) { Alert.alert('Hata', first.detail || 'Rapor çalıştırılamadı'); setReportLoading(false); return; }
       const firstRows = (first.data || []).map(indexRow);
       setReportData(firstRows);
       setLoadedPages(1);
       setReportLoading(false);
 
-      if (firstRows.length < pageSize) return; // no more pages
+      if (firstRows.length < pageSize) {
+        resultCacheRef.current.set(cacheKey, { data: firstRows, pages: 1 });
+        return;
+      }
 
       // Background: fetch remaining pages IN PARALLEL batches, append as each batch completes
       setMoreLoading(true);
       let page = 2;
       let collected = firstRows;
       const maxPages = 50;
-      const batchSize = 4; // fetch 4 pages concurrently
+      const batchSize = 4;
       let done = false;
       while (!done && page <= maxPages) {
-        if (runTokenRef.current !== token_id) return;
+        if (runTokenRef.current !== token_id || controller.signal.aborted) return;
         const pageNums = Array.from({ length: batchSize }, (_, i) => page + i).filter(p => p <= maxPages);
         const results = await Promise.all(pageNums.map(p =>
           fetch(`${API_URL}/api/data/report-run`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
             body: JSON.stringify({ tenant_id: activeTenantId, dataset_key: selectedReport.datasetKey, params: { ...baseParams, Page: p, PageSize: pageSize }, fetch_all: false }),
+            signal: controller.signal,
           }).then(r => r.json()).catch(() => ({ ok: false, data: [] }))
         ));
-        if (runTokenRef.current !== token_id) return;
-        // Process in order, stop at first short/empty page
+        if (runTokenRef.current !== token_id || controller.signal.aborted) return;
         const batchRows: any[] = [];
         for (const r of results) {
           const rows = (r && r.ok && Array.isArray(r.data)) ? r.data.map(indexRow) : [];
@@ -320,9 +357,17 @@ export default function ReportsScreen() {
         }
         page += batchSize;
       }
-    } catch (err) {
-      console.error(err);
-      if (runTokenRef.current === token_id) Alert.alert('Hata', 'Bağlantı hatası');
+      // Save to cache on successful complete
+      if (runTokenRef.current === token_id && !controller.signal.aborted) {
+        resultCacheRef.current.set(cacheKey, { data: collected, pages: page - 1 });
+      }
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        // Silent abort
+      } else {
+        console.error(err);
+        if (runTokenRef.current === token_id) Alert.alert('Hata', 'Bağlantı hatası');
+      }
     } finally {
       if (runTokenRef.current === token_id) { setReportLoading(false); setMoreLoading(false); }
     }
@@ -613,8 +658,20 @@ export default function ReportsScreen() {
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text, flex: 1 }]}>{selectedReport?.title}</Text>
-              <TouchableOpacity style={{ marginRight: 8 }} onPress={() => { setShowResultModal(false); setShowFilterModal(true); }}><Ionicons name="options-outline" size={22} color={colors.primary} /></TouchableOpacity>
-              <TouchableOpacity onPress={() => { setShowResultModal(false); setSelectedReport(null); setReportData([]); }}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
+              <TouchableOpacity style={{ marginRight: 8 }} onPress={() => {
+                // Abort any in-flight page fetches when user returns to filter
+                if (abortRef.current) { try { abortRef.current.abort(); } catch(_){} }
+                runTokenRef.current++;
+                setMoreLoading(false); setReportLoading(false);
+                setShowResultModal(false); setShowFilterModal(true);
+              }}><Ionicons name="options-outline" size={22} color={colors.primary} /></TouchableOpacity>
+              <TouchableOpacity onPress={() => {
+                // Abort and clean up on close
+                if (abortRef.current) { try { abortRef.current.abort(); } catch(_){} }
+                runTokenRef.current++;
+                setMoreLoading(false); setReportLoading(false);
+                setShowResultModal(false); setSelectedReport(null); setReportData([]);
+              }}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             </View>
             {/* Toolbar */}
             <View style={[styles.toolbar, { borderBottomColor: colors.border }]}>

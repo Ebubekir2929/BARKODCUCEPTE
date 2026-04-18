@@ -85,20 +85,20 @@ export default function ForgotPasswordScreen() {
       return;
     }
 
-    // Email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      showError('Hata', 'Geçerli bir e-posta adresi girin');
+    // Email validation (allow username too - just require non-empty)
+    const trimmed = email.trim();
+    if (trimmed.length < 3) {
+      showError('Hata', 'Geçerli bir e-posta veya kullanıcı adı girin');
       return;
     }
 
     setIsLoading(true);
     try {
-      const success = await forgotPassword(email);
-      if (success) {
+      const result = await forgotPassword(trimmed);
+      if (result.success) {
         setEmailSent(true);
       } else {
-        showError('Hata', 'Bir hata oluştu. Lütfen tekrar deneyin.');
+        showError('Hata', result.error || 'Bir hata oluştu. Lütfen tekrar deneyin.');
       }
     } catch (error) {
       showError('Hata', 'Bir hata oluştu. Lütfen tekrar deneyin.');

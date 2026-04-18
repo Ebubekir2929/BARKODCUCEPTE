@@ -33,7 +33,7 @@ interface AuthStore {
   register: (data: RegisterData) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
-  forgotPassword: (email: string) => Promise<boolean>;
+  forgotPassword: (email: string) => Promise<{ success: boolean; error?: string; message?: string }>;
   addTenant: (tenant_id: string, name: string) => Promise<{ success: boolean; error?: string }>;
   updateTenantName: (tenant_id: string, name: string) => Promise<{ success: boolean; error?: string }>;
   removeTenant: (tenant_id: string) => Promise<{ success: boolean; error?: string }>;
@@ -161,8 +161,20 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   },
 
   forgotPassword: async (email: string) => {
-    // TODO: Implement when backend endpoint is ready
-    return !!email;
+    try {
+      const response = await fetch(`${API_URL}/api/auth/forgot-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: (email || '').trim() }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        return { success: false, error: data.detail || 'Bir hata oluştu' };
+      }
+      return { success: true, message: data.message || 'E-posta gönderildi' };
+    } catch (error) {
+      return { success: false, error: 'Bağlantı hatası' };
+    }
   },
 
   addTenant: async (tenant_id: string, name: string) => {

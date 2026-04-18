@@ -4,13 +4,17 @@ from jose import jwt, JWTError
 from datetime import datetime, timedelta, date
 from models.user import (
     UserRegister, UserLogin, UserResponse,
-    TenantSource, TenantAdd, TenantUpdate, TokenResponse, LicenseStatus
+    TenantSource, TenantAdd, TenantUpdate, TokenResponse, LicenseStatus,
+    ForgotPasswordRequest,
 )
 from services import get_patron_pool, get_data_pool
 import os
 import hashlib
 import json
 import logging
+import secrets
+import string
+from services.mailer import send_email
 
 logger = logging.getLogger(__name__)
 
@@ -275,6 +279,69 @@ async def login(data: UserLogin):
     logger.info(f"User logged in via MySQL: {email} (identifier={identifier})")
 
     return TokenResponse(access_token=token, user=user_resp, license=license_status)
+
+
+    return TokenResponse(access_token=token, user=user_resp, license=license_status)
+
+
+@router.post("/forgot-password")
+async def forgot_password(data: ForgotPasswordRequest):
+    identifier = (data.email or "").strip()
+    if not identifier:
+        raise HTTPException(status_code=400, detail="E-posta veya kullanıcı adı girin")
+
+    pool = await get_patron_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT user_id, username, email, full_name FROM users WHERE (email = %s OR username = %s) AND active = 1 LIMIT 1",
+                (identifier, identifier),
+            )
+            row = await cur.fetchone()
+
+    if not row or not row[2]:
+        logger.info(f"Forgot password requested for unknown/inactive: {identifier}")
+        return {"ok": True, "message": "Eğer kayıtlı bir hesap varsa, şifre sıfırlama e-postası gönderildi."}
+
+    user_id, username, email, full_name = row
+
+    alphabet = string.ascii_letters + string.digits
+    new_password = ''.join(secrets.choice(alphabet) for _ in range(10))
+    new_hash = sha1_hash(new_password)
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("UPDATE users SET password = %s WHERE user_id = %s", (new_hash, user_id))
+            await conn.commit()
+
+    subject = "Barkodcu Cepte - Şifre Sıfırlama"
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="font-family:Arial,sans-serif;background:#f5f5f5;margin:0;padding:20px">
+  <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.08)">
+    <div style="background:#0EA5E9;padding:20px;text-align:center;color:#fff">
+      <h1 style="margin:0;font-size:22px">Barkodcu Cepte</h1>
+    </div>
+    <div style="padding:24px;color:#333;line-height:1.55">
+      <p>Merhaba <b>{full_name or username or 'Kullanıcı'}</b>,</p>
+      <p>Şifre sıfırlama talebiniz alınmıştır. Yeni geçici şifreniz aşağıdadır:</p>
+      <div style="background:#F1F5F9;border:2px dashed #0EA5E9;padding:14px;text-align:center;border-radius:8px;font-size:22px;font-weight:700;letter-spacing:2px;color:#0369A1;margin:16px 0">{new_password}</div>
+      <p>Lütfen uygulamaya giriş yaptıktan sonra bu şifreyi <b>hemen değiştirin</b>.</p>
+      <p style="margin-top:20px"><b>Hesap:</b> {email}<br/><b>Kullanıcı Adı:</b> {username or '-'}</p>
+      <hr style="border:none;border-top:1px solid #e5e5e5;margin:20px 0"/>
+      <p style="font-size:12px;color:#888">Bu talebi siz yapmadıysanız, lütfen hemen bizimle iletişime geçin.</p>
+    </div>
+  </div>
+</body></html>"""
+    text = f"Merhaba {full_name or username},\n\nYeni şifreniz: {new_password}\n\nGiriş yaptıktan sonra lütfen değiştirin.\n\nBarkodcu Cepte"
+
+    sent = send_email(email, subject, html, text)
+    if not sent:
+        logger.warning(f"Password updated but email send failed for user {user_id}")
+        raise HTTPException(status_code=500, detail="Şifre sıfırlandı ancak e-posta gönderilemedi. Lütfen yöneticinizle iletişime geçin.")
+
+    logger.info(f"Password reset email sent for user_id={user_id}, email={email}")
+    return {"ok": True, "message": "Şifre sıfırlama e-postası gönderildi. Gelen kutunuzu kontrol edin."}
 
 
 @router.get("/me", response_model=UserResponse)
