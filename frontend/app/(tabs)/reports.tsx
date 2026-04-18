@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef, memo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal,
   TextInput, ActivityIndicator, FlatList, Alert, Platform,
@@ -138,10 +138,20 @@ export default function ReportsScreen() {
   const [filterValues, setFilterValues] = useState<Record<string, any>>({});
   const [reportData, setReportData] = useState<any[]>([]);
   const [reportLoading, setReportLoading] = useState(false);
+  const [moreLoading, setMoreLoading] = useState(false);
+  const [loadedPages, setLoadedPages] = useState(0);
   const [sortKey, setSortKey] = useState('');
   const [sortAsc, setSortAsc] = useState(true);
   const [searchFilter, setSearchFilter] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [exportLoading, setExportLoading] = useState(false);
+  const runTokenRef = useRef(0);
+
+  // Debounce search input (300ms) so we don't filter on every keystroke
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchFilter.trim().toLowerCase()), 300);
+    return () => clearTimeout(t);
+  }, [searchFilter]);
 
   // Lookup cache
   const [lookupCache, setLookupCache] = useState<Record<string, { value: string; label: string }[]>>({});
@@ -242,32 +252,76 @@ export default function ReportsScreen() {
     }
 
     setShowFilterModal(false); setShowResultModal(true);
-    setReportLoading(true); setReportData([]);
+    setReportLoading(true); setReportData([]); setLoadedPages(0); setMoreLoading(false);
+    const token_id = ++runTokenRef.current;
 
-    const params: Record<string, any> = { ...selectedReport.defaultParams };
+    const baseParams: Record<string, any> = { ...selectedReport.defaultParams };
     Object.entries(filterValues).forEach(([k, v]) => {
-      if (v !== undefined && v !== null && v !== '') params[k] = v;
+      if (v !== undefined && v !== null && v !== '') baseParams[k] = v;
     });
+    const pageSize = Number(baseParams.PageSize || 500);
+    // Precompute searchable text on each row ONCE so filter is O(1) per row later
+    const indexRow = (row: any) => {
+      const parts: string[] = [];
+      for (const k in row) {
+        const v = row[k];
+        if (v !== null && v !== undefined && typeof v !== 'object') parts.push(String(v));
+      }
+      row.__search = parts.join(' ').toLowerCase();
+      return row;
+    };
 
     try {
       const { token } = useAuthStore.getState();
-      const resp = await fetch(`${API_URL}/api/data/report-run`, {
+      // Fetch page 1 first (fast response to user)
+      const firstResp = await fetch(`${API_URL}/api/data/report-run`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ tenant_id: activeTenantId, dataset_key: selectedReport.datasetKey, params, fetch_all: true }),
+        body: JSON.stringify({ tenant_id: activeTenantId, dataset_key: selectedReport.datasetKey, params: { ...baseParams, Page: 1, PageSize: pageSize }, fetch_all: false }),
       });
-      const data = await resp.json();
-      if (data.ok && data.data) setReportData(data.data);
-      else if (!data.ok) Alert.alert('Hata', data.detail || 'Rapor çalıştırılamadı');
-    } catch (err) { console.error(err); }
-    finally { setReportLoading(false); }
+      const first = await firstResp.json();
+      if (runTokenRef.current !== token_id) return; // aborted
+      if (!first.ok) { Alert.alert('Hata', first.detail || 'Rapor çalıştırılamadı'); setReportLoading(false); return; }
+      const firstRows = (first.data || []).map(indexRow);
+      setReportData(firstRows);
+      setLoadedPages(1);
+      setReportLoading(false);
+
+      if (firstRows.length < pageSize) return; // no more pages
+
+      // Background: fetch remaining pages sequentially, append as they come
+      setMoreLoading(true);
+      let page = 2;
+      let collected = firstRows;
+      const maxPages = 50;
+      while (page <= maxPages) {
+        if (runTokenRef.current !== token_id) return; // aborted (new run started)
+        const resp = await fetch(`${API_URL}/api/data/report-run`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ tenant_id: activeTenantId, dataset_key: selectedReport.datasetKey, params: { ...baseParams, Page: page, PageSize: pageSize }, fetch_all: false }),
+        });
+        const r = await resp.json();
+        if (runTokenRef.current !== token_id) return;
+        const rows = (r.ok && Array.isArray(r.data)) ? r.data.map(indexRow) : [];
+        if (rows.length === 0) break;
+        collected = collected.concat(rows);
+        setReportData(collected);
+        setLoadedPages(page);
+        if (rows.length < pageSize) break;
+        page++;
+      }
+    } catch (err) {
+      console.error(err);
+      if (runTokenRef.current === token_id) Alert.alert('Hata', 'Bağlantı hatası');
+    } finally {
+      if (runTokenRef.current === token_id) { setReportLoading(false); setMoreLoading(false); }
+    }
   }, [activeTenantId, selectedReport, filterValues]);
 
-  // Sort & search
+  // Sort & search (uses precomputed __search index for speed)
   const processedData = useMemo(() => {
     let d = reportData;
-    if (searchFilter) {
-      const q = searchFilter.toLowerCase();
-      d = d.filter((row: any) => Object.values(row).some((v: any) => String(v || '').toLowerCase().includes(q)));
+    if (debouncedSearch) {
+      d = d.filter((row: any) => (row.__search || '').includes(debouncedSearch));
     }
     if (sortKey) {
       d = [...d].sort((a: any, b: any) => {
@@ -278,7 +332,7 @@ export default function ReportsScreen() {
       });
     }
     return d;
-  }, [reportData, searchFilter, sortKey, sortAsc]);
+  }, [reportData, debouncedSearch, sortKey, sortAsc]);
 
   const toggleSort = (key: string) => { if (sortKey === key) setSortAsc(!sortAsc); else { setSortKey(key); setSortAsc(true); } };
 
@@ -571,106 +625,30 @@ export default function ReportsScreen() {
                 </View>
               );
             })()}
-            <View style={{ paddingHorizontal: 12, paddingVertical: 4 }}><Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{reportLoading ? 'Çalıştırılıyor...' : `${processedData.length} kayıt`}</Text></View>
+            <View style={{ paddingHorizontal: 12, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{reportLoading ? 'Çalıştırılıyor...' : `${processedData.length} kayıt${debouncedSearch && processedData.length !== reportData.length ? ` · toplam ${reportData.length}` : ''}`}</Text>
+              {moreLoading && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: colors.primary + '18' }}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={[{ fontSize: 10, color: colors.primary, fontWeight: '700' }]}>Daha fazla yükleniyor (sayfa {loadedPages + 1})...</Text>
+                </View>
+              )}
+            </View>
             {reportLoading ? (
               <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary }]}>POS'tan veri alınıyor...</Text></View>
             ) : processedData.length > 0 ? (
-              <FlatList data={processedData} keyExtractor={(_, idx) => String(idx)} contentContainerStyle={{ padding: 12, paddingBottom: 30, gap: 8 }}
-                renderItem={({ item }) => {
-                  const cl = selectedReport?.cardLayout;
-                  if (cl) {
-                    const titleVal = String(item[cl.title] ?? '-');
-                    const codeVal = cl.code ? String(item[cl.code] ?? '') : '';
-                    const amountRaw = cl.amount ? item[cl.amount] : null;
-                    const amountCurrency = cl.amountCurrency ? String(item[cl.amountCurrency] ?? '') : '';
-                    const amountText = cl.amount
-                      ? (cl.amountType === 'money'
-                          ? `₺${parseFloat(amountRaw || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                          : parseFloat(amountRaw || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2 }))
-                      : '';
-                    return (
-                      <View style={[cardStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                        <View style={cardStyles.cardTop}>
-                          <View style={{ flex: 1, paddingRight: 12 }}>
-                            {codeVal !== '' && (
-                              <Text style={[cardStyles.code, { color: colors.textSecondary }]} numberOfLines={1}>{codeVal}</Text>
-                            )}
-                            <Text style={[cardStyles.title, { color: colors.text }]} numberOfLines={2}>{titleVal}</Text>
-                          </View>
-                          {cl.amount && (
-                            <View style={{ alignItems: 'flex-end' }}>
-                              <Text style={[cardStyles.amount, { color: colors.primary }]} numberOfLines={1}>{amountText}</Text>
-                              {amountCurrency !== '' && (
-                                <Text style={[cardStyles.amountCurrency, { color: colors.textSecondary }]}>{amountCurrency}</Text>
-                              )}
-                            </View>
-                          )}
-                        </View>
-                        {cl.chips && cl.chips.length > 0 && (
-                          <View style={cardStyles.chipsRow}>
-                            {cl.chips.map(c => {
-                              const v = item[c.key];
-                              if (v === undefined || v === null || v === '') return null;
-                              const col = selectedReport?.columns.find(x => x.key === c.key);
-                              let txt = '';
-                              let bg = colors.primary + '12';
-                              let fg = colors.primary;
-                              if (c.type === 'bool' || col?.type === 'bool') {
-                                const isTrue = v === true || v === 1 || v === '1';
-                                txt = `${c.label || col?.label || c.key}: ${isTrue ? 'Evet' : 'Hayır'}`;
-                                bg = isTrue ? (colors.success + '20') : (colors.error + '18');
-                                fg = isTrue ? colors.success : colors.error;
-                              } else if (c.type === 'number' || col?.type === 'number') {
-                                txt = `${c.label || col?.label || c.key}: ${parseFloat(String(v || '0')).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}`;
-                              } else {
-                                txt = c.label ? `${c.label}: ${v}` : String(v);
-                              }
-                              return (
-                                <View key={c.key} style={[cardStyles.chip, { backgroundColor: bg }]}>
-                                  <Text style={[cardStyles.chipText, { color: fg }]} numberOfLines={1}>{txt}</Text>
-                                </View>
-                              );
-                            })}
-                          </View>
-                        )}
-                        {cl.meta && cl.meta.length > 0 && (
-                          <View style={[cardStyles.metaRow, { borderTopColor: colors.border }]}>
-                            {cl.meta.map(m => {
-                              const v = item[m.key];
-                              if (v === undefined || v === null || v === '' || v === '-') return null;
-                              const col = selectedReport?.columns.find(x => x.key === m.key);
-                              let val = String(v);
-                              if (m.type === 'money' || col?.type === 'money') {
-                                val = `₺${parseFloat(String(v || '0')).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`;
-                              } else if (m.type === 'number' || col?.type === 'number') {
-                                val = parseFloat(String(v || '0')).toLocaleString('tr-TR', { maximumFractionDigits: 2 });
-                              }
-                              return (
-                                <View key={m.key} style={cardStyles.metaItem}>
-                                  <Text style={[cardStyles.metaLabel, { color: colors.textSecondary }]}>{m.label || col?.label || m.key}</Text>
-                                  <Text style={[cardStyles.metaValue, { color: colors.text }]} numberOfLines={1}>{val}</Text>
-                                </View>
-                              );
-                            })}
-                          </View>
-                        )}
-                      </View>
-                    );
-                  }
-                  // Fallback: generic 2-col grid layout
-                  return (
-                    <View style={[cardStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                        {(selectedReport?.columns || []).map(col => (
-                          <View key={col.key} style={styles.resultCell}>
-                            <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{col.label}</Text>
-                            <Text style={[{ fontSize: 12, fontWeight: '600', color: col.type === 'money' ? colors.primary : colors.text }]} numberOfLines={1}>{renderValue(item[col.key], col)}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    </View>
-                  );
-                }}
+              <FlatList
+                data={processedData}
+                keyExtractor={(_, idx) => String(idx)}
+                contentContainerStyle={{ padding: 12, paddingBottom: 30, gap: 8 }}
+                initialNumToRender={15}
+                maxToRenderPerBatch={12}
+                windowSize={7}
+                removeClippedSubviews={Platform.OS !== 'web'}
+                updateCellsBatchingPeriod={50}
+                renderItem={({ item }) => (
+                  <ReportCard item={item} report={selectedReport} colors={colors} renderValue={renderValue} />
+                )}
               />
             ) : (
               <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 }}><Ionicons name="document-text-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>Sonuç bulunamadı</Text></View>
@@ -733,3 +711,93 @@ const cardStyles = StyleSheet.create({
   metaLabel: { fontSize: 9, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 1 },
   metaValue: { fontSize: 12, fontWeight: '600' },
 });
+
+
+// Memoized report card — re-renders only when item/report/colors change
+interface ReportCardProps {
+  item: any;
+  report: ReportDef | null;
+  colors: any;
+  renderValue: (val: any, col: ColDef) => string;
+}
+const ReportCardComp: React.FC<ReportCardProps> = ({ item, report, colors, renderValue }) => {
+  const cl = report?.cardLayout;
+  if (cl) {
+    const titleVal = String(item[cl.title] ?? '-');
+    const codeVal = cl.code ? String(item[cl.code] ?? '') : '';
+    const amountRaw = cl.amount ? item[cl.amount] : null;
+    const amountCurrency = cl.amountCurrency ? String(item[cl.amountCurrency] ?? '') : '';
+    const amountText = cl.amount
+      ? (cl.amountType === 'money'
+          ? `₺${parseFloat(amountRaw || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+          : parseFloat(amountRaw || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2 }))
+      : '';
+    return (
+      <View style={[cardStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={cardStyles.cardTop}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            {codeVal !== '' && (<Text style={[cardStyles.code, { color: colors.textSecondary }]} numberOfLines={1}>{codeVal}</Text>)}
+            <Text style={[cardStyles.title, { color: colors.text }]} numberOfLines={2}>{titleVal}</Text>
+          </View>
+          {cl.amount && (
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text style={[cardStyles.amount, { color: colors.primary }]} numberOfLines={1}>{amountText}</Text>
+              {amountCurrency !== '' && (<Text style={[cardStyles.amountCurrency, { color: colors.textSecondary }]}>{amountCurrency}</Text>)}
+            </View>
+          )}
+        </View>
+        {cl.chips && cl.chips.length > 0 && (
+          <View style={cardStyles.chipsRow}>
+            {cl.chips.map(c => {
+              const v = item[c.key];
+              if (v === undefined || v === null || v === '') return null;
+              const col = report?.columns.find(x => x.key === c.key);
+              let txt = ''; let bg = colors.primary + '12'; let fg = colors.primary;
+              if (c.type === 'bool' || col?.type === 'bool') {
+                const isTrue = v === true || v === 1 || v === '1';
+                txt = `${c.label || col?.label || c.key}: ${isTrue ? 'Evet' : 'Hayır'}`;
+                bg = isTrue ? (colors.success + '20') : (colors.error + '18');
+                fg = isTrue ? colors.success : colors.error;
+              } else if (c.type === 'number' || col?.type === 'number') {
+                txt = `${c.label || col?.label || c.key}: ${parseFloat(String(v || '0')).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}`;
+              } else {
+                txt = c.label ? `${c.label}: ${v}` : String(v);
+              }
+              return (<View key={c.key} style={[cardStyles.chip, { backgroundColor: bg }]}><Text style={[cardStyles.chipText, { color: fg }]} numberOfLines={1}>{txt}</Text></View>);
+            })}
+          </View>
+        )}
+        {cl.meta && cl.meta.length > 0 && (
+          <View style={[cardStyles.metaRow, { borderTopColor: colors.border }]}>
+            {cl.meta.map(m => {
+              const v = item[m.key];
+              if (v === undefined || v === null || v === '' || v === '-') return null;
+              const col = report?.columns.find(x => x.key === m.key);
+              let val = String(v);
+              if (m.type === 'money' || col?.type === 'money') {
+                val = `₺${parseFloat(String(v || '0')).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`;
+              } else if (m.type === 'number' || col?.type === 'number') {
+                val = parseFloat(String(v || '0')).toLocaleString('tr-TR', { maximumFractionDigits: 2 });
+              }
+              return (<View key={m.key} style={cardStyles.metaItem}><Text style={[cardStyles.metaLabel, { color: colors.textSecondary }]}>{m.label || col?.label || m.key}</Text><Text style={[cardStyles.metaValue, { color: colors.text }]} numberOfLines={1}>{val}</Text></View>);
+            })}
+          </View>
+        )}
+      </View>
+    );
+  }
+  // Fallback: 2-col grid
+  return (
+    <View style={[cardStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+        {(report?.columns || []).map(col => (
+          <View key={col.key} style={styles.resultCell}>
+            <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{col.label}</Text>
+            <Text style={[{ fontSize: 12, fontWeight: '600', color: col.type === 'money' ? colors.primary : colors.text }]} numberOfLines={1}>{renderValue(item[col.key], col)}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+};
+const ReportCard = memo(ReportCardComp, (prev, next) => prev.item === next.item && prev.report === next.report && prev.colors === next.colors);
