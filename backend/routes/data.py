@@ -1027,6 +1027,53 @@ async def run_report(
     
     try:
         logger.info(f"Running report: {dataset_key} with params: {params}")
+        
+        # Auto-paginate: if fetch_all is requested, loop through all pages
+        fetch_all = bool(body.get("fetch_all", False))
+        if fetch_all and isinstance(params, dict) and "PageSize" in params:
+            page_size = int(params.get("PageSize") or 500)
+            # Fetch first page
+            first_result = await _on_demand_request(tenant_id, dataset_key, {**params, "Page": 1, "PageSize": page_size}, timeout_sec=90)
+            first_data = first_result.get("data", []) if isinstance(first_result, dict) else []
+            if not isinstance(first_data, list):
+                first_data = []
+            req_uid = first_result.get("request_uid", "")
+            
+            # If first page < page_size, we got everything
+            if len(first_data) < page_size:
+                logger.info(f"Report result (single page): {dataset_key} -> {len(first_data)} rows")
+                return {"ok": True, "request_uid": req_uid, "data": first_data, "pages": 1}
+            
+            # Otherwise, fetch remaining pages in parallel batches (5 at a time)
+            all_rows = list(first_data)
+            page = 2
+            max_pages = 50
+            batch_size = 5
+            done = False
+            while not done and page <= max_pages:
+                tasks = [
+                    _on_demand_request(tenant_id, dataset_key, {**params, "Page": p, "PageSize": page_size}, timeout_sec=90)
+                    for p in range(page, min(page + batch_size, max_pages + 1))
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for r in results:
+                    if isinstance(r, Exception):
+                        logger.warning(f"Page fetch error: {r}")
+                        done = True
+                        break
+                    d = r.get("data", []) if isinstance(r, dict) else []
+                    if not isinstance(d, list) or len(d) == 0:
+                        done = True
+                        break
+                    all_rows.extend(d)
+                    if len(d) < page_size:
+                        done = True
+                        break
+                page += batch_size
+            
+            logger.info(f"Report result (paged): {dataset_key} -> {len(all_rows)} rows across {page-1} page(s)")
+            return {"ok": True, "request_uid": req_uid, "data": all_rows, "pages": page - 1}
+        
         result = await _on_demand_request(tenant_id, dataset_key, params, timeout_sec=90)
         data_count = len(result.get("data", [])) if isinstance(result.get("data"), list) else 0
         logger.info(f"Report result: {dataset_key} -> {data_count} rows")

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal,
-  TextInput, ActivityIndicator, FlatList, Alert,
+  TextInput, ActivityIndicator, FlatList, Alert, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,6 +11,8 @@ import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as XLSX from 'xlsx';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -37,6 +39,7 @@ interface ReportDef {
   datasetKey: string; defaultParams: Record<string, any>;
   columns: ColDef[]; filters: FilterDef[];
   requireNarrowing?: boolean;
+  requiredFilters?: string[]; // filter names that MUST have value
   cardLayout?: CardLayout;
 }
 
@@ -45,13 +48,14 @@ const FIYAT_LISTELERI: ReportDef = {
   description: 'Stok fiyat listeleri ve KDV bilgileri',
   datasetKey: 'rap_fiyat_listeleri_web',
   defaultParams: {
-    Aktif: 1, Durum: 0, Resimli: 0, Page: 1, PageSize: 200,
+    Aktif: 1, Durum: 0, Resimli: 0, Page: 1, PageSize: 500,
     FiyatAd: '', BirimAd: '', DovizAd: '', Lokasyon: '',
     StokCinsi: '', StokGrup: '', StokMarka: '', StokVergi: '', Stoklar: '',
     StokOzelKod1: '', StokOzelKod2: '', StokOzelKod3: '', StokOzelKod4: '', StokOzelKod5: '',
     StokOzelKod6: '', StokOzelKod7: '', StokOzelKod8: '', StokOzelKod9: '',
   },
   requireNarrowing: true,
+  requiredFilters: ['FiyatAd'],
   cardLayout: {
     title: 'AD',
     code: 'KOD',
@@ -217,13 +221,22 @@ export default function ReportsScreen() {
   const runReport = useCallback(async () => {
     if (!activeTenantId || !selectedReport) return;
 
-    // Check required filters
-    if (selectedReport.requireNarrowing) {
+    // Check required filters (explicit required filter list takes priority)
+    if (selectedReport.requiredFilters && selectedReport.requiredFilters.length > 0) {
+      for (const reqName of selectedReport.requiredFilters) {
+        const val = filterValues[reqName];
+        if (val === undefined || val === null || val === '') {
+          const filt = selectedReport.filters.find(f => f.name === reqName);
+          Alert.alert('Zorunlu Filtre', `"${filt?.label || reqName}" seçimi zorunludur.`);
+          return;
+        }
+      }
+    } else if (selectedReport.requireNarrowing) {
       const hasNarrow = selectedReport.filters.some(f =>
         f.type === 'multiselect' && filterValues[f.name] && filterValues[f.name].length > 0
       );
       if (!hasNarrow) {
-        Alert.alert('Filtre Gerekli', 'En az bir daraltıcı filtre seçin (Fiyat Adı, Lokasyon, Stok Grup vb.)');
+        Alert.alert('Filtre Gerekli', 'En az bir daraltıcı filtre seçin');
         return;
       }
     }
@@ -240,7 +253,7 @@ export default function ReportsScreen() {
       const { token } = useAuthStore.getState();
       const resp = await fetch(`${API_URL}/api/data/report-run`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ tenant_id: activeTenantId, dataset_key: selectedReport.datasetKey, params }),
+        body: JSON.stringify({ tenant_id: activeTenantId, dataset_key: selectedReport.datasetKey, params, fetch_all: true }),
       });
       const data = await resp.json();
       if (data.ok && data.data) setReportData(data.data);
@@ -287,6 +300,71 @@ export default function ReportsScreen() {
       await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
     } catch (err) { console.error(err); }
     finally { setExportLoading(false); }
+  };
+
+  // Excel Export
+  const exportExcel = async () => {
+    if (!selectedReport || processedData.length === 0) return;
+    setExportLoading(true);
+    try {
+      const cols = selectedReport.columns;
+      // Build rows (human-readable values)
+      const rows = processedData.map((r: any) => {
+        const o: Record<string, any> = {};
+        cols.forEach(c => {
+          let v = r[c.key];
+          if (c.type === 'money' || c.type === 'number') {
+            const n = parseFloat(String(v ?? '0'));
+            v = isNaN(n) ? 0 : n;
+          } else if (c.type === 'bool') {
+            v = (v === true || v === 1 || v === '1') ? 'Evet' : 'Hayır';
+          } else if (v === null || v === undefined) {
+            v = '';
+          } else {
+            v = String(v);
+          }
+          o[c.label] = v;
+        });
+        return o;
+      });
+      const ws = XLSX.utils.json_to_sheet(rows, { header: cols.map(c => c.label) });
+      // Auto-size columns
+      const colWidths = cols.map(c => {
+        const maxLen = Math.max(c.label.length, ...rows.map(r => String(r[c.label] ?? '').length));
+        return { wch: Math.min(40, Math.max(8, maxLen + 2)) };
+      });
+      (ws as any)['!cols'] = colWidths;
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, (selectedReport.title || 'Rapor').substring(0, 31));
+
+      const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      const fileName = `${selectedReport.key}_${ts}.xlsx`;
+
+      if (Platform.OS === 'web') {
+        // On web: download via Blob
+        const wbout = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+        const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = fileName;
+        document.body.appendChild(a); a.click();
+        setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
+      } else {
+        const b64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' });
+        const uri = FileSystem.cacheDirectory + fileName;
+        await FileSystem.writeAsStringAsync(uri, b64, { encoding: FileSystem.EncodingType.Base64 });
+        await Sharing.shareAsync(uri, {
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          UTI: 'com.microsoft.excel.xlsx',
+          dialogTitle: selectedReport.title,
+        });
+      }
+    } catch (err) {
+      console.error('Excel export error:', err);
+      Alert.alert('Hata', 'Excel oluşturulurken bir hata oluştu.');
+    } finally {
+      setExportLoading(false);
+    }
   };
 
   // Get selected labels for a filter
@@ -437,33 +515,62 @@ export default function ReportsScreen() {
                 <Ionicons name="search" size={14} color={colors.textSecondary} />
                 <TextInput style={[{ flex: 1, fontSize: 12, color: colors.text }]} placeholder="Ara..." placeholderTextColor={colors.textSecondary} value={searchFilter} onChangeText={setSearchFilter} />
               </View>
+              <TouchableOpacity style={[styles.exportBtn, { backgroundColor: colors.success + '18' }]} onPress={exportExcel} disabled={exportLoading}>
+                {exportLoading ? <ActivityIndicator size="small" color={colors.success} /> : <Ionicons name="grid-outline" size={14} color={colors.success} />}
+                <Text style={[{ fontSize: 10, color: colors.success, fontWeight: '700' }]}>Excel</Text>
+              </TouchableOpacity>
               <TouchableOpacity style={[styles.exportBtn, { backgroundColor: colors.error + '15' }]} onPress={exportPdf} disabled={exportLoading}>
                 {exportLoading ? <ActivityIndicator size="small" color={colors.error} /> : <Ionicons name="document-text-outline" size={14} color={colors.error} />}
-                <Text style={[{ fontSize: 10, color: colors.error, fontWeight: '600' }]}>PDF</Text>
+                <Text style={[{ fontSize: 10, color: colors.error, fontWeight: '700' }]}>PDF</Text>
               </TouchableOpacity>
             </View>
-            {/* Sort headers - only show for reports without cardLayout */}
-            {selectedReport && !reportLoading && processedData.length > 0 && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 36, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                <View style={{ flexDirection: 'row', paddingHorizontal: 12, alignItems: 'center' }}>
-                  <Text style={[{ fontSize: 10, color: colors.textSecondary, marginRight: 8, marginTop: 6 }]}>Sırala:</Text>
-                  {(selectedReport.cardLayout
-                    ? [
-                        { key: selectedReport.cardLayout.title, label: 'Ad' },
-                        selectedReport.cardLayout.code ? { key: selectedReport.cardLayout.code, label: 'Kod' } : null,
-                        selectedReport.cardLayout.amount ? { key: selectedReport.cardLayout.amount, label: selectedReport.cardLayout.amountLabel || 'Tutar' } : null,
-                        ...(selectedReport.cardLayout.chips || []).slice(0, 3).map(c => ({ key: c.key, label: c.label || selectedReport.columns.find(col => col.key === c.key)?.label || c.key })),
-                      ].filter(Boolean) as { key: string; label: string }[]
-                    : selectedReport.columns
-                  ).map(col => (
-                    <TouchableOpacity key={col.key} style={[styles.sortHeader, sortKey === col.key && { backgroundColor: colors.primary + '15' }]} onPress={() => toggleSort(col.key)}>
-                      <Text style={[{ fontSize: 11, fontWeight: '700', color: sortKey === col.key ? colors.primary : colors.textSecondary }]}>{col.label}</Text>
-                      {sortKey === col.key && <Ionicons name={sortAsc ? 'arrow-up' : 'arrow-down'} size={11} color={colors.primary} />}
-                    </TouchableOpacity>
-                  ))}
+            {/* Sort headers - compact pill style */}
+            {selectedReport && !reportLoading && processedData.length > 0 && (() => {
+              const sortOpts = (selectedReport.cardLayout
+                ? [
+                    selectedReport.cardLayout.title ? { key: selectedReport.cardLayout.title, label: selectedReport.columns.find(c => c.key === selectedReport.cardLayout!.title)?.label || 'Ad' } : null,
+                    selectedReport.cardLayout.amount ? { key: selectedReport.cardLayout.amount, label: selectedReport.cardLayout.amountLabel || 'Fiyat' } : null,
+                    ...(selectedReport.cardLayout.chips || []).map(c => ({ key: c.key, label: c.label || selectedReport.columns.find(col => col.key === c.key)?.label || c.key })),
+                  ].filter(Boolean) as { key: string; label: string }[]
+                : selectedReport.columns
+              );
+              return (
+                <View style={[styles.sortBar, { borderBottomColor: colors.border, backgroundColor: colors.background }]}>
+                  <View style={styles.sortIconBox}>
+                    <Ionicons name="swap-vertical" size={13} color={colors.textSecondary} />
+                    <Text style={[{ fontSize: 10, color: colors.textSecondary, fontWeight: '600' }]}>Sırala</Text>
+                  </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingHorizontal: 2, alignItems: 'center' }}>
+                    {sortOpts.map(col => {
+                      const active = sortKey === col.key;
+                      return (
+                        <TouchableOpacity
+                          key={col.key}
+                          style={[
+                            styles.sortPill,
+                            {
+                              backgroundColor: active ? colors.primary : colors.card,
+                              borderColor: active ? colors.primary : colors.border,
+                            },
+                          ]}
+                          onPress={() => toggleSort(col.key)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={[{ fontSize: 11, fontWeight: '700', color: active ? '#fff' : colors.text }]} numberOfLines={1}>{col.label}</Text>
+                          {active && <Ionicons name={sortAsc ? 'arrow-up' : 'arrow-down'} size={11} color="#fff" />}
+                        </TouchableOpacity>
+                      );
+                    })}
+                    {sortKey !== '' && (
+                      <TouchableOpacity onPress={() => { setSortKey(''); setSortAsc(true); }} style={[styles.sortPill, { backgroundColor: 'transparent', borderColor: colors.border }]}>
+                        <Ionicons name="close" size={11} color={colors.textSecondary} />
+                        <Text style={[{ fontSize: 10, color: colors.textSecondary, fontWeight: '600' }]}>Temizle</Text>
+                      </TouchableOpacity>
+                    )}
+                  </ScrollView>
                 </View>
-              </ScrollView>
-            )}
+              );
+            })()}
             <View style={{ paddingHorizontal: 12, paddingVertical: 4 }}><Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{reportLoading ? 'Çalıştırılıyor...' : `${processedData.length} kayıt`}</Text></View>
             {reportLoading ? (
               <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary }]}>POS'tan veri alınıyor...</Text></View>
@@ -577,7 +684,7 @@ export default function ReportsScreen() {
         <View style={styles.exportOverlay}>
           <View style={[styles.exportBox, { backgroundColor: colors.card }]}>
             <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={[{ color: colors.text, fontSize: 14, fontWeight: '600', marginTop: 12 }]}>PDF hazırlanıyor...</Text>
+            <Text style={[{ color: colors.text, fontSize: 14, fontWeight: '600', marginTop: 12 }]}>Dosya hazırlanıyor...</Text>
           </View>
         </View>
       )}
@@ -602,6 +709,9 @@ const styles = StyleSheet.create({
   toolbar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, gap: 6, borderBottomWidth: 1 },
   exportBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   sortHeader: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 3, marginRight: 4 },
+  sortBar: { flexDirection: 'row', alignItems: 'center', paddingLeft: 10, paddingRight: 12, paddingVertical: 8, gap: 8, borderBottomWidth: 1 },
+  sortIconBox: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingRight: 6, borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: '#ccc', marginRight: 4 },
+  sortPill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1 },
   resultRow: { paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   resultCell: { minWidth: '40%', flex: 1 },
   exportOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 9998 },
