@@ -33,7 +33,13 @@ const FIYAT_LISTELERI: ReportDef = {
   key: 'fiyat_listeleri', title: 'Fiyat Listeleri', icon: 'pricetags-outline',
   description: 'Stok fiyat listeleri ve KDV bilgileri',
   datasetKey: 'rap_fiyat_listeleri_web',
-  defaultParams: { Aktif: 1, Durum: 0, Resimli: 0, Page: 1, PageSize: 500 },
+  defaultParams: {
+    Aktif: 1, Durum: 0, Resimli: 0, Page: 1, PageSize: 200,
+    FiyatAd: '', BirimAd: '', DovizAd: '', Lokasyon: '',
+    StokCinsi: '', StokGrup: '', StokMarka: '', StokVergi: '', Stoklar: '',
+    StokOzelKod1: '', StokOzelKod2: '', StokOzelKod3: '', StokOzelKod4: '', StokOzelKod5: '',
+    StokOzelKod6: '', StokOzelKod7: '', StokOzelKod8: '', StokOzelKod9: '',
+  },
   requireNarrowing: true,
   columns: [
     { key: 'KOD', label: 'Kod' }, { key: 'AD', label: 'Ürün Adı' },
@@ -235,7 +241,7 @@ export default function ReportsScreen() {
   const renderValue = (val: any, col: ColDef) => {
     if (col.type === 'money') return `₺${parseFloat(val || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`;
     if (col.type === 'number') return parseFloat(val || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2 });
-    if (col.type === 'bool') return val === 1 || val === '1' ? 'Evet' : 'Hayır';
+    if (col.type === 'bool') return val === true || val === 1 || val === '1' ? 'Evet' : 'Hayır';
     return String(val || '-');
   };
 
