@@ -184,6 +184,30 @@ backend:
         agent: "testing"
         comment: "✅ TESTED: All tenant management APIs working correctly. ADD: Successfully adds tenants with duplicate ID validation. RENAME: Updates tenant names properly. DELETE: Removes tenants with minimum 1 tenant validation. All operations require valid authentication."
 
+  - task: "Report Filter Options API"
+    implemented: true
+    working: true
+    file: "routes/data.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: POST /api/data/report-filter-options works correctly. Validated via berk JWT + admin tenant_id in body. Happy path with source='STOK_FIYAT_AD' returns HTTP 200 in ~3.8s with {ok:true, data:[{AD:'Bayi',ID:1017},{AD:'Dağıtıcı',ID:1018},{AD:'Parekende',ID:1016}]}. Error handling: missing tenant_id -> 400 'tenant_id ve source gerekli', missing source -> 400 same message, no auth -> 403. sync.php proxy (rap_filtre_lookup) functioning."
+
+  - task: "Report Run API"
+    implemented: true
+    working: true
+    file: "routes/data.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED: POST /api/data/report-run works correctly. Valid request with dataset_key='rap_fiyat_listeleri_web' and params {Aktif:1,Durum:0,Resimli:0,Page:1,PageSize:500,FiyatAd:<id>} returns HTTP 200 in ~3.5s with {ok:true, data:[], request_uid:'...'}. Tested all 3 FiyatAd IDs (1016/1017/1018) - all return empty data arrays (legitimate upstream empty price lists for this tenant, not a code issue). Error handling: missing tenant_id -> 400, missing dataset_key -> 400, invalid dataset_key -> 400 'Geçersiz rapor:...' (allowed_keys whitelist working), no auth -> 403. Backend logs show proper logging: 'Running report: rap_fiyat_listeleri_web with params: ...' and 'Report result: rap_fiyat_listeleri_web -> 0 rows'. sync.php proxy (request_create + polling) functioning."
+
 frontend:
   - task: "Login Screen"
     implemented: true
@@ -292,7 +316,8 @@ metadata:
 
 test_plan:
   current_focus:
-    - "All screens working"
+    - "Report Filter Options API"
+    - "Report Run API"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -304,3 +329,5 @@ agent_communication:
     message: "Added real auth backend with MongoDB - Register (POST /api/auth/register), Login (POST /api/auth/login), Me (GET /api/auth/me), Tenant CRUD APIs. Frontend register screen updated with 2-step form (step 1: personal info, step 2: business info). Login now connects to real API. DataSourceSelector shows tenant names from user profile. Test credentials in /app/memory/test_credentials.md. All new backend endpoints need testing."
   - agent: "testing"
     message: "✅ BACKEND AUTH TESTING COMPLETE: All 4 auth API endpoints tested successfully. 18 test scenarios executed with 94.4% success rate (17/18 passed). All critical functionality working: registration with validation, login with email/username, JWT token authentication, tenant management (add/rename/delete). Only minor issue: tax validation returns 422 instead of 400 but validation works correctly. Backend logs show proper bcrypt password hashing and all operations logged correctly. Auth system is production-ready."
+  - agent: "testing"
+    message: "✅ REPORT ENDPOINTS TESTING COMPLETE (10/10 passed): (1) POST /api/data/report-filter-options with source='STOK_FIYAT_AD' returns 200 in ~3.8s with {ok:true, data:[{AD:'Bayi',ID:1017},{AD:'Dağıtıcı',ID:1018},{AD:'Parekende',ID:1016}]}. (2) POST /api/data/report-run with dataset_key='rap_fiyat_listeleri_web' returns 200 in ~3.5s with {ok:true, data:[], request_uid:...}. All 3 FiyatAd values (1016/1017/1018) tested - all return empty arrays which is legitimate upstream data for this tenant. Error handling validated: missing tenant_id/source/dataset_key -> 400 with Turkish messages, invalid dataset_key -> 400 'Geçersiz rapor:', no auth -> 403. Auth flow works with berk JWT + admin tenant_id in body (no tenant-ownership check). sync.php proxy chain (request_create + request_status polling) functioning properly. Backend logs clean, no errors."

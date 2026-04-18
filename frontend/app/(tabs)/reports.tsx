@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal,
   TextInput, ActivityIndicator, FlatList, Alert,
@@ -11,91 +11,66 @@ import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import * as FileSystem from 'expo-file-system';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
-interface FilterField {
-  name: string; label: string;
-  type: 'date' | 'select_static' | 'multiselect';
-  source?: string; // for multiselect lookup
+// === REPORT DEFINITIONS ===
+interface FilterDef {
+  name: string; label: string; type: 'multiselect' | 'select_static' | 'date';
+  source?: string; // rap_filtre_lookup Kaynak
   options?: { value: any; label: string }[];
+  required?: boolean; group?: string;
 }
-
+interface ColDef { key: string; label: string; type?: 'money' | 'number' | 'bool'; }
 interface ReportDef {
   key: string; title: string; icon: keyof typeof Ionicons.glyphMap; description: string;
   datasetKey: string; defaultParams: Record<string, any>;
-  columns: { key: string; label: string; numeric?: boolean }[];
-  filters: FilterField[];
+  columns: ColDef[]; filters: FilterDef[];
+  requireNarrowing?: boolean;
 }
 
-const REPORTS: ReportDef[] = [
-  { key: 'fiyat_listeleri', title: 'Fiyat Listeleri', icon: 'pricetags-outline', description: 'Stok fiyat listeleri', datasetKey: 'rap_fiyat_listeleri_web',
-    defaultParams: { FiyatAd: '', DovizAd: '', Aktif: 1, Lokasyon: '', Durum: 0, BirimAd: '', Stoklar: '', StokCinsi: '', StokGrup: '', StokMarka: '', StokVergi: '', Page: 1, PageSize: 200 },
-    columns: [{ key: 'KOD', label: 'Kod' }, { key: 'AD', label: 'Ürün Adı' }, { key: 'FIYAT', label: 'Fiyat', numeric: true }, { key: 'FIYAT_YEREL', label: 'Yerel Fiyat', numeric: true }, { key: 'STOK_BIRIM', label: 'Birim' }, { key: 'STOK_GRUP', label: 'Grup' }],
-    filters: [
-      { name: 'FiyatAd', label: 'Fiyat Adı', type: 'multiselect', source: 'STOK_FIYAT_AD' },
-      { name: 'DovizAd', label: 'Döviz Adı', type: 'multiselect', source: 'DOVIZ_AD' },
-      { name: 'Aktif', label: 'Aktif', type: 'select_static', options: [{ value: 1, label: 'Aktif' }, { value: 0, label: 'Pasif' }] },
-      { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON' },
-      { name: 'BirimAd', label: 'Birim', type: 'multiselect', source: 'STOK_BIRIM' },
-      { name: 'StokGrup', label: 'Stok Grup', type: 'multiselect', source: 'STOK_GRUP' },
-      { name: 'StokCinsi', label: 'Stok Cinsi', type: 'multiselect', source: 'STOK_CINSI' },
-      { name: 'StokMarka', label: 'Stok Marka', type: 'multiselect', source: 'STOK_MARKA' },
-    ] },
-  { key: 'satis_adet_kar', title: 'Satış Adet Kar', icon: 'trending-up-outline', description: 'Satış, adet ve kar analizi', datasetKey: 'rap_satis_adet_kar_web',
-    defaultParams: { BASTARIH: '', BITTARIH: '', KdvDahil: 1, FisTipi: 0, Lokasyon: '', StokGrup: '', StokCinsi: '', StokMarka: '', Page: 1, PageSize: 200 },
-    columns: [{ key: 'KOD', label: 'Kod' }, { key: 'AD', label: 'Ürün Adı' }, { key: 'SATIS_MIKTAR', label: 'Satış Mik.', numeric: true }, { key: 'SATIS_TUTARI', label: 'Satış Tutarı', numeric: true }, { key: 'KAR_TUTAR', label: 'Kar', numeric: true }, { key: 'ORAN', label: 'Kar %', numeric: true }],
-    filters: [
-      { name: 'BASTARIH', label: 'Başlangıç', type: 'date' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date' },
-      { name: 'KdvDahil', label: 'KDV Dahil', type: 'select_static', options: [{ value: 1, label: 'Evet' }, { value: 0, label: 'Hayır' }] },
-      { name: 'FisTipi', label: 'Fiş Tipi', type: 'select_static', options: [{ value: 0, label: 'Tümü' }, { value: 1, label: 'Tip 1' }, { value: 2, label: 'Tip 2' }, { value: 3, label: 'Tip 3' }] },
-      { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON' },
-      { name: 'StokGrup', label: 'Stok Grup', type: 'multiselect', source: 'STOK_GRUP' },
-      { name: 'StokCinsi', label: 'Stok Cinsi', type: 'multiselect', source: 'STOK_CINSI' },
-      { name: 'StokMarka', label: 'Stok Marka', type: 'multiselect', source: 'STOK_MARKA' },
-    ] },
-  { key: 'stok_envanter', title: 'Stok Envanter', icon: 'cube-outline', description: 'Güncel stok durumu', datasetKey: 'rap_stok_envanter_web',
-    defaultParams: { SONTARIH: '', KdvDahil: 1, Lokasyon: '', Durum: 0, StokGrup: '', StokCinsi: '', StokMarka: '', Page: 1, PageSize: 200 },
-    columns: [{ key: 'KOD', label: 'Kod' }, { key: 'AD', label: 'Ürün' }, { key: 'MEVCUT', label: 'Mevcut', numeric: true }, { key: 'LOKASYON', label: 'Lokasyon' }, { key: 'AGIRLIKLI_ORTALAMA___FIYAT', label: 'Ort.Fiyat', numeric: true }],
-    filters: [
-      { name: 'SONTARIH', label: 'Son Tarih', type: 'date' },
-      { name: 'KdvDahil', label: 'KDV Dahil', type: 'select_static', options: [{ value: 1, label: 'Evet' }, { value: 0, label: 'Hayır' }] },
-      { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON' },
-      { name: 'StokGrup', label: 'Stok Grup', type: 'multiselect', source: 'STOK_GRUP' },
-      { name: 'StokCinsi', label: 'Stok Cinsi', type: 'multiselect', source: 'STOK_CINSI' },
-      { name: 'StokMarka', label: 'Stok Marka', type: 'multiselect', source: 'STOK_MARKA' },
-    ] },
-  { key: 'gelir_tablosu', title: 'Gelir Tablosu', icon: 'stats-chart-outline', description: 'Gelir ve gider analizi', datasetKey: 'rap_lm_gelir_tablosu',
-    defaultParams: { BASTARIH: '', BITTARIH: '', KdvDahil: 1 },
-    columns: [{ key: 'AD', label: 'Kalem' }, { key: 'TUTAR', label: 'Tutar', numeric: true }, { key: 'ORAN', label: 'Oran %', numeric: true }],
-    filters: [
-      { name: 'BASTARIH', label: 'Başlangıç', type: 'date' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date' },
-      { name: 'KdvDahil', label: 'KDV Dahil', type: 'select_static', options: [{ value: 1, label: 'Evet' }, { value: 0, label: 'Hayır' }] },
-    ] },
-  { key: 'personel_satis', title: 'Personel Satış Özet', icon: 'people-outline', description: 'Personel satış performansı', datasetKey: 'rap_personel_satis_ozet_web',
-    defaultParams: { BASTARIH: '', BITTARIH: '', Lokasyon: '', Page: 1, PageSize: 200 },
-    columns: [{ key: 'PERSONEL', label: 'Personel' }, { key: 'TOPLAM', label: 'Toplam', numeric: true }, { key: 'NAKIT', label: 'Nakit', numeric: true }, { key: 'KREDI_KARTI', label: 'K.Kartı', numeric: true }, { key: 'FIS_SAYISI', label: 'Fiş', numeric: true }],
-    filters: [
-      { name: 'BASTARIH', label: 'Başlangıç', type: 'date' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date' },
-      { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON' },
-    ] },
-  { key: 'fis_kalem', title: 'Fiş Kalem Listesi', icon: 'receipt-outline', description: 'Fiş ve kalem detayları', datasetKey: 'rap_fis_kalem_listesi_web',
-    defaultParams: { BASTARIH: '', BITTARIH: '', Lokasyon: '', StokGrup: '', Page: 1, PageSize: 200 },
-    columns: [{ key: 'TARIH', label: 'Tarih' }, { key: 'STOK_ADI', label: 'Ürün' }, { key: 'MIKTAR', label: 'Miktar', numeric: true }, { key: 'TUTAR', label: 'Tutar', numeric: true }, { key: 'LOKASYON', label: 'Lokasyon' }],
-    filters: [
-      { name: 'BASTARIH', label: 'Başlangıç', type: 'date' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date' },
-      { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON' },
-      { name: 'StokGrup', label: 'Stok Grup', type: 'multiselect', source: 'STOK_GRUP' },
-    ] },
-  { key: 'cari_ekstre', title: 'Cari Hesap Ekstresi', icon: 'wallet-outline', description: 'Borç/alacak ekstresi', datasetKey: 'rap_cari_hesap_ekstresi_web',
-    defaultParams: { BASTARIH: '', BITTARIH: '', Page: 1, PageSize: 200 },
-    columns: [{ key: 'CARI_ADI', label: 'Cari' }, { key: 'TARIH', label: 'Tarih' }, { key: 'BORC', label: 'Borç', numeric: true }, { key: 'ALACAK', label: 'Alacak', numeric: true }, { key: 'BAKIYE', label: 'Bakiye', numeric: true }],
-    filters: [
-      { name: 'BASTARIH', label: 'Başlangıç', type: 'date' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date' },
-    ] },
+const FIYAT_LISTELERI: ReportDef = {
+  key: 'fiyat_listeleri', title: 'Fiyat Listeleri', icon: 'pricetags-outline',
+  description: 'Stok fiyat listeleri ve KDV bilgileri',
+  datasetKey: 'rap_fiyat_listeleri_web',
+  defaultParams: { Aktif: 1, Durum: 0, Resimli: 0, Page: 1, PageSize: 500 },
+  requireNarrowing: true,
+  columns: [
+    { key: 'KOD', label: 'Kod' }, { key: 'AD', label: 'Ürün Adı' },
+    { key: 'STOK_FIYAT_AD', label: 'Fiyat Adı' }, { key: 'DOVIZ_AD', label: 'Döviz' },
+    { key: 'STOK_BIRIM', label: 'Birim' }, { key: 'FIYAT', label: 'Fiyat', type: 'money' },
+    { key: 'FIYAT_YEREL', label: 'Yerel Fiyat', type: 'money' },
+    { key: 'KDV_DAHILMI', label: 'KDV Dahil', type: 'bool' },
+    { key: 'MEVCUT', label: 'Mevcut', type: 'number' },
+    { key: 'STOK_CINSI', label: 'Cinsi' }, { key: 'STOK_GRUP', label: 'Grup' },
+    { key: 'STOK_MARKA', label: 'Marka' },
+  ],
+  filters: [
+    { name: 'FiyatAd', label: 'Fiyat Adı', type: 'multiselect', source: 'STOK_FIYAT_AD', required: true, group: 'Temel' },
+    { name: 'DovizAd', label: 'Döviz Adı', type: 'multiselect', source: 'DOVIZ_AD', group: 'Temel' },
+    { name: 'Aktif', label: 'Aktif', type: 'select_static', options: [{ value: 1, label: 'Aktif' }, { value: 0, label: 'Pasif' }, { value: '', label: 'Tümü' }], group: 'Temel' },
+    { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Temel' },
+    { name: 'BirimAd', label: 'Birim', type: 'multiselect', source: 'STOK_BIRIM', group: 'Stok' },
+    { name: 'StokCinsi', label: 'Stok Cinsi', type: 'multiselect', source: 'STOK_CINSI', group: 'Stok' },
+    { name: 'StokGrup', label: 'Stok Grup', type: 'multiselect', source: 'STOK_GRUP', group: 'Stok' },
+    { name: 'StokMarka', label: 'Stok Marka', type: 'multiselect', source: 'STOK_MARKA', group: 'Stok' },
+    { name: 'StokVergi', label: 'Stok Vergi', type: 'multiselect', source: 'STOK_VERGI', group: 'Stok' },
+  ],
+};
+
+// Other reports - simplified
+const OTHER_REPORTS: ReportDef[] = [
+  { key: 'satis_adet_kar', title: 'Satış Adet Kar', icon: 'trending-up-outline', description: 'Satış, adet ve kar analizi', datasetKey: 'rap_satis_adet_kar_web', defaultParams: { BASTARIH: '', BITTARIH: '', KdvDahil: 1, Page: 1, PageSize: 500 }, columns: [{ key: 'KOD', label: 'Kod' }, { key: 'AD', label: 'Ürün' }, { key: 'SATIS_MIKTAR', label: 'Satış Mik.', type: 'number' }, { key: 'SATIS_TUTARI', label: 'Satış Tutarı', type: 'money' }, { key: 'KAR_TUTAR', label: 'Kar', type: 'money' }, { key: 'ORAN', label: 'Kar %', type: 'number' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }, { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre' }, { name: 'StokGrup', label: 'Stok Grup', type: 'multiselect', source: 'STOK_GRUP', group: 'Filtre' }] },
+  { key: 'stok_envanter', title: 'Stok Envanter', icon: 'cube-outline', description: 'Güncel stok durumu', datasetKey: 'rap_stok_envanter_web', defaultParams: { SONTARIH: '', KdvDahil: 1, Page: 1, PageSize: 500 }, columns: [{ key: 'KOD', label: 'Kod' }, { key: 'AD', label: 'Ürün' }, { key: 'MEVCUT', label: 'Mevcut', type: 'number' }, { key: 'LOKASYON', label: 'Lokasyon' }, { key: 'AGIRLIKLI_ORTALAMA___FIYAT', label: 'Ort.Fiyat', type: 'money' }], filters: [{ name: 'SONTARIH', label: 'Son Tarih', type: 'date', group: 'Tarih' }, { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre' }, { name: 'StokGrup', label: 'Stok Grup', type: 'multiselect', source: 'STOK_GRUP', group: 'Filtre' }] },
+  { key: 'gelir_tablosu', title: 'Gelir Tablosu', icon: 'stats-chart-outline', description: 'Gelir ve gider analizi', datasetKey: 'rap_lm_gelir_tablosu', defaultParams: { BASTARIH: '', BITTARIH: '', KdvDahil: 1 }, columns: [{ key: 'AD', label: 'Kalem' }, { key: 'TUTAR', label: 'Tutar', type: 'money' }, { key: 'ORAN', label: 'Oran %', type: 'number' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }] },
+  { key: 'personel_satis', title: 'Personel Satış Özet', icon: 'people-outline', description: 'Personel satış performansı', datasetKey: 'rap_personel_satis_ozet_web', defaultParams: { BASTARIH: '', BITTARIH: '', Page: 1, PageSize: 500 }, columns: [{ key: 'PERSONEL', label: 'Personel' }, { key: 'TOPLAM', label: 'Toplam', type: 'money' }, { key: 'NAKIT', label: 'Nakit', type: 'money' }, { key: 'KREDI_KARTI', label: 'K.Kartı', type: 'money' }, { key: 'FIS_SAYISI', label: 'Fiş', type: 'number' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }, { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre' }] },
+  { key: 'fis_kalem', title: 'Fiş Kalem Listesi', icon: 'receipt-outline', description: 'Fiş ve kalem detayları', datasetKey: 'rap_fis_kalem_listesi_web', defaultParams: { BASTARIH: '', BITTARIH: '', Page: 1, PageSize: 500 }, columns: [{ key: 'TARIH', label: 'Tarih' }, { key: 'STOK_ADI', label: 'Ürün' }, { key: 'MIKTAR', label: 'Miktar', type: 'number' }, { key: 'TUTAR', label: 'Tutar', type: 'money' }, { key: 'LOKASYON', label: 'Lokasyon' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }, { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre' }] },
+  { key: 'cari_ekstre', title: 'Cari Hesap Ekstresi', icon: 'wallet-outline', description: 'Borç/alacak ekstresi', datasetKey: 'rap_cari_hesap_ekstresi_web', defaultParams: { BASTARIH: '', BITTARIH: '', Page: 1, PageSize: 500 }, columns: [{ key: 'CARI_ADI', label: 'Cari' }, { key: 'TARIH', label: 'Tarih' }, { key: 'BORC', label: 'Borç', type: 'money' }, { key: 'ALACAK', label: 'Alacak', type: 'money' }, { key: 'BAKIYE', label: 'Bakiye', type: 'money' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }] },
 ];
 
+const ALL_REPORTS = [FIYAT_LISTELERI, ...OTHER_REPORTS];
+
+// === COMPONENT ===
 export default function ReportsScreen() {
   const { colors } = useThemeStore();
   const { user } = useAuthStore();
@@ -109,17 +84,26 @@ export default function ReportsScreen() {
     return user.tenants[0]?.tenant_id || '';
   }, [user?.tenants, activeSource]);
 
+  // State
   const [selectedReport, setSelectedReport] = useState<ReportDef | null>(null);
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [showResultModal, setShowResultModal] = useState(false);
+  const [showPickerModal, setShowPickerModal] = useState(false);
+  const [pickerFilter, setPickerFilter] = useState<FilterDef | null>(null);
+  const [pickerOptions, setPickerOptions] = useState<{ value: string; label: string }[]>([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState('');
+
+  const [filterValues, setFilterValues] = useState<Record<string, any>>({});
   const [reportData, setReportData] = useState<any[]>([]);
   const [reportLoading, setReportLoading] = useState(false);
-  const [filterValues, setFilterValues] = useState<Record<string, any>>({});
-  const [lookupCache, setLookupCache] = useState<Record<string, any[]>>({});
-  const [lookupLoading, setLookupLoading] = useState<Record<string, boolean>>({});
   const [sortKey, setSortKey] = useState('');
   const [sortAsc, setSortAsc] = useState(true);
   const [searchFilter, setSearchFilter] = useState('');
+  const [exportLoading, setExportLoading] = useState(false);
+
+  // Lookup cache
+  const [lookupCache, setLookupCache] = useState<Record<string, { value: string; label: string }[]>>({});
 
   const getDefDates = () => {
     const now = new Date();
@@ -127,54 +111,91 @@ export default function ReportsScreen() {
     return { start: `${y}-${m}-01`, end: `${y}-${m}-${d}` };
   };
 
-  // Fetch lookup options for a filter
-  const fetchLookup = useCallback(async (source: string) => {
-    if (lookupCache[source] || lookupLoading[source] || !activeTenantId) return;
-    setLookupLoading(prev => ({ ...prev, [source]: true }));
-    try {
-      const { token } = useAuthStore.getState();
-      const resp = await fetch(`${API_URL}/api/data/report-filter-options`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ tenant_id: activeTenantId, source }),
-      });
-      const data = await resp.json();
-      if (data.ok && data.data) {
-        const opts = data.data.map((r: any) => ({ 
-          value: String(r.ID ?? r.KOD ?? r.AD ?? ''), 
-          label: String(r.AD || r.KOD || r.ID || '') 
-        }));
-        setLookupCache(prev => ({ ...prev, [source]: opts }));
-      }
-    } catch (err) { console.error('Lookup error:', err); }
-    finally { setLookupLoading(prev => ({ ...prev, [source]: false })); }
-  }, [activeTenantId]);
-
+  // Open filter modal for a report
   const openReportFilter = (report: ReportDef) => {
     const dd = getDefDates();
     const vals: Record<string, any> = {};
     report.filters.forEach(f => {
-      if (f.type === 'date') vals[f.name] = f.name.includes('BAS') || f.name === 'BASTARIH' ? dd.start : dd.end;
-      else if (f.type === 'select_static') vals[f.name] = report.defaultParams[f.name] ?? (f.options?.[0]?.value ?? '');
-      else vals[f.name] = '';
+      if (f.type === 'date') vals[f.name] = f.name.includes('BAS') ? dd.start : dd.end;
+      else if (f.type === 'select_static') vals[f.name] = report.defaultParams[f.name] ?? '';
+      else vals[f.name] = ''; // multiselect empty
     });
     setFilterValues(vals);
     setSelectedReport(report);
     setShowFilterModal(true);
     setReportData([]); setSortKey(''); setSearchFilter('');
-    // Pre-fetch lookups
-    report.filters.filter(f => f.type === 'multiselect' && f.source).forEach(f => fetchLookup(f.source!));
   };
 
+  // Open picker for multiselect filter (on-demand load)
+  const openPicker = useCallback(async (filter: FilterDef) => {
+    setPickerFilter(filter);
+    setPickerSearch('');
+    setShowPickerModal(true);
+
+    if (filter.source && lookupCache[filter.source]) {
+      setPickerOptions(lookupCache[filter.source]);
+      return;
+    }
+    if (!filter.source || !activeTenantId) return;
+
+    setPickerLoading(true);
+    setPickerOptions([]);
+    try {
+      const { token } = useAuthStore.getState();
+      const resp = await fetch(`${API_URL}/api/data/report-filter-options`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ tenant_id: activeTenantId, source: filter.source }),
+      });
+      const data = await resp.json();
+      if (data.ok && data.data) {
+        const opts = data.data.map((r: any) => ({
+          value: String(r.ID ?? r.AD ?? r.KOD ?? ''),
+          label: String(r.AD || r.KOD || r.ID || ''),
+        }));
+        setPickerOptions(opts);
+        setLookupCache(prev => ({ ...prev, [filter.source!]: opts }));
+      }
+    } catch (err) { console.error('Lookup error:', err); }
+    finally { setPickerLoading(false); }
+  }, [activeTenantId, lookupCache]);
+
+  // Toggle selection in multiselect
+  const togglePickerValue = (val: string) => {
+    if (!pickerFilter) return;
+    const current = filterValues[pickerFilter.name] || '';
+    const arr = current ? current.split(',') : [];
+    const idx = arr.indexOf(val);
+    if (idx >= 0) arr.splice(idx, 1);
+    else arr.push(val);
+    setFilterValues(prev => ({ ...prev, [pickerFilter.name]: arr.join(',') }));
+  };
+
+  const isPickerSelected = (val: string) => {
+    if (!pickerFilter) return false;
+    const current = filterValues[pickerFilter.name] || '';
+    return current.split(',').includes(val);
+  };
+
+  // Run report
   const runReport = useCallback(async () => {
     if (!activeTenantId || !selectedReport) return;
+
+    // Check required filters
+    if (selectedReport.requireNarrowing) {
+      const hasNarrow = selectedReport.filters.some(f =>
+        f.type === 'multiselect' && filterValues[f.name] && filterValues[f.name].length > 0
+      );
+      if (!hasNarrow) {
+        Alert.alert('Filtre Gerekli', 'En az bir daraltıcı filtre seçin (Fiyat Adı, Lokasyon, Stok Grup vb.)');
+        return;
+      }
+    }
+
     setShowFilterModal(false); setShowResultModal(true);
     setReportLoading(true); setReportData([]);
 
-    const params: Record<string, any> = {};
-    // Copy defaults
-    Object.entries(selectedReport.defaultParams).forEach(([k, v]) => { params[k] = v; });
-    // Override with filter values, skip empty strings for multiselect
-    Object.entries(filterValues).forEach(([k, v]) => { 
+    const params: Record<string, any> = { ...selectedReport.defaultParams };
+    Object.entries(filterValues).forEach(([k, v]) => {
       if (v !== undefined && v !== null && v !== '') params[k] = v;
     });
 
@@ -186,34 +207,68 @@ export default function ReportsScreen() {
       });
       const data = await resp.json();
       if (data.ok && data.data) setReportData(data.data);
-      else if (!data.ok) Alert.alert('Rapor Hatası', data.detail || data.message || 'Veri alınamadı');
-    } catch (err) { console.error(err); Alert.alert('Hata', 'Rapor çalıştırılamadı'); }
+      else if (!data.ok) Alert.alert('Hata', data.detail || 'Rapor çalıştırılamadı');
+    } catch (err) { console.error(err); }
     finally { setReportLoading(false); }
   }, [activeTenantId, selectedReport, filterValues]);
 
+  // Sort & search
   const processedData = useMemo(() => {
     let d = reportData;
-    if (searchFilter) { const q = searchFilter.toLowerCase(); d = d.filter((row: any) => Object.values(row).some((v: any) => String(v || '').toLowerCase().includes(q))); }
-    if (sortKey) { d = [...d].sort((a: any, b: any) => { const va = a[sortKey]; const vb = b[sortKey]; const na = parseFloat(va); const nb = parseFloat(vb); if (!isNaN(na) && !isNaN(nb)) return sortAsc ? na - nb : nb - na; return sortAsc ? String(va || '').localeCompare(String(vb || ''), 'tr') : String(vb || '').localeCompare(String(va || ''), 'tr'); }); }
+    if (searchFilter) {
+      const q = searchFilter.toLowerCase();
+      d = d.filter((row: any) => Object.values(row).some((v: any) => String(v || '').toLowerCase().includes(q)));
+    }
+    if (sortKey) {
+      d = [...d].sort((a: any, b: any) => {
+        const va = a[sortKey]; const vb = b[sortKey];
+        const na = parseFloat(va); const nb = parseFloat(vb);
+        if (!isNaN(na) && !isNaN(nb)) return sortAsc ? na - nb : nb - na;
+        return sortAsc ? String(va || '').localeCompare(String(vb || ''), 'tr') : String(vb || '').localeCompare(String(va || ''), 'tr');
+      });
+    }
     return d;
   }, [reportData, searchFilter, sortKey, sortAsc]);
 
   const toggleSort = (key: string) => { if (sortKey === key) setSortAsc(!sortAsc); else { setSortKey(key); setSortAsc(true); } };
 
-  const exportPdf = async () => {
-    if (!selectedReport || processedData.length === 0) return;
-    const cols = selectedReport.columns;
-    const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:6px;font-size:11px;text-align:left}th{background:#f5f5f5;font-size:10px}</style></head><body><h2>${selectedReport.title}</h2><p>${processedData.length} kayıt</p><table><thead><tr>${cols.map(c => `<th>${c.label}</th>`).join('')}</tr></thead><tbody>${processedData.map((r: any) => `<tr>${cols.map(c => `<td>${c.numeric ? parseFloat(r[c.key] || '0').toFixed(2) : (r[c.key] || '-')}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`;
-    try { const { uri } = await Print.printToFileAsync({ html }); await Sharing.shareAsync(uri, { mimeType: 'application/pdf' }); } catch (err) { console.error(err); }
+  const renderValue = (val: any, col: ColDef) => {
+    if (col.type === 'money') return `₺${parseFloat(val || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`;
+    if (col.type === 'number') return parseFloat(val || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2 });
+    if (col.type === 'bool') return val === 1 || val === '1' ? 'Evet' : 'Hayır';
+    return String(val || '-');
   };
 
-  const exportCsv = async () => {
+  // PDF Export
+  const exportPdf = async () => {
     if (!selectedReport || processedData.length === 0) return;
+    setExportLoading(true);
     const cols = selectedReport.columns;
-    let csv = cols.map(c => c.label).join(';') + '\n';
-    processedData.forEach((r: any) => { csv += cols.map(c => c.numeric ? parseFloat(r[c.key] || '0').toFixed(2) : String(r[c.key] || '').replace(/;/g, ',')).join(';') + '\n'; });
-    try { const path = `${FileSystem.cacheDirectory}${selectedReport.key}.csv`; await FileSystem.writeAsStringAsync(path, csv); await Sharing.shareAsync(path, { mimeType: 'text/csv' }); } catch (err) { console.error(err); }
+    const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:16px;font-size:11px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:5px;text-align:left;font-size:10px}th{background:#f5f5f5;font-weight:bold}h2{font-size:16px}</style></head><body><h2>${selectedReport.title}</h2><p>${processedData.length} kayıt</p><table><thead><tr>${cols.map(c => `<th>${c.label}</th>`).join('')}</tr></thead><tbody>${processedData.map((r: any) => `<tr>${cols.map(c => `<td>${renderValue(r[c.key], c)}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`;
+    try {
+      const { uri } = await Print.printToFileAsync({ html });
+      await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
+    } catch (err) { console.error(err); }
+    finally { setExportLoading(false); }
   };
+
+  // Get selected labels for a filter
+  const getSelectedLabels = (filterName: string, source?: string) => {
+    const val = filterValues[filterName] || '';
+    if (!val) return '';
+    const opts = source ? (lookupCache[source] || []) : [];
+    const ids = val.split(',');
+    if (opts.length > 0) {
+      return ids.map((id: string) => opts.find(o => o.value === id)?.label || id).join(', ');
+    }
+    return val;
+  };
+
+  const filteredPickerOpts = useMemo(() => {
+    if (!pickerSearch) return pickerOptions;
+    const q = pickerSearch.toLowerCase();
+    return pickerOptions.filter(o => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q));
+  }, [pickerOptions, pickerSearch]);
 
   if (!activeTenantId) {
     return (
@@ -230,65 +285,58 @@ export default function ReportsScreen() {
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Raporlar</Text>
       </View>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 100 }} showsVerticalScrollIndicator={false}>
-        {REPORTS.map(report => (
+      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 100 }}>
+        {ALL_REPORTS.map(report => (
           <TouchableOpacity key={report.key} style={[styles.reportCard, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => openReportFilter(report)} activeOpacity={0.7}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <View style={[styles.reportIcon, { backgroundColor: colors.primary + '15' }]}><Ionicons name={report.icon} size={22} color={colors.primary} /></View>
-              <View style={{ flex: 1 }}><Text style={[styles.reportTitle, { color: colors.text }]}>{report.title}</Text><Text style={[styles.reportDesc, { color: colors.textSecondary }]}>{report.description}</Text></View>
+              <View style={{ flex: 1 }}><Text style={[{ fontSize: 15, fontWeight: '700', color: colors.text }]}>{report.title}</Text><Text style={[{ fontSize: 12, color: colors.textSecondary }]}>{report.description}</Text></View>
               <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
             </View>
           </TouchableOpacity>
         ))}
       </ScrollView>
 
-      {/* Filter Modal */}
+      {/* FILTER MODAL */}
       <Modal visible={showFilterModal} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '80%' }]}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '85%' }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>{selectedReport?.title} - Filtreler</Text>
+              <Text style={[{ fontSize: 17, fontWeight: '700', color: colors.text, flex: 1 }]}>{selectedReport?.title} - Filtreler</Text>
               <TouchableOpacity onPress={() => setShowFilterModal(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             </View>
-            <ScrollView style={{ padding: 16 }} contentContainerStyle={{ gap: 12, paddingBottom: 30 }}>
+            <ScrollView style={{ padding: 16 }} contentContainerStyle={{ gap: 10, paddingBottom: 30 }}>
               {selectedReport?.filters.map(filter => (
                 <View key={filter.name}>
-                  <Text style={[{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 4 }]}>{filter.label}</Text>
+                  <Text style={[{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 4 }]}>
+                    {filter.label} {filter.required && <Text style={{ color: colors.error }}>*</Text>}
+                  </Text>
                   {filter.type === 'date' ? (
-                    <TextInput style={[styles.filterInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
-                      value={filterValues[filter.name] || ''} onChangeText={v => setFilterValues(prev => ({ ...prev, [filter.name]: v }))}
-                      placeholder="YYYY-MM-DD" placeholderTextColor={colors.textSecondary} />
+                    <TextInput
+                      style={[styles.filterInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+                      value={filterValues[filter.name] || ''}
+                      onChangeText={v => setFilterValues(prev => ({ ...prev, [filter.name]: v }))}
+                      placeholder="YYYY-MM-DD" placeholderTextColor={colors.textSecondary}
+                    />
                   ) : filter.type === 'select_static' ? (
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                       {filter.options?.map(opt => (
-                        <TouchableOpacity key={String(opt.value)} style={[styles.optChip, filterValues[filter.name] === opt.value && { backgroundColor: colors.primary, borderColor: colors.primary }, { borderColor: colors.border }]}
+                        <TouchableOpacity key={String(opt.value)} style={[styles.chip, filterValues[filter.name] === opt.value && { backgroundColor: colors.primary, borderColor: colors.primary }, { borderColor: colors.border }]}
                           onPress={() => setFilterValues(prev => ({ ...prev, [filter.name]: opt.value }))}>
                           <Text style={[{ fontSize: 12, color: filterValues[filter.name] === opt.value ? '#fff' : colors.text }]}>{opt.label}</Text>
                         </TouchableOpacity>
                       ))}
                     </ScrollView>
-                  ) : filter.type === 'multiselect' && filter.source ? (
-                    <View>
-                      {lookupLoading[filter.source] ? (
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <ActivityIndicator size="small" color={colors.primary} />
-                          <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>Yükleniyor...</Text>
-                        </View>
-                      ) : (
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 4 }}>
-                          <TouchableOpacity style={[styles.optChip, !filterValues[filter.name] && { backgroundColor: colors.primary, borderColor: colors.primary }, { borderColor: colors.border }]}
-                            onPress={() => setFilterValues(prev => ({ ...prev, [filter.name]: '' }))}>
-                            <Text style={[{ fontSize: 11, color: !filterValues[filter.name] ? '#fff' : colors.text }]}>Tümü</Text>
-                          </TouchableOpacity>
-                          {(lookupCache[filter.source] || []).slice(0, 20).map((opt: any, i: number) => (
-                            <TouchableOpacity key={i} style={[styles.optChip, filterValues[filter.name] === String(opt.value) && { backgroundColor: colors.primary, borderColor: colors.primary }, { borderColor: colors.border }]}
-                              onPress={() => setFilterValues(prev => ({ ...prev, [filter.name]: String(opt.value) }))}>
-                              <Text style={[{ fontSize: 11, color: filterValues[filter.name] === String(opt.value) ? '#fff' : colors.text }]} numberOfLines={1}>{opt.label}</Text>
-                            </TouchableOpacity>
-                          ))}
-                        </ScrollView>
-                      )}
-                    </View>
+                  ) : filter.type === 'multiselect' ? (
+                    <TouchableOpacity
+                      style={[styles.filterInput, { backgroundColor: colors.card, borderColor: filterValues[filter.name] ? colors.primary : colors.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}
+                      onPress={() => openPicker(filter)}
+                    >
+                      <Text style={[{ fontSize: 13, color: filterValues[filter.name] ? colors.text : colors.textSecondary, flex: 1 }]} numberOfLines={1}>
+                        {filterValues[filter.name] ? getSelectedLabels(filter.name, filter.source) : 'Seçiniz...'}
+                      </Text>
+                      <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
+                    </TouchableOpacity>
                   ) : null}
                 </View>
               ))}
@@ -300,24 +348,64 @@ export default function ReportsScreen() {
         </View>
       </Modal>
 
-      {/* Result Modal */}
+      {/* PICKER MODAL (multiselect on-demand) */}
+      <Modal visible={showPickerModal} animationType="slide" transparent statusBarTranslucent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '80%' }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text, flex: 1 }]}>{pickerFilter?.label}</Text>
+              <TouchableOpacity onPress={() => setShowPickerModal(false)}><Ionicons name="checkmark" size={24} color={colors.primary} /></TouchableOpacity>
+            </View>
+            <View style={{ paddingHorizontal: 12, paddingVertical: 8 }}>
+              <View style={[styles.searchInput, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <Ionicons name="search" size={16} color={colors.textSecondary} />
+                <TextInput style={[{ flex: 1, fontSize: 13, color: colors.text }]} placeholder="Ara..." placeholderTextColor={colors.textSecondary} value={pickerSearch} onChangeText={setPickerSearch} />
+              </View>
+            </View>
+            {pickerLoading ? (
+              <View style={{ alignItems: 'center', paddingVertical: 40 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>Seçenekler yükleniyor...</Text></View>
+            ) : (
+              <FlatList
+                data={filteredPickerOpts}
+                keyExtractor={(item, idx) => String(idx)}
+                contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 20 }}
+                renderItem={({ item }) => {
+                  const sel = isPickerSelected(item.value);
+                  return (
+                    <TouchableOpacity style={[styles.pickerItem, { backgroundColor: sel ? colors.primary + '15' : colors.card, borderColor: sel ? colors.primary : colors.border }]} onPress={() => togglePickerValue(item.value)}>
+                      <Ionicons name={sel ? 'checkbox' : 'square-outline'} size={20} color={sel ? colors.primary : colors.textSecondary} />
+                      <Text style={[{ fontSize: 14, color: sel ? colors.primary : colors.text, fontWeight: sel ? '600' : '400', flex: 1 }]}>{item.label}</Text>
+                    </TouchableOpacity>
+                  );
+                }}
+                ListEmptyComponent={<View style={{ alignItems: 'center', paddingVertical: 20 }}><Text style={[{ color: colors.textSecondary }]}>Seçenek bulunamadı</Text></View>}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* RESULT MODAL */}
       <Modal visible={showResultModal} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>{selectedReport?.title}</Text>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity onPress={() => { setShowResultModal(false); setShowFilterModal(true); }}><Ionicons name="options-outline" size={22} color={colors.primary} /></TouchableOpacity>
-                <TouchableOpacity onPress={() => { setShowResultModal(false); setSelectedReport(null); setReportData([]); }}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
-              </View>
+              <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text, flex: 1 }]}>{selectedReport?.title}</Text>
+              <TouchableOpacity style={{ marginRight: 8 }} onPress={() => { setShowResultModal(false); setShowFilterModal(true); }}><Ionicons name="options-outline" size={22} color={colors.primary} /></TouchableOpacity>
+              <TouchableOpacity onPress={() => { setShowResultModal(false); setSelectedReport(null); setReportData([]); }}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             </View>
+            {/* Toolbar */}
             <View style={[styles.toolbar, { borderBottomColor: colors.border }]}>
               <View style={[styles.searchInput, { backgroundColor: colors.card, borderColor: colors.border, flex: 1 }]}>
                 <Ionicons name="search" size={14} color={colors.textSecondary} />
-                <TextInput style={[{ flex: 1, fontSize: 12, color: colors.text }]} placeholder="Filtrele..." placeholderTextColor={colors.textSecondary} value={searchFilter} onChangeText={setSearchFilter} />
+                <TextInput style={[{ flex: 1, fontSize: 12, color: colors.text }]} placeholder="Ara..." placeholderTextColor={colors.textSecondary} value={searchFilter} onChangeText={setSearchFilter} />
               </View>
-              <TouchableOpacity style={[styles.exportBtn, { backgroundColor: colors.error + '15' }]} onPress={exportPdf}><Ionicons name="document-text-outline" size={14} color={colors.error} /><Text style={[{ fontSize: 10, color: colors.error, fontWeight: '600' }]}>PDF</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.exportBtn, { backgroundColor: colors.error + '15' }]} onPress={exportPdf} disabled={exportLoading}>
+                {exportLoading ? <ActivityIndicator size="small" color={colors.error} /> : <Ionicons name="document-text-outline" size={14} color={colors.error} />}
+                <Text style={[{ fontSize: 10, color: colors.error, fontWeight: '600' }]}>PDF</Text>
+              </TouchableOpacity>
             </View>
+            {/* Sort headers */}
             {selectedReport && !reportLoading && processedData.length > 0 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 32, borderBottomWidth: 1, borderBottomColor: colors.border }}>
                 <View style={{ flexDirection: 'row', paddingHorizontal: 12 }}>
@@ -340,7 +428,7 @@ export default function ReportsScreen() {
                     {(selectedReport?.columns || []).map(col => (
                       <View key={col.key} style={styles.resultCell}>
                         <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{col.label}</Text>
-                        <Text style={[{ fontSize: 12, fontWeight: '600', color: col.numeric ? colors.primary : colors.text }]} numberOfLines={1}>{col.numeric ? `₺${parseFloat(item[col.key] || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2 })}` : String(item[col.key] || '-')}</Text>
+                        <Text style={[{ fontSize: 12, fontWeight: '600', color: col.type === 'money' ? colors.primary : colors.text }]} numberOfLines={1}>{renderValue(item[col.key], col)}</Text>
                       </View>
                     ))}
                   </View>
@@ -352,6 +440,16 @@ export default function ReportsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Export overlay */}
+      {exportLoading && (
+        <View style={styles.exportOverlay}>
+          <View style={[styles.exportBox, { backgroundColor: colors.card }]}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={[{ color: colors.text, fontSize: 14, fontWeight: '600', marginTop: 12 }]}>PDF hazırlanıyor...</Text>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -362,19 +460,19 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 20, fontWeight: '800' },
   reportCard: { borderRadius: 12, borderWidth: 1, padding: 14, marginBottom: 8 },
   reportIcon: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  reportTitle: { fontSize: 15, fontWeight: '700' },
-  reportDesc: { fontSize: 12, marginTop: 2 },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 60, gap: 12 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: { borderTopLeftRadius: 24, borderTopRightRadius: 24, flex: 1, maxHeight: '92%' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderBottomWidth: 1 },
-  modalTitle: { fontSize: 17, fontWeight: '700', flex: 1 },
-  filterInput: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13 },
-  optChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: '#ddd' },
+  filterInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 13 },
+  chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1 },
+  searchInput: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, borderWidth: 1, gap: 6 },
+  pickerItem: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 6 },
   toolbar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, gap: 6, borderBottomWidth: 1 },
-  searchInput: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, paddingVertical: 6, borderRadius: 8, borderWidth: 1, gap: 4 },
   exportBtn: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   sortHeader: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 3, marginRight: 4 },
   resultRow: { paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   resultCell: { minWidth: '40%', flex: 1 },
+  exportOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 9998 },
+  exportBox: { borderRadius: 16, padding: 30, alignItems: 'center', minWidth: 200 },
 });
