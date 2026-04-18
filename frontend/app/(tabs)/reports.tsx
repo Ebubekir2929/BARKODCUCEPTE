@@ -370,10 +370,32 @@ export default function ReportsScreen() {
     const cols = selectedReport.columns;
     const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:16px;font-size:11px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:5px;text-align:left;font-size:10px}th{background:#f5f5f5;font-weight:bold}h2{font-size:16px}</style></head><body><h2>${selectedReport.title}</h2><p>${processedData.length} kayıt</p><table><thead><tr>${cols.map(c => `<th>${c.label}</th>`).join('')}</tr></thead><tbody>${processedData.map((r: any) => `<tr>${cols.map(c => `<td>${renderValue(r[c.key], c)}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`;
     try {
-      const { uri } = await Print.printToFileAsync({ html });
-      await Sharing.shareAsync(uri, { mimeType: 'application/pdf' });
-    } catch (err) { console.error(err); }
-    finally { setExportLoading(false); }
+      if (Platform.OS === 'web') {
+        // Web: open in new window and trigger print dialog
+        const w = window.open('', '_blank');
+        if (w) {
+          w.document.write(html);
+          w.document.close();
+          // small delay so styles render, then print
+          setTimeout(() => { try { w.focus(); w.print(); } catch(_){} }, 500);
+        } else {
+          Alert.alert('Popup engellendi', 'Tarayıcı yeni sekme açmaya izin vermedi. Popup izni verin.');
+        }
+      } else {
+        const { uri } = await Print.printToFileAsync({ html });
+        const canShare = await Sharing.isAvailableAsync();
+        if (canShare) {
+          await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: selectedReport.title });
+        } else {
+          Alert.alert('PDF hazır', `Dosya: ${uri}`);
+        }
+      }
+    } catch (err) {
+      console.error('PDF export error:', err);
+      Alert.alert('Hata', 'PDF oluşturulurken bir hata oluştu.');
+    } finally {
+      setExportLoading(false);
+    }
   };
 
   // Excel Export
@@ -703,19 +725,18 @@ export default function ReportsScreen() {
             ) : (
               <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 }}><Ionicons name="document-text-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>Sonuç bulunamadı</Text></View>
             )}
+            {/* Export overlay INSIDE result modal so it floats above the modal */}
+            {exportLoading && (
+              <View style={styles.exportOverlay}>
+                <View style={[styles.exportBox, { backgroundColor: colors.card }]}>
+                  <ActivityIndicator size="large" color={colors.primary} />
+                  <Text style={[{ color: colors.text, fontSize: 14, fontWeight: '600', marginTop: 12 }]}>Dosya hazırlanıyor...</Text>
+                </View>
+              </View>
+            )}
           </View>
         </View>
       </Modal>
-
-      {/* Export overlay */}
-      {exportLoading && (
-        <View style={styles.exportOverlay}>
-          <View style={[styles.exportBox, { backgroundColor: colors.card }]}>
-            <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={[{ color: colors.text, fontSize: 14, fontWeight: '600', marginTop: 12 }]}>Dosya hazırlanıyor...</Text>
-          </View>
-        </View>
-      )}
     </SafeAreaView>
   );
 }
