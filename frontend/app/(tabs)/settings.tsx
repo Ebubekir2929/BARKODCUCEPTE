@@ -484,6 +484,23 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Account / Güvenlik */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>HESAP VE GÜVENLİK</Text>
+          <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => router.push('/change-password')}
+            >
+              <View style={styles.menuItemLeft}>
+                <Ionicons name="key-outline" size={22} color={colors.primary} />
+                <Text style={[styles.menuItemLabel, { color: colors.text }]}>Şifre Değiştir</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+          </View>
+        </View>
+
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('application')}</Text>
           <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>

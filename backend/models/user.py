@@ -31,6 +31,11 @@ class ForgotPasswordRequest(BaseModel):
     email: str
 
 
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+
 class UserInDB(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     full_name: str

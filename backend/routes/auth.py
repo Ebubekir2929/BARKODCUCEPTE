@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, date
 from models.user import (
     UserRegister, UserLogin, UserResponse,
     TenantSource, TenantAdd, TenantUpdate, TokenResponse, LicenseStatus,
-    ForgotPasswordRequest,
+    ForgotPasswordRequest, ChangePasswordRequest,
 )
 from services import get_patron_pool, get_data_pool
 import os
@@ -342,6 +342,39 @@ async def forgot_password(data: ForgotPasswordRequest):
 
     logger.info(f"Password reset email sent for user_id={user_id}, email={email}")
     return {"ok": True, "message": "Şifre sıfırlama e-postası gönderildi. Gelen kutunuzu kontrol edin."}
+
+
+@router.post("/change-password")
+async def change_password(data: ChangePasswordRequest, current_user: dict = Depends(get_current_user)):
+    old_pw = (data.old_password or "")
+    new_pw = (data.new_password or "")
+    if not old_pw or not new_pw:
+        raise HTTPException(status_code=400, detail="Mevcut ve yeni şifre gerekli")
+    if len(new_pw) < 6:
+        raise HTTPException(status_code=400, detail="Yeni şifre en az 6 karakter olmalı")
+    if old_pw == new_pw:
+        raise HTTPException(status_code=400, detail="Yeni şifre mevcut şifre ile aynı olamaz")
+
+    user_id = current_user.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Oturum geçersiz")
+
+    pool = await get_patron_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT password FROM users WHERE user_id = %s", (user_id,))
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+            stored_hash = row[0]
+            if sha1_hash(old_pw) != (stored_hash or "").lower():
+                raise HTTPException(status_code=401, detail="Mevcut şifre hatalı")
+            new_hash = sha1_hash(new_pw)
+            await cur.execute("UPDATE users SET password = %s WHERE user_id = %s", (new_hash, user_id))
+            await conn.commit()
+
+    logger.info(f"Password changed for user_id={user_id}")
+    return {"ok": True, "message": "Şifre başarıyla değiştirildi"}
 
 
 @router.get("/me", response_model=UserResponse)
