@@ -16,6 +16,7 @@ export interface User {
   tenants: TenantSource[];
   role: string;
   created_at?: string;
+  must_change_password?: boolean;
 }
 
 export interface AuthState {

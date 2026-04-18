@@ -63,6 +63,7 @@ class UserResponse(BaseModel):
     role: str
     license_expiry: Optional[datetime] = None
     created_at: datetime
+    must_change_password: bool = False
 
 
 class LicenseStatus(BaseModel):

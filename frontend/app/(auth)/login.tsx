@@ -77,20 +77,24 @@ export default function LoginScreen() {
 
       const result = await login(email, password);
       if (result.success) {
+        // Helper to navigate to correct destination
+        const navigateNext = () => {
+          // If password must be changed (e.g. after forgot-password reset), force change screen
+          const mustChange = useAuthStore.getState().user?.must_change_password;
+          if (mustChange) {
+            router.replace('/change-password?force=1');
+          } else {
+            router.replace('/(tabs)/dashboard');
+          }
+        };
         if (result.licenseWarning && result.daysRemaining !== undefined) {
-          // Show license warning then navigate
           showWarning(
             'Lisans Uyarısı',
             `Lisans sürenizin dolmasına ${result.daysRemaining} gün kaldı. Lütfen lisansınızı yenileyiniz.`,
-            [
-              {
-                text: 'Tamam',
-                onPress: () => router.replace('/(tabs)/dashboard'),
-              },
-            ]
+            [{ text: 'Tamam', onPress: navigateNext }]
           );
         } else {
-          router.replace('/(tabs)/dashboard');
+          navigateNext();
         }
       } else {
         showError('Giriş Başarısız', result.error || 'Kullanıcı adı/e-posta veya şifre hatalı');

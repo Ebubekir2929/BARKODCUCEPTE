@@ -1,20 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView,
-  ActivityIndicator, KeyboardAvoidingView, Platform, Alert,
+  ActivityIndicator, KeyboardAvoidingView, Platform, Alert, BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useThemeStore } from '../../src/store/themeStore';
-import { useAuthStore } from '../../src/store/authStore';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useThemeStore } from '../src/store/themeStore';
+import { useAuthStore } from '../src/store/authStore';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 export default function ChangePasswordScreen() {
   const router = useRouter();
   const { colors } = useThemeStore();
-  const { token } = useAuthStore();
+  const { token, refreshUser } = useAuthStore();
+  const params = useLocalSearchParams<{ force?: string }>();
+  const isForced = params.force === '1';
+
+  // Block hardware back when forced
+  useEffect(() => {
+    if (!isForced) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      Alert.alert('Uyarı', 'Lütfen önce yeni bir şifre belirleyin.');
+      return true;
+    });
+    return () => sub.remove();
+  }, [isForced]);
 
   const [oldPass, setOldPass] = useState('');
   const [newPass, setNewPass] = useState('');
@@ -52,8 +64,13 @@ export default function ChangePasswordScreen() {
       if (!resp.ok) {
         Alert.alert('Hata', data.detail || 'Şifre değiştirilemedi');
       } else {
+        // Refresh user so must_change_password flag clears
+        try { await refreshUser(); } catch(_) {}
         Alert.alert('Başarılı', data.message || 'Şifre başarıyla değiştirildi', [
-          { text: 'Tamam', onPress: () => router.back() },
+          { text: 'Tamam', onPress: () => {
+            if (isForced) router.replace('/(tabs)/dashboard');
+            else router.back();
+          }},
         ]);
       }
     } catch (e) {
@@ -66,21 +83,36 @@ export default function ChangePasswordScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-          <Ionicons name="arrow-back" size={24} color={colors.text} />
-        </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.text }]}>Şifre Değiştir</Text>
+        {isForced ? (
+          <View style={{ width: 24 }} />
+        ) : (
+          <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+        )}
+        <Text style={[styles.title, { color: colors.text }]}>{isForced ? 'Şifre Belirle' : 'Şifre Değiştir'}</Text>
         <View style={{ width: 24 }} />
       </View>
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          {isForced && (
+            <View style={[styles.warnBanner, { backgroundColor: colors.warning + '18', borderColor: colors.warning }]}>
+              <Ionicons name="warning" size={18} color={colors.warning} />
+              <Text style={[styles.warnText, { color: colors.warning }]}>
+                Hesabınıza geçici bir şifre ile giriş yaptınız. Devam etmek için yeni bir şifre belirlemeniz gerekiyor.
+              </Text>
+            </View>
+          )}
+
           <View style={[styles.iconBox, { backgroundColor: colors.primary + '15' }]}>
             <Ionicons name="lock-closed" size={36} color={colors.primary} />
           </View>
 
           <Text style={[styles.description, { color: colors.textSecondary }]}>
-            Güvenliğiniz için yeni bir şifre belirleyin. Yeni şifreniz en az 6 karakter olmalıdır.
+            {isForced
+              ? 'Lütfen hesabınız için yeni ve güvenli bir şifre belirleyin. Şifreniz en az 6 karakter olmalıdır.'
+              : 'Güvenliğiniz için yeni bir şifre belirleyin. Yeni şifreniz en az 6 karakter olmalıdır.'}
           </Text>
 
           {/* Current password */}
@@ -190,4 +222,9 @@ const styles = StyleSheet.create({
     padding: 12, borderRadius: 10, marginTop: 6,
   },
   infoText: { fontSize: 12, flex: 1, lineHeight: 16 },
+  warnBanner: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
+    padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 4,
+  },
+  warnText: { fontSize: 13, fontWeight: '600', flex: 1, lineHeight: 18 },
 });

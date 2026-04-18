@@ -85,7 +85,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT user_id, username, email, full_name, VergiNo, tenant_id, has_tables, BaslangicTarih, BitisTarih, active FROM users WHERE user_id = %s",
+                "SELECT user_id, username, email, full_name, VergiNo, tenant_id, has_tables, BaslangicTarih, BitisTarih, active, COALESCE(must_change_password, 0) FROM users WHERE user_id = %s",
                 (user_id,)
             )
             row = await cur.fetchone()
@@ -97,6 +97,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         "user_id": row[0], "username": row[1], "email": row[2], "full_name": row[3],
         "tax_number": row[4] or "", "tenant_id": row[5], "has_tables": row[6],
         "start_date": row[7], "end_date": row[8], "active": row[9],
+        "must_change_password": bool(row[10]),
     }
 
 
@@ -145,6 +146,7 @@ async def build_user_response(user_dict: dict) -> UserResponse:
         role="user",
         license_expiry=datetime.combine(user_dict["end_date"], datetime.min.time()) if user_dict.get("end_date") else None,
         created_at=datetime.combine(user_dict.get("start_date", date.today()), datetime.min.time()),
+        must_change_password=bool(user_dict.get("must_change_password", False)),
     )
 
 
@@ -233,7 +235,7 @@ async def login(data: UserLogin):
             # Fetch ALL candidates — username may be duplicated in this legacy DB
             await cur.execute("""
                 SELECT user_id, username, email, full_name, password, VergiNo, tenant_id, has_tables,
-                       BaslangicTarih, BitisTarih, active
+                       BaslangicTarih, BitisTarih, active, COALESCE(must_change_password, 0)
                 FROM users WHERE email = %s OR username = %s
                 ORDER BY (email = %s) DESC, active DESC, user_id DESC
             """, (identifier, identifier, identifier))
@@ -255,7 +257,7 @@ async def login(data: UserLogin):
     if not matched:
         raise HTTPException(status_code=401, detail="Kullanıcı adı/e-posta veya şifre hatalı")
 
-    user_id, username, email, full_name, _stored_hash, vergi_no, tenant_id, has_tables, start_date, end_date, active = matched
+    user_id, username, email, full_name, _stored_hash, vergi_no, tenant_id, has_tables, start_date, end_date, active, must_change_password = matched
 
     # Check active
     if not active:
@@ -271,6 +273,7 @@ async def login(data: UserLogin):
         "full_name": full_name, "tax_number": vergi_no or "",
         "tenant_id": tenant_id, "has_tables": has_tables,
         "start_date": start_date, "end_date": end_date, "active": active,
+        "must_change_password": bool(must_change_password),
     }
 
     token = create_access_token({"user_id": user_id, "email": email})
@@ -311,7 +314,7 @@ async def forgot_password(data: ForgotPasswordRequest):
 
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("UPDATE users SET password = %s WHERE user_id = %s", (new_hash, user_id))
+            await cur.execute("UPDATE users SET password = %s, must_change_password = 1 WHERE user_id = %s", (new_hash, user_id))
             await conn.commit()
 
     subject = "Barkodcu Cepte - Şifre Sıfırlama"
@@ -370,7 +373,7 @@ async def change_password(data: ChangePasswordRequest, current_user: dict = Depe
             if sha1_hash(old_pw) != (stored_hash or "").lower():
                 raise HTTPException(status_code=401, detail="Mevcut şifre hatalı")
             new_hash = sha1_hash(new_pw)
-            await cur.execute("UPDATE users SET password = %s WHERE user_id = %s", (new_hash, user_id))
+            await cur.execute("UPDATE users SET password = %s, must_change_password = 0 WHERE user_id = %s", (new_hash, user_id))
             await conn.commit()
 
     logger.info(f"Password changed for user_id={user_id}")
