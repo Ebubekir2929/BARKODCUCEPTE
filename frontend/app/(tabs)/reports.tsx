@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef, memo } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef, memo, useDeferredValue } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal,
   TextInput, ActivityIndicator, FlatList, Alert, Platform,
@@ -288,26 +288,37 @@ export default function ReportsScreen() {
 
       if (firstRows.length < pageSize) return; // no more pages
 
-      // Background: fetch remaining pages sequentially, append as they come
+      // Background: fetch remaining pages IN PARALLEL batches, append as each batch completes
       setMoreLoading(true);
       let page = 2;
       let collected = firstRows;
       const maxPages = 50;
-      while (page <= maxPages) {
-        if (runTokenRef.current !== token_id) return; // aborted (new run started)
-        const resp = await fetch(`${API_URL}/api/data/report-run`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ tenant_id: activeTenantId, dataset_key: selectedReport.datasetKey, params: { ...baseParams, Page: page, PageSize: pageSize }, fetch_all: false }),
-        });
-        const r = await resp.json();
+      const batchSize = 4; // fetch 4 pages concurrently
+      let done = false;
+      while (!done && page <= maxPages) {
         if (runTokenRef.current !== token_id) return;
-        const rows = (r.ok && Array.isArray(r.data)) ? r.data.map(indexRow) : [];
-        if (rows.length === 0) break;
-        collected = collected.concat(rows);
-        setReportData(collected);
-        setLoadedPages(page);
-        if (rows.length < pageSize) break;
-        page++;
+        const pageNums = Array.from({ length: batchSize }, (_, i) => page + i).filter(p => p <= maxPages);
+        const results = await Promise.all(pageNums.map(p =>
+          fetch(`${API_URL}/api/data/report-run`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ tenant_id: activeTenantId, dataset_key: selectedReport.datasetKey, params: { ...baseParams, Page: p, PageSize: pageSize }, fetch_all: false }),
+          }).then(r => r.json()).catch(() => ({ ok: false, data: [] }))
+        ));
+        if (runTokenRef.current !== token_id) return;
+        // Process in order, stop at first short/empty page
+        const batchRows: any[] = [];
+        for (const r of results) {
+          const rows = (r && r.ok && Array.isArray(r.data)) ? r.data.map(indexRow) : [];
+          if (rows.length === 0) { done = true; break; }
+          batchRows.push(...rows);
+          if (rows.length < pageSize) { done = true; break; }
+        }
+        if (batchRows.length > 0) {
+          collected = collected.concat(batchRows);
+          setReportData(collected);
+          setLoadedPages(page + pageNums.length - 1);
+        }
+        page += batchSize;
       }
     } catch (err) {
       console.error(err);
@@ -317,22 +328,31 @@ export default function ReportsScreen() {
     }
   }, [activeTenantId, selectedReport, filterValues]);
 
-  // Sort & search (uses precomputed __search index for speed)
+  // Sort & search — deferred for smooth UI (heavy work happens in background)
+  const deferredSearch = useDeferredValue(debouncedSearch);
+  const deferredSortKey = useDeferredValue(sortKey);
+  const deferredSortAsc = useDeferredValue(sortAsc);
+  const isProcessing =
+    (debouncedSearch !== deferredSearch) ||
+    (sortKey !== deferredSortKey) ||
+    (sortAsc !== deferredSortAsc) ||
+    (searchFilter.trim().toLowerCase() !== debouncedSearch);
+
   const processedData = useMemo(() => {
     let d = reportData;
-    if (debouncedSearch) {
-      d = d.filter((row: any) => (row.__search || '').includes(debouncedSearch));
+    if (deferredSearch) {
+      d = d.filter((row: any) => (row.__search || '').includes(deferredSearch));
     }
-    if (sortKey) {
+    if (deferredSortKey) {
       d = [...d].sort((a: any, b: any) => {
-        const va = a[sortKey]; const vb = b[sortKey];
+        const va = a[deferredSortKey]; const vb = b[deferredSortKey];
         const na = parseFloat(va); const nb = parseFloat(vb);
-        if (!isNaN(na) && !isNaN(nb)) return sortAsc ? na - nb : nb - na;
-        return sortAsc ? String(va || '').localeCompare(String(vb || ''), 'tr') : String(vb || '').localeCompare(String(va || ''), 'tr');
+        if (!isNaN(na) && !isNaN(nb)) return deferredSortAsc ? na - nb : nb - na;
+        return deferredSortAsc ? String(va || '').localeCompare(String(vb || ''), 'tr') : String(vb || '').localeCompare(String(va || ''), 'tr');
       });
     }
     return d;
-  }, [reportData, debouncedSearch, sortKey, sortAsc]);
+  }, [reportData, deferredSearch, deferredSortKey, deferredSortAsc]);
 
   const toggleSort = (key: string) => { if (sortKey === key) setSortAsc(!sortAsc); else { setSortKey(key); setSortAsc(true); } };
 
@@ -517,27 +537,34 @@ export default function ReportsScreen() {
         </View>
       </Modal>
 
-      {/* PICKER MODAL (multiselect on-demand) */}
+      {/* PICKER MODAL (multiselect on-demand) — auto-sizes to content */}
       <Modal visible={showPickerModal} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '80%' }]}>
+          <View style={[{ backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%' }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text, flex: 1 }]}>{pickerFilter?.label}</Text>
               <TouchableOpacity onPress={() => setShowPickerModal(false)}><Ionicons name="checkmark" size={24} color={colors.primary} /></TouchableOpacity>
             </View>
-            <View style={{ paddingHorizontal: 12, paddingVertical: 8 }}>
-              <View style={[styles.searchInput, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Ionicons name="search" size={16} color={colors.textSecondary} />
-                <TextInput style={[{ flex: 1, fontSize: 13, color: colors.text }]} placeholder="Ara..." placeholderTextColor={colors.textSecondary} value={pickerSearch} onChangeText={setPickerSearch} />
+            {pickerOptions.length > 5 && !pickerLoading && (
+              <View style={{ paddingHorizontal: 12, paddingVertical: 8 }}>
+                <View style={[styles.searchInput, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                  <Ionicons name="search" size={16} color={colors.textSecondary} />
+                  <TextInput style={[{ flex: 1, fontSize: 13, color: colors.text, paddingVertical: 0 }]} placeholder="Ara..." placeholderTextColor={colors.textSecondary} value={pickerSearch} onChangeText={setPickerSearch} />
+                  {pickerSearch.length > 0 && (
+                    <TouchableOpacity onPress={() => setPickerSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
-            </View>
+            )}
             {pickerLoading ? (
               <View style={{ alignItems: 'center', paddingVertical: 40 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>Seçenekler yükleniyor...</Text></View>
             ) : (
               <FlatList
                 data={filteredPickerOpts}
                 keyExtractor={(item, idx) => String(idx)}
-                contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 20 }}
+                contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 20, paddingTop: pickerOptions.length > 5 ? 0 : 8 }}
                 renderItem={({ item }) => {
                   const sel = isPickerSelected(item.value);
                   return (
@@ -567,7 +594,24 @@ export default function ReportsScreen() {
             <View style={[styles.toolbar, { borderBottomColor: colors.border }]}>
               <View style={[styles.searchInput, { backgroundColor: colors.card, borderColor: colors.border, flex: 1 }]}>
                 <Ionicons name="search" size={14} color={colors.textSecondary} />
-                <TextInput style={[{ flex: 1, fontSize: 12, color: colors.text }]} placeholder="Ara..." placeholderTextColor={colors.textSecondary} value={searchFilter} onChangeText={setSearchFilter} />
+                <TextInput
+                  style={[{ flex: 1, fontSize: 12, color: colors.text, paddingVertical: 0 }]}
+                  placeholder="Ara..."
+                  placeholderTextColor={colors.textSecondary}
+                  value={searchFilter}
+                  onChangeText={setSearchFilter}
+                  returnKeyType="search"
+                />
+                {isProcessing && searchFilter.length > 0 ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : searchFilter.length > 0 ? (
+                  <TouchableOpacity
+                    onPress={() => { setSearchFilter(''); setDebouncedSearch(''); }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+                  </TouchableOpacity>
+                ) : null}
               </View>
               <TouchableOpacity style={[styles.exportBtn, { backgroundColor: colors.success + '18' }]} onPress={exportExcel} disabled={exportLoading}>
                 {exportLoading ? <ActivityIndicator size="small" color={colors.success} /> : <Ionicons name="grid-outline" size={14} color={colors.success} />}
@@ -627,6 +671,12 @@ export default function ReportsScreen() {
             })()}
             <View style={{ paddingHorizontal: 12, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{reportLoading ? 'Çalıştırılıyor...' : `${processedData.length} kayıt${debouncedSearch && processedData.length !== reportData.length ? ` · toplam ${reportData.length}` : ''}`}</Text>
+              {isProcessing && !reportLoading && reportData.length > 0 && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={[{ fontSize: 10, color: colors.primary, fontWeight: '600' }]}>{sortKey !== deferredSortKey || sortAsc !== deferredSortAsc ? 'Sıralanıyor...' : 'İşleniyor...'}</Text>
+                </View>
+              )}
               {moreLoading && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: colors.primary + '18' }}>
                   <ActivityIndicator size="small" color={colors.primary} />
