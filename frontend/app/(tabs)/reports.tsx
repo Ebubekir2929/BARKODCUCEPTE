@@ -42,6 +42,10 @@ interface ReportDef {
   requireNarrowing?: boolean;
   requiredFilters?: string[]; // filter names that MUST have value
   cardLayout?: CardLayout;
+  summary?: {
+    cols: { key: string; label: string; type?: 'money' | 'number' }[];
+    totalsFromRow?: Record<string, string>; // map colKey -> rowKey to read POS-provided totals (else compute sum)
+  };
 }
 
 const FIYAT_LISTELERI: ReportDef = {
@@ -120,6 +124,10 @@ const today = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
+const firstOfYear = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-01-01`;
+};
 const firstOfMonth = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
@@ -132,7 +140,7 @@ const SATIS_ADET_KAR: ReportDef = {
   description: 'Satış adet, tutar ve kâr analizi',
   datasetKey: 'rap_satis_adet_kar_web',
   defaultParams: {
-    BASTARIH: firstOfMonth(),
+    BASTARIH: firstOfYear(),
     BITTARIH: today(),
     KdvDahil: 1,
     FisTipi: 0,
@@ -144,7 +152,27 @@ const SATIS_ADET_KAR: ReportDef = {
     PageSize: 500,
     ...STOK_FILTER_DEFAULTS,
   },
-  requireNarrowing: true,
+  requireNarrowing: false,
+  requiredFilters: ['Lokasyon'],
+  summary: {
+    cols: [
+      { key: 'SATIS_MIKTAR', label: 'Miktar', type: 'number' },
+      { key: 'FIYAT', label: 'Satış Fiyat', type: 'money' },
+      { key: 'SATIS_TUTARI', label: 'Satış Tutar', type: 'money' },
+      { key: 'SON_ALIS_FIYATI', label: 'Alış Fiyat', type: 'money' },
+      { key: 'ALIS_TUTARI', label: 'Alış Tutar', type: 'money' },
+      { key: 'KAR_TUTAR', label: 'Kâr Tutar', type: 'money' },
+      { key: 'ORAN', label: 'Kâr %', type: 'number' },
+    ],
+    // Use POS-provided totals when available (it already returns TOPLAM_* on every row)
+    totalsFromRow: {
+      SATIS_MIKTAR: 'TOPLAM_SATIS_MIKTAR',
+      SATIS_TUTARI: 'TOPLAM_SATIS_TUTARI',
+      ALIS_TUTARI: 'TOPLAM_ALIS_TUTARI',
+      KAR_TUTAR: 'TOPLAM_KAR_TUTAR',
+      ORAN: 'TOPLAM_ORAN',
+    },
+  },
   cardLayout: {
     title: 'AD',
     code: 'KOD',
@@ -913,6 +941,7 @@ export default function ReportsScreen() {
                 windowSize={7}
                 removeClippedSubviews={Platform.OS !== 'web'}
                 updateCellsBatchingPeriod={50}
+                ListHeaderComponent={selectedReport?.summary ? <ReportSummaryPanel data={reportData} config={selectedReport.summary} colors={colors} /> : null}
                 renderItem={({ item }) => (
                   <ReportCard item={item} report={selectedReport} colors={colors} renderValue={renderValue} />
                 )}
@@ -1067,3 +1096,84 @@ const ReportCardComp: React.FC<ReportCardProps> = ({ item, report, colors, rende
   );
 };
 const ReportCard = memo(ReportCardComp, (prev, next) => prev.item === next.item && prev.report === next.report && prev.colors === next.colors);
+
+// Summary panel (TOPLAM / MIN / MAX) shown at top of result list
+interface ReportSummaryPanelProps {
+  data: any[];
+  config: { cols: { key: string; label: string; type?: 'money' | 'number' }[]; totalsFromRow?: Record<string, string> };
+  colors: any;
+}
+const ReportSummaryPanelComp: React.FC<ReportSummaryPanelProps> = ({ data, config, colors }) => {
+  const stats = useMemo(() => {
+    if (!data || data.length === 0) return null;
+    const out: Record<string, { total: number; min: number; max: number }> = {};
+    // Use POS-provided totals on first row when available, else sum across rows
+    const firstRow = data[0] || {};
+    for (const col of config.cols) {
+      const totalKey = config.totalsFromRow?.[col.key];
+      const vals = data.map(r => parseFloat(String(r[col.key] ?? '0'))).filter(n => !isNaN(n));
+      const total = totalKey != null
+        ? parseFloat(String(firstRow[totalKey] ?? '0')) || vals.reduce((a, b) => a + b, 0)
+        : vals.reduce((a, b) => a + b, 0);
+      const min = vals.length ? Math.min(...vals) : 0;
+      const max = vals.length ? Math.max(...vals) : 0;
+      out[col.key] = { total, min, max };
+    }
+    return out;
+  }, [data, config]);
+
+  if (!stats) return null;
+
+  const fmt = (v: number, type?: 'money' | 'number') => {
+    if (type === 'money') return `₺${v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return v.toLocaleString('tr-TR', { maximumFractionDigits: 2 });
+  };
+
+  return (
+    <View style={[summaryStyles.wrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <View style={[summaryStyles.headerRow, { borderBottomColor: colors.border }]}>
+        <Text style={[summaryStyles.rowLabel, { color: colors.textSecondary, width: 62 }]}></Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          {config.cols.map(c => (
+            <View key={c.key} style={summaryStyles.cell}>
+              <Text style={[summaryStyles.colLabel, { color: colors.textSecondary }]} numberOfLines={1}>{c.label}</Text>
+            </View>
+          ))}
+        </ScrollView>
+      </View>
+      {([
+        { key: 'total', label: 'TOPLAM', color: colors.primary, bg: colors.primary + '12' },
+        { key: 'min', label: 'EN DÜŞÜK', color: colors.error, bg: colors.error + '10' },
+        { key: 'max', label: 'EN YÜKSEK', color: colors.success, bg: colors.success + '10' },
+      ] as const).map(stat => (
+        <View key={stat.key} style={[summaryStyles.row, { backgroundColor: stat.bg }]}>
+          <View style={[summaryStyles.rowLabelBox, { width: 62 }]}>
+            <Text style={[summaryStyles.rowLabel, { color: stat.color, fontWeight: '800' }]} numberOfLines={1}>{stat.label}</Text>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            {config.cols.map(c => (
+              <View key={c.key} style={summaryStyles.cell}>
+                <Text style={[summaryStyles.cellVal, { color: colors.text }]} numberOfLines={1}>
+                  {fmt(stats[c.key][stat.key] || 0, c.type)}
+                </Text>
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      ))}
+    </View>
+  );
+};
+const ReportSummaryPanel = memo(ReportSummaryPanelComp, (prev, next) => prev.data === next.data && prev.config === next.config && prev.colors === next.colors);
+
+const summaryStyles = StyleSheet.create({
+  wrap: { borderRadius: 12, borderWidth: 1, overflow: 'hidden', marginBottom: 10 },
+  headerRow: { flexDirection: 'row', paddingVertical: 6, paddingHorizontal: 8, borderBottomWidth: 1 },
+  row: { flexDirection: 'row', paddingVertical: 7, paddingHorizontal: 8, alignItems: 'center' },
+  rowLabelBox: { justifyContent: 'center' },
+  rowLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
+  cell: { minWidth: 92, paddingHorizontal: 6 },
+  colLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.2 },
+  cellVal: { fontSize: 12, fontWeight: '700', textAlign: 'right' },
+});
+
