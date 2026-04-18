@@ -219,46 +219,61 @@ async def register(data: UserRegister):
 
 @router.post("/login", response_model=TokenResponse)
 async def login(data: UserLogin):
+    identifier = (data.email or "").strip()
+    if not identifier or not data.password:
+        raise HTTPException(status_code=401, detail="E-posta/kullanıcı adı ve şifre gerekli")
+
     pool = await get_patron_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            # Fetch ALL candidates — username may be duplicated in this legacy DB
             await cur.execute("""
-                SELECT user_id, username, email, full_name, password, VergiNo, tenant_id, has_tables, 
+                SELECT user_id, username, email, full_name, password, VergiNo, tenant_id, has_tables,
                        BaslangicTarih, BitisTarih, active
                 FROM users WHERE email = %s OR username = %s
-            """, (data.email, data.email))
-            row = await cur.fetchone()
-    
-    if not row:
-        raise HTTPException(status_code=401, detail="E-posta veya şifre hatalı")
-    
-    user_id, username, email, full_name, stored_hash, vergi_no, tenant_id, has_tables, start_date, end_date, active = row
-    
-    # Verify password (SHA1)
-    if sha1_hash(data.password) != stored_hash.lower():
-        raise HTTPException(status_code=401, detail="E-posta veya şifre hatalı")
-    
+                ORDER BY (email = %s) DESC, active DESC, user_id DESC
+            """, (identifier, identifier, identifier))
+            rows = await cur.fetchall()
+
+    if not rows:
+        raise HTTPException(status_code=401, detail="Kullanıcı adı/e-posta veya şifre hatalı")
+
+    provided_hash = sha1_hash(data.password)
+
+    # Iterate through all candidates and find one whose password matches
+    matched = None
+    for row in rows:
+        stored_hash = row[4]
+        if stored_hash and provided_hash == stored_hash.lower():
+            matched = row
+            break
+
+    if not matched:
+        raise HTTPException(status_code=401, detail="Kullanıcı adı/e-posta veya şifre hatalı")
+
+    user_id, username, email, full_name, _stored_hash, vergi_no, tenant_id, has_tables, start_date, end_date, active = matched
+
     # Check active
     if not active:
         raise HTTPException(status_code=403, detail="Hesabınız aktif değil. Lütfen yöneticinize başvurun.")
-    
+
     # Check license
     license_status = get_license_status(start_date, end_date)
     if not license_status.is_valid:
         raise HTTPException(status_code=403, detail="Lisans süreniz dolmuştur. Lütfen lisansınızı yenileyin.")
-    
+
     user_dict = {
         "user_id": user_id, "username": username, "email": email,
         "full_name": full_name, "tax_number": vergi_no or "",
         "tenant_id": tenant_id, "has_tables": has_tables,
         "start_date": start_date, "end_date": end_date, "active": active,
     }
-    
+
     token = create_access_token({"user_id": user_id, "email": email})
     user_resp = await build_user_response(user_dict)
-    
-    logger.info(f"User logged in via MySQL: {email}")
-    
+
+    logger.info(f"User logged in via MySQL: {email} (identifier={identifier})")
+
     return TokenResponse(access_token=token, user=user_resp, license=license_status)
 
 
