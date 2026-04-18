@@ -146,7 +146,7 @@ const SATIS_ADET_KAR: ReportDef = {
     FisTipi: 0,
     Pc_Ad: '',
     Lokasyon: '',
-    MaliyetYoksaSatisGelsin: 1,
+    MaliyetYoksaSatisGelsin: 0,
     SarfFireGelmesin: 0,
     Page: 1,
     PageSize: 500,
@@ -1131,36 +1131,41 @@ const ReportSummaryPanelComp: React.FC<ReportSummaryPanelProps> = ({ data, confi
 
   return (
     <View style={[summaryStyles.wrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-      <View style={[summaryStyles.headerRow, { borderBottomColor: colors.border }]}>
-        <Text style={[summaryStyles.rowLabel, { color: colors.textSecondary, width: 62 }]}></Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          {config.cols.map(c => (
-            <View key={c.key} style={summaryStyles.cell}>
-              <Text style={[summaryStyles.colLabel, { color: colors.textSecondary }]} numberOfLines={1}>{c.label}</Text>
-            </View>
-          ))}
-        </ScrollView>
-      </View>
-      {([
-        { key: 'total', label: 'TOPLAM', color: colors.primary, bg: colors.primary + '12' },
-        { key: 'min', label: 'EN DÜŞÜK', color: colors.error, bg: colors.error + '10' },
-        { key: 'max', label: 'EN YÜKSEK', color: colors.success, bg: colors.success + '10' },
-      ] as const).map(stat => (
-        <View key={stat.key} style={[summaryStyles.row, { backgroundColor: stat.bg }]}>
-          <View style={[summaryStyles.rowLabelBox, { width: 62 }]}>
-            <Text style={[summaryStyles.rowLabel, { color: stat.color, fontWeight: '800' }]} numberOfLines={1}>{stat.label}</Text>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+        <View>
+          {/* Column header row */}
+          <View style={[summaryStyles.headerRow, { borderBottomColor: colors.border }]}>
+            <View style={summaryStyles.labelCol} />
             {config.cols.map(c => (
               <View key={c.key} style={summaryStyles.cell}>
-                <Text style={[summaryStyles.cellVal, { color: colors.text }]} numberOfLines={1}>
-                  {fmt(stats[c.key][stat.key] || 0, c.type)}
-                </Text>
+                <Text style={[summaryStyles.colLabel, { color: colors.textSecondary }]} numberOfLines={1}>{c.label}</Text>
               </View>
             ))}
-          </ScrollView>
+          </View>
+          {/* Data rows */}
+          {([
+            { key: 'total', label: 'TOPLAM', icon: 'stats-chart' as const, color: colors.primary, bg: colors.primary + '10' },
+            { key: 'min', label: 'EN DÜŞÜK', icon: 'trending-down' as const, color: colors.error, bg: colors.error + '0D' },
+            { key: 'max', label: 'EN YÜKSEK', icon: 'trending-up' as const, color: colors.success, bg: colors.success + '0D' },
+          ] as const).map((stat, idx) => (
+            <View key={stat.key} style={[summaryStyles.row, { backgroundColor: stat.bg, borderTopColor: colors.border, borderTopWidth: idx === 0 ? 0 : StyleSheet.hairlineWidth }]}>
+              <View style={summaryStyles.labelCol}>
+                <View style={[summaryStyles.pill, { backgroundColor: stat.color }]}>
+                  <Ionicons name={stat.icon} size={11} color="#fff" />
+                  <Text style={summaryStyles.pillText} numberOfLines={1}>{stat.label}</Text>
+                </View>
+              </View>
+              {config.cols.map(c => (
+                <View key={c.key} style={summaryStyles.cell}>
+                  <Text style={[summaryStyles.cellVal, { color: colors.text }]} numberOfLines={1}>
+                    {fmt(stats[c.key][stat.key] || 0, c.type)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          ))}
         </View>
-      ))}
+      </ScrollView>
     </View>
   );
 };
@@ -1168,12 +1173,13 @@ const ReportSummaryPanel = memo(ReportSummaryPanelComp, (prev, next) => prev.dat
 
 const summaryStyles = StyleSheet.create({
   wrap: { borderRadius: 12, borderWidth: 1, overflow: 'hidden', marginBottom: 10 },
-  headerRow: { flexDirection: 'row', paddingVertical: 6, paddingHorizontal: 8, borderBottomWidth: 1 },
-  row: { flexDirection: 'row', paddingVertical: 7, paddingHorizontal: 8, alignItems: 'center' },
-  rowLabelBox: { justifyContent: 'center' },
-  rowLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3 },
-  cell: { minWidth: 92, paddingHorizontal: 6 },
-  colLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.2 },
-  cellVal: { fontSize: 12, fontWeight: '700', textAlign: 'right' },
+  headerRow: { flexDirection: 'row', paddingVertical: 8, paddingHorizontal: 4, alignItems: 'center', borderBottomWidth: 1 },
+  row: { flexDirection: 'row', paddingVertical: 9, paddingHorizontal: 4, alignItems: 'center' },
+  labelCol: { width: 106, paddingLeft: 8 },
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, alignSelf: 'flex-start' },
+  pillText: { color: '#fff', fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
+  cell: { minWidth: 96, paddingHorizontal: 6, alignItems: 'flex-end' },
+  colLabel: { fontSize: 10, fontWeight: '700', letterSpacing: 0.3, textAlign: 'right' },
+  cellVal: { fontSize: 12, fontWeight: '700', textAlign: 'right', fontVariant: ['tabular-nums'] },
 });
 
