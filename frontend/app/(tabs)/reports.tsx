@@ -22,11 +22,22 @@ interface FilterDef {
   required?: boolean; group?: string;
 }
 interface ColDef { key: string; label: string; type?: 'money' | 'number' | 'bool'; }
+interface CardLayout {
+  title: string;          // main product/entity name (e.g. 'AD')
+  code?: string;          // secondary code (e.g. 'KOD')
+  amount?: string;        // right-side big amount (e.g. 'FIYAT')
+  amountType?: 'money' | 'number';
+  amountCurrency?: string;// key for currency label (e.g. 'DOVIZ_AD')
+  amountLabel?: string;   // optional label below amount (e.g. 'Fiyat')
+  chips?: { key: string; label?: string; type?: 'bool' | 'text' | 'number' }[]; // quick-info pills
+  meta?: { key: string; label?: string; type?: 'text' | 'number' | 'money' }[]; // footer info
+}
 interface ReportDef {
   key: string; title: string; icon: keyof typeof Ionicons.glyphMap; description: string;
   datasetKey: string; defaultParams: Record<string, any>;
   columns: ColDef[]; filters: FilterDef[];
   requireNarrowing?: boolean;
+  cardLayout?: CardLayout;
 }
 
 const FIYAT_LISTELERI: ReportDef = {
@@ -41,6 +52,26 @@ const FIYAT_LISTELERI: ReportDef = {
     StokOzelKod6: '', StokOzelKod7: '', StokOzelKod8: '', StokOzelKod9: '',
   },
   requireNarrowing: true,
+  cardLayout: {
+    title: 'AD',
+    code: 'KOD',
+    amount: 'FIYAT',
+    amountType: 'money',
+    amountCurrency: 'DOVIZ_AD',
+    amountLabel: 'Satış Fiyatı',
+    chips: [
+      { key: 'STOK_FIYAT_AD' },
+      { key: 'KDV_DAHILMI', label: 'KDV Dahil', type: 'bool' },
+      { key: 'STOK_BIRIM' },
+      { key: 'MEVCUT', label: 'Mevcut', type: 'number' },
+    ],
+    meta: [
+      { key: 'STOK_CINSI' },
+      { key: 'STOK_GRUP', label: 'Grup' },
+      { key: 'STOK_MARKA', label: 'Marka' },
+      { key: 'FIYAT_YEREL', label: 'Yerel', type: 'money' },
+    ],
+  },
   columns: [
     { key: 'KOD', label: 'Kod' }, { key: 'AD', label: 'Ürün Adı' },
     { key: 'STOK_FIYAT_AD', label: 'Fiyat Adı' }, { key: 'DOVIZ_AD', label: 'Döviz' },
@@ -411,14 +442,23 @@ export default function ReportsScreen() {
                 <Text style={[{ fontSize: 10, color: colors.error, fontWeight: '600' }]}>PDF</Text>
               </TouchableOpacity>
             </View>
-            {/* Sort headers */}
+            {/* Sort headers - only show for reports without cardLayout */}
             {selectedReport && !reportLoading && processedData.length > 0 && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 32, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                <View style={{ flexDirection: 'row', paddingHorizontal: 12 }}>
-                  {selectedReport.columns.map(col => (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ maxHeight: 36, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                <View style={{ flexDirection: 'row', paddingHorizontal: 12, alignItems: 'center' }}>
+                  <Text style={[{ fontSize: 10, color: colors.textSecondary, marginRight: 8, marginTop: 6 }]}>Sırala:</Text>
+                  {(selectedReport.cardLayout
+                    ? [
+                        { key: selectedReport.cardLayout.title, label: 'Ad' },
+                        selectedReport.cardLayout.code ? { key: selectedReport.cardLayout.code, label: 'Kod' } : null,
+                        selectedReport.cardLayout.amount ? { key: selectedReport.cardLayout.amount, label: selectedReport.cardLayout.amountLabel || 'Tutar' } : null,
+                        ...(selectedReport.cardLayout.chips || []).slice(0, 3).map(c => ({ key: c.key, label: c.label || selectedReport.columns.find(col => col.key === c.key)?.label || c.key })),
+                      ].filter(Boolean) as { key: string; label: string }[]
+                    : selectedReport.columns
+                  ).map(col => (
                     <TouchableOpacity key={col.key} style={[styles.sortHeader, sortKey === col.key && { backgroundColor: colors.primary + '15' }]} onPress={() => toggleSort(col.key)}>
-                      <Text style={[{ fontSize: 10, fontWeight: '700', color: sortKey === col.key ? colors.primary : colors.textSecondary }]}>{col.label}</Text>
-                      {sortKey === col.key && <Ionicons name={sortAsc ? 'arrow-up' : 'arrow-down'} size={10} color={colors.primary} />}
+                      <Text style={[{ fontSize: 11, fontWeight: '700', color: sortKey === col.key ? colors.primary : colors.textSecondary }]}>{col.label}</Text>
+                      {sortKey === col.key && <Ionicons name={sortAsc ? 'arrow-up' : 'arrow-down'} size={11} color={colors.primary} />}
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -428,17 +468,102 @@ export default function ReportsScreen() {
             {reportLoading ? (
               <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary }]}>POS'tan veri alınıyor...</Text></View>
             ) : processedData.length > 0 ? (
-              <FlatList data={processedData} keyExtractor={(_, idx) => String(idx)} contentContainerStyle={{ paddingBottom: 30 }}
-                renderItem={({ item, index }) => (
-                  <View style={[styles.resultRow, { backgroundColor: index % 2 === 0 ? colors.card : colors.background, borderBottomColor: colors.border }]}>
-                    {(selectedReport?.columns || []).map(col => (
-                      <View key={col.key} style={styles.resultCell}>
-                        <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{col.label}</Text>
-                        <Text style={[{ fontSize: 12, fontWeight: '600', color: col.type === 'money' ? colors.primary : colors.text }]} numberOfLines={1}>{renderValue(item[col.key], col)}</Text>
+              <FlatList data={processedData} keyExtractor={(_, idx) => String(idx)} contentContainerStyle={{ padding: 12, paddingBottom: 30, gap: 8 }}
+                renderItem={({ item }) => {
+                  const cl = selectedReport?.cardLayout;
+                  if (cl) {
+                    const titleVal = String(item[cl.title] ?? '-');
+                    const codeVal = cl.code ? String(item[cl.code] ?? '') : '';
+                    const amountRaw = cl.amount ? item[cl.amount] : null;
+                    const amountCurrency = cl.amountCurrency ? String(item[cl.amountCurrency] ?? '') : '';
+                    const amountText = cl.amount
+                      ? (cl.amountType === 'money'
+                          ? `₺${parseFloat(amountRaw || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                          : parseFloat(amountRaw || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2 }))
+                      : '';
+                    return (
+                      <View style={[cardStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                        <View style={cardStyles.cardTop}>
+                          <View style={{ flex: 1, paddingRight: 12 }}>
+                            {codeVal !== '' && (
+                              <Text style={[cardStyles.code, { color: colors.textSecondary }]} numberOfLines={1}>{codeVal}</Text>
+                            )}
+                            <Text style={[cardStyles.title, { color: colors.text }]} numberOfLines={2}>{titleVal}</Text>
+                          </View>
+                          {cl.amount && (
+                            <View style={{ alignItems: 'flex-end' }}>
+                              <Text style={[cardStyles.amount, { color: colors.primary }]} numberOfLines={1}>{amountText}</Text>
+                              {amountCurrency !== '' && (
+                                <Text style={[cardStyles.amountCurrency, { color: colors.textSecondary }]}>{amountCurrency}</Text>
+                              )}
+                            </View>
+                          )}
+                        </View>
+                        {cl.chips && cl.chips.length > 0 && (
+                          <View style={cardStyles.chipsRow}>
+                            {cl.chips.map(c => {
+                              const v = item[c.key];
+                              if (v === undefined || v === null || v === '') return null;
+                              const col = selectedReport?.columns.find(x => x.key === c.key);
+                              let txt = '';
+                              let bg = colors.primary + '12';
+                              let fg = colors.primary;
+                              if (c.type === 'bool' || col?.type === 'bool') {
+                                const isTrue = v === true || v === 1 || v === '1';
+                                txt = `${c.label || col?.label || c.key}: ${isTrue ? 'Evet' : 'Hayır'}`;
+                                bg = isTrue ? (colors.success + '20') : (colors.error + '18');
+                                fg = isTrue ? colors.success : colors.error;
+                              } else if (c.type === 'number' || col?.type === 'number') {
+                                txt = `${c.label || col?.label || c.key}: ${parseFloat(String(v || '0')).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}`;
+                              } else {
+                                txt = c.label ? `${c.label}: ${v}` : String(v);
+                              }
+                              return (
+                                <View key={c.key} style={[cardStyles.chip, { backgroundColor: bg }]}>
+                                  <Text style={[cardStyles.chipText, { color: fg }]} numberOfLines={1}>{txt}</Text>
+                                </View>
+                              );
+                            })}
+                          </View>
+                        )}
+                        {cl.meta && cl.meta.length > 0 && (
+                          <View style={[cardStyles.metaRow, { borderTopColor: colors.border }]}>
+                            {cl.meta.map(m => {
+                              const v = item[m.key];
+                              if (v === undefined || v === null || v === '' || v === '-') return null;
+                              const col = selectedReport?.columns.find(x => x.key === m.key);
+                              let val = String(v);
+                              if (m.type === 'money' || col?.type === 'money') {
+                                val = `₺${parseFloat(String(v || '0')).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`;
+                              } else if (m.type === 'number' || col?.type === 'number') {
+                                val = parseFloat(String(v || '0')).toLocaleString('tr-TR', { maximumFractionDigits: 2 });
+                              }
+                              return (
+                                <View key={m.key} style={cardStyles.metaItem}>
+                                  <Text style={[cardStyles.metaLabel, { color: colors.textSecondary }]}>{m.label || col?.label || m.key}</Text>
+                                  <Text style={[cardStyles.metaValue, { color: colors.text }]} numberOfLines={1}>{val}</Text>
+                                </View>
+                              );
+                            })}
+                          </View>
+                        )}
                       </View>
-                    ))}
-                  </View>
-                )}
+                    );
+                  }
+                  // Fallback: generic 2-col grid layout
+                  return (
+                    <View style={[cardStyles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                        {(selectedReport?.columns || []).map(col => (
+                          <View key={col.key} style={styles.resultCell}>
+                            <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{col.label}</Text>
+                            <Text style={[{ fontSize: 12, fontWeight: '600', color: col.type === 'money' ? colors.primary : colors.text }]} numberOfLines={1}>{renderValue(item[col.key], col)}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  );
+                }}
               />
             ) : (
               <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 }}><Ionicons name="document-text-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>Sonuç bulunamadı</Text></View>
@@ -481,4 +606,20 @@ const styles = StyleSheet.create({
   resultCell: { minWidth: '40%', flex: 1 },
   exportOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', zIndex: 9998 },
   exportBox: { borderRadius: 16, padding: 30, alignItems: 'center', minWidth: 200 },
+});
+
+const cardStyles = StyleSheet.create({
+  card: { borderRadius: 12, borderWidth: 1, padding: 12 },
+  cardTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
+  code: { fontSize: 11, fontWeight: '600', letterSpacing: 0.3, marginBottom: 2 },
+  title: { fontSize: 15, fontWeight: '700', lineHeight: 20 },
+  amount: { fontSize: 18, fontWeight: '800', letterSpacing: -0.3 },
+  amountCurrency: { fontSize: 10, fontWeight: '600', marginTop: 2 },
+  chipsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 },
+  chip: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  chipText: { fontSize: 11, fontWeight: '600' },
+  metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginTop: 10, paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
+  metaItem: { minWidth: 70 },
+  metaLabel: { fontSize: 9, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 1 },
+  metaValue: { fontSize: 12, fontWeight: '600' },
 });
