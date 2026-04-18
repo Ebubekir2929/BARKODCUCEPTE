@@ -13,6 +13,7 @@ from datetime import datetime
 # Import routes
 from routes.auth import router as auth_router, set_db as set_auth_db
 from routes.data import router as data_router
+from routes.notifications import router as notifications_router, ensure_tokens_table
 from services import init_patron_pool, init_data_pool, close_pools
 
 
@@ -63,6 +64,7 @@ async def get_status_checks():
 # Include auth and data routes under /api
 api_router.include_router(auth_router)
 api_router.include_router(data_router)
+api_router.include_router(notifications_router)
 
 # Include the router in the main app
 app.include_router(api_router)
@@ -80,6 +82,10 @@ async def startup():
         logging.info("kasacepteweb MySQL pool ready")
     except Exception as e:
         logging.error(f"Failed to init data pool: {e}")
+    try:
+        await ensure_tokens_table()
+    except Exception as e:
+        logging.error(f"Failed to init push tokens table: {e}")
 
 app.add_middleware(
     CORSMiddleware,

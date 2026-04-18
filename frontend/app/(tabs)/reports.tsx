@@ -24,6 +24,7 @@ interface FilterDef {
   options?: { value: any; label: string }[];
   required?: boolean; group?: string;
   placeholder?: string;
+  numeric?: boolean; // text input that should use numeric keyboard + number conversion
 }
 interface ColDef { key: string; label: string; type?: 'money' | 'number' | 'bool'; }
 interface CardLayout {
@@ -398,9 +399,252 @@ const OTHER_REPORTS: ReportDef[] = [
       { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre', required: true },
     ],
   },
-  { key: 'personel_satis', title: 'Personel Satış Özet', icon: 'people-outline', description: 'Personel satış performansı', datasetKey: 'rap_personel_satis_ozet_web', defaultParams: { BASTARIH: '', BITTARIH: '', Page: 1, PageSize: 500 }, columns: [{ key: 'PERSONEL', label: 'Personel' }, { key: 'TOPLAM', label: 'Toplam', type: 'money' }, { key: 'NAKIT', label: 'Nakit', type: 'money' }, { key: 'KREDI_KARTI', label: 'K.Kartı', type: 'money' }, { key: 'FIS_SAYISI', label: 'Fiş', type: 'number' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }, { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre' }] },
-  { key: 'fis_kalem', title: 'Fiş Kalem Listesi', icon: 'receipt-outline', description: 'Fiş ve kalem detayları', datasetKey: 'rap_fis_kalem_listesi_web', defaultParams: { BASTARIH: '', BITTARIH: '', Page: 1, PageSize: 500 }, columns: [{ key: 'TARIH', label: 'Tarih' }, { key: 'STOK_ADI', label: 'Ürün' }, { key: 'MIKTAR', label: 'Miktar', type: 'number' }, { key: 'TUTAR', label: 'Tutar', type: 'money' }, { key: 'LOKASYON', label: 'Lokasyon' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }, { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre' }] },
-  { key: 'cari_ekstre', title: 'Cari Hesap Ekstresi', icon: 'wallet-outline', description: 'Borç/alacak ekstresi', datasetKey: 'rap_cari_hesap_ekstresi_web', defaultParams: { BASTARIH: '', BITTARIH: '', Page: 1, PageSize: 500 }, columns: [{ key: 'CARI_ADI', label: 'Cari' }, { key: 'TARIH', label: 'Tarih' }, { key: 'BORC', label: 'Borç', type: 'money' }, { key: 'ALACAK', label: 'Alacak', type: 'money' }, { key: 'BAKIYE', label: 'Bakiye', type: 'money' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }] },
+  // === PERSONEL SATIŞ ÖZET ===
+  {
+    key: 'personel_satis', title: 'Personel Satış Özet', icon: 'people-outline',
+    description: 'Personel bazlı satış, fiş, kişi analizi',
+    datasetKey: 'rap_personel_satis_ozet_web',
+    defaultParams: {
+      BASTARIH: firstOfMonth(), BITTARIH: today(),
+      Personel: '', BelgePersoneli: 1, Lokasyon: '', Proje: '', Dovizler: '',
+      KdvDahil: 1, FisTuru: '',
+      Cariler: '', CariTur: '', CariGrup: '',
+      CariOzelKod1: '', CariOzelKod2: '', CariOzelKod3: '', CariOzelKod4: '', CariOzelKod5: '',
+      Page: 1, PageSize: 500,
+      ...STOK_FILTER_DEFAULTS,
+    },
+    requireNarrowing: false, requiredFilters: ['Lokasyon'],
+    summary: {
+      cols: [
+        { key: 'MIKTAR_NET', label: 'Miktar Net', type: 'number' },
+        { key: 'TUTAR_NET', label: 'Tutar Net', type: 'money' },
+        { key: 'ISKONTO_TUTAR', label: 'İskonto', type: 'money' },
+        { key: 'FIS_ADET', label: 'Fiş', type: 'number' },
+        { key: 'KISI', label: 'Kişi', type: 'number' },
+        { key: 'NOKTA', label: 'Nokta', type: 'number' },
+      ],
+      totalsFromRow: {
+        MIKTAR_NET: 'TOPLAM_MIKTAR_NET', TUTAR_NET: 'TOPLAM_TUTAR_NET',
+        ISKONTO_TUTAR: 'TOPLAM_ISKONTO_TUTAR', FIS_ADET: 'TOPLAM_FIS_ADET',
+        KISI: 'TOPLAM_KISI', NOKTA: 'TOPLAM_NOKTA',
+      },
+    },
+    cardLayout: {
+      title: 'AD', code: 'KOD',
+      amount: 'TUTAR_NET', amountType: 'money', amountLabel: 'Net Satış',
+      chips: [
+        { key: 'FIS_ADET', label: 'Fiş', type: 'number' },
+        { key: 'KISI', label: 'Kişi', type: 'number' },
+        { key: 'ORAN', label: '%', type: 'number' },
+      ],
+      meta: [
+        { key: 'MIKTAR_NET', label: 'Miktar', type: 'number' },
+        { key: 'TUTAR_GIRIS', label: 'Giriş', type: 'money' },
+        { key: 'TUTAR_CIKIS', label: 'Çıkış', type: 'money' },
+        { key: 'ISKONTO_TUTAR', label: 'İskonto', type: 'money' },
+        { key: 'NOKTA', label: 'Nokta', type: 'number' },
+      ],
+    },
+    columns: [
+      { key: 'KOD', label: 'Kod' }, { key: 'AD', label: 'Personel' },
+      { key: 'MIKTAR_CIKIS', label: 'Miktar Çıkış', type: 'number' },
+      { key: 'MIKTAR_GIRIS', label: 'Miktar Giriş', type: 'number' },
+      { key: 'MIKTAR_BEDELSIZ', label: 'Bedelsiz', type: 'number' },
+      { key: 'MIKTAR_NET', label: 'Miktar Net', type: 'number' },
+      { key: 'TUTAR_CIKIS', label: 'Tutar Çıkış', type: 'money' },
+      { key: 'TUTAR_GIRIS', label: 'Tutar Giriş', type: 'money' },
+      { key: 'ISKONTO_TUTAR', label: 'İskonto', type: 'money' },
+      { key: 'TUTAR_NET', label: 'Tutar Net', type: 'money' },
+      { key: 'NOKTA', label: 'Nokta', type: 'number' },
+      { key: 'FIS_ADET', label: 'Fiş Adet', type: 'number' },
+      { key: 'KISI', label: 'Kişi', type: 'number' },
+      { key: 'ORAN', label: 'Oran %', type: 'number' },
+    ],
+    filters: [
+      { name: 'BASTARIH', label: 'Başlangıç Tarihi', type: 'date', group: 'Tarih' },
+      { name: 'BITTARIH', label: 'Bitiş Tarihi', type: 'date', group: 'Tarih' },
+      { name: 'KdvDahil', label: 'KDV', type: 'select_static', group: 'Seçenekler',
+        options: [{ value: 1, label: 'KDV Dahil' }, { value: 0, label: 'KDV Hariç' }] },
+      { name: 'BelgePersoneli', label: 'Belge Personeli', type: 'select_static', group: 'Seçenekler',
+        options: [{ value: 1, label: 'Evet' }, { value: 0, label: 'Hayır' }] },
+      { name: 'Personel', label: 'Personel', type: 'multiselect', source: 'PERSONEL', group: 'Filtre' },
+      { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre' },
+      { name: 'Proje', label: 'Proje', type: 'multiselect', source: 'PROJE', group: 'Filtre' },
+      { name: 'FisTuru', label: 'Fiş Türü', type: 'multiselect', source: 'FIS_TURU', group: 'Filtre' },
+      { name: 'Dovizler', label: 'Döviz', type: 'multiselect', source: 'DOVIZ_AD', group: 'Filtre' },
+      { name: 'Cariler', label: 'Cari', type: 'multiselect', source: 'CARI', group: 'Cari' },
+      { name: 'CariTur', label: 'Cari Tür', type: 'multiselect', source: 'CARI_TUR', group: 'Cari' },
+      { name: 'CariGrup', label: 'Cari Grup', type: 'multiselect', source: 'CARI_GRUP', group: 'Cari' },
+      ...STOK_FILTERS_UI,
+    ],
+  },
+  // === FIŞ KALEM LISTESI ===
+  {
+    key: 'fis_kalem', title: 'Fiş Kalem Listesi', icon: 'receipt-outline',
+    description: 'Detaylı fiş satır bazlı kalem listesi',
+    datasetKey: 'rap_fis_kalem_listesi_web',
+    defaultParams: {
+      BASTARIH: firstOfMonth(), BITTARIH: today(),
+      FisTuru: '', FisAltTuru: '', Lokasyon: '', Proje: '', BelgeNo: '',
+      Personel: '', Cariler: '', CariTur: '', CariGrup: '', Adresler: '', Temsilci: '',
+      CariOzelKod1: '', CariOzelKod2: '', CariOzelKod3: '', CariOzelKod4: '', CariOzelKod5: '',
+      FisOzelKod1: '', FisOzelKod2: '', FisOzelKod3: '', FisOzelKod4: '', FisOzelKod5: '',
+      Detayli: 0, Page: 1, PageSize: 500,
+      ...STOK_FILTER_DEFAULTS,
+    },
+    requireNarrowing: false, requiredFilters: ['Lokasyon'],
+    summary: {
+      cols: [
+        { key: 'MIKTAR_FIS', label: 'Miktar', type: 'number' },
+        { key: 'NET_TUTAR', label: 'Net Tutar', type: 'money' },
+        { key: 'KDV_TUTAR', label: 'KDV', type: 'money' },
+        { key: 'DAHIL_NET_TUTAR', label: 'Dahil Net', type: 'money' },
+        { key: 'SATIR_GENEL_TOPLAM', label: 'Genel Toplam', type: 'money' },
+      ],
+      totalsFromRow: {
+        MIKTAR_FIS: 'TOPLAM_MIKTAR', NET_TUTAR: 'TOPLAM_NET_TUTAR',
+        KDV_TUTAR: 'TOPLAM_KDV', DAHIL_NET_TUTAR: 'TOPLAM_DAHIL_NET_TUTAR',
+      },
+    },
+    cardLayout: {
+      title: 'STOK_AD', code: 'BELGENO',
+      amount: 'SATIR_GENEL_TOPLAM', amountType: 'money', amountLabel: 'Satır Toplam',
+      chips: [
+        { key: 'MIKTAR_FIS', label: 'Miktar', type: 'number' },
+        { key: 'STOK_BIRIM' },
+        { key: 'FIS_TURU' },
+      ],
+      meta: [
+        { key: 'FIS_TARIHI', label: 'Tarih' },
+        { key: 'LOKASYON', label: 'Lokasyon' },
+        { key: 'CARI_AD', label: 'Cari' },
+        { key: 'NET_FIYAT', label: 'Birim Fiyat', type: 'money' },
+        { key: 'NET_TUTAR', label: 'Net Tutar', type: 'money' },
+        { key: 'KDV_TUTAR', label: 'KDV', type: 'money' },
+        { key: 'STOK_KOD', label: 'Stok Kodu' },
+      ],
+    },
+    columns: [
+      { key: 'FIS_TARIHI', label: 'Tarih' }, { key: 'BELGENO', label: 'Belge No' },
+      { key: 'FIS_TURU', label: 'Fiş Türü' }, { key: 'FIS_ALT_TIPI', label: 'Alt Tür' },
+      { key: 'LOKASYON', label: 'Lokasyon' }, { key: 'CARI_KOD', label: 'Cari Kod' },
+      { key: 'CARI_AD', label: 'Cari' }, { key: 'STOK_KOD', label: 'Stok Kod' },
+      { key: 'STOK_AD', label: 'Stok' }, { key: 'STOK_BIRIM', label: 'Birim' },
+      { key: 'MIKTAR_FIS', label: 'Miktar', type: 'number' },
+      { key: 'NET_FIYAT', label: 'Net Fiyat', type: 'money' },
+      { key: 'NET_TUTAR', label: 'Net Tutar', type: 'money' },
+      { key: 'KDV_TUTAR', label: 'KDV', type: 'money' },
+      { key: 'DAHIL_NET_TUTAR', label: 'Dahil Net', type: 'money' },
+      { key: 'SATIR_GENEL_TOPLAM', label: 'Satır Toplam', type: 'money' },
+    ],
+    filters: [
+      { name: 'BASTARIH', label: 'Başlangıç Tarihi', type: 'date', group: 'Tarih' },
+      { name: 'BITTARIH', label: 'Bitiş Tarihi', type: 'date', group: 'Tarih' },
+      { name: 'BelgeNo', label: 'Belge No', type: 'text', group: 'Seçenekler', placeholder: 'Belge no...' },
+      { name: 'Detayli', label: 'Detaylı', type: 'select_static', group: 'Seçenekler',
+        options: [{ value: 0, label: 'Özet' }, { value: 1, label: 'Detaylı' }] },
+      { name: 'FisTuru', label: 'Fiş Türü', type: 'multiselect', source: 'FIS_TURU', group: 'Filtre' },
+      { name: 'FisAltTuru', label: 'Fiş Alt Tür', type: 'multiselect', source: 'FIS_ALT_TIPI', group: 'Filtre' },
+      { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre' },
+      { name: 'Proje', label: 'Proje', type: 'multiselect', source: 'PROJE', group: 'Filtre' },
+      { name: 'Personel', label: 'Personel', type: 'multiselect', source: 'PERSONEL', group: 'Filtre' },
+      { name: 'Cariler', label: 'Cari', type: 'multiselect', source: 'CARI', group: 'Cari' },
+      { name: 'CariTur', label: 'Cari Tür', type: 'multiselect', source: 'CARI_TUR', group: 'Cari' },
+      { name: 'CariGrup', label: 'Cari Grup', type: 'multiselect', source: 'CARI_GRUP', group: 'Cari' },
+      ...STOK_FILTERS_UI,
+    ],
+  },
+  // === CARI HESAP EKSTRESI ===
+  {
+    key: 'cari_ekstre', title: 'Cari Hesap Ekstresi', icon: 'wallet-outline',
+    description: 'Cari bazlı borç / alacak / bakiye hareketleri',
+    datasetKey: 'rap_cari_hesap_ekstresi_web',
+    defaultParams: {
+      BASTARIH: firstOfYear(), BITTARIH: `${today()} 23:59:59`,
+      BakiyeTip: 0, Proje: '', Lokasyon: '', AktifDurum: '',
+      Cariler: '', CariKodu: '', CariAdi: '',
+      CariTur: '', CariGrup: '', Temsilci: '', Sehir: '', CariRut: '',
+      CariOzelKod1: '', CariOzelKod2: '', CariOzelKod3: '', CariOzelKod4: '', CariOzelKod5: '',
+      Detayli: 0, BakiyeVermeyenHareketsizDevirlerGelmesin: 0,
+      MinBakiye: -99999999, MaxBakiye: 99999999,
+      Page: 1, PageSize: 500,
+    },
+    requireNarrowing: false, requiredFilters: ['Cariler'],
+    summary: {
+      cols: [
+        { key: 'BORC', label: 'Borç', type: 'money' },
+        { key: 'ALACAK', label: 'Alacak', type: 'money' },
+        { key: 'ACIK_FATURA', label: 'Açık Fatura', type: 'money' },
+        { key: 'ACIK_FIS', label: 'Açık Fiş', type: 'money' },
+        { key: 'ACIK_DIGER', label: 'Açık Diğer', type: 'money' },
+      ],
+      totalsFromRow: {
+        BORC: 'TOPLAM_BORC', ALACAK: 'TOPLAM_ALACAK',
+        ACIK_FATURA: 'TOPLAM_ACIK_FATURA', ACIK_FIS: 'TOPLAM_ACIK_FIS',
+        ACIK_DIGER: 'TOPLAM_ACIK_DIGER',
+      },
+    },
+    cardLayout: {
+      title: 'AD', code: 'KOD',
+      amount: 'RP_BAKIYE', amountType: 'money', amountLabel: 'Bakiye',
+      amountCurrency: 'DOVIZ_AD',
+      chips: [
+        { key: 'CARI_TUR' },
+        { key: 'FINANS_ISLEM_TURU' },
+        { key: 'BA', label: 'B/A' },
+      ],
+      meta: [
+        { key: 'TARIH', label: 'Tarih' },
+        { key: 'BELGENO', label: 'Belge No' },
+        { key: 'BORC', label: 'Borç', type: 'money' },
+        { key: 'ALACAK', label: 'Alacak', type: 'money' },
+        { key: 'ACIK_FATURA', label: 'Açık Fat.', type: 'money' },
+        { key: 'LOKASYON', label: 'Lokasyon' },
+        { key: 'CARI_PERSONEL', label: 'Personel' },
+      ],
+    },
+    columns: [
+      { key: 'KOD', label: 'Cari Kod' }, { key: 'AD', label: 'Cari Adı' },
+      { key: 'CARI_TUR', label: 'Cari Tür' }, { key: 'CARI_GRUP', label: 'Cari Grup' },
+      { key: 'DOVIZ_AD', label: 'Döviz' }, { key: 'TARIH', label: 'Tarih' },
+      { key: 'FINANS_ISLEM_TURU', label: 'İşlem' }, { key: 'BELGENO', label: 'Belge No' },
+      { key: 'BORC', label: 'Borç', type: 'money' },
+      { key: 'ALACAK', label: 'Alacak', type: 'money' },
+      { key: 'RP_BAKIYE', label: 'Bakiye', type: 'money' },
+      { key: 'RP_YEREL_BAKIYE', label: 'Yerel Bakiye', type: 'money' },
+      { key: 'ACIK_FATURA', label: 'Açık Fatura', type: 'money' },
+      { key: 'ACIK_FIS', label: 'Açık Fiş', type: 'money' },
+      { key: 'ACIK_DIGER', label: 'Açık Diğer', type: 'money' },
+      { key: 'LOKASYON', label: 'Lokasyon' },
+      { key: 'BA', label: 'B/A' },
+    ],
+    filters: [
+      { name: 'BASTARIH', label: 'Başlangıç Tarihi', type: 'date', group: 'Tarih' },
+      { name: 'BITTARIH', label: 'Bitiş Tarihi', type: 'date', group: 'Tarih' },
+      { name: 'BakiyeTip', label: 'Bakiye Tipi', type: 'select_static', group: 'Seçenekler',
+        options: [
+          { value: 0, label: 'Tümü' },
+          { value: 1, label: 'Borçlu' },
+          { value: 2, label: 'Alacaklı' },
+          { value: 3, label: 'Sıfır Bakiyeliler' },
+        ] },
+      { name: 'AktifDurum', label: 'Aktif Durum', type: 'select_static', group: 'Seçenekler',
+        options: [{ value: '', label: 'Tümü' }, { value: 1, label: 'Aktif' }, { value: 0, label: 'Pasif' }] },
+      { name: 'Detayli', label: 'Detaylı', type: 'select_static', group: 'Seçenekler',
+        options: [{ value: 0, label: 'Özet (Bakiye)' }, { value: 1, label: 'Detaylı (Hareketler)' }] },
+      { name: 'CariKodu', label: 'Cari Kodu', type: 'text', group: 'Cari', placeholder: 'Cari kodu...' },
+      { name: 'CariAdi', label: 'Cari Adı', type: 'text', group: 'Cari', placeholder: 'Cari adı...' },
+      { name: 'MinBakiye', label: 'Min Bakiye', type: 'text', group: 'Bakiye', placeholder: '-99999999', numeric: true },
+      { name: 'MaxBakiye', label: 'Max Bakiye', type: 'text', group: 'Bakiye', placeholder: '99999999', numeric: true },
+      { name: 'Cariler', label: 'Cari', type: 'multiselect', source: 'CARI', group: 'Cari' },
+      { name: 'CariTur', label: 'Cari Tür', type: 'multiselect', source: 'CARI_TUR', group: 'Cari' },
+      { name: 'CariGrup', label: 'Cari Grup', type: 'multiselect', source: 'CARI_GRUP', group: 'Cari' },
+      { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre' },
+      { name: 'Proje', label: 'Proje', type: 'multiselect', source: 'PROJE', group: 'Filtre' },
+      { name: 'Temsilci', label: 'Temsilci', type: 'multiselect', source: 'TEMSILCI', group: 'Filtre' },
+      { name: 'Sehir', label: 'Şehir', type: 'multiselect', source: 'SEHIR', group: 'Filtre' },
+    ],
+  },
 ];
 
 const ALL_REPORTS = [FIYAT_LISTELERI, ...OTHER_REPORTS];
@@ -571,7 +815,17 @@ export default function ReportsScreen() {
     // Build cache key from report key + filter values
     const baseParams: Record<string, any> = { ...selectedReport.defaultParams };
     Object.entries(filterValues).forEach(([k, v]) => {
-      if (v !== undefined && v !== null && v !== '') baseParams[k] = v;
+      if (v !== undefined && v !== null && v !== '') {
+        // Convert numeric filters (MinBakiye, MaxBakiye, etc.) to number
+        const filterDef = selectedReport.filters.find(f => f.name === k);
+        if (filterDef?.numeric && typeof v === 'string') {
+          const n = parseFloat(v);
+          if (!Number.isNaN(n)) baseParams[k] = n;
+          // If NaN, skip — keep the default (don't pass invalid number as string)
+        } else {
+          baseParams[k] = v;
+        }
+      }
     });
     const pageSize = Number(baseParams.PageSize || 500);
     const cacheKey = `${selectedReport.key}|${JSON.stringify(filterValues)}`;
@@ -952,6 +1206,7 @@ export default function ReportsScreen() {
                       onChangeText={v => setFilterValues(prev => ({ ...prev, [filter.name]: v }))}
                       placeholder={filter.placeholder || 'Metin girin...'} placeholderTextColor={colors.textSecondary}
                       autoCapitalize="none"
+                      keyboardType={filter.numeric ? 'numbers-and-punctuation' : 'default'}
                     />
                   ) : null}
                 </View>

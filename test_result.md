@@ -207,6 +207,24 @@ backend:
       - working: true
         agent: "testing"
         comment: "✅ TESTED: POST /api/data/report-run works correctly. Valid request with dataset_key='rap_fiyat_listeleri_web' and params {Aktif:1,Durum:0,Resimli:0,Page:1,PageSize:500,FiyatAd:<id>} returns HTTP 200 in ~3.5s with {ok:true, data:[], request_uid:'...'}. Tested all 3 FiyatAd IDs (1016/1017/1018) - all return empty data arrays (legitimate upstream empty price lists for this tenant, not a code issue). Error handling: missing tenant_id -> 400, missing dataset_key -> 400, invalid dataset_key -> 400 'Geçersiz rapor:...' (allowed_keys whitelist working), no auth -> 403. Backend logs show proper logging: 'Running report: rap_fiyat_listeleri_web with params: ...' and 'Report result: rap_fiyat_listeleri_web -> 0 rows'. sync.php proxy (request_create + polling) functioning."
+      - working: true
+        agent: "testing"
+        comment: "✅ REGRESSION RE-TESTED (2026-04-18): POST /api/data/report-run with dataset_key='rap_cari_hesap_ekstresi_web' (tenant d5587c87a7f9476fa82b83f40accd6c7) returns HTTP 200 in ~8.7s with 146 rows — matches main agent's reported baseline. Response shape OK:true with full row objects containing ACIKLAMA, ACIK_DIGER, ACIK_FATURA, ACIK_FIS, AD, ADRES, ALACAK, BA, BAGKUR_ORAN, ... Note: the review request's provided param list used incorrect field names (CariKod/CariAd/CariBolge/CariSektor/CariTipi/OzelKod/YetkiliSatici/DovizTip/Aciklama) which upstream POS silently ignores -> 0 rows. The ACTUAL frontend/upstream schema (reports.tsx line 562) is: Cariler/CariKodu/CariAdi/CariTur/CariGrup/Temsilci/Sehir/CariRut/CariOzelKod1-5/Proje/Lokasyon/AktifDurum. Updated /app/backend_test.py to use correct schema; regression now passes with 146 rows. No backend code change required — endpoint is working correctly; naming mismatch was only in the test spec."
+
+  - task: "Push Notifications API"
+    implemented: true
+    working: true
+    file: "routes/notifications.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Implemented 4 endpoints: POST /api/notifications/register-token (upsert token+platform+device_id for user in MySQL user_push_tokens), POST /api/notifications/unregister-token (soft-deactivate by token; empty token deactivates all user tokens), GET /api/notifications/my-tokens (returns {ok,tokens:[{token,platform,device_id,active,...}]}), POST /api/notifications/send-test (sends real push via Expo API for user's active tokens). MySQL table auto-created. Integrated in notificationService.ts on toggle."
+      - working: true
+        agent: "testing"
+        comment: "✅ FULL SUITE PASSED (2026-04-18, 10/10 including regression): Verified against https://satis-yonetim-5.preview.emergentagent.com/api with cakmak.ebubekir29@gmail.com. (1) register-token ExponentPushToken[test-abc-123] ios/test-device-001 -> 200 {ok:true}. (2) Idempotency: same payload second call -> 200 {ok:true}. (3) my-tokens -> 200, token found with active=true (total=2 tokens for user). (4) send-test {title:'Test',body:'Merhaba'} -> 200 {ok:true, sent:1, expo_response:{data:[{status:'error',message:'... not a valid Expo push token', details:{error:'DeviceNotRegistered'}}]}} — endpoint correctly returns ok:true even when Expo reports DeviceNotRegistered for fake token (as designed). (5) unregister-token -> 200 {ok:true}. (6) my-tokens after unregister -> token active=false (soft delete). (7) Error cases: no-auth -> 403 (FastAPI/HTTPBearer default); empty token -> 400 'Token gerekli'; send-test with 0 active tokens -> 404 'Cihazınız için kayıtlı push token yok. Lütfen bildirimleri açın.' (correct Turkish). Backend logs show proper MySQL upsert and Expo HTTPS calls (exp.host/--/api/v2/push/send 200 OK)."
 
 frontend:
   - task: "Login Screen"
@@ -331,3 +349,13 @@ agent_communication:
     message: "✅ BACKEND AUTH TESTING COMPLETE: All 4 auth API endpoints tested successfully. 18 test scenarios executed with 94.4% success rate (17/18 passed). All critical functionality working: registration with validation, login with email/username, JWT token authentication, tenant management (add/rename/delete). Only minor issue: tax validation returns 422 instead of 400 but validation works correctly. Backend logs show proper bcrypt password hashing and all operations logged correctly. Auth system is production-ready."
   - agent: "testing"
     message: "✅ REPORT ENDPOINTS TESTING COMPLETE (10/10 passed): (1) POST /api/data/report-filter-options with source='STOK_FIYAT_AD' returns 200 in ~3.8s with {ok:true, data:[{AD:'Bayi',ID:1017},{AD:'Dağıtıcı',ID:1018},{AD:'Parekende',ID:1016}]}. (2) POST /api/data/report-run with dataset_key='rap_fiyat_listeleri_web' returns 200 in ~3.5s with {ok:true, data:[], request_uid:...}. All 3 FiyatAd values (1016/1017/1018) tested - all return empty arrays which is legitimate upstream data for this tenant. Error handling validated: missing tenant_id/source/dataset_key -> 400 with Turkish messages, invalid dataset_key -> 400 'Geçersiz rapor:', no auth -> 403. Auth flow works with berk JWT + admin tenant_id in body (no tenant-ownership check). sync.php proxy chain (request_create + request_status polling) functioning properly. Backend logs clean, no errors."
+  - agent: "main"
+    message: "Son 3 rapor (Personel Satış, Fiş Kalem, Cari Ekstre) UI ve sütun konfigürasyonları doğrulandı. Cari Ekstre MinBakiye/MaxBakiye boş string 502 hatasını düzelttim (default -99999999 / 99999999). Cari Ekstre canlıda 146 satır dönüyor - sütunlar ve TOPLAM alanları eşleşiyor. Diğer 2 rapor (personel_satis, fis_kalem) 200 dönüyor ama tenant verisi yok, kullanıcı kendi canlı verisi ile test edecek. Push Notifications implementasyonu tamamlandı: /api/notifications/register-token, /unregister-token, /send-test, /my-tokens endpoint'leri eklendi (backend/routes/notifications.py). MySQL patron DB'ye user_push_tokens tablosu otomatik yaratılıyor. notificationService.ts backend ile senkron token saklıyor, unregister + real push test ediyor. Settings toggle: açıldığında token register + saklama, kapandığında backend'te unregister, Test bildirimi artık backend üzerinden gerçek push gönderiyor (fallback: local)."
+  - agent: "testing"
+    message: "✅ PUSH NOTIFICATIONS + CARI EKSTRE REGRESSION: 10/10 PASS (2026-04-18). Push endpoints (register-token idempotent, unregister, my-tokens active/inactive flip, send-test w/ real Expo call, error cases 401/403/400/404 with Turkish messages) all behave exactly as spec. send-test returns ok:true even when Expo reports DeviceNotRegistered for fake ExponentPushToken[test-abc-123] — endpoint sent=1 and expo_response attached, as designed. IMPORTANT FINDING on regression: review-request param list for rap_cari_hesap_ekstresi_web contained WRONG field names (CariKod/CariAd/CariBolge/CariSektor/CariTipi/OzelKod/YetkiliSatici/DovizTip/Aciklama). Upstream POS silently drops unknown keys and returns 0 rows. Correct schema matches frontend/app/(tabs)/reports.tsx line 562: Cariler/CariKodu/CariAdi/CariTur/CariGrup/Temsilci/Sehir/CariRut/CariOzelKod1..5/Proje/Lokasyon/AktifDurum — using these yields the expected 146 rows. Fixed /app/backend_test.py to use correct names. Backend code is NOT broken; only the test spec had stale param names. No action required from main agent."
+
+test_plan:
+  current_focus: []
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"

@@ -74,6 +74,13 @@ export default function SettingsScreen() {
       } catch (error) {
         console.log('Push notification registration error:', error);
       }
+    } else if (!newValue && Platform.OS !== 'web') {
+      // Turning off → unregister on backend so server won't push anymore
+      try {
+        await notificationService.unregisterFromBackend();
+      } catch (error) {
+        console.log('Push notification unregister error:', error);
+      }
     }
     
     setNotificationsEnabled(newValue);
@@ -85,6 +92,8 @@ export default function SettingsScreen() {
       } else {
         showSuccess('Bildirimler Aktif', 'Artık stok, satış ve fiş iptali uyarıları alacaksınız.');
       }
+    } else if (Platform.OS !== 'web') {
+      showInfo('Bildirimler Kapatıldı', 'Artık push bildirimi almayacaksınız.');
     }
   };
 
@@ -106,20 +115,36 @@ export default function SettingsScreen() {
   const testCancellationNotification = async () => {
     if (Platform.OS === 'web') {
       showInfo('Demo Bildirim', '🚫 Fiş İptali: Merkez Şube - FIS-001 numaralı fiş iptal edildi. Tutar: ₺245.50');
-    } else {
-      await notificationService.sendReceiptCancelledNotification(
-        {
-          id: 'test-1',
-          receiptNo: 'FIS-TEST-001',
-          date: new Date().toISOString(),
-          amount: 245.50,
-          reason: 'Test bildirimi',
-          items: [],
-        },
-        'Merkez Şube'
-      );
-      showSuccess('Gönderildi', 'Test bildirimi gönderildi. Bildirim çubuğunuzu kontrol edin.');
+      return;
     }
+
+    // Try backend-powered push first (so it also tests the real Expo → device round-trip)
+    try {
+      const ok = await notificationService.sendTestPushNotification(
+        '🚫 Fiş İptali',
+        'Merkez Şube: FIS-TEST-001 numaralı fiş iptal edildi. Tutar: ₺245.50'
+      );
+      if (ok) {
+        showSuccess('Gönderildi', 'Push bildirimi gönderildi. Bildirim çubuğunuzu kontrol edin.');
+        return;
+      }
+    } catch (err) {
+      console.log('Backend test notification failed, falling back to local:', err);
+    }
+
+    // Fallback: local notification
+    await notificationService.sendReceiptCancelledNotification(
+      {
+        id: 'test-1',
+        receiptNo: 'FIS-TEST-001',
+        date: new Date().toISOString(),
+        amount: 245.50,
+        reason: 'Test bildirimi',
+        items: [],
+      },
+      'Merkez Şube'
+    );
+    showSuccess('Gönderildi', 'Test bildirimi gönderildi. Bildirim çubuğunuzu kontrol edin.');
   };
 
   const handleLogout = () => {

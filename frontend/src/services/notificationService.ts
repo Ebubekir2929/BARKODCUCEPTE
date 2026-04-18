@@ -1,5 +1,9 @@
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
+import { useAuthStore } from '../store/authStore';
 import { CancelledReceipt } from '../types';
+
+const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 // Conditionally import expo-notifications only on native
 let Notifications: any = null;
@@ -58,10 +62,15 @@ class NotificationService {
         return null;
       }
 
-      const tokenData = await Notifications.getExpoPushTokenAsync({
-        projectId: 'your-project-id',
-      });
-      
+      // Get projectId from Expo Constants (set via EAS or app.json extra.eas.projectId)
+      const projectId =
+        Constants?.expoConfig?.extra?.eas?.projectId ??
+        Constants?.easConfig?.projectId;
+
+      const tokenData = projectId
+        ? await Notifications.getExpoPushTokenAsync({ projectId })
+        : await Notifications.getExpoPushTokenAsync();
+
       this.expoPushToken = tokenData.data;
       console.log('Push token:', this.expoPushToken);
 
@@ -82,10 +91,83 @@ class NotificationService {
         });
       }
 
+      // Send token to backend so it can push notifications via Expo Push API
+      if (this.expoPushToken) {
+        await this.saveTokenToBackend(this.expoPushToken);
+      }
+
       return this.expoPushToken;
     } catch (error) {
       console.error('Error registering for push notifications:', error);
       return null;
+    }
+  }
+
+  async saveTokenToBackend(token: string): Promise<boolean> {
+    try {
+      const { token: authToken } = useAuthStore.getState();
+      if (!authToken) {
+        console.log('No auth token, skipping backend token sync');
+        return false;
+      }
+      const resp = await fetch(`${API_URL}/api/notifications/register-token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          token,
+          platform: Platform.OS,
+          device_id: (Device?.osInternalBuildId || Device?.deviceName || 'unknown').toString().slice(0, 100),
+        }),
+      });
+      const data = await resp.json();
+      console.log('Backend token-register response:', data);
+      return resp.ok && !!data?.ok;
+    } catch (error) {
+      console.error('saveTokenToBackend error:', error);
+      return false;
+    }
+  }
+
+  async unregisterFromBackend(): Promise<boolean> {
+    try {
+      const { token: authToken } = useAuthStore.getState();
+      if (!authToken) return false;
+      const resp = await fetch(`${API_URL}/api/notifications/unregister-token`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ token: this.expoPushToken || '' }),
+      });
+      return resp.ok;
+    } catch (error) {
+      console.error('unregisterFromBackend error:', error);
+      return false;
+    }
+  }
+
+  async sendTestPushNotification(title = 'Barkodcu Cepte', body = 'Test bildirimi'): Promise<boolean> {
+    try {
+      const { token: authToken } = useAuthStore.getState();
+      if (!authToken) return false;
+      const resp = await fetch(`${API_URL}/api/notifications/send-test`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ title, body }),
+      });
+      const data = await resp.json();
+      console.log('send-test response:', data);
+      return resp.ok && !!data?.ok;
+    } catch (error) {
+      console.error('sendTestPushNotification error:', error);
+      return false;
     }
   }
 
