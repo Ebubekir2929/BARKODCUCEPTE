@@ -53,6 +53,7 @@ interface ReportDef {
     valueKey: string;   // e.g. 'TUTAR'
     levelKey: string;   // e.g. 'SEVIYE'
   };
+  disableSort?: boolean; // hide the sort pills bar for chronological reports
 }
 
 const FIYAT_LISTELERI: ReportDef = {
@@ -119,7 +120,6 @@ const STOK_FILTER_DEFAULTS = {
   StokOzelKod5: '', StokOzelKod6: '', StokOzelKod7: '', StokOzelKod8: '', StokOzelKod9: '',
 };
 const STOK_FILTERS_UI: FilterDef[] = [
-  { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtreler' },
   { name: 'Stoklar', label: 'Stok (Ürün)', type: 'multiselect', source: 'STOK', group: 'Filtreler' },
   { name: 'StokGrup', label: 'Stok Grup', type: 'multiselect', source: 'STOK_GRUP', group: 'Filtreler' },
   { name: 'StokCinsi', label: 'Stok Cinsi', type: 'multiselect', source: 'STOK_CINSI', group: 'Filtreler' },
@@ -559,6 +559,7 @@ const OTHER_REPORTS: ReportDef[] = [
     key: 'cari_ekstre', title: 'Cari Hesap Ekstresi', icon: 'wallet-outline',
     description: 'Cari bazlı borç / alacak / bakiye hareketleri',
     datasetKey: 'rap_cari_hesap_ekstresi_web',
+    disableSort: true,
     defaultParams: {
       BASTARIH: firstOfYear(), BITTARIH: `${today()} 23:59:59`,
       BakiyeTip: 0, Proje: '', Lokasyon: '', AktifDurum: '',
@@ -1165,7 +1166,16 @@ export default function ReportsScreen() {
               <TouchableOpacity onPress={() => setShowFilterModal(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             </View>
             <ScrollView style={{ padding: 16 }} contentContainerStyle={{ gap: 10, paddingBottom: 30 }}>
-              {selectedReport?.filters.map(filter => (
+              {(() => {
+                // Dedupe filters by name — prevents React duplicate-key warnings when reports
+                // accidentally list the same filter twice (e.g. explicit + spread).
+                const seen = new Set<string>();
+                const unique = (selectedReport?.filters || []).filter(f => {
+                  if (seen.has(f.name)) return false;
+                  seen.add(f.name);
+                  return true;
+                });
+                return unique.map(filter => (
                 <View key={filter.name}>
                   <Text style={[{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 4 }]}>
                     {filter.label} {filter.required && <Text style={{ color: colors.error }}>*</Text>}
@@ -1210,7 +1220,8 @@ export default function ReportsScreen() {
                     />
                   ) : null}
                 </View>
-              ))}
+              ));
+              })()}
               <TouchableOpacity style={[{ backgroundColor: colors.primary, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 8 }]} onPress={runReport}>
                 <Text style={[{ color: '#fff', fontWeight: '700', fontSize: 15 }]}>Raporu Çalıştır</Text>
               </TouchableOpacity>
@@ -1356,7 +1367,7 @@ export default function ReportsScreen() {
               </TouchableOpacity>
             </View>
             {/* Sort headers - compact pill style */}
-            {selectedReport && !reportLoading && processedData.length > 0 && (() => {
+            {selectedReport && !reportLoading && processedData.length > 0 && !selectedReport.disableSort && (() => {
               const sortOpts = (selectedReport.cardLayout
                 ? [
                     selectedReport.cardLayout.title ? { key: selectedReport.cardLayout.title, label: selectedReport.columns.find(c => c.key === selectedReport.cardLayout!.title)?.label || 'Ad' } : null,
