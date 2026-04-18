@@ -18,10 +18,11 @@ const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 // === REPORT DEFINITIONS ===
 interface FilterDef {
-  name: string; label: string; type: 'multiselect' | 'select_static' | 'date';
+  name: string; label: string; type: 'multiselect' | 'select_static' | 'date' | 'text';
   source?: string; // rap_filtre_lookup Kaynak
   options?: { value: any; label: string }[];
   required?: boolean; group?: string;
+  placeholder?: string;
 }
 interface ColDef { key: string; label: string; type?: 'money' | 'number' | 'bool'; }
 interface CardLayout {
@@ -100,8 +101,127 @@ const FIYAT_LISTELERI: ReportDef = {
 };
 
 // Other reports - simplified
+// === SATIS ADET KAR — Tam parametre seti (POS tüm anahtarları ister) ===
+const STOK_FILTER_DEFAULTS = {
+  Stoklar: '', StokGrup: '', StokCinsi: '', StokMarka: '', StokVergi: '',
+  StokOzelKod1: '', StokOzelKod2: '', StokOzelKod3: '', StokOzelKod4: '',
+  StokOzelKod5: '', StokOzelKod6: '', StokOzelKod7: '', StokOzelKod8: '', StokOzelKod9: '',
+};
+const STOK_FILTERS_UI: FilterDef[] = [
+  { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtreler' },
+  { name: 'Stoklar', label: 'Stok (Ürün)', type: 'multiselect', source: 'STOK', group: 'Filtreler' },
+  { name: 'StokGrup', label: 'Stok Grup', type: 'multiselect', source: 'STOK_GRUP', group: 'Filtreler' },
+  { name: 'StokCinsi', label: 'Stok Cinsi', type: 'multiselect', source: 'STOK_CINSI', group: 'Filtreler' },
+  { name: 'StokMarka', label: 'Stok Marka', type: 'multiselect', source: 'STOK_MARKA', group: 'Filtreler' },
+  { name: 'StokVergi', label: 'KDV (Vergi)', type: 'multiselect', source: 'STOK_VERGI', group: 'Filtreler' },
+];
+
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const firstOfMonth = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+};
+
+const SATIS_ADET_KAR: ReportDef = {
+  key: 'satis_adet_kar',
+  title: 'Satış Adet / Kâr',
+  icon: 'trending-up-outline',
+  description: 'Satış adet, tutar ve kâr analizi',
+  datasetKey: 'rap_satis_adet_kar_web',
+  defaultParams: {
+    BASTARIH: firstOfMonth(),
+    BITTARIH: today(),
+    KdvDahil: 1,
+    FisTipi: 0,
+    Pc_Ad: '',
+    Lokasyon: '',
+    MaliyetYoksaSatisGelsin: 1,
+    SarfFireGelmesin: 0,
+    Page: 1,
+    PageSize: 500,
+    ...STOK_FILTER_DEFAULTS,
+  },
+  requireNarrowing: true,
+  cardLayout: {
+    title: 'AD',
+    code: 'KOD',
+    amount: 'KAR_TUTAR',
+    amountType: 'money',
+    amountLabel: 'Kâr',
+    chips: [
+      { key: 'ORAN', label: 'Kâr %', type: 'number' },
+      { key: 'SATIS_MIKTAR', label: 'Adet', type: 'number' },
+      { key: 'STOK_BIRIM' },
+    ],
+    meta: [
+      { key: 'SATIS_TUTARI', label: 'Satış', type: 'money' },
+      { key: 'ALIS_TUTARI', label: 'Alış', type: 'money' },
+      { key: 'FIYAT', label: 'Birim Satış', type: 'money' },
+      { key: 'SON_ALIS_FIYATI', label: 'Son Alış', type: 'money' },
+      { key: 'STOK_GRUP', label: 'Grup' },
+      { key: 'STOK_MARKA', label: 'Marka' },
+      { key: 'BARKOD', label: 'Barkod' },
+    ],
+  },
+  columns: [
+    { key: 'KOD', label: 'Kod' },
+    { key: 'AD', label: 'Ürün' },
+    { key: 'BARKOD', label: 'Barkod' },
+    { key: 'STOK_GRUP', label: 'Grup' },
+    { key: 'STOK_MARKA', label: 'Marka' },
+    { key: 'STOK_BIRIM', label: 'Birim' },
+    { key: 'SON_ALIS_KAYNAK', label: 'Maliyet Kaynak' },
+    { key: 'FIYAT', label: 'Satış Fiyatı', type: 'money' },
+    { key: 'SON_ALIS_FIYATI', label: 'Son Alış Fiyatı', type: 'money' },
+    { key: 'SATIS_MIKTAR', label: 'Satış Adet', type: 'number' },
+    { key: 'ALIS_TUTARI', label: 'Alış Tutarı', type: 'money' },
+    { key: 'SATIS_TUTARI', label: 'Satış Tutarı', type: 'money' },
+    { key: 'KAR_TUTAR', label: 'Kâr Tutarı', type: 'money' },
+    { key: 'ORAN', label: 'Kâr Oranı %', type: 'number' },
+  ],
+  filters: [
+    { name: 'BASTARIH', label: 'Başlangıç Tarihi', type: 'date', group: 'Tarih Aralığı' },
+    { name: 'BITTARIH', label: 'Bitiş Tarihi', type: 'date', group: 'Tarih Aralığı' },
+    { name: 'FisTipi', label: 'Fiş Tipi', type: 'select_static', group: 'Seçenekler',
+      options: [
+        { value: 0, label: 'Tümü' },
+        { value: 1, label: 'Sadece Satış Fişleri' },
+        { value: 2, label: 'Sadece İadeler' },
+      ] },
+    { name: 'KdvDahil', label: 'KDV Dahil Göster', type: 'select_static', group: 'Seçenekler',
+      options: [
+        { value: 1, label: 'KDV Dahil' },
+        { value: 0, label: 'KDV Hariç' },
+      ] },
+    { name: 'MaliyetYoksaSatisGelsin', label: 'Maliyet Yoksa', type: 'select_static', group: 'Seçenekler',
+      options: [
+        { value: 1, label: 'Satış fiyatı göster' },
+        { value: 0, label: 'Gösterme (sıfır)' },
+      ] },
+    { name: 'SarfFireGelmesin', label: 'Sarf/Fire', type: 'select_static', group: 'Seçenekler',
+      options: [
+        { value: 0, label: 'Dahil' },
+        { value: 1, label: 'Hariç' },
+      ] },
+    { name: 'Pc_Ad', label: 'Bilgisayar Adı (Pc_Ad)', type: 'text', group: 'Filtreler', placeholder: 'Örn: KASA1' },
+    ...STOK_FILTERS_UI,
+    { name: 'StokOzelKod1', label: 'Özel Kod 1', type: 'multiselect', source: 'STOK_OZEL_KOD_1', group: 'Özel Kodlar' },
+    { name: 'StokOzelKod2', label: 'Özel Kod 2', type: 'multiselect', source: 'STOK_OZEL_KOD_2', group: 'Özel Kodlar' },
+    { name: 'StokOzelKod3', label: 'Özel Kod 3', type: 'multiselect', source: 'STOK_OZEL_KOD_3', group: 'Özel Kodlar' },
+    { name: 'StokOzelKod4', label: 'Özel Kod 4', type: 'multiselect', source: 'STOK_OZEL_KOD_4', group: 'Özel Kodlar' },
+    { name: 'StokOzelKod5', label: 'Özel Kod 5', type: 'multiselect', source: 'STOK_OZEL_KOD_5', group: 'Özel Kodlar' },
+    { name: 'StokOzelKod6', label: 'Özel Kod 6', type: 'multiselect', source: 'STOK_OZEL_KOD_6', group: 'Özel Kodlar' },
+    { name: 'StokOzelKod7', label: 'Özel Kod 7', type: 'multiselect', source: 'STOK_OZEL_KOD_7', group: 'Özel Kodlar' },
+    { name: 'StokOzelKod8', label: 'Özel Kod 8', type: 'multiselect', source: 'STOK_OZEL_KOD_8', group: 'Özel Kodlar' },
+    { name: 'StokOzelKod9', label: 'Özel Kod 9', type: 'multiselect', source: 'STOK_OZEL_KOD_9', group: 'Özel Kodlar' },
+  ],
+};
+
 const OTHER_REPORTS: ReportDef[] = [
-  { key: 'satis_adet_kar', title: 'Satış Adet Kar', icon: 'trending-up-outline', description: 'Satış, adet ve kar analizi', datasetKey: 'rap_satis_adet_kar_web', defaultParams: { BASTARIH: '', BITTARIH: '', KdvDahil: 1, Page: 1, PageSize: 500 }, columns: [{ key: 'KOD', label: 'Kod' }, { key: 'AD', label: 'Ürün' }, { key: 'SATIS_MIKTAR', label: 'Satış Mik.', type: 'number' }, { key: 'SATIS_TUTARI', label: 'Satış Tutarı', type: 'money' }, { key: 'KAR_TUTAR', label: 'Kar', type: 'money' }, { key: 'ORAN', label: 'Kar %', type: 'number' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }, { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre' }, { name: 'StokGrup', label: 'Stok Grup', type: 'multiselect', source: 'STOK_GRUP', group: 'Filtre' }] },
+  SATIS_ADET_KAR,
   { key: 'stok_envanter', title: 'Stok Envanter', icon: 'cube-outline', description: 'Güncel stok durumu', datasetKey: 'rap_stok_envanter_web', defaultParams: { SONTARIH: '', KdvDahil: 1, Page: 1, PageSize: 500 }, columns: [{ key: 'KOD', label: 'Kod' }, { key: 'AD', label: 'Ürün' }, { key: 'MEVCUT', label: 'Mevcut', type: 'number' }, { key: 'LOKASYON', label: 'Lokasyon' }, { key: 'AGIRLIKLI_ORTALAMA___FIYAT', label: 'Ort.Fiyat', type: 'money' }], filters: [{ name: 'SONTARIH', label: 'Son Tarih', type: 'date', group: 'Tarih' }, { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre' }, { name: 'StokGrup', label: 'Stok Grup', type: 'multiselect', source: 'STOK_GRUP', group: 'Filtre' }] },
   { key: 'gelir_tablosu', title: 'Gelir Tablosu', icon: 'stats-chart-outline', description: 'Gelir ve gider analizi', datasetKey: 'rap_lm_gelir_tablosu', defaultParams: { BASTARIH: '', BITTARIH: '', KdvDahil: 1 }, columns: [{ key: 'AD', label: 'Kalem' }, { key: 'TUTAR', label: 'Tutar', type: 'money' }, { key: 'ORAN', label: 'Oran %', type: 'number' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }] },
   { key: 'personel_satis', title: 'Personel Satış Özet', icon: 'people-outline', description: 'Personel satış performansı', datasetKey: 'rap_personel_satis_ozet_web', defaultParams: { BASTARIH: '', BITTARIH: '', Page: 1, PageSize: 500 }, columns: [{ key: 'PERSONEL', label: 'Personel' }, { key: 'TOPLAM', label: 'Toplam', type: 'money' }, { key: 'NAKIT', label: 'Nakit', type: 'money' }, { key: 'KREDI_KARTI', label: 'K.Kartı', type: 'money' }, { key: 'FIS_SAYISI', label: 'Fiş', type: 'number' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }, { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre' }] },
@@ -181,9 +301,15 @@ export default function ReportsScreen() {
     const dd = getDefDates();
     const vals: Record<string, any> = {};
     report.filters.forEach(f => {
-      if (f.type === 'date') vals[f.name] = f.name.includes('BAS') ? dd.start : dd.end;
-      else if (f.type === 'select_static') vals[f.name] = report.defaultParams[f.name] ?? '';
-      else vals[f.name] = ''; // multiselect empty
+      if (f.type === 'date') {
+        vals[f.name] = report.defaultParams[f.name] || (f.name.includes('BAS') ? dd.start : dd.end);
+      } else if (f.type === 'select_static') {
+        vals[f.name] = report.defaultParams[f.name] ?? '';
+      } else if (f.type === 'text') {
+        vals[f.name] = report.defaultParams[f.name] ?? '';
+      } else {
+        vals[f.name] = ''; // multiselect empty
+      }
     });
     setFilterValues(vals);
     setSelectedReport(report);
@@ -597,6 +723,14 @@ export default function ReportsScreen() {
                       </Text>
                       <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
                     </TouchableOpacity>
+                  ) : filter.type === 'text' ? (
+                    <TextInput
+                      style={[styles.filterInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+                      value={filterValues[filter.name] || ''}
+                      onChangeText={v => setFilterValues(prev => ({ ...prev, [filter.name]: v }))}
+                      placeholder={filter.placeholder || 'Metin girin...'} placeholderTextColor={colors.textSecondary}
+                      autoCapitalize="none"
+                    />
                   ) : null}
                 </View>
               ))}
