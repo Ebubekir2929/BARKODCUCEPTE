@@ -93,7 +93,7 @@ export default function LoginScreen() {
           router.replace('/(tabs)/dashboard');
         }
       } else {
-        showError('Giriş Başarısız', result.error || 'E-posta veya şifre hatalı');
+        showError('Giriş Başarısız', result.error || 'Kullanıcı adı/e-posta veya şifre hatalı');
       }
     } catch (error) {
       showError('Hata', 'Bir hata oluştu. Lütfen tekrar deneyin.');
@@ -165,15 +165,15 @@ export default function LoginScreen() {
           {/* Form */}
           <View style={styles.form}>
             <View style={[styles.inputContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Ionicons name="mail-outline" size={20} color={colors.textSecondary} />
+              <Ionicons name="person-outline" size={20} color={colors.textSecondary} />
               <TextInput
                 style={[styles.input, { color: colors.text }]}
-                placeholder="E-posta"
+                placeholder="E-posta veya Kullanıcı Adı"
                 placeholderTextColor={colors.textSecondary}
                 value={email}
                 onChangeText={setEmail}
-                keyboardType="email-address"
                 autoCapitalize="none"
+                autoCorrect={false}
               />
             </View>
 

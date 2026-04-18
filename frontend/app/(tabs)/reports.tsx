@@ -367,6 +367,8 @@ export default function ReportsScreen() {
   const exportPdf = async () => {
     if (!selectedReport || processedData.length === 0) return;
     setExportLoading(true);
+    // Defer heavy work so overlay paints first
+    await new Promise(resolve => setTimeout(resolve, 0));
     const cols = selectedReport.columns;
     const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:16px;font-size:11px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:5px;text-align:left;font-size:10px}th{background:#f5f5f5;font-weight:bold}h2{font-size:16px}</style></head><body><h2>${selectedReport.title}</h2><p>${processedData.length} kayıt</p><table><thead><tr>${cols.map(c => `<th>${c.label}</th>`).join('')}</tr></thead><tbody>${processedData.map((r: any) => `<tr>${cols.map(c => `<td>${renderValue(r[c.key], c)}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`;
     try {
@@ -402,6 +404,8 @@ export default function ReportsScreen() {
   const exportExcel = async () => {
     if (!selectedReport || processedData.length === 0) return;
     setExportLoading(true);
+    // Defer heavy work so overlay paints first
+    await new Promise(resolve => setTimeout(resolve, 0));
     try {
       const cols = selectedReport.columns;
       // Build rows (human-readable values)
