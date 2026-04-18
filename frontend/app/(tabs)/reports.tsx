@@ -47,6 +47,10 @@ interface ReportDef {
   summary?: {
     cols: { key: string; label: string; type?: 'money' | 'number' }[];
     totalsFromRow?: Record<string, string>;
+    // Compute a column's total as an expression over other totalsFromRow keys
+    // e.g. { BAKIYE: { op: 'sub', a: 'TOPLAM_BORC', b: 'TOPLAM_ALACAK' } }
+    totalsComputed?: Record<string, { op: 'sub' | 'add'; a: string; b: string }>;
+    showOnlyTotal?: boolean;
   };
   hierarchical?: {
     labelKey: string;   // e.g. 'ACIKLAMA'
@@ -133,8 +137,10 @@ const today = () => {
 };
 const formatDateTR = (iso: string): string => {
   if (!iso) return '';
-  const parts = iso.split('-');
-  if (parts.length !== 3) return iso;
+  // Strip any time suffix like "2026-04-18 23:59:59" → "2026-04-18"
+  const datePart = iso.split(' ')[0].split('T')[0];
+  const parts = datePart.split('-');
+  if (parts.length !== 3) return datePart;
   return `${parts[2]}.${parts[1]}.${parts[0]}`;
 };
 const firstOfYear = () => {
@@ -574,15 +580,15 @@ const OTHER_REPORTS: ReportDef[] = [
       cols: [
         { key: 'BORC', label: 'Borç', type: 'money' },
         { key: 'ALACAK', label: 'Alacak', type: 'money' },
-        { key: 'ACIK_FATURA', label: 'Açık Fatura', type: 'money' },
-        { key: 'ACIK_FIS', label: 'Açık Fiş', type: 'money' },
-        { key: 'ACIK_DIGER', label: 'Açık Diğer', type: 'money' },
+        { key: 'BAKIYE', label: 'Bakiye', type: 'money' },
       ],
       totalsFromRow: {
         BORC: 'TOPLAM_BORC', ALACAK: 'TOPLAM_ALACAK',
-        ACIK_FATURA: 'TOPLAM_ACIK_FATURA', ACIK_FIS: 'TOPLAM_ACIK_FIS',
-        ACIK_DIGER: 'TOPLAM_ACIK_DIGER',
       },
+      totalsComputed: {
+        BAKIYE: { op: 'sub', a: 'TOPLAM_BORC', b: 'TOPLAM_ALACAK' },
+      },
+      showOnlyTotal: true,
     },
     cardLayout: {
       title: 'FINANS_ISLEM_TURU', code: 'BELGENO',
@@ -1611,10 +1617,18 @@ const ReportSummaryPanelComp: React.FC<ReportSummaryPanelProps> = ({ data, confi
     const firstRow = data[0] || {};
     for (const col of config.cols) {
       const totalKey = config.totalsFromRow?.[col.key];
+      const computed = config.totalsComputed?.[col.key];
       const vals = data.map(r => parseFloat(String(r[col.key] ?? '0'))).filter(n => !isNaN(n));
-      const total = totalKey != null
-        ? parseFloat(String(firstRow[totalKey] ?? '0')) || vals.reduce((a, b) => a + b, 0)
-        : vals.reduce((a, b) => a + b, 0);
+      let total: number;
+      if (computed) {
+        const a = parseFloat(String(firstRow[computed.a] ?? '0')) || 0;
+        const b = parseFloat(String(firstRow[computed.b] ?? '0')) || 0;
+        total = computed.op === 'sub' ? a - b : a + b;
+      } else if (totalKey != null) {
+        total = parseFloat(String(firstRow[totalKey] ?? '0')) || vals.reduce((a, b) => a + b, 0);
+      } else {
+        total = vals.reduce((a, b) => a + b, 0);
+      }
       const min = vals.length ? Math.min(...vals) : 0;
       const max = vals.length ? Math.max(...vals) : 0;
       out[col.key] = { total, min, max };
@@ -1628,6 +1642,14 @@ const ReportSummaryPanelComp: React.FC<ReportSummaryPanelProps> = ({ data, confi
     if (type === 'money') return `₺${v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     return v.toLocaleString('tr-TR', { maximumFractionDigits: 2 });
   };
+
+  const statRows = config.showOnlyTotal
+    ? [{ key: 'total' as const, label: 'TOPLAM', icon: 'stats-chart' as const, color: colors.primary, bg: colors.primary + '10' }]
+    : [
+        { key: 'total' as const, label: 'TOPLAM', icon: 'stats-chart' as const, color: colors.primary, bg: colors.primary + '10' },
+        { key: 'min' as const, label: 'EN DÜŞÜK', icon: 'trending-down' as const, color: colors.error, bg: colors.error + '0D' },
+        { key: 'max' as const, label: 'EN YÜKSEK', icon: 'trending-up' as const, color: colors.success, bg: colors.success + '0D' },
+      ];
 
   return (
     <View style={[summaryStyles.wrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -1650,11 +1672,7 @@ const ReportSummaryPanelComp: React.FC<ReportSummaryPanelProps> = ({ data, confi
             ))}
           </View>
           {/* Data rows */}
-          {([
-            { key: 'total', label: 'TOPLAM', icon: 'stats-chart' as const, color: colors.primary, bg: colors.primary + '10' },
-            { key: 'min', label: 'EN DÜŞÜK', icon: 'trending-down' as const, color: colors.error, bg: colors.error + '0D' },
-            { key: 'max', label: 'EN YÜKSEK', icon: 'trending-up' as const, color: colors.success, bg: colors.success + '0D' },
-          ] as const).map((stat, idx) => (
+          {statRows.map((stat, idx) => (
             <View key={stat.key} style={[summaryStyles.row, { backgroundColor: stat.bg, borderTopColor: colors.border, borderTopWidth: idx === 0 ? 0 : StyleSheet.hairlineWidth }]}>
               <View style={summaryStyles.labelCol}>
                 <View style={[summaryStyles.pill, { backgroundColor: stat.color }]}>
