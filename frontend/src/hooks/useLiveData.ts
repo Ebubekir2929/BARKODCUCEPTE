@@ -203,8 +203,8 @@ export function useLiveData(filter?: DashboardFilter) {
       return;
     }
 
-    // Only show refreshing spinner when filter changes, not auto-refresh
-    const currentFilterKey = JSON.stringify(filter || {});
+    // Only show refreshing spinner when filter/source changes, not auto-refresh
+    const currentFilterKey = JSON.stringify(filter || {}) + '|' + activeTenantId();
     if (hasLoadedOnce.current && currentFilterKey !== lastFilterRef.current) {
       setIsRefreshing(true);
     }
