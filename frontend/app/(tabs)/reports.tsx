@@ -41,11 +41,16 @@ interface ReportDef {
   datasetKey: string; defaultParams: Record<string, any>;
   columns: ColDef[]; filters: FilterDef[];
   requireNarrowing?: boolean;
-  requiredFilters?: string[]; // filter names that MUST have value
+  requiredFilters?: string[];
   cardLayout?: CardLayout;
   summary?: {
     cols: { key: string; label: string; type?: 'money' | 'number' }[];
-    totalsFromRow?: Record<string, string>; // map colKey -> rowKey to read POS-provided totals (else compute sum)
+    totalsFromRow?: Record<string, string>;
+  };
+  hierarchical?: {
+    labelKey: string;   // e.g. 'ACIKLAMA'
+    valueKey: string;   // e.g. 'TUTAR'
+    levelKey: string;   // e.g. 'SEVIYE'
   };
 }
 
@@ -357,7 +362,42 @@ const OTHER_REPORTS: ReportDef[] = [
       { name: 'StokOzelKod9', label: 'Özel Kod 9', type: 'multiselect', source: 'STOK_OZEL_KOD_9', group: 'Özel Kodlar' },
     ],
   },
-  { key: 'gelir_tablosu', title: 'Gelir Tablosu', icon: 'stats-chart-outline', description: 'Gelir ve gider analizi', datasetKey: 'rap_lm_gelir_tablosu', defaultParams: { BASTARIH: '', BITTARIH: '', KdvDahil: 1 }, columns: [{ key: 'AD', label: 'Kalem' }, { key: 'TUTAR', label: 'Tutar', type: 'money' }, { key: 'ORAN', label: 'Oran %', type: 'number' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }] },
+  {
+    key: 'gelir_tablosu',
+    title: 'Gelir Tablosu',
+    icon: 'stats-chart-outline',
+    description: 'Hiyerarşik gelir / gider / kâr zararı raporu',
+    datasetKey: 'rap_lm_gelir_tablosu',
+    defaultParams: {
+      BASTARIH: firstOfMonth(),
+      BITTARIH: today(),
+      KdvDahil: 0,
+      Lokasyon: '',
+      SatisGrupGoster: 1,
+      IadeGrupGoster: 1,
+      MaliyetGrupGoster: 1,
+    },
+    requireNarrowing: false,
+    requiredFilters: ['Lokasyon'],
+    hierarchical: { labelKey: 'ACIKLAMA', valueKey: 'TUTAR', levelKey: 'SEVIYE' },
+    columns: [
+      { key: 'ACIKLAMA', label: 'Açıklama' },
+      { key: 'TUTAR', label: 'Tutar', type: 'money' },
+    ],
+    filters: [
+      { name: 'BASTARIH', label: 'Başlangıç Tarihi', type: 'date', group: 'Tarih Aralığı' },
+      { name: 'BITTARIH', label: 'Bitiş Tarihi', type: 'date', group: 'Tarih Aralığı' },
+      { name: 'KdvDahil', label: 'KDV', type: 'select_static', group: 'Seçenekler',
+        options: [{ value: 1, label: 'KDV Dahil' }, { value: 0, label: 'KDV Hariç' }] },
+      { name: 'SatisGrupGoster', label: 'Satış Grupla', type: 'select_static', group: 'Seçenekler',
+        options: [{ value: 1, label: 'Gruplı Göster' }, { value: 0, label: 'Detaylı' }] },
+      { name: 'IadeGrupGoster', label: 'İade Grupla', type: 'select_static', group: 'Seçenekler',
+        options: [{ value: 1, label: 'Gruplı Göster' }, { value: 0, label: 'Detaylı' }] },
+      { name: 'MaliyetGrupGoster', label: 'Maliyet Grupla', type: 'select_static', group: 'Seçenekler',
+        options: [{ value: 1, label: 'Gruplı Göster' }, { value: 0, label: 'Detaylı' }] },
+      { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre', required: true },
+    ],
+  },
   { key: 'personel_satis', title: 'Personel Satış Özet', icon: 'people-outline', description: 'Personel satış performansı', datasetKey: 'rap_personel_satis_ozet_web', defaultParams: { BASTARIH: '', BITTARIH: '', Page: 1, PageSize: 500 }, columns: [{ key: 'PERSONEL', label: 'Personel' }, { key: 'TOPLAM', label: 'Toplam', type: 'money' }, { key: 'NAKIT', label: 'Nakit', type: 'money' }, { key: 'KREDI_KARTI', label: 'K.Kartı', type: 'money' }, { key: 'FIS_SAYISI', label: 'Fiş', type: 'number' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }, { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre' }] },
   { key: 'fis_kalem', title: 'Fiş Kalem Listesi', icon: 'receipt-outline', description: 'Fiş ve kalem detayları', datasetKey: 'rap_fis_kalem_listesi_web', defaultParams: { BASTARIH: '', BITTARIH: '', Page: 1, PageSize: 500 }, columns: [{ key: 'TARIH', label: 'Tarih' }, { key: 'STOK_ADI', label: 'Ürün' }, { key: 'MIKTAR', label: 'Miktar', type: 'number' }, { key: 'TUTAR', label: 'Tutar', type: 'money' }, { key: 'LOKASYON', label: 'Lokasyon' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }, { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtre' }] },
   { key: 'cari_ekstre', title: 'Cari Hesap Ekstresi', icon: 'wallet-outline', description: 'Borç/alacak ekstresi', datasetKey: 'rap_cari_hesap_ekstresi_web', defaultParams: { BASTARIH: '', BITTARIH: '', Page: 1, PageSize: 500 }, columns: [{ key: 'CARI_ADI', label: 'Cari' }, { key: 'TARIH', label: 'Tarih' }, { key: 'BORC', label: 'Borç', type: 'money' }, { key: 'ALACAK', label: 'Alacak', type: 'money' }, { key: 'BAKIYE', label: 'Bakiye', type: 'money' }], filters: [{ name: 'BASTARIH', label: 'Başlangıç', type: 'date', group: 'Tarih' }, { name: 'BITTARIH', label: 'Bitiş', type: 'date', group: 'Tarih' }] },
@@ -673,10 +713,30 @@ export default function ReportsScreen() {
   const exportPdf = async () => {
     if (!selectedReport || processedData.length === 0) return;
     setExportLoading(true);
-    // Defer heavy work so overlay paints first
     await new Promise(resolve => setTimeout(resolve, 0));
     const cols = selectedReport.columns;
-    const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:16px;font-size:11px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:5px;text-align:left;font-size:10px}th{background:#f5f5f5;font-weight:bold}h2{font-size:16px}</style></head><body><h2>${selectedReport.title}</h2><p>${processedData.length} kayıt</p><table><thead><tr>${cols.map(c => `<th>${c.label}</th>`).join('')}</tr></thead><tbody>${processedData.map((r: any) => `<tr>${cols.map(c => `<td>${renderValue(r[c.key], c)}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`;
+    // Build summary HTML (TOPLAM/MIN/MAX) if configured
+    const buildSummaryHtml = (): string => {
+      const s = selectedReport.summary;
+      if (!s) return '';
+      const firstRow = processedData[0] || {};
+      const rows: Record<string, { total: number; min: number; max: number }> = {};
+      for (const c of s.cols) {
+        const vals = processedData.map((r: any) => parseFloat(String(r[c.key] ?? '0'))).filter(n => !isNaN(n));
+        const totalKey = s.totalsFromRow?.[c.key];
+        const total = totalKey != null ? parseFloat(String(firstRow[totalKey] ?? '0')) || vals.reduce((a, b) => a + b, 0) : vals.reduce((a, b) => a + b, 0);
+        rows[c.key] = { total, min: vals.length ? Math.min(...vals) : 0, max: vals.length ? Math.max(...vals) : 0 };
+      }
+      const fmtS = (v: number, t?: string) => t === 'money' ? `₺${v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : v.toLocaleString('tr-TR', { maximumFractionDigits: 2 });
+      const cell = (v: number, t?: string) => `<td style="text-align:right;padding:6px;border:1px solid #e5e7eb">${fmtS(v, t)}</td>`;
+      return `<h3 style="margin:14px 0 6px">Rapor Özeti</h3><table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:10px"><thead><tr><th style="padding:6px;background:#f3f4f6;border:1px solid #e5e7eb"></th>${s.cols.map(c => `<th style="padding:6px;background:#f3f4f6;border:1px solid #e5e7eb;text-align:right">${c.label}</th>`).join('')}</tr></thead><tbody>
+        <tr style="background:#eff6ff"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#1d4ed8">TOPLAM</td>${s.cols.map(c => cell(rows[c.key].total, c.type)).join('')}</tr>
+        <tr style="background:#fef2f2"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#b91c1c">EN DÜŞÜK</td>${s.cols.map(c => cell(rows[c.key].min, c.type)).join('')}</tr>
+        <tr style="background:#f0fdf4"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#047857">EN YÜKSEK</td>${s.cols.map(c => cell(rows[c.key].max, c.type)).join('')}</tr>
+        </tbody></table>`;
+    };
+    const summaryHtml = buildSummaryHtml();
+    const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:16px;font-size:11px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:5px;text-align:left;font-size:10px}th{background:#f5f5f5;font-weight:bold}h2{font-size:16px;margin:0 0 8px}h3{font-size:13px}</style></head><body><h2>${selectedReport.title}</h2><p style="color:#666">${processedData.length} kayıt · ${new Date().toLocaleDateString('tr-TR')}</p>${summaryHtml}<table><thead><tr>${cols.map(c => `<th>${c.label}</th>`).join('')}</tr></thead><tbody>${processedData.map((r: any) => `<tr>${cols.map(c => `<td>${renderValue(r[c.key], c)}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`;
     try {
       if (Platform.OS === 'web') {
         // Web: open in new window and trigger print dialog
@@ -742,6 +802,30 @@ export default function ReportsScreen() {
       (ws as any)['!cols'] = colWidths;
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, (selectedReport.title || 'Rapor').substring(0, 31));
+
+      // Summary sheet (TOPLAM/MIN/MAX)
+      if (selectedReport.summary) {
+        const s = selectedReport.summary;
+        const firstRow = processedData[0] || {};
+        const computeVals = (key: string) => {
+          const vals = processedData.map((r: any) => parseFloat(String(r[key] ?? '0'))).filter(n => !isNaN(n));
+          const totalKey = s.totalsFromRow?.[key];
+          return {
+            total: totalKey != null ? parseFloat(String(firstRow[totalKey] ?? '0')) || vals.reduce((a, b) => a + b, 0) : vals.reduce((a, b) => a + b, 0),
+            min: vals.length ? Math.min(...vals) : 0,
+            max: vals.length ? Math.max(...vals) : 0,
+          };
+        };
+        const stats = s.cols.map(c => ({ col: c, v: computeVals(c.key) }));
+        const summaryRows: any[] = [
+          { '': 'TOPLAM', ...Object.fromEntries(stats.map(x => [x.col.label, x.v.total])) },
+          { '': 'EN DÜŞÜK', ...Object.fromEntries(stats.map(x => [x.col.label, x.v.min])) },
+          { '': 'EN YÜKSEK', ...Object.fromEntries(stats.map(x => [x.col.label, x.v.max])) },
+        ];
+        const wsS = XLSX.utils.json_to_sheet(summaryRows, { header: ['', ...s.cols.map(c => c.label)] });
+        (wsS as any)['!cols'] = [{ wch: 14 }, ...s.cols.map(() => ({ wch: 16 }))];
+        XLSX.utils.book_append_sheet(wb, wsS, 'Özet');
+      }
 
       const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
       const fileName = `${selectedReport.key}_${ts}.xlsx`;
@@ -1092,7 +1176,9 @@ export default function ReportsScreen() {
                 updateCellsBatchingPeriod={50}
                 ListHeaderComponent={selectedReport?.summary ? <ReportSummaryPanel data={reportData} config={selectedReport.summary} colors={colors} /> : null}
                 renderItem={({ item }) => (
-                  <ReportCard item={item} report={selectedReport} colors={colors} renderValue={renderValue} />
+                  selectedReport?.hierarchical
+                    ? <HierarchicalRow item={item} report={selectedReport} colors={colors} />
+                    : <ReportCard item={item} report={selectedReport} colors={colors} renderValue={renderValue} />
                 )}
               />
             ) : (
@@ -1340,5 +1426,44 @@ const summaryStyles = StyleSheet.create({
   hintRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderBottomWidth: 1 },
   hintText: { fontSize: 12, fontWeight: '700' },
   hintMuted: { fontSize: 10, fontWeight: '600', letterSpacing: 0.3 },
+});
+
+
+// === HIERARCHICAL ROW — for Gelir Tablosu-style reports with SEVIYE levels ===
+interface HierarchicalRowProps { item: any; report: ReportDef; colors: any; }
+const HierarchicalRowComp: React.FC<HierarchicalRowProps> = ({ item, report, colors }) => {
+  const cfg = report.hierarchical!;
+  const level = Number(item[cfg.levelKey] ?? 0);
+  const label = String(item[cfg.labelKey] ?? '');
+  const valRaw = parseFloat(String(item[cfg.valueKey] ?? '0')) || 0;
+  const valText = `₺${valRaw.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const isNegative = valRaw < 0;
+
+  // Style by level
+  let bg = colors.card;
+  let labelColor = colors.text;
+  let valueColor = isNegative ? colors.error : colors.text;
+  let fontWeight: '400' | '600' | '700' | '800' = '400';
+  let fontSize = 13;
+  if (level === 0) { bg = colors.primary + '18'; labelColor = colors.primary; fontWeight = '800'; fontSize = 14; }
+  else if (level === 1) { bg = colors.card; fontWeight = '600'; }
+  else if (level === 2) { bg = colors.background; fontWeight = '500'; }
+  else if (level >= 3) { bg = colors.background; fontSize = 12; }
+  if (isNegative && level === 0) { bg = colors.error + '15'; labelColor = colors.error; valueColor = colors.error; }
+
+  return (
+    <View style={[hierStyles.row, { backgroundColor: bg, borderBottomColor: colors.border, paddingLeft: 14 + level * 18 }]}>
+      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+        {level > 0 && <Ionicons name="return-down-forward" size={12} color={colors.textSecondary} />}
+        <Text style={[{ fontSize, color: labelColor, fontWeight, flex: 1 }]} numberOfLines={2}>{label}</Text>
+      </View>
+      <Text style={[{ fontSize, fontWeight: level === 0 ? '800' : '700', color: valueColor, textAlign: 'right', fontVariant: ['tabular-nums'] as any }]} numberOfLines={1}>{valText}</Text>
+    </View>
+  );
+};
+const HierarchicalRow = memo(HierarchicalRowComp, (prev, next) => prev.item === next.item && prev.report === next.report && prev.colors === next.colors);
+
+const hierStyles = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', paddingRight: 14, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, gap: 10 },
 });
 
