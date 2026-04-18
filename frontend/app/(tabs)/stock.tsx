@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
+import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import { useAuthStore } from '../../src/store/authStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
@@ -19,6 +20,7 @@ const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 export default function StockScreen() {
   const { colors } = useThemeStore();
+  const { showError, showWarning, alertProps } = useAlert();
   const { user } = useAuthStore();
   const { activeSource } = useDataSourceStore();
 
@@ -174,7 +176,7 @@ export default function StockScreen() {
   const openScanner = async () => {
     if (!permission?.granted) {
       const r = await requestPermission();
-      if (!r.granted) { Alert.alert('İzin Gerekli', 'Kamera izni gereklidir.'); return; }
+      if (!r.granted) { showWarning('İzin Gerekli', 'Kamera izni gereklidir.'); return; }
     }
     setShowScanner(true);
   };
@@ -184,7 +186,7 @@ export default function StockScreen() {
     setSearchQuery(data);
     const found = stockList.find((s: any) => (s.BARKOD || '') === data);
     if (found) openStockDetail(found);
-    else Alert.alert('Bulunamadı', `"${data}" barkodlu ürün bulunamadı.`);
+    else showError('Bulunamadı', `"${data}" barkodlu ürün bulunamadı.`);
   };
 
   // Detail
@@ -544,6 +546,7 @@ export default function StockScreen() {
           <Text style={[{ color: '#fff', fontSize: 13, fontWeight: '600' }]}>{toastMsg}</Text>
         </View>
       )}
+      <CustomAlert {...alertProps} />
     </SafeAreaView>
   );
 }

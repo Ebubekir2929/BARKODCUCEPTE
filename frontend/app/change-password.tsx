@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useThemeStore } from '../src/store/themeStore';
 import { useAuthStore } from '../src/store/authStore';
+import { useAlert, CustomAlert } from '../src/components/CustomAlert';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -17,12 +18,13 @@ export default function ChangePasswordScreen() {
   const { token, refreshUser } = useAuthStore();
   const params = useLocalSearchParams<{ force?: string }>();
   const isForced = params.force === '1';
+  const { showError, showSuccess, showWarning, alertProps } = useAlert();
 
   // Block hardware back when forced
   useEffect(() => {
     if (!isForced) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      Alert.alert('Uyarı', 'Lütfen önce yeni bir şifre belirleyin.');
+      showWarning('Uyarı', 'Lütfen önce yeni bir şifre belirleyin.');
       return true;
     });
     return () => sub.remove();
@@ -37,19 +39,19 @@ export default function ChangePasswordScreen() {
 
   const handleSubmit = async () => {
     if (!oldPass || !newPass || !newPass2) {
-      Alert.alert('Uyarı', 'Tüm alanları doldurun');
+      showWarning('Uyarı', 'Tüm alanları doldurun');
       return;
     }
     if (newPass !== newPass2) {
-      Alert.alert('Uyarı', 'Yeni şifreler eşleşmiyor');
+      showWarning('Uyarı', 'Yeni şifreler eşleşmiyor');
       return;
     }
     if (newPass.length < 6) {
-      Alert.alert('Uyarı', 'Yeni şifre en az 6 karakter olmalı');
+      showWarning('Uyarı', 'Yeni şifre en az 6 karakter olmalı');
       return;
     }
     if (oldPass === newPass) {
-      Alert.alert('Uyarı', 'Yeni şifre mevcut şifre ile aynı olamaz');
+      showWarning('Uyarı', 'Yeni şifre mevcut şifre ile aynı olamaz');
       return;
     }
 
@@ -62,11 +64,10 @@ export default function ChangePasswordScreen() {
       });
       const data = await resp.json();
       if (!resp.ok) {
-        Alert.alert('Hata', data.detail || 'Şifre değiştirilemedi');
+        showError('Hata', data.detail || 'Şifre değiştirilemedi');
       } else {
-        // Refresh user so must_change_password flag clears
         try { await refreshUser(); } catch(_) {}
-        Alert.alert('Başarılı', data.message || 'Şifre başarıyla değiştirildi', [
+        showSuccess('Başarılı', data.message || 'Şifre başarıyla değiştirildi', [
           { text: 'Tamam', onPress: () => {
             if (isForced) router.replace('/(tabs)/dashboard');
             else router.back();
@@ -74,7 +75,7 @@ export default function ChangePasswordScreen() {
         ]);
       }
     } catch (e) {
-      Alert.alert('Hata', 'Bağlantı hatası');
+      showError('Hata', 'Bağlantı hatası');
     } finally {
       setLoading(false);
     }
@@ -193,6 +194,7 @@ export default function ChangePasswordScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      <CustomAlert {...alertProps} />
     </SafeAreaView>
   );
 }
