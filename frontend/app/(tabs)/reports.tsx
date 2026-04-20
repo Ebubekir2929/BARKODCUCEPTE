@@ -937,14 +937,15 @@ export default function ReportsScreen() {
           }
         }
 
-        // Fiş Kalem Listesi: group line items by BELGENO, create a header card per fiş
+        // Fiş Kalem Listesi: group line items by BELGENO → fiş header card
+        // Detayli=0 → only headers; Detayli=1 → headers + line items
         if (selectedReport.key === 'fis_kalem') {
+          const wantDetails = baseParams.Detayli === 1 || baseParams.Detayli === '1';
           const groups = new Map<string, { header: any; items: any[] }>();
           for (const row of collectedRows) {
             const bn = String(row.BELGENO || '').trim();
             if (!bn) continue;
             if (!groups.has(bn)) {
-              // Create a header row summarizing the fiş
               groups.set(bn, {
                 header: {
                   BELGENO: bn,
@@ -977,11 +978,12 @@ export default function ReportsScreen() {
           }
           if (groups.size > 0) {
             const result: any[] = [];
-            // Preserve original ordering by first occurrence of each BELGENO
             for (const [, g] of groups) {
               result.push(indexRow(g.header));
-              for (const item of g.items) {
-                result.push(indexRow({ ...item, __isDetail: true, __parentBelgeNo: g.header.BELGENO }));
+              if (wantDetails) {
+                for (const item of g.items) {
+                  result.push(indexRow({ ...item, __isDetail: true, __parentBelgeNo: g.header.BELGENO }));
+                }
               }
             }
             return result;
@@ -1116,6 +1118,38 @@ export default function ReportsScreen() {
     setExportLoading(true);
     await new Promise(resolve => setTimeout(resolve, 0));
     const cols = selectedReport.columns;
+    const fmtMoney = (n: number) => `₺${n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    // Top banner (Personel Satış / Fiş Kalem split / Cari Ekstre hint)
+    const buildTopBannerHtml = (): string => {
+      if (selectedReport.key === 'personel_satis') {
+        const firstRow = processedData[0] || {};
+        let toplam = parseFloat(String(firstRow.TOPLAM_TUTAR_NET ?? '0'));
+        if (!(toplam > 0)) toplam = processedData.reduce((acc: number, r: any) => acc + (parseFloat(String(r.TUTAR_NET || '0')) || 0), 0);
+        const fisAdet = parseFloat(String(firstRow.TOPLAM_FIS_ADET ?? processedData.reduce((a: number, r: any) => a + (parseFloat(String(r.FIS_ADET || 0)) || 0), 0)));
+        return `<div style="padding:14px;background:#f0fdf4;border:2px solid #16a34a;border-radius:10px;margin-bottom:12px;display:flex;align-items:center;gap:12px"><div style="font-size:11px;font-weight:800;color:#16a34a;letter-spacing:0.5px">TOPLAM SATIŞ</div><div style="font-size:22px;font-weight:800">${fmtMoney(toplam)}</div><div style="font-size:11px;color:#666;margin-left:auto">${fisAdet.toLocaleString('tr-TR')} fiş · ${processedData.length} personel</div></div>`;
+      }
+      if (selectedReport.key === 'fis_kalem') {
+        let satis = 0, alis = 0, satisAd = 0, alisAd = 0;
+        for (const row of processedData as any[]) {
+          if (row.__isDetail) continue;
+          const tut = parseFloat(String(row.SATIR_GENEL_TOPLAM || row.DAHIL_NET_TUTAR || '0')) || 0;
+          const ft = String(row.FIS_TURU || '').toLowerCase();
+          if (ft.includes('alış') || ft.includes('alis')) { alis += tut; alisAd += 1; }
+          else { satis += tut; satisAd += 1; }
+        }
+        return `<div style="display:flex;gap:10px;margin-bottom:12px"><div style="flex:1;padding:12px;background:#f0fdf4;border:2px solid #16a34a;border-radius:10px"><div style="font-size:10px;font-weight:800;color:#16a34a">SATIŞ TOPLAMI</div><div style="font-size:18px;font-weight:800">${fmtMoney(satis)}</div><div style="font-size:10px;color:#666">${satisAd} fiş/fatura</div></div><div style="flex:1;padding:12px;background:#fef2f2;border:2px solid #dc2626;border-radius:10px"><div style="font-size:10px;font-weight:800;color:#dc2626">ALIŞ TOPLAMI</div><div style="font-size:18px;font-weight:800">${fmtMoney(alis)}</div><div style="font-size:10px;color:#666">${alisAd} fiş/fatura</div></div></div>`;
+      }
+      if (selectedReport.key === 'cari_ekstre') {
+        const det = filterValues?.Detayli;
+        if (det === 1 || det === '1') {
+          const detailCount = processedData.filter((r: any) => r.__isDetail).length;
+          return `<div style="padding:10px;background:#eff6ff;border:1px solid #2563eb;border-radius:8px;margin-bottom:12px;color:#1e40af;font-size:12px">💡 Her fiş / faturanın altında <b>stok kalemleri</b> gösterilmektedir (${detailCount} stok kalemi)</div>`;
+        }
+      }
+      return '';
+    };
+
     // Build summary HTML (TOPLAM/MIN/MAX) if configured
     const buildSummaryHtml = (): string => {
       const s = selectedReport.summary;
@@ -1125,19 +1159,42 @@ export default function ReportsScreen() {
       for (const c of s.cols) {
         const vals = processedData.map((r: any) => parseFloat(String(r[c.key] ?? '0'))).filter(n => !isNaN(n));
         const totalKey = s.totalsFromRow?.[c.key];
-        const total = totalKey != null ? parseFloat(String(firstRow[totalKey] ?? '0')) || vals.reduce((a, b) => a + b, 0) : vals.reduce((a, b) => a + b, 0);
+        const computed = s.totalsComputed?.[c.key];
+        let total: number;
+        if (computed) {
+          const a = parseFloat(String(firstRow[computed.a] ?? '0')) || 0;
+          const b = parseFloat(String(firstRow[computed.b] ?? '0')) || 0;
+          total = computed.op === 'sub' ? a - b : a + b;
+        } else if (totalKey != null) {
+          total = parseFloat(String(firstRow[totalKey] ?? '0')) || vals.reduce((a, b) => a + b, 0);
+        } else {
+          total = vals.reduce((a, b) => a + b, 0);
+        }
         rows[c.key] = { total, min: vals.length ? Math.min(...vals) : 0, max: vals.length ? Math.max(...vals) : 0 };
       }
       const fmtS = (v: number, t?: string) => t === 'money' ? `₺${v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : v.toLocaleString('tr-TR', { maximumFractionDigits: 2 });
       const cell = (v: number, t?: string) => `<td style="text-align:right;padding:6px;border:1px solid #e5e7eb">${fmtS(v, t)}</td>`;
-      return `<h3 style="margin:14px 0 6px">Rapor Özeti</h3><table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:10px"><thead><tr><th style="padding:6px;background:#f3f4f6;border:1px solid #e5e7eb"></th>${s.cols.map(c => `<th style="padding:6px;background:#f3f4f6;border:1px solid #e5e7eb;text-align:right">${c.label}</th>`).join('')}</tr></thead><tbody>
-        <tr style="background:#eff6ff"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#1d4ed8">TOPLAM</td>${s.cols.map(c => cell(rows[c.key].total, c.type)).join('')}</tr>
+      const bodyRows = s.showOnlyTotal
+        ? `<tr style="background:#eff6ff"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#1d4ed8">TOPLAM</td>${s.cols.map(c => cell(rows[c.key].total, c.type)).join('')}</tr>`
+        : `<tr style="background:#eff6ff"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#1d4ed8">TOPLAM</td>${s.cols.map(c => cell(rows[c.key].total, c.type)).join('')}</tr>
         <tr style="background:#fef2f2"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#b91c1c">EN DÜŞÜK</td>${s.cols.map(c => cell(rows[c.key].min, c.type)).join('')}</tr>
-        <tr style="background:#f0fdf4"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#047857">EN YÜKSEK</td>${s.cols.map(c => cell(rows[c.key].max, c.type)).join('')}</tr>
-        </tbody></table>`;
+        <tr style="background:#f0fdf4"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#047857">EN YÜKSEK</td>${s.cols.map(c => cell(rows[c.key].max, c.type)).join('')}</tr>`;
+      return `<h3 style="margin:14px 0 6px">Rapor Özeti</h3><table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:10px"><thead><tr><th style="padding:6px;background:#f3f4f6;border:1px solid #e5e7eb"></th>${s.cols.map(c => `<th style="padding:6px;background:#f3f4f6;border:1px solid #e5e7eb;text-align:right">${c.label}</th>`).join('')}</tr></thead><tbody>${bodyRows}</tbody></table>`;
     };
+
+    // Row renderer that highlights fiş headers and indents detail rows
+    const renderRow = (r: any) => {
+      if (r.__isFisHeader) {
+        return `<tr style="background:#dbeafe"><td colspan="${cols.length}" style="padding:8px;border:1px solid #2563eb;font-weight:700;color:#1e40af">📄 ${r.BELGENO || ''} · ${r.FIS_TURU || ''}${r.CARI_AD ? ' · ' + r.CARI_AD : ''}${r.FIS_TARIHI ? ' · ' + String(r.FIS_TARIHI).split(' ')[0] : ''} &nbsp;&nbsp;→&nbsp;&nbsp; <b>${fmtMoney(parseFloat(String(r.SATIR_GENEL_TOPLAM || '0')) || 0)}</b> (${r.KALEM_SAYISI || 0} kalem)</td></tr>`;
+      }
+      if (r.__isDetail) {
+        return `<tr style="background:#f9fafb"><td colspan="${cols.length}" style="padding:6px 8px 6px 24px;border:1px solid #e5e7eb;font-size:10px">&nbsp;&nbsp;➡ <b>${r.STOK_KOD || ''}</b> ${r.STOK_AD || ''} — Miktar: ${parseFloat(String(r.MIKTAR_FIS || 0)).toLocaleString('tr-TR')} ${r.STOK_BIRIM || ''} · Fiyat: ${fmtMoney(parseFloat(String(r.NET_FIYAT || 0)) || 0)} · KDV: ${fmtMoney(parseFloat(String(r.KDV_TUTAR || 0)) || 0)} · <b>${fmtMoney(parseFloat(String(r.SATIR_GENEL_TOPLAM || 0)) || 0)}</b></td></tr>`;
+      }
+      return `<tr>${cols.map(c => `<td>${renderValue(r[c.key], c)}</td>`).join('')}</tr>`;
+    };
+    const topBannerHtml = buildTopBannerHtml();
     const summaryHtml = buildSummaryHtml();
-    const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:16px;font-size:11px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:5px;text-align:left;font-size:10px}th{background:#f5f5f5;font-weight:bold}h2{font-size:16px;margin:0 0 8px}h3{font-size:13px}</style></head><body><h2>${selectedReport.title}</h2><p style="color:#666">${processedData.length} kayıt · ${new Date().toLocaleDateString('tr-TR')}</p>${summaryHtml}<table><thead><tr>${cols.map(c => `<th>${c.label}</th>`).join('')}</tr></thead><tbody>${processedData.map((r: any) => `<tr>${cols.map(c => `<td>${renderValue(r[c.key], c)}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`;
+    const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:16px;font-size:11px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:5px;text-align:left;font-size:10px}th{background:#f5f5f5;font-weight:bold}h2{font-size:16px;margin:0 0 8px}h3{font-size:13px}</style></head><body><h2>${selectedReport.title}</h2><p style="color:#666">${processedData.length} kayıt · ${new Date().toLocaleDateString('tr-TR')}</p>${topBannerHtml}${summaryHtml}<table><thead><tr>${cols.map(c => `<th>${c.label}</th>`).join('')}</tr></thead><tbody>${processedData.map(renderRow).join('')}</tbody></table></body></html>`;
     try {
       if (Platform.OS === 'web') {
         // Web: open in new window and trigger print dialog
@@ -1211,20 +1268,50 @@ export default function ReportsScreen() {
         const computeVals = (key: string) => {
           const vals = processedData.map((r: any) => parseFloat(String(r[key] ?? '0'))).filter(n => !isNaN(n));
           const totalKey = s.totalsFromRow?.[key];
+          const computed = s.totalsComputed?.[key];
+          let total: number;
+          if (computed) {
+            const a = parseFloat(String(firstRow[computed.a] ?? '0')) || 0;
+            const b = parseFloat(String(firstRow[computed.b] ?? '0')) || 0;
+            total = computed.op === 'sub' ? a - b : a + b;
+          } else if (totalKey != null) {
+            total = parseFloat(String(firstRow[totalKey] ?? '0')) || vals.reduce((a, b) => a + b, 0);
+          } else {
+            total = vals.reduce((a, b) => a + b, 0);
+          }
           return {
-            total: totalKey != null ? parseFloat(String(firstRow[totalKey] ?? '0')) || vals.reduce((a, b) => a + b, 0) : vals.reduce((a, b) => a + b, 0),
+            total,
             min: vals.length ? Math.min(...vals) : 0,
             max: vals.length ? Math.max(...vals) : 0,
           };
         };
         const stats = s.cols.map(c => ({ col: c, v: computeVals(c.key) }));
-        const summaryRows: any[] = [
-          { '': 'TOPLAM', ...Object.fromEntries(stats.map(x => [x.col.label, x.v.total])) },
-          { '': 'EN DÜŞÜK', ...Object.fromEntries(stats.map(x => [x.col.label, x.v.min])) },
-          { '': 'EN YÜKSEK', ...Object.fromEntries(stats.map(x => [x.col.label, x.v.max])) },
-        ];
+        const summaryRows: any[] = s.showOnlyTotal
+          ? [{ '': 'TOPLAM', ...Object.fromEntries(stats.map(x => [x.col.label, x.v.total])) }]
+          : [
+              { '': 'TOPLAM', ...Object.fromEntries(stats.map(x => [x.col.label, x.v.total])) },
+              { '': 'EN DÜŞÜK', ...Object.fromEntries(stats.map(x => [x.col.label, x.v.min])) },
+              { '': 'EN YÜKSEK', ...Object.fromEntries(stats.map(x => [x.col.label, x.v.max])) },
+            ];
+        // Add TOP BANNER rows for Personel Satış and Fiş Kalem
+        if (selectedReport.key === 'personel_satis') {
+          let toplam = parseFloat(String(firstRow.TOPLAM_TUTAR_NET ?? '0'));
+          if (!(toplam > 0)) toplam = processedData.reduce((a: number, r: any) => a + (parseFloat(String(r.TUTAR_NET || 0)) || 0), 0);
+          summaryRows.unshift({ '': 'TOPLAM SATIŞ', [s.cols[0]?.label || '']: toplam } as any);
+        } else if (selectedReport.key === 'fis_kalem') {
+          let satis = 0, alis = 0;
+          for (const row of processedData as any[]) {
+            if (row.__isDetail) continue;
+            const tut = parseFloat(String(row.SATIR_GENEL_TOPLAM || row.DAHIL_NET_TUTAR || '0')) || 0;
+            const ft = String(row.FIS_TURU || '').toLowerCase();
+            if (ft.includes('alış') || ft.includes('alis')) alis += tut;
+            else satis += tut;
+          }
+          summaryRows.unshift({ '': 'SATIŞ TOPLAMI', [s.cols[0]?.label || '']: satis } as any);
+          summaryRows.unshift({ '': 'ALIŞ TOPLAMI', [s.cols[0]?.label || '']: alis } as any);
+        }
         const wsS = XLSX.utils.json_to_sheet(summaryRows, { header: ['', ...s.cols.map(c => c.label)] });
-        (wsS as any)['!cols'] = [{ wch: 14 }, ...s.cols.map(() => ({ wch: 16 }))];
+        (wsS as any)['!cols'] = [{ wch: 18 }, ...s.cols.map(() => ({ wch: 16 }))];
         XLSX.utils.book_append_sheet(wb, wsS, 'Özet');
       }
 
@@ -1586,7 +1673,15 @@ export default function ReportsScreen() {
                 windowSize={7}
                 removeClippedSubviews={Platform.OS !== 'web'}
                 updateCellsBatchingPeriod={50}
-                ListHeaderComponent={selectedReport?.summary ? <ReportSummaryPanel data={reportData} config={selectedReport.summary} colors={colors} /> : null}
+                ListHeaderComponent={(() => {
+                  if (!selectedReport) return null;
+                  return (
+                    <>
+                      <TopBanner report={selectedReport} data={reportData} baseParams={selectedReport.defaultParams} filterValues={filterValues} colors={colors} />
+                      {selectedReport.summary && <ReportSummaryPanel data={reportData} config={selectedReport.summary} colors={colors} />}
+                    </>
+                  );
+                })()}
                 renderItem={({ item }) => (
                   selectedReport?.hierarchical
                     ? <HierarchicalRow item={item} report={selectedReport} colors={colors} />
@@ -1896,6 +1991,107 @@ const ReportSummaryPanelComp: React.FC<ReportSummaryPanelProps> = ({ data, confi
   );
 };
 const ReportSummaryPanel = memo(ReportSummaryPanelComp, (prev, next) => prev.data === next.data && prev.config === next.config && prev.colors === next.colors);
+
+// === TOP BANNER — prominent total / split / hint shown above the summary panel ===
+interface TopBannerProps { report: ReportDef; data: any[]; baseParams: any; filterValues: any; colors: any; }
+const TopBannerComp: React.FC<TopBannerProps> = ({ report, data, filterValues, colors }) => {
+  if (!data || data.length === 0) return null;
+  const fmt = (n: number) => `₺${n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  // PERSONEL SATIŞ: prominent "Toplam Satış" banner
+  if (report.key === 'personel_satis') {
+    const firstRow = data[0] || {};
+    let toplam = parseFloat(String(firstRow.TOPLAM_TUTAR_NET ?? '0'));
+    if (!(toplam > 0)) {
+      toplam = data.reduce((acc, r) => acc + (parseFloat(String(r.TUTAR_NET || '0')) || 0), 0);
+    }
+    const fisAdet = parseFloat(String(firstRow.TOPLAM_FIS_ADET ?? data.reduce((a, r) => a + (parseFloat(String(r.FIS_ADET || 0)) || 0), 0)));
+    return (
+      <View style={[topBannerStyles.banner, { backgroundColor: colors.success + '15', borderColor: colors.success + '50' }]}>
+        <View style={topBannerStyles.iconWrap}>
+          <View style={[topBannerStyles.iconBg, { backgroundColor: colors.success }]}>
+            <Ionicons name="cash-outline" size={22} color="#fff" />
+          </View>
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[topBannerStyles.label, { color: colors.success }]}>TOPLAM SATIŞ</Text>
+          <Text style={[topBannerStyles.big, { color: colors.text }]} numberOfLines={1}>{fmt(toplam)}</Text>
+          <Text style={[topBannerStyles.sub, { color: colors.textSecondary }]}>{fisAdet.toLocaleString('tr-TR')} fiş • {data.length} personel</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // FİŞ KALEM LİSTESİ: split sales vs purchases
+  if (report.key === 'fis_kalem') {
+    let satisTutar = 0, alisTutar = 0, satisAdet = 0, alisAdet = 0;
+    for (const row of data) {
+      if (!row.__isFisHeader && !row.__isDetail) {
+        // Flat row (no grouping applied) — treat normally
+        const tut = parseFloat(String(row.SATIR_GENEL_TOPLAM || row.DAHIL_NET_TUTAR || '0')) || 0;
+        const ft = String(row.FIS_TURU || '').toLowerCase();
+        if (ft.includes('alış') || ft.includes('alis')) { alisTutar += tut; alisAdet += 1; }
+        else { satisTutar += tut; satisAdet += 1; }
+      } else if (row.__isFisHeader) {
+        const tut = parseFloat(String(row.SATIR_GENEL_TOPLAM || row.DAHIL_NET_TUTAR || '0')) || 0;
+        const ft = String(row.FIS_TURU || '').toLowerCase();
+        if (ft.includes('alış') || ft.includes('alis')) { alisTutar += tut; alisAdet += 1; }
+        else { satisTutar += tut; satisAdet += 1; }
+      }
+    }
+    return (
+      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+        <View style={[topBannerStyles.halfBanner, { backgroundColor: colors.success + '15', borderColor: colors.success + '50' }]}>
+          <Ionicons name="arrow-up-circle" size={20} color={colors.success} />
+          <Text style={[topBannerStyles.halfLabel, { color: colors.success }]}>SATIŞ TOPLAMI</Text>
+          <Text style={[topBannerStyles.halfBig, { color: colors.text }]} numberOfLines={1}>{fmt(satisTutar)}</Text>
+          <Text style={[topBannerStyles.halfSub, { color: colors.textSecondary }]}>{satisAdet} fiş/fatura</Text>
+        </View>
+        <View style={[topBannerStyles.halfBanner, { backgroundColor: colors.error + '10', borderColor: colors.error + '50' }]}>
+          <Ionicons name="arrow-down-circle" size={20} color={colors.error} />
+          <Text style={[topBannerStyles.halfLabel, { color: colors.error }]}>ALIŞ TOPLAMI</Text>
+          <Text style={[topBannerStyles.halfBig, { color: colors.text }]} numberOfLines={1}>{fmt(alisTutar)}</Text>
+          <Text style={[topBannerStyles.halfSub, { color: colors.textSecondary }]}>{alisAdet} fiş/fatura</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // CARI EKSTRE: hint when Detayli=1 (stock items appear under transactions)
+  if (report.key === 'cari_ekstre') {
+    const det = filterValues?.Detayli;
+    const isDetail = det === 1 || det === '1';
+    if (isDetail) {
+      const detailCount = data.filter((r: any) => r.__isDetail).length;
+      return (
+        <View style={[topBannerStyles.hint, { backgroundColor: colors.primary + '10', borderColor: colors.primary + '40' }]}>
+          <Ionicons name="information-circle" size={18} color={colors.primary} />
+          <Text style={[topBannerStyles.hintText, { color: colors.text }]} numberOfLines={2}>
+            💡 Her fiş / faturanın altında <Text style={{ fontWeight: '700', color: colors.primary }}>stok kalemleri</Text> gösterilmektedir ({detailCount} stok kalemi bulundu)
+          </Text>
+        </View>
+      );
+    }
+  }
+
+  return null;
+};
+const TopBanner = memo(TopBannerComp, (p, n) => p.report === n.report && p.data === n.data && p.filterValues === n.filterValues && p.colors === n.colors);
+
+const topBannerStyles = StyleSheet.create({
+  banner: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 14, borderWidth: 1.5, marginBottom: 10 },
+  iconWrap: { alignItems: 'center', justifyContent: 'center' },
+  iconBg: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+  label: { fontSize: 10, fontWeight: '800', letterSpacing: 0.5, marginBottom: 2 },
+  big: { fontSize: 22, fontWeight: '800', fontVariant: ['tabular-nums'] as any, letterSpacing: -0.5 },
+  sub: { fontSize: 11, fontWeight: '600', marginTop: 2 },
+  halfBanner: { flex: 1, padding: 12, borderRadius: 12, borderWidth: 1.5, gap: 2 },
+  halfLabel: { fontSize: 9, fontWeight: '800', letterSpacing: 0.5, marginTop: 4 },
+  halfBig: { fontSize: 16, fontWeight: '800', fontVariant: ['tabular-nums'] as any },
+  halfSub: { fontSize: 10, fontWeight: '500' },
+  hint: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 10 },
+  hintText: { flex: 1, fontSize: 12, fontWeight: '500', lineHeight: 17 },
+});
 
 const summaryStyles = StyleSheet.create({
   wrap: { borderRadius: 12, borderWidth: 1, overflow: 'hidden', marginBottom: 10 },
