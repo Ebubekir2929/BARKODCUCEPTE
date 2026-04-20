@@ -883,8 +883,120 @@ export default function ReportsScreen() {
       setLoadedPages(1);
       setReportLoading(false);
 
+      // Drill-down / grouping helper — runs after both single-page AND multi-page fetches
+      const postProcess = async (collectedRows: any[]): Promise<any[]> => {
+        // Cari Ekstre Detayli=1: inject fis_kalem stock items as child rows
+        if (
+          selectedReport.key === 'cari_ekstre' &&
+          (baseParams.Detayli === 1 || baseParams.Detayli === '1')
+        ) {
+          try {
+            const fisParams = {
+              BASTARIH: baseParams.BASTARIH || firstOfYear(),
+              BITTARIH: String(baseParams.BITTARIH || today()).split(' ')[0],
+              FisTuru: '', FisAltTuru: '', Lokasyon: baseParams.Lokasyon || '', Proje: baseParams.Proje || '', BelgeNo: '',
+              Personel: '', Cariler: baseParams.Cariler || '', CariTur: baseParams.CariTur || '', CariGrup: baseParams.CariGrup || '',
+              Adresler: '', Temsilci: '',
+              CariOzelKod1: '', CariOzelKod2: '', CariOzelKod3: '', CariOzelKod4: '', CariOzelKod5: '',
+              FisOzelKod1: '', FisOzelKod2: '', FisOzelKod3: '', FisOzelKod4: '', FisOzelKod5: '',
+              Detayli: 1, Page: 1, PageSize: 500,
+              ...STOK_FILTER_DEFAULTS,
+            };
+            const fisResp = await fetch(`${API_URL}/api/data/report-run`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              body: JSON.stringify({ tenant_id: activeTenantId, dataset_key: 'rap_fis_kalem_listesi_web', params: fisParams, fetch_all: true }),
+              signal: controller.signal,
+            });
+            const fis = await fisResp.json();
+            if (runTokenRef.current !== token_id || controller.signal.aborted) return collectedRows;
+            const fisRows: any[] = Array.isArray(fis?.data) ? fis.data : [];
+            if (fisRows.length > 0) {
+              const byBelge: Record<string, any[]> = {};
+              for (const fr of fisRows) {
+                const bn = String(fr.BELGENO || '').trim();
+                if (!bn) continue;
+                (byBelge[bn] = byBelge[bn] || []).push(fr);
+              }
+              const expanded: any[] = [];
+              for (const row of collectedRows) {
+                expanded.push(row);
+                const bn = String(row.BELGENO || '').trim();
+                if (bn && byBelge[bn]) {
+                  for (const child of byBelge[bn]) {
+                    expanded.push(indexRow({ ...child, __isDetail: true, __parentBelgeNo: bn }));
+                  }
+                }
+              }
+              if (expanded.length !== collectedRows.length) {
+                return expanded;
+              }
+            }
+          } catch (drillErr) {
+            console.warn('Cari Ekstre drill-down failed:', drillErr);
+          }
+        }
+
+        // Fiş Kalem Listesi: group line items by BELGENO, create a header card per fiş
+        if (selectedReport.key === 'fis_kalem') {
+          const groups = new Map<string, { header: any; items: any[] }>();
+          for (const row of collectedRows) {
+            const bn = String(row.BELGENO || '').trim();
+            if (!bn) continue;
+            if (!groups.has(bn)) {
+              // Create a header row summarizing the fiş
+              groups.set(bn, {
+                header: {
+                  BELGENO: bn,
+                  FIS_TARIHI: row.FIS_TARIHI,
+                  FIS_TURU: row.FIS_TURU,
+                  FIS_ALT_TIPI: row.FIS_ALT_TIPI,
+                  LOKASYON: row.LOKASYON,
+                  CARI_KOD: row.CARI_KOD,
+                  CARI_AD: row.CARI_AD,
+                  PROJE: row.PROJE,
+                  NET_TUTAR: 0,
+                  KDV_TUTAR: 0,
+                  DAHIL_NET_TUTAR: 0,
+                  SATIR_GENEL_TOPLAM: 0,
+                  MIKTAR_FIS: 0,
+                  KALEM_SAYISI: 0,
+                  __isFisHeader: true,
+                },
+                items: [],
+              });
+            }
+            const g = groups.get(bn)!;
+            g.items.push(row);
+            g.header.NET_TUTAR += parseFloat(String(row.NET_TUTAR || '0')) || 0;
+            g.header.KDV_TUTAR += parseFloat(String(row.KDV_TUTAR || '0')) || 0;
+            g.header.DAHIL_NET_TUTAR += parseFloat(String(row.DAHIL_NET_TUTAR || '0')) || 0;
+            g.header.SATIR_GENEL_TOPLAM += parseFloat(String(row.SATIR_GENEL_TOPLAM || '0')) || 0;
+            g.header.MIKTAR_FIS += parseFloat(String(row.MIKTAR_FIS || '0')) || 0;
+            g.header.KALEM_SAYISI = g.items.length;
+          }
+          if (groups.size > 0) {
+            const result: any[] = [];
+            // Preserve original ordering by first occurrence of each BELGENO
+            for (const [, g] of groups) {
+              result.push(indexRow(g.header));
+              for (const item of g.items) {
+                result.push(indexRow({ ...item, __isDetail: true, __parentBelgeNo: g.header.BELGENO }));
+              }
+            }
+            return result;
+          }
+        }
+
+        return collectedRows;
+      };
+
       if (firstRows.length < pageSize) {
-        resultCacheRef.current.set(cacheKey, { data: firstRows, pages: 1 });
+        const finalRows = await postProcess(firstRows);
+        if (runTokenRef.current === token_id && !controller.signal.aborted) {
+          setReportData(finalRows);
+          resultCacheRef.current.set(cacheKey, { data: finalRows, pages: 1 });
+        }
         return;
       }
 
@@ -922,68 +1034,11 @@ export default function ReportsScreen() {
       }
       // Save to cache on successful complete
       if (runTokenRef.current === token_id && !controller.signal.aborted) {
-        resultCacheRef.current.set(cacheKey, { data: collected, pages: page - 1 });
-      }
-
-      // ====== Cari Ekstre Detayli=1: parallel drill-down to fis_kalem for stock items ======
-      if (
-        selectedReport.key === 'cari_ekstre' &&
-        (baseParams.Detayli === 1 || baseParams.Detayli === '1')
-      ) {
-        try {
-          const fisParams = {
-            BASTARIH: baseParams.BASTARIH || firstOfYear(),
-            BITTARIH: String(baseParams.BITTARIH || today()).split(' ')[0], // strip time
-            FisTuru: '', FisAltTuru: '', Lokasyon: baseParams.Lokasyon || '', Proje: baseParams.Proje || '', BelgeNo: '',
-            Personel: '', Cariler: baseParams.Cariler || '', CariTur: baseParams.CariTur || '', CariGrup: baseParams.CariGrup || '',
-            Adresler: '', Temsilci: '',
-            CariOzelKod1: '', CariOzelKod2: '', CariOzelKod3: '', CariOzelKod4: '', CariOzelKod5: '',
-            FisOzelKod1: '', FisOzelKod2: '', FisOzelKod3: '', FisOzelKod4: '', FisOzelKod5: '',
-            Detayli: 1,
-            Page: 1, PageSize: 500,
-            ...STOK_FILTER_DEFAULTS,
-          };
-          const fisResp = await fetch(`${API_URL}/api/data/report-run`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-            body: JSON.stringify({ tenant_id: activeTenantId, dataset_key: 'rap_fis_kalem_listesi_web', params: fisParams, fetch_all: true }),
-            signal: controller.signal,
-          });
-          const fis = await fisResp.json();
-          if (runTokenRef.current !== token_id || controller.signal.aborted) return;
-          const fisRows: any[] = Array.isArray(fis?.data) ? fis.data : [];
-          if (fisRows.length > 0) {
-            // Group fiş kalem by BELGENO
-            const byBelge: Record<string, any[]> = {};
-            for (const fr of fisRows) {
-              const bn = String(fr.BELGENO || '').trim();
-              if (!bn) continue;
-              (byBelge[bn] = byBelge[bn] || []).push(fr);
-            }
-            // Inject child rows after each matching cari row
-            const expanded: any[] = [];
-            for (const row of collected) {
-              expanded.push(row);
-              const bn = String(row.BELGENO || '').trim();
-              if (bn && byBelge[bn]) {
-                for (const child of byBelge[bn]) {
-                  expanded.push(indexRow({
-                    ...child,
-                    __isDetail: true,
-                    __parentBelgeNo: bn,
-                  }));
-                }
-              }
-            }
-            if (expanded.length !== collected.length) {
-              setReportData(expanded);
-              resultCacheRef.current.set(cacheKey, { data: expanded, pages: page - 1 });
-            }
-          }
-        } catch (drillErr) {
-          console.warn('Cari Ekstre drill-down failed:', drillErr);
-          // Non-fatal — main cari ekstre data is still shown
+        const finalRows = await postProcess(collected);
+        if (finalRows !== collected) {
+          setReportData(finalRows);
         }
+        resultCacheRef.current.set(cacheKey, { data: finalRows, pages: page - 1 });
       }
     } catch (err: any) {
       if (err?.name === 'AbortError') {
@@ -1608,7 +1663,39 @@ interface ReportCardProps {
   renderValue: (val: any, col: ColDef) => string;
 }
 const ReportCardComp: React.FC<ReportCardProps> = ({ item, report, colors, renderValue }) => {
-  // Special render: drill-down detail row (stok kalem) under a Cari Ekstre transaction
+  // Special render: Fiş Kalem header row — highlighted card showing fiş summary
+  if (item.__isFisHeader) {
+    const fmt = (n: number) => n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fisTuru = String(item.FIS_TURU || '-');
+    const belge = String(item.BELGENO || '');
+    const tarih = String(item.FIS_TARIHI || '').split(' ')[0];
+    const cariAd = String(item.CARI_AD || '');
+    const kalem = item.KALEM_SAYISI || 0;
+    const miktar = parseFloat(String(item.MIKTAR_FIS || '0'));
+    const toplam = parseFloat(String(item.SATIR_GENEL_TOPLAM || '0'));
+    return (
+      <View style={[cardStyles.card, { backgroundColor: colors.primary + '08', borderColor: colors.primary + '40', borderWidth: 1.5 }]}>
+        <View style={cardStyles.cardTop}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={[cardStyles.code, { color: colors.primary, fontWeight: '700' }]} numberOfLines={1}>{belge}</Text>
+            <Text style={[cardStyles.title, { color: colors.text }]} numberOfLines={2}>{fisTuru}</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={[cardStyles.amount, { color: colors.primary }]} numberOfLines={1}>₺{fmt(toplam)}</Text>
+            <Text style={[cardStyles.amountCurrency, { color: colors.textSecondary }]}>Fiş Toplamı</Text>
+          </View>
+        </View>
+        <View style={cardStyles.chipsRow}>
+          {tarih && <View style={[cardStyles.chip, { backgroundColor: colors.primary + '15' }]}><Text style={[cardStyles.chipText, { color: colors.primary }]}>{tarih}</Text></View>}
+          <View style={[cardStyles.chip, { backgroundColor: colors.success + '18' }]}><Text style={[cardStyles.chipText, { color: colors.success }]}>{kalem} kalem</Text></View>
+          <View style={[cardStyles.chip, { backgroundColor: colors.primary + '12' }]}><Text style={[cardStyles.chipText, { color: colors.primary }]}>Toplam Miktar: {miktar.toLocaleString('tr-TR')}</Text></View>
+          {cariAd && <View style={[cardStyles.chip, { backgroundColor: colors.textSecondary + '18' }]}><Text style={[cardStyles.chipText, { color: colors.text }]} numberOfLines={1}>{cariAd}</Text></View>}
+        </View>
+      </View>
+    );
+  }
+
+  // Special render: drill-down detail row (stok kalem)
   if (item.__isDetail) {
     const stokKod = String(item.STOK_KOD || '');
     const stokAd = String(item.STOK_AD || '-');
