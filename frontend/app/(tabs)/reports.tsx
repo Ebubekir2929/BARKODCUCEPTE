@@ -419,7 +419,7 @@ const OTHER_REPORTS: ReportDef[] = [
       Page: 1, PageSize: 500,
       ...STOK_FILTER_DEFAULTS,
     },
-    requireNarrowing: false, requiredFilters: ['Lokasyon'],
+    requireNarrowing: false, requiredFilters: [],
     summary: {
       cols: [
         { key: 'MIKTAR_NET', label: 'Miktar Net', type: 'number' },
@@ -434,6 +434,7 @@ const OTHER_REPORTS: ReportDef[] = [
         ISKONTO_TUTAR: 'TOPLAM_ISKONTO_TUTAR', FIS_ADET: 'TOPLAM_FIS_ADET',
         KISI: 'TOPLAM_KISI', NOKTA: 'TOPLAM_NOKTA',
       },
+      showOnlyTotal: true,
     },
     cardLayout: {
       title: 'AD', code: 'KOD',
@@ -498,7 +499,7 @@ const OTHER_REPORTS: ReportDef[] = [
       Detayli: 0, Page: 1, PageSize: 500,
       ...STOK_FILTER_DEFAULTS,
     },
-    requireNarrowing: false, requiredFilters: ['Lokasyon'],
+    requireNarrowing: false, requiredFilters: [],
     summary: {
       cols: [
         { key: 'MIKTAR_FIS', label: 'Miktar', type: 'number' },
@@ -511,6 +512,7 @@ const OTHER_REPORTS: ReportDef[] = [
         MIKTAR_FIS: 'TOPLAM_MIKTAR', NET_TUTAR: 'TOPLAM_NET_TUTAR',
         KDV_TUTAR: 'TOPLAM_KDV', DAHIL_NET_TUTAR: 'TOPLAM_DAHIL_NET_TUTAR',
       },
+      showOnlyTotal: true,
     },
     cardLayout: {
       title: 'STOK_AD', code: 'BELGENO',
