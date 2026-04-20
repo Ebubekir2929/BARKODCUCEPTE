@@ -924,6 +924,67 @@ export default function ReportsScreen() {
       if (runTokenRef.current === token_id && !controller.signal.aborted) {
         resultCacheRef.current.set(cacheKey, { data: collected, pages: page - 1 });
       }
+
+      // ====== Cari Ekstre Detayli=1: parallel drill-down to fis_kalem for stock items ======
+      if (
+        selectedReport.key === 'cari_ekstre' &&
+        (baseParams.Detayli === 1 || baseParams.Detayli === '1')
+      ) {
+        try {
+          const fisParams = {
+            BASTARIH: baseParams.BASTARIH || firstOfYear(),
+            BITTARIH: String(baseParams.BITTARIH || today()).split(' ')[0], // strip time
+            FisTuru: '', FisAltTuru: '', Lokasyon: baseParams.Lokasyon || '', Proje: baseParams.Proje || '', BelgeNo: '',
+            Personel: '', Cariler: baseParams.Cariler || '', CariTur: baseParams.CariTur || '', CariGrup: baseParams.CariGrup || '',
+            Adresler: '', Temsilci: '',
+            CariOzelKod1: '', CariOzelKod2: '', CariOzelKod3: '', CariOzelKod4: '', CariOzelKod5: '',
+            FisOzelKod1: '', FisOzelKod2: '', FisOzelKod3: '', FisOzelKod4: '', FisOzelKod5: '',
+            Detayli: 1,
+            Page: 1, PageSize: 500,
+            ...STOK_FILTER_DEFAULTS,
+          };
+          const fisResp = await fetch(`${API_URL}/api/data/report-run`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ tenant_id: activeTenantId, dataset_key: 'rap_fis_kalem_listesi_web', params: fisParams, fetch_all: true }),
+            signal: controller.signal,
+          });
+          const fis = await fisResp.json();
+          if (runTokenRef.current !== token_id || controller.signal.aborted) return;
+          const fisRows: any[] = Array.isArray(fis?.data) ? fis.data : [];
+          if (fisRows.length > 0) {
+            // Group fiş kalem by BELGENO
+            const byBelge: Record<string, any[]> = {};
+            for (const fr of fisRows) {
+              const bn = String(fr.BELGENO || '').trim();
+              if (!bn) continue;
+              (byBelge[bn] = byBelge[bn] || []).push(fr);
+            }
+            // Inject child rows after each matching cari row
+            const expanded: any[] = [];
+            for (const row of collected) {
+              expanded.push(row);
+              const bn = String(row.BELGENO || '').trim();
+              if (bn && byBelge[bn]) {
+                for (const child of byBelge[bn]) {
+                  expanded.push(indexRow({
+                    ...child,
+                    __isDetail: true,
+                    __parentBelgeNo: bn,
+                  }));
+                }
+              }
+            }
+            if (expanded.length !== collected.length) {
+              setReportData(expanded);
+              resultCacheRef.current.set(cacheKey, { data: expanded, pages: page - 1 });
+            }
+          }
+        } catch (drillErr) {
+          console.warn('Cari Ekstre drill-down failed:', drillErr);
+          // Non-fatal — main cari ekstre data is still shown
+        }
+      }
     } catch (err: any) {
       if (err?.name === 'AbortError') {
         // Silent abort
@@ -952,12 +1013,35 @@ export default function ReportsScreen() {
       d = d.filter((row: any) => (row.__search || '').includes(deferredSearch));
     }
     if (deferredSortKey) {
-      d = [...d].sort((a: any, b: any) => {
-        const va = a[deferredSortKey]; const vb = b[deferredSortKey];
-        const na = parseFloat(va); const nb = parseFloat(vb);
-        if (!isNaN(na) && !isNaN(nb)) return deferredSortAsc ? na - nb : nb - na;
-        return deferredSortAsc ? String(va || '').localeCompare(String(vb || ''), 'tr') : String(vb || '').localeCompare(String(va || ''), 'tr');
-      });
+      // Preserve parent → child grouping when __isDetail rows exist.
+      // Split into parent rows + their detail children, sort parents, then rebuild.
+      const hasDetails = d.some((r: any) => r.__isDetail);
+      if (hasDetails) {
+        const groups: { parent: any; children: any[] }[] = [];
+        let current: { parent: any; children: any[] } | null = null;
+        for (const row of d) {
+          if (row.__isDetail) {
+            if (current) current.children.push(row);
+          } else {
+            current = { parent: row, children: [] };
+            groups.push(current);
+          }
+        }
+        groups.sort((ga, gb) => {
+          const va = ga.parent[deferredSortKey]; const vb = gb.parent[deferredSortKey];
+          const na = parseFloat(va); const nb = parseFloat(vb);
+          if (!isNaN(na) && !isNaN(nb)) return deferredSortAsc ? na - nb : nb - na;
+          return deferredSortAsc ? String(va || '').localeCompare(String(vb || ''), 'tr') : String(vb || '').localeCompare(String(va || ''), 'tr');
+        });
+        d = groups.flatMap(g => [g.parent, ...g.children]);
+      } else {
+        d = [...d].sort((a: any, b: any) => {
+          const va = a[deferredSortKey]; const vb = b[deferredSortKey];
+          const na = parseFloat(va); const nb = parseFloat(vb);
+          if (!isNaN(na) && !isNaN(nb)) return deferredSortAsc ? na - nb : nb - na;
+          return deferredSortAsc ? String(va || '').localeCompare(String(vb || ''), 'tr') : String(vb || '').localeCompare(String(va || ''), 'tr');
+        });
+      }
     }
     return d;
   }, [reportData, deferredSearch, deferredSortKey, deferredSortAsc]);
@@ -1524,6 +1608,34 @@ interface ReportCardProps {
   renderValue: (val: any, col: ColDef) => string;
 }
 const ReportCardComp: React.FC<ReportCardProps> = ({ item, report, colors, renderValue }) => {
+  // Special render: drill-down detail row (stok kalem) under a Cari Ekstre transaction
+  if (item.__isDetail) {
+    const stokKod = String(item.STOK_KOD || '');
+    const stokAd = String(item.STOK_AD || '-');
+    const miktar = parseFloat(String(item.MIKTAR_FIS || '0'));
+    const birim = String(item.STOK_BIRIM || '');
+    const fiyat = parseFloat(String(item.NET_FIYAT || '0'));
+    const kdv = parseFloat(String(item.KDV_TUTAR || '0'));
+    const netKdvDahil = parseFloat(String(item.SATIR_GENEL_TOPLAM || item.DAHIL_NET_TUTAR || '0'));
+    const fmt = (n: number) => n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return (
+      <View style={[{ marginLeft: 16, marginTop: -8, marginBottom: 8, padding: 10, borderRadius: 8, borderLeftWidth: 3, borderLeftColor: colors.primary + '80', backgroundColor: colors.card + 'C0', borderColor: colors.border, borderWidth: StyleSheet.hairlineWidth }]}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+          <Ionicons name="arrow-forward-outline" size={12} color={colors.primary} />
+          <Text style={[{ fontSize: 11, color: colors.textSecondary, marginLeft: 4 }]}>{stokKod}</Text>
+          <View style={{ flex: 1 }} />
+          <Text style={[{ fontSize: 13, fontWeight: '700', color: colors.primary }]}>₺{fmt(netKdvDahil)}</Text>
+        </View>
+        <Text style={[{ fontSize: 13, fontWeight: '600', color: colors.text, marginBottom: 6 }]} numberOfLines={2}>{stokAd}</Text>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
+          <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>Miktar: <Text style={{ color: colors.text, fontWeight: '600' }}>{miktar.toLocaleString('tr-TR')} {birim}</Text></Text>
+          <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>Fiyat: <Text style={{ color: colors.text, fontWeight: '600' }}>₺{fmt(fiyat)}</Text></Text>
+          {kdv > 0 && <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>KDV: <Text style={{ color: colors.text, fontWeight: '600' }}>₺{fmt(kdv)}</Text></Text>}
+        </View>
+      </View>
+    );
+  }
+
   const cl = report?.cardLayout;
   if (cl) {
     const titleVal = String(item[cl.title] ?? '-');
