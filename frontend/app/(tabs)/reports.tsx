@@ -1232,34 +1232,91 @@ export default function ReportsScreen() {
     await new Promise(resolve => setTimeout(resolve, 0));
     try {
       const cols = selectedReport.columns;
+      const isFisKalem = selectedReport.key === 'fis_kalem';
+      const hasHeaders = (processedData as any[]).some(r => r.__isFisHeader);
+      const hasDetails = (processedData as any[]).some(r => r.__isDetail);
+
       // Build rows (human-readable values)
-      const rows = processedData.map((r: any) => {
-        const o: Record<string, any> = {};
-        cols.forEach(c => {
-          let v = r[c.key];
-          if (c.type === 'money' || c.type === 'number') {
-            const n = parseFloat(String(v ?? '0'));
-            v = isNaN(n) ? 0 : n;
-          } else if (c.type === 'bool') {
-            v = (v === true || v === 1 || v === '1') ? 'Evet' : 'Hayır';
-          } else if (v === null || v === undefined) {
-            v = '';
-          } else {
-            v = String(v);
+      // Special path: Fiş Kalem with grouped structure → use custom column set with a "Tür" column
+      const rows: any[] = [];
+      if (isFisKalem && hasHeaders) {
+        // Custom wide-format rows: one column-set for fiş headers, another for stok kalemleri
+        for (const r of processedData as any[]) {
+          const o: Record<string, any> = {};
+          if (r.__isFisHeader) {
+            o['Tür'] = 'FİŞ';
+            o['Tarih'] = String(r.FIS_TARIHI || '').split(' ')[0];
+            o['Belge No'] = r.BELGENO || '';
+            o['Fiş Türü'] = r.FIS_TURU || '';
+            o['Alt Tür'] = r.FIS_ALT_TIPI || '';
+            o['Lokasyon'] = r.LOKASYON || '';
+            o['Cari Kod'] = r.CARI_KOD || '';
+            o['Cari'] = r.CARI_AD || '';
+            o['Stok Kod'] = '';
+            o['Stok'] = '';
+            o['Birim'] = '';
+            o['Miktar'] = parseFloat(String(r.MIKTAR_FIS || 0)) || 0;
+            o['Net Fiyat'] = '';
+            o['Net Tutar'] = parseFloat(String(r.NET_TUTAR || 0)) || 0;
+            o['KDV'] = parseFloat(String(r.KDV_TUTAR || 0)) || 0;
+            o['Dahil Net'] = parseFloat(String(r.DAHIL_NET_TUTAR || 0)) || 0;
+            o['Satır Toplam'] = parseFloat(String(r.SATIR_GENEL_TOPLAM || 0)) || 0;
+            o['Kalem Sayısı'] = r.KALEM_SAYISI || 0;
+          } else if (r.__isDetail) {
+            o['Tür'] = '  Kalem';
+            o['Tarih'] = '';
+            o['Belge No'] = r.BELGENO || '';
+            o['Fiş Türü'] = '';
+            o['Alt Tür'] = '';
+            o['Lokasyon'] = '';
+            o['Cari Kod'] = '';
+            o['Cari'] = '';
+            o['Stok Kod'] = r.STOK_KOD || '';
+            o['Stok'] = r.STOK_AD || '';
+            o['Birim'] = r.STOK_BIRIM || '';
+            o['Miktar'] = parseFloat(String(r.MIKTAR_FIS || 0)) || 0;
+            o['Net Fiyat'] = parseFloat(String(r.NET_FIYAT || 0)) || 0;
+            o['Net Tutar'] = parseFloat(String(r.NET_TUTAR || 0)) || 0;
+            o['KDV'] = parseFloat(String(r.KDV_TUTAR || 0)) || 0;
+            o['Dahil Net'] = parseFloat(String(r.DAHIL_NET_TUTAR || 0)) || 0;
+            o['Satır Toplam'] = parseFloat(String(r.SATIR_GENEL_TOPLAM || 0)) || 0;
+            o['Kalem Sayısı'] = '';
           }
-          o[c.label] = v;
-        });
-        return o;
-      });
-      const ws = XLSX.utils.json_to_sheet(rows, { header: cols.map(c => c.label) });
+          rows.push(o);
+        }
+      } else {
+        for (const r of processedData as any[]) {
+          const o: Record<string, any> = {};
+          cols.forEach(c => {
+            let v = r[c.key];
+            if (c.type === 'money' || c.type === 'number') {
+              const n = parseFloat(String(v ?? '0'));
+              v = isNaN(n) ? 0 : n;
+            } else if (c.type === 'bool') {
+              v = (v === true || v === 1 || v === '1') ? 'Evet' : 'Hayır';
+            } else if (v === null || v === undefined) {
+              v = '';
+            } else {
+              v = String(v);
+            }
+            o[c.label] = v;
+          });
+          rows.push(o);
+        }
+      }
+
+      const fisKalemHeaders = ['Tür','Tarih','Belge No','Fiş Türü','Alt Tür','Lokasyon','Cari Kod','Cari','Stok Kod','Stok','Birim','Miktar','Net Fiyat','Net Tutar','KDV','Dahil Net','Satır Toplam','Kalem Sayısı'];
+      const header = (isFisKalem && hasHeaders) ? fisKalemHeaders : cols.map(c => c.label);
+      const ws = XLSX.utils.json_to_sheet(rows, { header });
       // Auto-size columns
-      const colWidths = cols.map(c => {
-        const maxLen = Math.max(c.label.length, ...rows.map(r => String(r[c.label] ?? '').length));
+      const colWidths = header.map(h => {
+        const maxLen = Math.max(h.length, ...rows.map((r: any) => String(r[h] ?? '').length));
         return { wch: Math.min(40, Math.max(8, maxLen + 2)) };
       });
       (ws as any)['!cols'] = colWidths;
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, (selectedReport.title || 'Rapor').substring(0, 31));
+      void hasDetails; // marker used for future expansion
 
       // Summary sheet (TOPLAM/MIN/MAX)
       if (selectedReport.summary) {
