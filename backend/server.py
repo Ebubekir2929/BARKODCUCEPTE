@@ -22,9 +22,11 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection (for tenant names + additional tenants)
-mongo_url = os.environ['MONGO_URL']
+# Varsayılan değerler: env yoksa da app başlasın (ör. Railway'de MONGO_URL set edilmemişse)
+mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
+db_name = os.environ.get('DB_NAME', 'barkodcucepte_prod')
 client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+db = client[db_name]
 
 # Set MongoDB for auth routes (tenant management)
 set_auth_db(db)
