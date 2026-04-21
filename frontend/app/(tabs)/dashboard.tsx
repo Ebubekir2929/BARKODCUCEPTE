@@ -723,7 +723,7 @@ export default function DashboardScreen() {
                   >
                     <Ionicons name="location-outline" size={14} color={colors.error} />
                     <Text style={[styles.cancellationText, { color: colors.error }]}>
-                      {lok} · {adet} İptal · ₺{tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                      {lok} · {adet} {t('cancel_label')} · ₺{tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                     </Text>
                     <Ionicons name="chevron-forward" size={14} color={colors.error} />
                   </TouchableOpacity>
@@ -798,7 +798,7 @@ export default function DashboardScreen() {
               >
                 <Ionicons name="close-circle-outline" size={16} color={colors.error} />
                 <Text style={[styles.cancellationText, { color: colors.error }]}>
-                  {iptalAdet} İptal · ₺{iptalTutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                  {iptalAdet} {t('cancel_label')} · ₺{iptalTutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                 </Text>
                 <Ionicons name="chevron-forward" size={14} color={colors.error} />
               </TouchableOpacity>
@@ -970,7 +970,7 @@ export default function DashboardScreen() {
                       return (
                         <View key={idx} style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border, alignItems: 'center' }]}>
                           <View style={{ flex: 3 }}>
-                            <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]} numberOfLines={1}>{item.STOK_ADI || 'Ürün'}</Text>
+                            <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]} numberOfLines={1}>{item.STOK_ADI || t('product')}</Text>
                             <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{item.LOKASYON || ''}</Text>
                           </View>
                           <Text style={[{ flex: 1, fontSize: 14, fontWeight: '600', color: colors.text, textAlign: 'center' }]}>
@@ -1093,16 +1093,14 @@ export default function DashboardScreen() {
               <TouchableOpacity onPress={() => { setSelectedIptalItem(null); setIptalDetailItems([]); }}>
                 <Ionicons name="arrow-back" size={24} color={colors.text} />
               </TouchableOpacity>
-              <Text style={[styles.modalTitle, { color: colors.text, flex: 1, textAlign: 'center' }]}>
-                İptal Detayı
-              </Text>
+              <Text style={[styles.modalTitle, { color: colors.text, flex: 1, textAlign: 'center' }]}>{t('iptal_detail_title')}</Text>
               <View style={{ width: 24 }} />
             </View>
             {selectedIptalItem && (
               <ScrollView style={[styles.modalBody, { backgroundColor: colors.surface }]} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
                 <View style={[{ alignItems: 'center', padding: 16, borderRadius: 12, backgroundColor: '#EF4444' + '10', gap: 4, marginBottom: 12 }]}>
                   <Ionicons name="close-circle" size={28} color="#EF4444" />
-                  <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text }]}>{selectedIptalItem.PERSONEL_AD || 'İptal'}</Text>
+                  <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text }]}>{selectedIptalItem.PERSONEL_AD || t('cancel_label')}</Text>
                   <Text style={[{ fontSize: 13, color: colors.textSecondary }]}>{selectedIptalItem.LOKASYON} · {selectedIptalItem.IPTAL_TIPI}</Text>
                   <Text style={[{ fontSize: 20, fontWeight: '800', color: '#EF4444', marginTop: 4 }]}>₺{parseFloat(selectedIptalItem.TUTAR || '0').toFixed(2)}</Text>
                 </View>
@@ -1110,7 +1108,7 @@ export default function DashboardScreen() {
                 {iptalDetailLoading ? (
                   <View style={{ alignItems: 'center', paddingVertical: 30 }}>
                     <ActivityIndicator size="large" color={colors.primary} />
-                    <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>POS'tan veri alınıyor...</Text>
+                    <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('fetching_pos')}</Text>
                   </View>
                 ) : iptalDetailItems.length > 0 ? (
                   <View style={[{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }]}>
@@ -1122,7 +1120,7 @@ export default function DashboardScreen() {
                     {iptalDetailItems.map((item: any, idx: number) => (
                       <View key={idx} style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border }]}>
                         <View style={{ flex: 3 }}>
-                          <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]}>{item.STOK_ADI || 'Ürün'}</Text>
+                          <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]}>{item.STOK_ADI || t('product')}</Text>
                           <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{t('table_short')}: {item.MASA || '-'} · {item.SAAT || ''}</Text>
                         </View>
                         <Text style={[{ flex: 1, fontSize: 14, color: colors.text, textAlign: 'center' }]}>{parseFloat(item.MIKTAR || '0').toFixed(0)}</Text>
@@ -1154,9 +1152,7 @@ export default function DashboardScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>
-                Masa Detayı
-              </Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>{t('table_detail_title')}</Text>
               <TouchableOpacity onPress={() => { setSelectedOpenTable(null); setTableDetailItems([]); }}>
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>

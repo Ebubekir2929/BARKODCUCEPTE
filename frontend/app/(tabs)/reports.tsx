@@ -661,7 +661,7 @@ const ALL_REPORTS = [FIYAT_LISTELERI, ...OTHER_REPORTS];
 // === COMPONENT ===
 export default function ReportsScreen() {
   const { colors } = useThemeStore();
-  const { t } = useLanguageStore();
+  const { t, language } = useLanguageStore();
   const { user } = useAuthStore();
   const { activeSource } = useDataSourceStore();
 
@@ -676,7 +676,158 @@ export default function ReportsScreen() {
     const tr = t(key);
     return tr !== key ? tr : report.description;
   };
-  const getGroupLabel = (group: string) => {
+  // Large dictionary for translating filter/column labels stored as TR strings
+  // in report definitions. Applied only when language is EN.
+  const LABEL_MAP: Record<string, string> = {
+      'Cari': 'Customer',
+      'Cari Adı': 'Customer Name',
+      'Cari Kodu': 'Customer Code',
+      'Cari Grubu': 'Customer Group',
+      'Cari Grup': 'Customer Group',
+      'Cari Tür': 'Customer Type',
+      'Cari Türü': 'Customer Type',
+      'Cari (Ad veya Kod)': 'Customer (Name or Code)',
+      'Cariler': 'Customers',
+      'Temsilci': 'Representative',
+      'Sehir': 'City',
+      'Şehir': 'City',
+      'Cari Rut': 'Customer Route',
+      'CariRut': 'Customer Route',
+      'Aktif': 'Active',
+      'Pasif': 'Passive',
+      'Aktif Durum': 'Active Status',
+      'Aktif Durumu': 'Active Status',
+      'Tümü': 'All',
+      'Stok': 'Stock',
+      'Stok Kodu': 'Stock Code',
+      'Stok Adı': 'Stock Name',
+      'Stok (Ürün)': 'Stock (Product)',
+      'Stok Grup': 'Stock Group',
+      'Stok Grubu': 'Stock Group',
+      'Stok Cinsi': 'Stock Type',
+      'Stok Marka': 'Stock Brand',
+      'Stok Vergi': 'Stock Tax',
+      'Stok Durumu': 'Stock Status',
+      'Stoklar': 'Stocks',
+      'Birim': 'Unit',
+      'Marka': 'Brand',
+      'Grup': 'Group',
+      'Cinsi': 'Type',
+      'Fiyat': 'Price',
+      'Fiyat Adı': 'Price Name',
+      'Yerel Fiyat': 'Local Price',
+      'Döviz': 'Currency',
+      'Döviz Adı': 'Currency Name',
+      'DovizAd': 'Currency Name',
+      'KDV': 'VAT',
+      'KDV Dahil': 'VAT Included',
+      'KDV Dahil Göster': 'Show VAT Included',
+      'KDV (Vergi)': 'VAT (Tax)',
+      'KDV Oranı': 'VAT Rate',
+      'Tarih': 'Date',
+      'Tarih Aralığı': 'Date Range',
+      'Başlangıç': 'Start',
+      'Bitiş': 'End',
+      'Başlangıç Tarihi': 'Start Date',
+      'Bitiş Tarihi': 'End Date',
+      'Son Tarih': 'End Date',
+      'Bugün': 'Today',
+      'Dün': 'Yesterday',
+      'Lokasyon': 'Location',
+      'Lokasyon Dağılımı': 'Location Distribution',
+      'Proje': 'Project',
+      'Fiş': 'Receipt',
+      'Fiş Tipi': 'Receipt Type',
+      'Fiş Türü': 'Receipt Type',
+      'Fiş Alt Türü': 'Receipt Sub-type',
+      'Fiş No': 'Receipt No',
+      'Belge No': 'Document No',
+      'Personel': 'Staff',
+      'Bilgisayar Adı (Pc_Ad)': 'Computer Name (Pc_Ad)',
+      'Bilgisayar': 'Computer',
+      'Özel Kod 1': 'Special Code 1',
+      'Özel Kod 2': 'Special Code 2',
+      'Özel Kod 3': 'Special Code 3',
+      'Özel Kod 4': 'Special Code 4',
+      'Özel Kod 5': 'Special Code 5',
+      'Özel Kod 6': 'Special Code 6',
+      'Özel Kod 7': 'Special Code 7',
+      'Özel Kod 8': 'Special Code 8',
+      'Özel Kod 9': 'Special Code 9',
+      'Adres': 'Address',
+      'Adresler': 'Addresses',
+      'Bakiye': 'Balance',
+      'Bakiye Tip': 'Balance Type',
+      'Borç': 'Debt',
+      'Alacak': 'Credit',
+      'Borçlu': 'Debtor',
+      'Alacaklı': 'Creditor',
+      'Min Bakiye': 'Min Balance',
+      'Max Bakiye': 'Max Balance',
+      'Miktar': 'Quantity',
+      'Adet': 'Qty',
+      'Tutar': 'Amount',
+      'Toplam': 'Total',
+      'Ad': 'Name',
+      'Kod': 'Code',
+      'Satış': 'Sales',
+      'Satış Fişleri': 'Sales Receipts',
+      'Sadece Satış Fişleri': 'Sales Receipts Only',
+      'Sadece İadeler': 'Returns Only',
+      'İade': 'Return',
+      'İadeler': 'Returns',
+      'Hepsi': 'All',
+      'Detaylı': 'Detailed',
+      'Özet': 'Summary',
+      'Son Alış': 'Last Purchase',
+      'Son Alış Fiyatı': 'Last Purchase Price',
+      'Birim Satış': 'Unit Sale',
+      'Maliyet': 'Cost',
+      'Maliyet Kaynak': 'Cost Source',
+      'Maliyet Yoksa': 'If No Cost',
+      'Kâr': 'Profit',
+      'Kar': 'Profit',
+      'Kar/Zarar': 'Profit/Loss',
+      'Karlı': 'Profitable',
+      'Zararlı': 'Unprofitable',
+      'Finans': 'Finance',
+      'Ürün Adı': 'Product Name',
+      'Ürün': 'Product',
+      'Açıklama': 'Description',
+      'Durum': 'Status',
+      'Sarf/Fire': 'Consumption/Waste',
+      'Sarf Fire': 'Consumption/Waste',
+      'Toplu (Tüm Lokasyonlar)': 'Combined (All Locations)',
+      'Lokasyon Bazında': 'Per Location',
+      'Adet Çıkış': 'Qty Out',
+      'Miktar Çıkış': 'Qty Out',
+      'Tutar Çıkış': 'Amount Out',
+      'Adet Giriş': 'Qty In',
+      'Miktar Giriş': 'Qty In',
+      'Tutar Giriş': 'Amount In',
+      'Net Adet': 'Net Qty',
+      'Net Tutar': 'Net Amount',
+      'Rut': 'Route',
+      'Çıkış': 'Out',
+      'Giriş': 'In',
+      'Satış Adet': 'Sales Qty',
+      'Satış Tutar': 'Sales Amount',
+      'İskonto': 'Discount',
+      'İskonto Oranı': 'Discount Rate',
+      'Vergi': 'Tax',
+      'Net': 'Net',
+      'Brüt': 'Gross',
+      'Fiş Kalem Detaylı': 'Detailed Receipt Items',
+      'Detaylı Göster': 'Show Detailed',
+      'Bakiye Vermeyen Hareketsiz Devirler Gelmesin': 'Exclude Zero-Balance Inactive Transfers',
+    };
+  const translateLabel = (label: string | undefined | null): string => {
+    if (!label) return label || '';
+    if (language !== 'en') return label;
+    return LABEL_MAP[label] || label;
+  };
+
+    const getGroupLabel = (group: string) => {
     const map: Record<string, any> = {
       'Temel': 'filter_group_temel',
       'Stok': 'filter_group_stok',
@@ -1499,7 +1650,7 @@ export default function ReportsScreen() {
                 return unique.map(filter => (
                 <View key={filter.name}>
                   <Text style={[{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 4 }]}>
-                    {filter.label} {filter.required && <Text style={{ color: colors.error }}>*</Text>}
+                    {translateLabel(filter.label)} {filter.required && <Text style={{ color: colors.error }}>*</Text>}
                   </Text>
                   {filter.type === 'date' ? (
                     <TouchableOpacity
@@ -1516,7 +1667,7 @@ export default function ReportsScreen() {
                       {filter.options?.map(opt => (
                         <TouchableOpacity key={String(opt.value)} style={[styles.chip, filterValues[filter.name] === opt.value && { backgroundColor: colors.primary, borderColor: colors.primary }, { borderColor: colors.border }]}
                           onPress={() => setFilterValues(prev => ({ ...prev, [filter.name]: opt.value }))}>
-                          <Text style={[{ fontSize: 12, color: filterValues[filter.name] === opt.value ? '#fff' : colors.text }]}>{opt.label}</Text>
+                          <Text style={[{ fontSize: 12, color: filterValues[filter.name] === opt.value ? '#fff' : colors.text }]}>{translateLabel(opt.label)}</Text>
                         </TouchableOpacity>
                       ))}
                     </ScrollView>
@@ -1719,7 +1870,7 @@ export default function ReportsScreen() {
                           onPress={() => toggleSort(col.key)}
                           activeOpacity={0.7}
                         >
-                          <Text style={[{ fontSize: 11, fontWeight: '700', color: active ? '#fff' : colors.text }]} numberOfLines={1}>{col.label}</Text>
+                          <Text style={[{ fontSize: 11, fontWeight: '700', color: active ? '#fff' : colors.text }]} numberOfLines={1}>{translateLabel(col.label)}</Text>
                           {active && <Ionicons name={sortAsc ? 'arrow-up' : 'arrow-down'} size={11} color="#fff" />}
                         </TouchableOpacity>
                       );
@@ -1977,7 +2128,7 @@ const ReportCardComp: React.FC<ReportCardProps> = ({ item, report, colors, rende
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
         {(report?.columns || []).map(col => (
           <View key={col.key} style={styles.resultCell}>
-            <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{col.label}</Text>
+            <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{translateLabel(col.label)}</Text>
             <Text style={[{ fontSize: 12, fontWeight: '600', color: col.type === 'money' ? colors.primary : colors.text }]} numberOfLines={1}>{renderValue(item[col.key], col)}</Text>
           </View>
         ))}
