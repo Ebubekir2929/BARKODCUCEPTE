@@ -111,7 +111,8 @@ async def _get_users_to_check() -> List[Dict[str, Any]]:
         async with conn.cursor() as cur:
             await cur.execute("""
                 SELECT s.user_id, u.tenant_id, s.notify_cancellations, s.notify_high_sales,
-                       s.high_sales_threshold, s.notify_low_stock, s.check_interval_minutes, s.last_check_at
+                       s.high_sales_threshold, s.notify_low_stock, s.check_interval_minutes, s.last_check_at,
+                       s.notify_line_cancellations
                 FROM user_notification_settings s
                 JOIN users u ON u.user_id = s.user_id
                 WHERE u.active = 1
@@ -174,6 +175,7 @@ async def _get_users_to_check() -> List[Dict[str, Any]]:
                         "tenant_id": t["tenant_id"],
                         "tenant_name": t["name"],
                         "notify_cancellations": bool(r[2]),
+                        "notify_line_cancellations": bool(r[8]) if len(r) > 8 and r[8] is not None else True,
                         "notify_high_sales": bool(r[3]),
                         "high_sales_threshold": float(r[4] or 5000.0),
                         "notify_low_stock": bool(r[5]),
@@ -224,7 +226,7 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
             }
             rows = await _pos_run(tenant_id, "rap_fis_kalem_listesi_web", fis_params)
             # --- 1a) SATIR İPTALLERİ — iterate each row and check row-level cancel flag ---
-            if user["notify_cancellations"]:
+            if user.get("notify_line_cancellations"):
                 for r in rows:
                     row_iptal = (
                         str(r.get("SATIR_DURUMU") or "").lower().find("iptal") >= 0

@@ -43,6 +43,7 @@ async def ensure_tokens_table():
                 CREATE TABLE IF NOT EXISTS user_notification_settings (
                     user_id INT PRIMARY KEY,
                     notify_cancellations TINYINT(1) DEFAULT 1,
+                    notify_line_cancellations TINYINT(1) DEFAULT 1,
                     notify_high_sales TINYINT(1) DEFAULT 1,
                     high_sales_threshold DECIMAL(18,2) DEFAULT 5000.00,
                     notify_low_stock TINYINT(1) DEFAULT 1,
@@ -51,6 +52,11 @@ async def ensure_tokens_table():
                     updated_at DATETIME NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+            # Add column if upgrading from old schema
+            try:
+                await cur.execute("ALTER TABLE user_notification_settings ADD COLUMN notify_line_cancellations TINYINT(1) DEFAULT 1 AFTER notify_cancellations")
+            except Exception:
+                pass  # column already exists
             # De-duplication table: remember which (type, key) events we already pushed
             await cur.execute("""
                 CREATE TABLE IF NOT EXISTS notification_events_seen (
@@ -214,6 +220,7 @@ async def list_my_tokens(current_user: dict = Depends(get_current_user)):
 
 class NotificationSettings(BaseModel):
     notify_cancellations: Optional[bool] = True
+    notify_line_cancellations: Optional[bool] = True
     notify_high_sales: Optional[bool] = True
     high_sales_threshold: Optional[float] = 5000.0
     notify_low_stock: Optional[bool] = True
@@ -228,24 +235,24 @@ async def get_settings(current_user: dict = Depends(get_current_user)):
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute("""
-                SELECT notify_cancellations, notify_high_sales, high_sales_threshold,
-                       notify_low_stock, check_interval_minutes, last_check_at
+                SELECT notify_cancellations, notify_line_cancellations, notify_high_sales,
+                       high_sales_threshold, notify_low_stock, check_interval_minutes, last_check_at
                 FROM user_notification_settings WHERE user_id=%s
             """, (user_id,))
             row = await cur.fetchone()
             if not row:
-                # Create defaults
                 await cur.execute("""
                     INSERT INTO user_notification_settings
-                        (user_id, notify_cancellations, notify_high_sales, high_sales_threshold,
-                         notify_low_stock, check_interval_minutes, updated_at)
-                    VALUES (%s, 1, 1, 5000.00, 1, 15, NOW())
+                        (user_id, notify_cancellations, notify_line_cancellations, notify_high_sales,
+                         high_sales_threshold, notify_low_stock, check_interval_minutes, updated_at)
+                    VALUES (%s, 1, 1, 1, 5000.00, 1, 15, NOW())
                 """, (user_id,))
                 await conn.commit()
                 return {
                     "ok": True,
                     "settings": {
                         "notify_cancellations": True,
+                        "notify_line_cancellations": True,
                         "notify_high_sales": True,
                         "high_sales_threshold": 5000.0,
                         "notify_low_stock": True,
@@ -257,11 +264,12 @@ async def get_settings(current_user: dict = Depends(get_current_user)):
         "ok": True,
         "settings": {
             "notify_cancellations": bool(row[0]),
-            "notify_high_sales": bool(row[1]),
-            "high_sales_threshold": float(row[2]) if row[2] is not None else 5000.0,
-            "notify_low_stock": bool(row[3]),
-            "check_interval_minutes": int(row[4]) if row[4] is not None else 15,
-            "last_check_at": row[5].isoformat() if row[5] else None,
+            "notify_line_cancellations": bool(row[1]),
+            "notify_high_sales": bool(row[2]),
+            "high_sales_threshold": float(row[3]) if row[3] is not None else 5000.0,
+            "notify_low_stock": bool(row[4]),
+            "check_interval_minutes": int(row[5]) if row[5] is not None else 15,
+            "last_check_at": row[6].isoformat() if row[6] else None,
         }
     }
 
@@ -275,11 +283,12 @@ async def set_settings(body: NotificationSettings, current_user: dict = Depends(
         async with conn.cursor() as cur:
             await cur.execute("""
                 INSERT INTO user_notification_settings
-                    (user_id, notify_cancellations, notify_high_sales, high_sales_threshold,
-                     notify_low_stock, check_interval_minutes, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                    (user_id, notify_cancellations, notify_line_cancellations, notify_high_sales,
+                     high_sales_threshold, notify_low_stock, check_interval_minutes, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
                 ON DUPLICATE KEY UPDATE
                     notify_cancellations=VALUES(notify_cancellations),
+                    notify_line_cancellations=VALUES(notify_line_cancellations),
                     notify_high_sales=VALUES(notify_high_sales),
                     high_sales_threshold=VALUES(high_sales_threshold),
                     notify_low_stock=VALUES(notify_low_stock),
@@ -288,6 +297,7 @@ async def set_settings(body: NotificationSettings, current_user: dict = Depends(
             """, (
                 user_id,
                 1 if body.notify_cancellations else 0,
+                1 if body.notify_line_cancellations else 0,
                 1 if body.notify_high_sales else 0,
                 float(body.high_sales_threshold or 0),
                 1 if body.notify_low_stock else 0,

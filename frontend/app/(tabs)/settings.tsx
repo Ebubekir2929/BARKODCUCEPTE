@@ -32,6 +32,7 @@ export default function SettingsScreen() {
   const [lowStockAlert, setLowStockAlert] = useState(true);
   const [salesAlert, setSalesAlert] = useState(true);
   const [cancellationAlert, setCancellationAlert] = useState(true);
+  const [lineCancellationAlert, setLineCancellationAlert] = useState(true);
   const [highSalesThreshold, setHighSalesThreshold] = useState('5000');
   const [checkIntervalMinutes, setCheckIntervalMinutes] = useState('15');
   const [showLanguageModal, setShowLanguageModal] = useState(false);
@@ -61,6 +62,7 @@ export default function SettingsScreen() {
       if (!token) return;
       const body = {
         notify_cancellations: cancellationAlert,
+        notify_line_cancellations: lineCancellationAlert,
         notify_high_sales: salesAlert,
         high_sales_threshold: parseFloat(highSalesThreshold) || 5000,
         notify_low_stock: lowStockAlert,
@@ -92,6 +94,7 @@ export default function SettingsScreen() {
             const d = await resp.json();
             const s = d?.settings || {};
             setCancellationAlert(!!s.notify_cancellations);
+            setLineCancellationAlert(s.notify_line_cancellations !== false);
             setSalesAlert(!!s.notify_high_sales);
             setLowStockAlert(!!s.notify_low_stock);
             setHighSalesThreshold(String(s.high_sales_threshold ?? 5000));
@@ -541,6 +544,26 @@ export default function SettingsScreen() {
                     value={cancellationAlert}
                     onValueChange={toggleCancellationAlert}
                     trackColor={{ false: colors.border, true: colors.error }}
+                    thumbColor="#FFF"
+                  />
+                </View>
+
+                <View style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}>
+                  <View style={styles.menuItemLeft}>
+                    <Ionicons name="remove-circle-outline" size={22} color={colors.warning || '#F97316'} />
+                    <View>
+                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>Satır İptali</Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>Tek bir fiş kaleminin iptal edilmesi durumunda bildirim</Text>
+                    </View>
+                  </View>
+                  <Switch
+                    value={lineCancellationAlert}
+                    onValueChange={async (v) => {
+                      setLineCancellationAlert(v);
+                      await AsyncStorage.setItem('lineCancellationAlert', v.toString());
+                      await syncSettingsToBackend({ notify_line_cancellations: v });
+                    }}
+                    trackColor={{ false: colors.border, true: colors.warning || '#F97316' }}
                     thumbColor="#FFF"
                   />
                 </View>
