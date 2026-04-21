@@ -382,7 +382,7 @@ export default function DashboardScreen() {
           <View style={styles.liveIndicatorLeft}>
             <View style={[styles.liveDot, { backgroundColor: dataError ? '#EF4444' : '#10B981' }]} />
             <Text style={[styles.liveText, { color: dataError ? '#EF4444' : '#10B981' }]}>
-              {dataLoading ? 'Güncelleniyor...' : dataError ? 'Bağlantı hatası' : 'Canlı Veri · 30sn'}
+              {dataLoading ? t('updating') : dataError ? t('connection_error') : t('live_data_30s')}
             </Text>
           </View>
           {lastSynced && (

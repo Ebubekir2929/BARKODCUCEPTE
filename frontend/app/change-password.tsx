@@ -26,7 +26,7 @@ export default function ChangePasswordScreen() {
   useEffect(() => {
     if (!isForced) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      showWarning('Uyarı', 'Lütfen önce yeni bir şifre belirleyin.');
+      showWarning(t('warning_title'), t('set_new_password_first'));
       return true;
     });
     return () => sub.remove();
@@ -41,19 +41,19 @@ export default function ChangePasswordScreen() {
 
   const handleSubmit = async () => {
     if (!oldPass || !newPass || !newPass2) {
-      showWarning('Uyarı', 'Tüm alanları doldurun');
+      showWarning(t('warning_title'), t('fill_all_fields'));
       return;
     }
     if (newPass !== newPass2) {
-      showWarning('Uyarı', 'Yeni şifreler eşleşmiyor');
+      showWarning(t('warning_title'), t('passwords_no_match'));
       return;
     }
     if (newPass.length < 6) {
-      showWarning('Uyarı', 'Yeni şifre en az 6 karakter olmalı');
+      showWarning(t('warning_title'), t('password_min_6'));
       return;
     }
     if (oldPass === newPass) {
-      showWarning('Uyarı', 'Yeni şifre mevcut şifre ile aynı olamaz');
+      showWarning(t('warning_title'), t('password_same_as_old'));
       return;
     }
 
@@ -66,10 +66,10 @@ export default function ChangePasswordScreen() {
       });
       const data = await resp.json();
       if (!resp.ok) {
-        showError('Hata', data.detail || 'Şifre değiştirilemedi');
+        showError(t('error_title'), data.detail || t('password_change_failed'));
       } else {
         try { await refreshUser(); } catch(_) {}
-        showSuccess('Başarılı', data.message || 'Şifre başarıyla değiştirildi', [
+        showSuccess(t('success_title'), data.message || t('password_changed_success'), [
           { text: 'Tamam', onPress: () => {
             if (isForced) router.replace('/(tabs)/dashboard');
             else router.back();
@@ -77,7 +77,7 @@ export default function ChangePasswordScreen() {
         ]);
       }
     } catch (e) {
-      showError('Hata', 'Bağlantı hatası');
+      showError(t('error_title'), t('connection_error_short'));
     } finally {
       setLoading(false);
     }

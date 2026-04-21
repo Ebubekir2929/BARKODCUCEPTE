@@ -141,12 +141,12 @@ export default function SettingsScreen() {
     
     if (newValue) {
       if (Platform.OS === 'web') {
-        showSuccess('Bildirimler Aktif', 'Web platformunda bildirimler uygulama içi gösterilecektir.');
+        showSuccess(t('notif_active_title'), t('notif_web_msg'));
       } else {
-        showSuccess('Bildirimler Aktif', 'Artık stok, satış ve fiş iptali uyarıları alacaksınız.');
+        showSuccess(t('notif_active_title'), t('notif_granted_msg'));
       }
     } else if (Platform.OS !== 'web') {
-      showInfo('Bildirimler Kapatıldı', 'Artık push bildirimi almayacaksınız.');
+      showInfo(t('notif_off_title'), t('notif_off_msg'));
     }
   };
 
@@ -170,7 +170,7 @@ export default function SettingsScreen() {
 
   const testCancellationNotification = async () => {
     if (Platform.OS === 'web') {
-      showInfo('Demo Bildirim', '🚫 Fiş İptali: Merkez Şube - FIS-001 numaralı fiş iptal edildi. Tutar: ₺245.50');
+      showInfo(t('demo_notif_title'), '🚫 Fiş İptali: Merkez Şube - FIS-001 numaralı fiş iptal edildi. Tutar: ₺245.50');
       return;
     }
 
@@ -181,7 +181,7 @@ export default function SettingsScreen() {
         'Merkez Şube: FIS-TEST-001 numaralı fiş iptal edildi. Tutar: ₺245.50'
       );
       if (ok) {
-        showSuccess('Gönderildi', 'Push bildirimi gönderildi. Bildirim çubuğunuzu kontrol edin.');
+        showSuccess(t('sent_title'), t('test_notif_push_sent'));
         return;
       }
     } catch (err) {
@@ -200,14 +200,14 @@ export default function SettingsScreen() {
       },
       'Merkez Şube'
     );
-    showSuccess('Gönderildi', 'Test bildirimi gönderildi. Bildirim çubuğunuzu kontrol edin.');
+    showSuccess(t('sent_title'), t('test_notif_sent'));
   };
 
   const handleLogout = () => {
-    showWarning('Çıkış Yap', 'Hesabınızdan çıkış yapmak istediğinize emin misiniz?', [
-      { text: 'İptal', style: 'cancel' },
+    showWarning(t('logout_title'), t('logout_confirm'), [
+      { text: t('cancel'), style: 'cancel' },
       {
-        text: 'Çıkış Yap',
+        text: t('logout_title'),
         style: 'destructive',
         onPress: async () => {
           await logout();
@@ -218,18 +218,18 @@ export default function SettingsScreen() {
   };
 
   const handleClearCache = () => {
-    showWarning('Önbelleği Temizle', 'Tüm önbellekteki veriler silinecek. Devam etmek istiyor musunuz?', [
-      { text: 'İptal', style: 'cancel' },
+    showWarning(t('cache_clear_title'), t('clear_cache_confirm'), [
+      { text: t('cancel'), style: 'cancel' },
       {
-        text: 'Temizle',
+        text: t('clear'),
         style: 'destructive',
         onPress: async () => {
           try {
             await AsyncStorage.removeItem('cached_products');
             await AsyncStorage.removeItem('cached_customers');
-            showSuccess('Başarılı', 'Önbellek temizlendi');
+            showSuccess(t('success_title'), t('cache_cleared'));
           } catch (error) {
-            showError('Hata', 'Önbellek temizlenirken bir hata oluştu');
+            showError(t('error_title'), t('cache_clear_error'));
           }
         },
       },
@@ -256,55 +256,55 @@ export default function SettingsScreen() {
   const handleSaveTenant = async () => {
     if (tenantModalMode === 'add') {
       if (!tenantIdInput.trim()) {
-        showWarning('Uyarı', 'Tenant ID girin');
+        showWarning(t('warning_title'), t('enter_tenant_id'));
         return;
       }
       if (!tenantNameInput.trim()) {
-        showWarning('Uyarı', 'Veri kaynağı adı girin');
+        showWarning(t('warning_title'), t('enter_tenant_name'));
         return;
       }
       setTenantLoading(true);
       const result = await addTenant(tenantIdInput.trim(), tenantNameInput.trim());
       setTenantLoading(false);
       if (result.success) {
-        showSuccess('Başarılı', 'Veri kaynağı eklendi');
+        showSuccess(t('success_title'), t('tenant_added_success'));
         setShowTenantModal(false);
       } else {
-        showError('Hata', result.error || 'Eklenemedi');
+        showError(t('error_title'), result.error || t('could_not_add'));
       }
     } else {
       if (!tenantNameInput.trim()) {
-        showWarning('Uyarı', 'Veri kaynağı adı girin');
+        showWarning(t('warning_title'), t('enter_tenant_name'));
         return;
       }
       setTenantLoading(true);
       const result = await updateTenantName(editingTenantId, tenantNameInput.trim());
       setTenantLoading(false);
       if (result.success) {
-        showSuccess('Başarılı', 'İsim güncellendi');
+        showSuccess(t('success_title'), t('name_updated'));
         setShowTenantModal(false);
       } else {
-        showError('Hata', result.error || 'Güncellenemedi');
+        showError(t('error_title'), result.error || t('update_failed'));
       }
     }
   };
 
   const handleDeleteTenant = (tenantId: string, tenantName: string) => {
     if ((user?.tenants?.length || 0) <= 1) {
-      showWarning('Uyarı', 'En az 1 veri kaynağı olmalıdır');
+      showWarning(t('warning_title'), t('at_least_one_tenant'));
       return;
     }
     showWarning(t('delete_tenant_title'), `"${tenantName}" ${t('delete_tenant_msg')}`, [
-      { text: 'İptal', style: 'cancel' },
+      { text: t('cancel'), style: 'cancel' },
       {
-        text: 'Sil',
+        text: t('delete'),
         style: 'destructive',
         onPress: async () => {
           const result = await removeTenant(tenantId);
           if (result.success) {
-            showSuccess('Başarılı', 'Veri kaynağı silindi');
+            showSuccess(t('success_title'), t('tenant_deleted_success'));
           } else {
-            showError('Hata', result.error || 'Silinemedi');
+            showError(t('error_title'), result.error || t('delete_failed'));
           }
         },
       },
@@ -317,12 +317,12 @@ export default function SettingsScreen() {
     
     return (
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>VERİ KAYNAKLARI YÖNETİMİ</Text>
+        <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('tenant_section_title')}</Text>
         
         <View style={[styles.tenantInfoBanner, { backgroundColor: colors.info + '15', borderColor: colors.info + '40' }]}>
           <Ionicons name="information-circle-outline" size={18} color={colors.info} />
           <Text style={[styles.tenantInfoText, { color: colors.info }]}>
-            Her Tenant ID bir veri kaynağını temsil eder. Uygulamadaki filtre butonları burada tanımlanan isimleri gösterir.
+            {t('tenant_info_banner')}
           </Text>
         </View>
 
@@ -577,8 +577,8 @@ export default function SettingsScreen() {
                   <View style={styles.menuItemLeft}>
                     <Ionicons name="remove-circle-outline" size={22} color={colors.warning || '#F97316'} />
                     <View>
-                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>Satır İptali</Text>
-                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>Tek bir fiş kaleminin iptal edilmesi durumunda bildirim</Text>
+                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('line_cancellation_alert')}</Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>{t('line_cancellation_alert_desc')}</Text>
                     </View>
                   </View>
                   <Switch
@@ -597,8 +597,8 @@ export default function SettingsScreen() {
                   <View style={styles.menuItemLeft}>
                     <Ionicons name="timer-outline" size={22} color={colors.primary} />
                     <View>
-                      <Text style={[styles.menuItemLabel, { color: colors.text, fontSize: 13 }]}>Kontrol Sıklığı (dk)</Text>
-                      <Text style={[styles.menuItemSub, { color: colors.textSecondary, fontSize: 10 }]}>Tüm veri kaynakları için bildirim taraması</Text>
+                      <Text style={[styles.menuItemLabel, { color: colors.text, fontSize: 13 }]}>{t('check_interval_minutes')}</Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary, fontSize: 10 }]}>{t('check_interval_minutes_desc')}</Text>
                     </View>
                   </View>
                   <TextInput
@@ -653,9 +653,9 @@ export default function SettingsScreen() {
                   await AsyncStorage.removeItem('cached_customers');
                   await AsyncStorage.removeItem('cached_dashboard');
                   await AsyncStorage.removeItem('cached_reports');
-                  showSuccess('Senkronize Edildi', 'Tüm veriler yenilendi. Sekmeleri açtığınızda canlı POS verilerinden yeniden çekilecek.');
+                  showSuccess(t('sync_success_title'), t('sync_success_msg'));
                 } catch (e) {
-                  showError('Hata', 'Senkronizasyon sırasında bir hata oluştu.');
+                  showError(t('error_title'), t('sync_error'));
                 }
               }}
             >
@@ -670,7 +670,7 @@ export default function SettingsScreen() {
 
         {/* Account / Güvenlik */}
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>HESAP VE GÜVENLİK</Text>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('account_and_security') || 'HESAP VE GÜVENLİK'}</Text>
           <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <TouchableOpacity
               style={styles.menuItem}

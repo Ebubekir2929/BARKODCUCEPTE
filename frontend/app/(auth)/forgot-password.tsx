@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/authStore';
 import { useThemeStore } from '../../src/store/themeStore';
+import { useLanguageStore } from '../../src/store/languageStore';
 import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 
 // Simple math CAPTCHA generator
@@ -46,6 +47,7 @@ export default function ForgotPasswordScreen() {
   const router = useRouter();
   const { forgotPassword } = useAuthStore();
   const { colors } = useThemeStore();
+  const { t } = useLanguageStore();
   const { showError, showSuccess, showWarning, alertProps } = useAlert();
 
   const [email, setEmail] = useState('');
@@ -67,16 +69,16 @@ export default function ForgotPasswordScreen() {
     const userAnswer = parseInt(captchaInput);
     if (userAnswer === captcha.answer) {
       setCaptchaVerified(true);
-      showSuccess('Doğrulandı', 'Robot doğrulaması başarılı!');
+      showSuccess(t('verified_title'), t('robot_verify_success'));
     } else {
-      showError('Hatalı', 'Yanlış cevap. Lütfen tekrar deneyin.');
+      showError(t('incorrect_title'), t('robot_verify_fail'));
       refreshCaptcha();
     }
   };
 
   const handleSubmit = async () => {
     if (!email) {
-      showWarning('Uyarı', 'Lütfen e-posta adresinizi girin');
+      showWarning(t('warning_title'), t('enter_email'));
       return;
     }
 
