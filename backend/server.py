@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+import asyncio
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field
@@ -72,27 +73,33 @@ app.include_router(api_router)
 
 @app.on_event("startup")
 async def startup():
-    try:
-        await init_patron_pool()
-        logging.info("patron MySQL pool ready")
-    except Exception as e:
-        logging.error(f"Failed to init patron pool: {e}")
-    try:
-        await init_data_pool()
-        logging.info("kasacepteweb MySQL pool ready")
-    except Exception as e:
-        logging.error(f"Failed to init data pool: {e}")
-    try:
-        await ensure_tokens_table()
-    except Exception as e:
-        logging.error(f"Failed to init push tokens table: {e}")
+    # MySQL pool init'leri ARKA PLANDA başlasın ki uygulama port'a anında bağlansın
+    # (Railway healthcheck / port probe 10-30s içinde timeout olur)
+    async def _init_pools_bg():
+        try:
+            await init_patron_pool()
+            logging.info("patron MySQL pool ready")
+        except Exception as e:
+            logging.error(f"Failed to init patron pool: {e}")
+        try:
+            await init_data_pool()
+            logging.info("kasacepteweb MySQL pool ready")
+        except Exception as e:
+            logging.error(f"Failed to init data pool: {e}")
+        try:
+            await ensure_tokens_table()
+        except Exception as e:
+            logging.error(f"Failed to init push tokens table: {e}")
 
-    # Start background notification watcher
-    try:
-        from services.notification_watcher import start_watcher
-        start_watcher()
-    except Exception as e:
-        logging.error(f"Failed to start notification watcher: {e}")
+        # Start background notification watcher
+        try:
+            from services.notification_watcher import start_watcher
+            start_watcher()
+        except Exception as e:
+            logging.error(f"Failed to start notification watcher: {e}")
+
+    asyncio.create_task(_init_pools_bg())
+    logging.info("App startup complete; DB pools initializing in background.")
 
 
 @app.on_event("shutdown")
