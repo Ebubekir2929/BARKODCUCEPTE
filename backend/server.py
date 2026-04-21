@@ -87,6 +87,26 @@ async def startup():
     except Exception as e:
         logging.error(f"Failed to init push tokens table: {e}")
 
+    # Start background notification watcher
+    try:
+        from services.notification_watcher import start_watcher
+        start_watcher()
+    except Exception as e:
+        logging.error(f"Failed to start notification watcher: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    try:
+        from services.notification_watcher import stop_watcher
+        stop_watcher()
+    except Exception:
+        pass
+    try:
+        await close_pools()
+    except Exception:
+        pass
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

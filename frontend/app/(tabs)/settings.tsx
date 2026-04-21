@@ -32,6 +32,8 @@ export default function SettingsScreen() {
   const [lowStockAlert, setLowStockAlert] = useState(true);
   const [salesAlert, setSalesAlert] = useState(true);
   const [cancellationAlert, setCancellationAlert] = useState(true);
+  const [highSalesThreshold, setHighSalesThreshold] = useState('5000');
+  const [checkIntervalMinutes, setCheckIntervalMinutes] = useState('15');
   const [showLanguageModal, setShowLanguageModal] = useState(false);
 
   // Tenant Management State
@@ -47,13 +49,61 @@ export default function SettingsScreen() {
     loadLanguage();
   }, []);
 
+  const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+
+  // Sync current notification prefs with backend
+  const syncSettingsToBackend = async (overrides?: Partial<{
+    notify_cancellations: boolean; notify_high_sales: boolean; high_sales_threshold: number;
+    notify_low_stock: boolean; check_interval_minutes: number;
+  }>) => {
+    try {
+      const { token } = useAuthStore.getState();
+      if (!token) return;
+      const body = {
+        notify_cancellations: cancellationAlert,
+        notify_high_sales: salesAlert,
+        high_sales_threshold: parseFloat(highSalesThreshold) || 5000,
+        notify_low_stock: lowStockAlert,
+        check_interval_minutes: Math.max(1, parseInt(checkIntervalMinutes, 10) || 15),
+        ...overrides,
+      };
+      await fetch(`${API_URL}/api/notifications/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      console.log('Settings sync failed:', e);
+    }
+  };
+
   const loadNotificationSettings = async () => {
     try {
       const notifs = await AsyncStorage.getItem('notificationsEnabled');
+      if (notifs !== null) setNotificationsEnabled(notifs === 'true');
+      // Fetch from backend (source of truth)
+      const { token } = useAuthStore.getState();
+      if (token) {
+        try {
+          const resp = await fetch(`${API_URL}/api/notifications/settings`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+          });
+          if (resp.ok) {
+            const d = await resp.json();
+            const s = d?.settings || {};
+            setCancellationAlert(!!s.notify_cancellations);
+            setSalesAlert(!!s.notify_high_sales);
+            setLowStockAlert(!!s.notify_low_stock);
+            setHighSalesThreshold(String(s.high_sales_threshold ?? 5000));
+            setCheckIntervalMinutes(String(s.check_interval_minutes ?? 15));
+            return;
+          }
+        } catch {}
+      }
+      // Fallback: local storage
       const lowStock = await AsyncStorage.getItem('lowStockAlert');
       const sales = await AsyncStorage.getItem('salesAlert');
       const cancellation = await AsyncStorage.getItem('cancellationAlert');
-      if (notifs !== null) setNotificationsEnabled(notifs === 'true');
       if (lowStock !== null) setLowStockAlert(lowStock === 'true');
       if (sales !== null) setSalesAlert(sales === 'true');
       if (cancellation !== null) setCancellationAlert(cancellation === 'true');
@@ -100,16 +150,19 @@ export default function SettingsScreen() {
   const toggleLowStockAlert = async (value: boolean) => {
     setLowStockAlert(value);
     await AsyncStorage.setItem('lowStockAlert', value.toString());
+    await syncSettingsToBackend({ notify_low_stock: value });
   };
 
   const toggleSalesAlert = async (value: boolean) => {
     setSalesAlert(value);
     await AsyncStorage.setItem('salesAlert', value.toString());
+    await syncSettingsToBackend({ notify_high_sales: value });
   };
 
   const toggleCancellationAlert = async (value: boolean) => {
     setCancellationAlert(value);
     await AsyncStorage.setItem('cancellationAlert', value.toString());
+    await syncSettingsToBackend({ notify_cancellations: value });
   };
 
   const testCancellationNotification = async () => {
@@ -451,6 +504,31 @@ export default function SettingsScreen() {
                   />
                 </View>
 
+                {salesAlert && (
+                  <View style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1, paddingVertical: 8 }]}>
+                    <View style={styles.menuItemLeft}>
+                      <Ionicons name="pricetag-outline" size={20} color={colors.success} />
+                      <View>
+                        <Text style={[styles.menuItemLabel, { color: colors.text, fontSize: 13 }]}>Yüksek Satış Eşiği (₺)</Text>
+                        <Text style={[styles.menuItemSub, { color: colors.textSecondary, fontSize: 10 }]}>Bu tutarın üzerindeki Perakende / Satış faturaları için bildirim</Text>
+                      </View>
+                    </View>
+                    <TextInput
+                      value={highSalesThreshold}
+                      onChangeText={setHighSalesThreshold}
+                      onEndEditing={() => syncSettingsToBackend()}
+                      keyboardType="numeric"
+                      placeholder="5000"
+                      placeholderTextColor={colors.textSecondary}
+                      style={{
+                        minWidth: 90, paddingHorizontal: 10, paddingVertical: 6,
+                        borderWidth: 1, borderColor: colors.border, borderRadius: 8,
+                        color: colors.text, textAlign: 'right', fontWeight: '700',
+                      }}
+                    />
+                  </View>
+                )}
+
                 <View style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}>
                   <View style={styles.menuItemLeft}>
                     <Ionicons name="close-circle-outline" size={22} color={colors.error} />
@@ -464,6 +542,29 @@ export default function SettingsScreen() {
                     onValueChange={toggleCancellationAlert}
                     trackColor={{ false: colors.border, true: colors.error }}
                     thumbColor="#FFF"
+                  />
+                </View>
+
+                <View style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1, paddingVertical: 8 }]}>
+                  <View style={styles.menuItemLeft}>
+                    <Ionicons name="timer-outline" size={22} color={colors.primary} />
+                    <View>
+                      <Text style={[styles.menuItemLabel, { color: colors.text, fontSize: 13 }]}>Kontrol Sıklığı (dk)</Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary, fontSize: 10 }]}>Tüm veri kaynakları için bildirim taraması</Text>
+                    </View>
+                  </View>
+                  <TextInput
+                    value={checkIntervalMinutes}
+                    onChangeText={setCheckIntervalMinutes}
+                    onEndEditing={() => syncSettingsToBackend()}
+                    keyboardType="numeric"
+                    placeholder="15"
+                    placeholderTextColor={colors.textSecondary}
+                    style={{
+                      minWidth: 70, paddingHorizontal: 10, paddingVertical: 6,
+                      borderWidth: 1, borderColor: colors.border, borderRadius: 8,
+                      color: colors.text, textAlign: 'center', fontWeight: '700',
+                    }}
                   />
                 </View>
 
@@ -498,7 +599,17 @@ export default function SettingsScreen() {
             
             <TouchableOpacity
               style={styles.menuItem}
-              onPress={() => showInfo(t('info'), t('demo_mode'))}
+              onPress={async () => {
+                try {
+                  await AsyncStorage.removeItem('cached_products');
+                  await AsyncStorage.removeItem('cached_customers');
+                  await AsyncStorage.removeItem('cached_dashboard');
+                  await AsyncStorage.removeItem('cached_reports');
+                  showSuccess('Senkronize Edildi', 'Tüm veriler yenilendi. Sekmeleri açtığınızda canlı POS verilerinden yeniden çekilecek.');
+                } catch (e) {
+                  showError('Hata', 'Senkronizasyon sırasında bir hata oluştu.');
+                }
+              }}
             >
               <View style={styles.menuItemLeft}>
                 <Ionicons name="sync-outline" size={22} color={colors.primary} />
@@ -542,7 +653,10 @@ export default function SettingsScreen() {
             
             <TouchableOpacity
               style={styles.menuItem}
-              onPress={() => showInfo(t('help'), 'destek@barkodcucepte.com')}
+              onPress={() => showInfo(
+                'Destek / Yardım',
+                '📞 Telefon:\n  • 0506 711 91 29\n  • 0442 442 2020\n\n📧 E-posta:\n  • fatih@berkyazilim.com\n  • cakmak.ebubekir29@gmail.com\n\nMesai saatlerinde destek ekibimiz hizmetinizdedir.'
+              )}
             >
               <View style={styles.menuItemLeft}>
                 <Ionicons name="help-circle-outline" size={22} color={colors.primary} />

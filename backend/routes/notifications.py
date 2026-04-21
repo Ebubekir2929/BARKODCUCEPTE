@@ -19,7 +19,7 @@ EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 
 
 async def ensure_tokens_table():
-    """Create user_push_tokens table if it doesn't exist (called at startup)."""
+    """Create user_push_tokens and user_notification_settings tables if they don't exist."""
     pool = await get_patron_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -38,8 +38,33 @@ async def ensure_tokens_table():
                     INDEX idx_active (active)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+            # Per-user notification preferences
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_notification_settings (
+                    user_id INT PRIMARY KEY,
+                    notify_cancellations TINYINT(1) DEFAULT 1,
+                    notify_high_sales TINYINT(1) DEFAULT 1,
+                    high_sales_threshold DECIMAL(18,2) DEFAULT 5000.00,
+                    notify_low_stock TINYINT(1) DEFAULT 1,
+                    check_interval_minutes INT DEFAULT 15,
+                    last_check_at DATETIME NULL,
+                    updated_at DATETIME NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+            # De-duplication table: remember which (type, key) events we already pushed
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS notification_events_seen (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    tenant_id VARCHAR(64) NOT NULL,
+                    event_type VARCHAR(32) NOT NULL,
+                    event_key VARCHAR(190) NOT NULL,
+                    seen_at DATETIME NULL,
+                    UNIQUE KEY uniq_event (tenant_id, event_type, event_key),
+                    INDEX idx_tenant_type (tenant_id, event_type)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
             await conn.commit()
-    logger.info("user_push_tokens table ready")
+    logger.info("user_push_tokens + notification_settings tables ready")
 
 
 class RegisterTokenBody(BaseModel):
@@ -183,3 +208,90 @@ async def list_my_tokens(current_user: dict = Depends(get_current_user)):
             for r in rows
         ],
     }
+
+
+# ===================== NOTIFICATION SETTINGS =====================
+
+class NotificationSettings(BaseModel):
+    notify_cancellations: Optional[bool] = True
+    notify_high_sales: Optional[bool] = True
+    high_sales_threshold: Optional[float] = 5000.0
+    notify_low_stock: Optional[bool] = True
+    check_interval_minutes: Optional[int] = 15
+
+
+@router.get("/settings")
+async def get_settings(current_user: dict = Depends(get_current_user)):
+    """Return the current user's notification preferences (creates defaults if missing)."""
+    user_id = current_user["user_id"]
+    pool = await get_patron_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                SELECT notify_cancellations, notify_high_sales, high_sales_threshold,
+                       notify_low_stock, check_interval_minutes, last_check_at
+                FROM user_notification_settings WHERE user_id=%s
+            """, (user_id,))
+            row = await cur.fetchone()
+            if not row:
+                # Create defaults
+                await cur.execute("""
+                    INSERT INTO user_notification_settings
+                        (user_id, notify_cancellations, notify_high_sales, high_sales_threshold,
+                         notify_low_stock, check_interval_minutes, updated_at)
+                    VALUES (%s, 1, 1, 5000.00, 1, 15, NOW())
+                """, (user_id,))
+                await conn.commit()
+                return {
+                    "ok": True,
+                    "settings": {
+                        "notify_cancellations": True,
+                        "notify_high_sales": True,
+                        "high_sales_threshold": 5000.0,
+                        "notify_low_stock": True,
+                        "check_interval_minutes": 15,
+                        "last_check_at": None,
+                    }
+                }
+    return {
+        "ok": True,
+        "settings": {
+            "notify_cancellations": bool(row[0]),
+            "notify_high_sales": bool(row[1]),
+            "high_sales_threshold": float(row[2]) if row[2] is not None else 5000.0,
+            "notify_low_stock": bool(row[3]),
+            "check_interval_minutes": int(row[4]) if row[4] is not None else 15,
+            "last_check_at": row[5].isoformat() if row[5] else None,
+        }
+    }
+
+
+@router.post("/settings")
+async def set_settings(body: NotificationSettings, current_user: dict = Depends(get_current_user)):
+    """Upsert the current user's notification preferences."""
+    user_id = current_user["user_id"]
+    pool = await get_patron_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                INSERT INTO user_notification_settings
+                    (user_id, notify_cancellations, notify_high_sales, high_sales_threshold,
+                     notify_low_stock, check_interval_minutes, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, NOW())
+                ON DUPLICATE KEY UPDATE
+                    notify_cancellations=VALUES(notify_cancellations),
+                    notify_high_sales=VALUES(notify_high_sales),
+                    high_sales_threshold=VALUES(high_sales_threshold),
+                    notify_low_stock=VALUES(notify_low_stock),
+                    check_interval_minutes=VALUES(check_interval_minutes),
+                    updated_at=NOW()
+            """, (
+                user_id,
+                1 if body.notify_cancellations else 0,
+                1 if body.notify_high_sales else 0,
+                float(body.high_sales_threshold or 0),
+                1 if body.notify_low_stock else 0,
+                max(1, int(body.check_interval_minutes or 15)),
+            ))
+            await conn.commit()
+    return {"ok": True}
