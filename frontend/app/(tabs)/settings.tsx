@@ -655,7 +655,7 @@ export default function SettingsScreen() {
               style={styles.menuItem}
               onPress={() => showInfo(
                 'Destek / Yardım',
-                '📞 Telefon:\n  • 0506 711 91 29\n  • 0442 442 2020\n\n📧 E-posta:\n  • fatih@berkyazilim.com\n  • cakmak.ebubekir29@gmail.com\n\nMesai saatlerinde destek ekibimiz hizmetinizdedir.'
+                '📞 Telefon:\n  • 0506 711 9129\n\n📧 E-posta:\n  • fatih@berkyazilim.com'
               )}
             >
               <View style={styles.menuItemLeft}>

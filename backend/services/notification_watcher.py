@@ -223,7 +223,32 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
                 **stok_empty,
             }
             rows = await _pos_run(tenant_id, "rap_fis_kalem_listesi_web", fis_params)
-            # Group by BELGENO for unique fiş events
+            # --- 1a) SATIR İPTALLERİ — iterate each row and check row-level cancel flag ---
+            if user["notify_cancellations"]:
+                for r in rows:
+                    row_iptal = (
+                        str(r.get("SATIR_DURUMU") or "").lower().find("iptal") >= 0
+                        or r.get("SATIR_IPTAL") in (1, "1", True, "E")
+                        or r.get("IPTAL") in (1, "1", True, "E")
+                        or str(r.get("DURUM") or "").lower() == "iptal"
+                    )
+                    if not row_iptal:
+                        continue
+                    bn = str(r.get("BELGENO") or "").strip()
+                    stok_kod = str(r.get("STOK_KOD") or r.get("KOD") or "").strip()
+                    stok_ad = str(r.get("STOK_AD") or r.get("AD") or "Stok kalemi")
+                    miktar = float(r.get("MIKTAR_FIS") or 0)
+                    satir_toplam = float(r.get("SATIR_GENEL_TOPLAM") or r.get("DAHIL_NET_TUTAR") or 0)
+                    key = f"{bn}::{stok_kod}::{miktar}"
+                    if await _mark_event_seen(tenant_id, "satir_iptal", key):
+                        await _push_many(
+                            tokens,
+                            f"❌ Satır İptali · {tenant_name}",
+                            f"{bn} · {stok_ad} ({miktar:g}) iptal edildi · ₺{satir_toplam:,.2f}",
+                            {"type": "line_cancellation", "belgeno": bn, "stok_kod": stok_kod,
+                             "tenant": tenant_id, "tenant_name": tenant_name},
+                        )
+            # --- 1b) Fiş seviyesi iptalleri + Yüksek Satış: aggregate by BELGENO ---
             seen_belge = {}
             for r in rows:
                 bn = str(r.get("BELGENO") or "").strip()
