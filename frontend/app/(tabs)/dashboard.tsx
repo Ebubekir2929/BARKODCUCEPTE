@@ -679,6 +679,60 @@ export default function DashboardScreen() {
         </View>
         )}
 
+        {/* Cancellations Summary — shows as soon as any iptal data arrives, regardless of branchSales */}
+        {(sourceData?.iptalOzet || []).length > 0 && (() => {
+          const rows: any[] = sourceData?.iptalOzet || [];
+          const fisIptalAdet = rows.reduce((s, o: any) => s + parseInt(o.FIS_IPTAL_ADET || '0'), 0);
+          const satirIptalAdet = rows.reduce((s, o: any) => s + parseInt(o.SATIR_IPTAL_ADET || '0'), 0);
+          const totalAdet = fisIptalAdet + satirIptalAdet;
+          const fisIptalTutar = rows.reduce((s, o: any) => s + parseFloat(o.FIS_IPTAL_TUTAR || '0'), 0);
+          const satirIptalTutar = rows.reduce((s, o: any) => s + parseFloat(o.SATIR_IPTAL_TUTAR || '0'), 0);
+          const totalTutar = fisIptalTutar + satirIptalTutar;
+          if (totalAdet <= 0 && totalTutar <= 0) return null;
+          // Collect unique locations
+          const locations = Array.from(new Set(rows.map((o: any) => o.LOKASYON || '-')));
+          return (
+            <View style={[styles.section, { backgroundColor: colors.error + '08', borderColor: colors.error + '40', borderWidth: 1.5 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <Ionicons name="close-circle" size={20} color={colors.error} />
+                <Text style={[styles.sectionTitle, { color: colors.error, marginBottom: 0 }]}>İptaller</Text>
+                <View style={{ flex: 1 }} />
+                <Text style={[{ fontSize: 18, fontWeight: '800', color: colors.error }]}>₺{totalTutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                <View style={{ backgroundColor: colors.error + '12', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }}>
+                  <Text style={[{ fontSize: 10, color: colors.error, fontWeight: '700' }]}>Fiş İptal: {fisIptalAdet}</Text>
+                </View>
+                <View style={{ backgroundColor: colors.error + '12', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }}>
+                  <Text style={[{ fontSize: 10, color: colors.error, fontWeight: '700' }]}>Satır İptal: {satirIptalAdet}</Text>
+                </View>
+                <View style={{ backgroundColor: colors.error + '12', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }}>
+                  <Text style={[{ fontSize: 10, color: colors.error, fontWeight: '700' }]}>Toplam: {totalAdet}</Text>
+                </View>
+              </View>
+              {locations.map((lok: string, idx: number) => {
+                const locRows = rows.filter((o: any) => (o.LOKASYON || '-') === lok);
+                const adet = locRows.reduce((s, o: any) => s + parseInt(o.FIS_IPTAL_ADET || '0') + parseInt(o.SATIR_IPTAL_ADET || '0'), 0);
+                const tutar = locRows.reduce((s, o: any) => s + parseFloat(o.FIS_IPTAL_TUTAR || '0') + parseFloat(o.SATIR_IPTAL_TUTAR || '0'), 0);
+                if (adet <= 0 && tutar <= 0) return null;
+                return (
+                  <TouchableOpacity
+                    key={`iptal-lok-${idx}-${lok}`}
+                    style={[styles.cancellationButton, { backgroundColor: colors.error + '12', marginBottom: 6 }]}
+                    onPress={() => openLocationIptalList(lok)}
+                  >
+                    <Ionicons name="location-outline" size={14} color={colors.error} />
+                    <Text style={[styles.cancellationText, { color: colors.error }]}>
+                      {lok} · {adet} İptal · ₺{tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                    </Text>
+                    <Ionicons name="chevron-forward" size={14} color={colors.error} />
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          );
+        })()}
+
         {/* Location Summary */}
         {(sourceData?.branchSales || []).length > 0 && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>

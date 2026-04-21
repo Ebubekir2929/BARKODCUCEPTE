@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useLanguageStore } from '../../src/store/languageStore';
 import { Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -14,6 +15,7 @@ const TabIcon = ({ name, color, size }: { name: IconName; color: string; size: n
 export default function TabLayout() {
   const { colors } = useThemeStore();
   const { t } = useLanguageStore();
+  const insets = useSafeAreaInsets();
 
   const renderDashboardIcon = useCallback(
     ({ color, size }: { color: string; size: number }) => (
@@ -58,9 +60,9 @@ export default function TabLayout() {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
           borderTopWidth: 1,
-          height: Platform.OS === 'ios' ? 85 : 65,
+          height: (Platform.OS === 'ios' ? 65 : 60) + insets.bottom,
           paddingTop: 8,
-          paddingBottom: Platform.OS === 'ios' ? 28 : 12,
+          paddingBottom: Math.max(12, insets.bottom + 4),
         },
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
