@@ -1433,7 +1433,7 @@ export default function ReportsScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <ActiveSourceIndicator />
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Raporlar</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>{t('reports')}</Text>
       </View>
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 100 }}>
         {ALL_REPORTS.map(report => (
@@ -1536,11 +1536,11 @@ export default function ReportsScreen() {
                 <TouchableOpacity
                   style={{ flex: 1, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' }}
                   onPress={() => setDatePickerFor(null)}
-                ><Text style={[{ color: colors.text, fontWeight: '600' }]}>İptal</Text></TouchableOpacity>
+                ><Text style={[{ color: colors.text, fontWeight: '600' }]}>{t('cancel')}</Text></TouchableOpacity>
                 <TouchableOpacity
                   style={{ flex: 1, padding: 12, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center' }}
                   onPress={() => setDatePickerFor(null)}
-                ><Text style={[{ color: '#fff', fontWeight: '700' }]}>Tamam</Text></TouchableOpacity>
+                ><Text style={[{ color: '#fff', fontWeight: '700' }]}>{t('ok')}</Text></TouchableOpacity>
               </View>
             </View>
           </View>
@@ -1696,7 +1696,7 @@ export default function ReportsScreen() {
                     {sortKey !== '' && (
                       <TouchableOpacity onPress={() => { setSortKey(''); setSortAsc(true); }} style={[styles.sortPill, { backgroundColor: 'transparent', borderColor: colors.border }]}>
                         <Ionicons name="close" size={11} color={colors.textSecondary} />
-                        <Text style={[{ fontSize: 10, color: colors.textSecondary, fontWeight: '600' }]}>Temizle</Text>
+                        <Text style={[{ fontSize: 10, color: colors.textSecondary, fontWeight: '600' }]}>{t('clear')}</Text>
                       </TouchableOpacity>
                     )}
                   </ScrollView>

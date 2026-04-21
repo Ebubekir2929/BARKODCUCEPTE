@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAuthStore } from '../../src/store/authStore';
+import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import * as Print from 'expo-print';
@@ -25,6 +26,7 @@ const getDefDates = () => {
 
 export default function CustomersScreen() {
   const { colors } = useThemeStore();
+  const { t } = useLanguageStore();
   const { user } = useAuthStore();
   const { activeSource } = useDataSourceStore();
 
@@ -151,16 +153,16 @@ export default function CustomersScreen() {
   const exportExtrePdf = async () => {
     if (!selectedCari || extreData.length === 0) return;
     setExportLoading(true);
-    const name = selectedCari.AD || selectedCari.CARI_ADI || 'Cari';
+    const name = selectedCari.AD || selectedCari.CARI_ADI || t('customer');
     const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:8px;font-size:12px;text-align:left}th{background:#f5f5f5}</style></head><body>
     <h2>${name} - Cari Ekstre</h2><p>${extreStart} / ${extreEnd}</p>
     <p>Toplam Borç: ₺${extreSummary.borc.toFixed(2)} | Toplam Alacak: ₺${extreSummary.alacak.toFixed(2)} | Bakiye: ₺${extreSummary.bakiye.toFixed(2)}</p>
-    <table><thead><tr><th>Tarih</th><th>Belge No</th><th>Açıklama</th><th>Borç</th><th>Alacak</th><th>Bakiye</th></tr></thead><tbody>
+    <table><thead><tr><th>Tarih</th><th>Belge No</th><th>Açıklama</th><th>{t('debt')}</th><th>{t('credit')}</th><th>Bakiye</th></tr></thead><tbody>
     ${extreData.map((r: any) => `<tr><td>${r.TARIH || ''}</td><td>${r.BELGENO || ''}</td><td>${r.ACIKLAMA || r.AD || ''}</td><td>${parseFloat(r.BORC || '0').toFixed(2)}</td><td>${parseFloat(r.ALACAK || '0').toFixed(2)}</td><td>${parseFloat(r.BAKIYE || '0').toFixed(2)}</td></tr>`).join('')}
     </tbody></table></body></html>`;
     try {
       const { uri } = await Print.printToFileAsync({ html });
-      await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: 'Ekstre PDF' });
+      await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: t('statement_pdf') });
       showToast('PDF oluşturuldu');
     } catch (err) { console.error(err); showToast('PDF oluşturulamadı'); }
     finally { setExportLoading(false); }
@@ -169,18 +171,18 @@ export default function CustomersScreen() {
   const exportExtreCsv = async () => {
     if (!selectedCari || extreData.length === 0) return;
     setExportLoading(true);
-    const name = selectedCari.AD || selectedCari.CARI_ADI || 'Cari';
-    const html = `<html><head><meta charset="utf-8"><style>table{border-collapse:collapse}th,td{border:1px solid #000;padding:4px;font-size:11px}</style></head><body><h3>${name} - Ekstre</h3><table><thead><tr><th>Tarih</th><th>Belge No</th><th>Açıklama</th><th>Borç</th><th>Alacak</th><th>Bakiye</th></tr></thead><tbody>${extreData.map((r: any) => `<tr><td>${r.TARIH || ''}</td><td>${r.BELGENO || ''}</td><td>${r.ACIKLAMA || r.AD || ''}</td><td>${parseFloat(r.BORC || '0').toFixed(2)}</td><td>${parseFloat(r.ALACAK || '0').toFixed(2)}</td><td>${parseFloat(r.BAKIYE || '0').toFixed(2)}</td></tr>`).join('')}</tbody></table></body></html>`;
+    const name = selectedCari.AD || selectedCari.CARI_ADI || t('customer');
+    const html = `<html><head><meta charset="utf-8"><style>table{border-collapse:collapse}th,td{border:1px solid #000;padding:4px;font-size:11px}</style></head><body><h3>${name} - Ekstre</h3><table><thead><tr><th>Tarih</th><th>Belge No</th><th>Açıklama</th><th>{t('debt')}</th><th>{t('credit')}</th><th>Bakiye</th></tr></thead><tbody>${extreData.map((r: any) => `<tr><td>${r.TARIH || ''}</td><td>${r.BELGENO || ''}</td><td>${r.ACIKLAMA || r.AD || ''}</td><td>${parseFloat(r.BORC || '0').toFixed(2)}</td><td>${parseFloat(r.ALACAK || '0').toFixed(2)}</td><td>${parseFloat(r.BAKIYE || '0').toFixed(2)}</td></tr>`).join('')}</tbody></table></body></html>`;
     try {
       const { uri } = await Print.printToFileAsync({ html });
       await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: `${name} Excel` });
-      showToast('Excel oluşturuldu');
-    } catch (err) { console.error('Excel error:', err); showToast('Excel oluşturulamadı'); }
+      showToast(t('excel_created'));
+    } catch (err) { console.error('Excel error:', err); showToast(t('excel_error')); }
     finally { setExportLoading(false); }
   };
 
   const renderCariItem = useCallback(({ item }: { item: any }) => {
-    const name = item.AD || item.CARI_ADI || 'Cari';
+    const name = item.AD || item.CARI_ADI || t('customer');
     const code = item.KOD || item.CARI_KODU || '';
     const bakiye = parseFloat(item.BAKIYE || '0');
     return (
@@ -192,7 +194,7 @@ export default function CustomersScreen() {
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={[styles.cariBakiye, { color: bakiye >= 0 ? colors.error : colors.success }]}>₺{Math.abs(bakiye).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</Text>
-            <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{bakiye >= 0 ? 'Borçlu' : 'Alacaklı'}</Text>
+            <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{bakiye >= 0 ? t('debtor') : t('creditor')}</Text>
           </View>
         </View>
       </TouchableOpacity>
@@ -212,28 +214,28 @@ export default function CustomersScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <ActiveSourceIndicator />
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Cariler</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>{t('customers')}</Text>
       </View>
 
       {/* Summary */}
       <View style={styles.summaryRow}>
         <View style={[styles.summaryCard, { backgroundColor: colors.error + '10', borderColor: colors.border }]}>
-          <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Toplam Borç</Text>
+          <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('debt_total')}</Text>
           <Text style={[{ fontSize: 12, fontWeight: '800', color: colors.error }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>₺{summary.borc.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</Text>
         </View>
         <View style={[styles.summaryCard, { backgroundColor: colors.success + '10', borderColor: colors.border }]}>
-          <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Toplam Alacak</Text>
+          <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('credit_total')}</Text>
           <Text style={[{ fontSize: 12, fontWeight: '800', color: colors.success }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>₺{summary.alacak.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</Text>
         </View>
         <View style={[styles.summaryCard, { backgroundColor: colors.primary + '10', borderColor: colors.border }]}>
-          <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Bakiye</Text>
+          <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('balance_short')}</Text>
           <Text style={[{ fontSize: 12, fontWeight: '800', color: colors.primary }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>₺{Math.abs(summary.bakiye).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</Text>
         </View>
       </View>
 
       {/* Filter pills */}
       <View style={{ flexDirection: 'row', paddingHorizontal: 16, gap: 6, marginTop: 6 }}>
-        {[{ k: 'all' as const, l: 'Tümü', c: colors.primary }, { k: 'borclu' as const, l: `Borçlu (${summary.borcluCount})`, c: colors.error }, { k: 'alacakli' as const, l: `Alacaklı (${summary.alacakliCount})`, c: colors.success }].map(o => (
+        {[{ k: 'all' as const, l: t('all'), c: colors.primary }, { k: 'borclu' as const, l: `${t('debtor')} (${summary.borcluCount})`, c: colors.error }, { k: 'alacakli' as const, l: `${t('creditor')} (${summary.alacakliCount})`, c: colors.success }].map(o => (
           <TouchableOpacity key={o.k} style={[styles.pill, { backgroundColor: filterType === o.k ? o.c + '20' : colors.card, borderColor: filterType === o.k ? o.c : colors.border }]} onPress={() => setFilterType(o.k)}>
             <Text style={[{ fontSize: 11, fontWeight: '600', color: filterType === o.k ? o.c : colors.textSecondary }]}>{o.l}</Text>
           </TouchableOpacity>
@@ -244,20 +246,20 @@ export default function CustomersScreen() {
       <View style={styles.searchContainer}>
         <View style={[styles.searchInput, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Ionicons name="search" size={18} color={colors.textSecondary} />
-          <TextInput style={[styles.searchText, { color: colors.text }]} placeholder="Cari adı veya kodu..." placeholderTextColor={colors.textSecondary} value={searchQuery} onChangeText={setSearchQuery} />
+          <TextInput style={[styles.searchText, { color: colors.text }]} placeholder={t('search_customer_ph')} placeholderTextColor={colors.textSecondary} value={searchQuery} onChangeText={setSearchQuery} />
           {searchQuery ? <TouchableOpacity onPress={() => setSearchQuery('')}><Ionicons name="close-circle" size={18} color={colors.textSecondary} /></TouchableOpacity> : null}
         </View>
       </View>
 
       <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}>
-        <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>{loading ? 'Yükleniyor...' : `${filteredCaris.length} cari`}</Text>
+        <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>{loading ? t('loading') : `${filteredCaris.length} ${t('customer_count')}`}</Text>
       </View>
 
       {loading ? (
-        <View style={styles.loadingContainer}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>Cari listesi yükleniyor...</Text></View>
+        <View style={styles.loadingContainer}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_customers')}</Text></View>
       ) : (
         <FlatList data={filteredCaris} renderItem={renderCariItem} keyExtractor={(item, idx) => String(item.KART || item.ID || idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
-          ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="people-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>Cari bulunamadı</Text></View>}
+          ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="people-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_customers')}</Text></View>}
         />
       )}
 
@@ -266,18 +268,18 @@ export default function CustomersScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>{selectedCari?.AD || selectedCari?.CARI_ADI || 'Ekstre'}</Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>{selectedCari?.AD || selectedCari?.CARI_ADI || t('statement')}</Text>
               <TouchableOpacity onPress={() => { setSelectedCari(null); setExtreData([]); }}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             </View>
 
             {/* Date filter */}
             <View style={[styles.dateRow, { borderBottomColor: colors.border }]}>
               <View style={{ flex: 1 }}>
-                <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Başlangıç</Text>
+                <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('start_placeholder')}</Text>
                 <TextInput style={[styles.dateInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={extreStart} onChangeText={setExtreStart} placeholder="YYYY-MM-DD" placeholderTextColor={colors.textSecondary} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Bitiş</Text>
+                <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('end_placeholder')}</Text>
                 <TextInput style={[styles.dateInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={extreEnd} onChangeText={setExtreEnd} placeholder="YYYY-MM-DD" placeholderTextColor={colors.textSecondary} />
               </View>
               <TouchableOpacity style={[styles.runBtn, { backgroundColor: colors.primary }]} onPress={refreshExtre}>
@@ -287,9 +289,9 @@ export default function CustomersScreen() {
 
             {/* Ekstre Summary */}
             <View style={[styles.extreSummary, { borderBottomColor: colors.border }]}>
-              <View style={{ flex: 1, alignItems: 'center' }}><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Borç</Text><Text style={[{ fontSize: 14, fontWeight: '800', color: colors.error }]}>₺{extreSummary.borc.toFixed(2)}</Text></View>
-              <View style={{ flex: 1, alignItems: 'center' }}><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Alacak</Text><Text style={[{ fontSize: 14, fontWeight: '800', color: colors.success }]}>₺{extreSummary.alacak.toFixed(2)}</Text></View>
-              <View style={{ flex: 1, alignItems: 'center' }}><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Bakiye</Text><Text style={[{ fontSize: 14, fontWeight: '800', color: colors.primary }]}>₺{extreSummary.bakiye.toFixed(2)}</Text></View>
+              <View style={{ flex: 1, alignItems: 'center' }}><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('debt')}</Text><Text style={[{ fontSize: 14, fontWeight: '800', color: colors.error }]}>₺{extreSummary.borc.toFixed(2)}</Text></View>
+              <View style={{ flex: 1, alignItems: 'center' }}><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('credit')}</Text><Text style={[{ fontSize: 14, fontWeight: '800', color: colors.success }]}>₺{extreSummary.alacak.toFixed(2)}</Text></View>
+              <View style={{ flex: 1, alignItems: 'center' }}><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('balance_short')}</Text><Text style={[{ fontSize: 14, fontWeight: '800', color: colors.primary }]}>₺{extreSummary.bakiye.toFixed(2)}</Text></View>
             </View>
 
             {/* Export buttons */}
@@ -301,7 +303,7 @@ export default function CustomersScreen() {
 
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
               {extreLoading ? (
-                <View style={{ alignItems: 'center', paddingVertical: 40 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>Ekstre yükleniyor...</Text></View>
+                <View style={{ alignItems: 'center', paddingVertical: 40 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_statement')}</Text></View>
               ) : extreData.length > 0 ? (
                 extreData.map((row: any, idx: number) => {
                   const borc = parseFloat(row.BORC || '0');
@@ -329,7 +331,7 @@ export default function CustomersScreen() {
                   );
                 })
               ) : (
-                <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>Ekstre bulunamadı</Text></View>
+                <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>{t('no_statement')}</Text></View>
               )}
             </ScrollView>
           </View>
@@ -342,7 +344,7 @@ export default function CustomersScreen() {
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <TouchableOpacity onPress={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
-              <Text style={[styles.modalTitle, { color: colors.text, flex: 1, textAlign: 'center' }]}>Fiş Detayı</Text>
+              <Text style={[styles.modalTitle, { color: colors.text, flex: 1, textAlign: 'center' }]}>{t('receipt_detail')}</Text>
               <View style={{ width: 24 }} />
             </View>
             {selectedFis && (
@@ -353,32 +355,32 @@ export default function CustomersScreen() {
             )}
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
               {fisLoading ? (
-                <View style={{ alignItems: 'center', paddingVertical: 40 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>Fiş detayı yükleniyor...</Text></View>
+                <View style={{ alignItems: 'center', paddingVertical: 40 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_receipt')}</Text></View>
               ) : fisDetail.length > 0 ? (
                 <>
                   {fisDetail.map((item: any, idx: number) => (
                     <View key={idx} style={[styles.fisRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
-                        <Text style={[{ fontSize: 12, fontWeight: '600', color: colors.text, flex: 1 }]} numberOfLines={1}>{item.STOK || 'Ürün'}</Text>
+                        <Text style={[{ fontSize: 12, fontWeight: '600', color: colors.text, flex: 1 }]} numberOfLines={1}>{item.STOK || t('product')}</Text>
                         <Text style={[{ fontSize: 12, fontWeight: '700', color: colors.primary }]}>₺{parseFloat(item.DAHIL_TUTAR || item.TUTAR || '0').toFixed(2)}</Text>
                       </View>
                       <View style={{ flexDirection: 'row', gap: 10 }}>
                         <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{item.BIRIM || ''}</Text>
-                        <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Miktar: {parseFloat(item.MIKTAR_FIS || '0').toFixed(2)}</Text>
-                        <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Fiyat: ₺{parseFloat(item.DAHIL_FIYAT || item.FIYAT || '0').toFixed(2)}</Text>
+                        <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('quantity_short')}: {parseFloat(item.MIKTAR_FIS || '0').toFixed(2)}</Text>
+                        <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('price_short')}: ₺{parseFloat(item.DAHIL_FIYAT || item.FIYAT || '0').toFixed(2)}</Text>
                       </View>
                     </View>
                   ))}
                   {fisTotals && (
                     <View style={[styles.fisTotals, { backgroundColor: colors.primary + '10', borderColor: colors.border }]}>
-                      <View style={styles.fisTotalRow}><Text style={[{ color: colors.textSecondary }]}>Satır Toplam</Text><Text style={[{ fontWeight: '600', color: colors.text }]}>₺{parseFloat(fisTotals.SATIR_TOPLAM || '0').toFixed(2)}</Text></View>
+                      <View style={styles.fisTotalRow}><Text style={[{ color: colors.textSecondary }]}>{t('line_total')}</Text><Text style={[{ fontWeight: '600', color: colors.text }]}>₺{parseFloat(fisTotals.SATIR_TOPLAM || '0').toFixed(2)}</Text></View>
                       <View style={styles.fisTotalRow}><Text style={[{ color: colors.textSecondary }]}>KDV</Text><Text style={[{ fontWeight: '600', color: colors.text }]}>₺{parseFloat(fisTotals.KDV_TOPLAM || '0').toFixed(2)}</Text></View>
-                      <View style={[styles.fisTotalRow, { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 6 }]}><Text style={[{ fontSize: 15, fontWeight: '800', color: colors.text }]}>Genel Toplam</Text><Text style={[{ fontSize: 16, fontWeight: '800', color: colors.primary }]}>₺{parseFloat(fisTotals.GENELTOPLAM || '0').toFixed(2)}</Text></View>
+                      <View style={[styles.fisTotalRow, { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 6 }]}><Text style={[{ fontSize: 15, fontWeight: '800', color: colors.text }]}>{t('grand_total')}</Text><Text style={[{ fontSize: 16, fontWeight: '800', color: colors.primary }]}>₺{parseFloat(fisTotals.GENELTOPLAM || '0').toFixed(2)}</Text></View>
                     </View>
                   )}
                 </>
               ) : (
-                <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>Fiş detayı bulunamadı</Text></View>
+                <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>{t('no_receipt_detail')}</Text></View>
               )}
             </ScrollView>
           </View>
@@ -389,7 +391,7 @@ export default function CustomersScreen() {
         <View style={styles.exportOverlay}>
           <View style={[styles.exportBox, { backgroundColor: colors.card }]}>
             <ActivityIndicator size="large" color={colors.primary} />
-            <Text style={[{ color: colors.text, fontSize: 14, fontWeight: '600', marginTop: 12 }]}>Dışa aktarılıyor...</Text>
+            <Text style={[{ color: colors.text, fontSize: 14, fontWeight: '600', marginTop: 12 }]}>{t('exporting')}</Text>
           </View>
         </View>
       )}

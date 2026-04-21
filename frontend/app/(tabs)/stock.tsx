@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import { useAuthStore } from '../../src/store/authStore';
+import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -20,6 +21,7 @@ const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 export default function StockScreen() {
   const { colors } = useThemeStore();
+  const { t } = useLanguageStore();
   const { showError, showWarning, alertProps } = useAlert();
   const { user } = useAuthStore();
   const { activeSource } = useDataSourceStore();
@@ -169,14 +171,14 @@ export default function StockScreen() {
 
   const selectedPriceLabel = useMemo(() => {
     const f = priceNames.find((p: any) => String(p.ID) === selectedPriceName || String(p.AD) === selectedPriceName);
-    return f ? (f.AD || `Fiyat #${f.ID}`) : 'Fiyat Adı Seç';
+    return f ? (f.AD || `${t('price_name')} #${f.ID}`) : t('price_name_select');
   }, [priceNames, selectedPriceName]);
 
   // Barcode scan
   const openScanner = async () => {
     if (!permission?.granted) {
       const r = await requestPermission();
-      if (!r.granted) { showWarning('İzin Gerekli', 'Kamera izni gereklidir.'); return; }
+      if (!r.granted) { showWarning(t('permission_required'), t('camera_permission')); return; }
     }
     setShowScanner(true);
   };
@@ -186,7 +188,7 @@ export default function StockScreen() {
     setSearchQuery(data);
     const found = stockList.find((s: any) => (s.BARKOD || '') === data);
     if (found) openStockDetail(found);
-    else showError('Bulunamadı', `"${data}" barkodlu ürün bulunamadı.`);
+    else showError(t('not_found'), `"${data}" ${t('product_not_found_barcode')}.`);
   };
 
   // Detail
@@ -208,7 +210,7 @@ export default function StockScreen() {
   }, [activeTenantId]);
 
   const renderStockItem = useCallback(({ item }: { item: any }) => {
-    const name = item.AD || 'Ürün';
+    const name = item.AD || t('product');
     const code = item.KOD || '';
     const barcode = item.BARKOD || '';
     const price = parseFloat(item.FIYAT || '0');
@@ -251,7 +253,7 @@ export default function StockScreen() {
           ) : null}
           {profit !== 0 ? (
             <View style={styles.detailItem}>
-              <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Kar</Text>
+              <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('profit')}</Text>
               <Text style={[{ fontSize: 12, fontWeight: '700', color: profit >= 0 ? colors.success : colors.error }]}>
                 {profit >= 0 ? '+' : ''}₺{profit.toFixed(2)} ({profitPct >= 0 ? '+' : ''}{profitPct.toFixed(0)}%)
               </Text>
@@ -289,7 +291,7 @@ export default function StockScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <ActiveSourceIndicator />
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>Stok Yönetimi</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>{t('stock_management')}</Text>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <TouchableOpacity style={[styles.iconBtn, { backgroundColor: colors.success + '20' }]} onPress={openScanner}>
             <Ionicons name="barcode-outline" size={20} color={colors.success} />
@@ -306,7 +308,7 @@ export default function StockScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
           <Ionicons name="pricetag-outline" size={16} color={colors.primary} />
           <Text style={[{ fontSize: 13, fontWeight: '600', color: colors.text, flex: 1 }]} numberOfLines={1}>
-            {loading ? 'Yükleniyor...' : selectedPriceLabel}
+            {loading ? t('loading') : selectedPriceLabel}
           </Text>
         </View>
         <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
@@ -316,7 +318,7 @@ export default function StockScreen() {
       <View style={styles.searchContainer}>
         <View style={[styles.searchInput, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Ionicons name="search" size={18} color={colors.textSecondary} />
-          <TextInput style={[styles.searchText, { color: colors.text }]} placeholder="Barkod, kod veya ürün adı..." placeholderTextColor={colors.textSecondary} value={searchQuery} onChangeText={setSearchQuery} />
+          <TextInput style={[styles.searchText, { color: colors.text }]} placeholder={t('search_stock_placeholder')} placeholderTextColor={colors.textSecondary} value={searchQuery} onChangeText={setSearchQuery} />
           {searchQuery ? <TouchableOpacity onPress={() => setSearchQuery('')}><Ionicons name="close-circle" size={18} color={colors.textSecondary} /></TouchableOpacity> : null}
         </View>
       </View>
@@ -326,28 +328,28 @@ export default function StockScreen() {
         <View style={{ paddingHorizontal: 16, marginTop: 6 }}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, alignItems: 'center', paddingRight: 60 }}>
             {filterGroup ? <View style={[styles.chip, { backgroundColor: colors.primary + '15' }]}><Text style={[styles.chipText, { color: colors.primary }]}>{filterGroup}</Text><TouchableOpacity onPress={() => setFilterGroup('')}><Ionicons name="close" size={12} color={colors.primary} /></TouchableOpacity></View> : null}
-            {filterProfit !== 'all' ? <View style={[styles.chip, { backgroundColor: filterProfit === 'profit' ? colors.success + '15' : colors.error + '15' }]}><Text style={[styles.chipText, { color: filterProfit === 'profit' ? colors.success : colors.error }]}>{filterProfit === 'profit' ? 'Karlı' : 'Zararlı'}</Text><TouchableOpacity onPress={() => setFilterProfit('all')}><Ionicons name="close" size={12} color={filterProfit === 'profit' ? colors.success : colors.error} /></TouchableOpacity></View> : null}
-            {filterQty !== 'all' ? <View style={[styles.chip, { backgroundColor: colors.warning + '15' }]}><Text style={[styles.chipText, { color: colors.warning }]}>{filterQty === 'low' ? 'Düşük Stok' : filterQty === 'mid' ? 'Orta Stok' : 'Yüksek Stok'}</Text><TouchableOpacity onPress={() => setFilterQty('all')}><Ionicons name="close" size={12} color={colors.warning} /></TouchableOpacity></View> : null}
+            {filterProfit !== 'all' ? <View style={[styles.chip, { backgroundColor: filterProfit === 'profit' ? colors.success + '15' : colors.error + '15' }]}><Text style={[styles.chipText, { color: filterProfit === 'profit' ? colors.success : colors.error }]}>{filterProfit === 'profit' ? t('profitable') : t('unprofitable')}</Text><TouchableOpacity onPress={() => setFilterProfit('all')}><Ionicons name="close" size={12} color={filterProfit === 'profit' ? colors.success : colors.error} /></TouchableOpacity></View> : null}
+            {filterQty !== 'all' ? <View style={[styles.chip, { backgroundColor: colors.warning + '15' }]}><Text style={[styles.chipText, { color: colors.warning }]}>{filterQty === 'low' ? t('low_stock_label') : filterQty === 'mid' ? t('mid_stock_label') : t('high_stock_label')}</Text><TouchableOpacity onPress={() => setFilterQty('all')}><Ionicons name="close" size={12} color={colors.warning} /></TouchableOpacity></View> : null}
             {filterKdv ? <View style={[styles.chip, { backgroundColor: colors.info + '15' }]}><Text style={[styles.chipText, { color: colors.info }]}>KDV %{filterKdv}</Text><TouchableOpacity onPress={() => setFilterKdv('')}><Ionicons name="close" size={12} color={colors.info} /></TouchableOpacity></View> : null}
           </ScrollView>
           <TouchableOpacity style={{ position: 'absolute', right: 16, top: 4, backgroundColor: colors.error + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }} onPress={() => { setFilterGroup(''); setFilterProfit('all'); setFilterQty('all'); setFilterKdv(''); }}>
-            <Text style={[{ fontSize: 12, color: colors.error, fontWeight: '700' }]}>Temizle</Text>
+            <Text style={[{ fontSize: 12, color: colors.error, fontWeight: '700' }]}>{t('clear')}</Text>
           </TouchableOpacity>
         </View>
       )}
 
       <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}>
-        <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>{stockLoading ? 'POS\'tan yükleniyor...' : `${filteredStocks.length} ürün`}</Text>
+        <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>{stockLoading ? t('loading_pos') : `${filteredStocks.length} ${t('product_singular')}`}</Text>
       </View>
 
       {stockLoading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>POS'tan stok listesi alınıyor...</Text>
+          <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_stock_list')}</Text>
         </View>
       ) : (
         <FlatList data={filteredStocks} renderItem={renderStockItem} keyExtractor={(_, idx) => String(idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false} initialNumToRender={15}
-          ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="cube-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>Stok bulunamadı</Text></View>}
+          ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="cube-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_stock_found')}</Text></View>}
         />
       )}
 
@@ -356,15 +358,15 @@ export default function StockScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '70%' }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>Filtreler</Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>{t('filters')}</Text>
               <TouchableOpacity onPress={() => setShowFilterModal(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             </View>
             <ScrollView style={{ padding: 16 }} contentContainerStyle={{ paddingBottom: 30 }}>
               {/* Grup */}
-              <Text style={[styles.filterLabel, { color: colors.text }]}>Stok Grubu</Text>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>{t('stock_group')}</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }} contentContainerStyle={{ gap: 6 }}>
                 <TouchableOpacity style={[styles.filterChip, filterGroup === '' && { backgroundColor: colors.primary, borderColor: colors.primary }]} onPress={() => setFilterGroup('')}>
-                  <Text style={[{ fontSize: 12, color: filterGroup === '' ? '#fff' : colors.text }]}>Tümü</Text>
+                  <Text style={[{ fontSize: 12, color: filterGroup === '' ? '#fff' : colors.text }]}>{t('all')}</Text>
                 </TouchableOpacity>
                 {groups.map(g => (
                   <TouchableOpacity key={g} style={[styles.filterChip, filterGroup === g && { backgroundColor: colors.primary, borderColor: colors.primary }, { borderColor: colors.border }]} onPress={() => setFilterGroup(g)}>
@@ -374,9 +376,9 @@ export default function StockScreen() {
               </ScrollView>
 
               {/* Kar/Zarar */}
-              <Text style={[styles.filterLabel, { color: colors.text }]}>Kar/Zarar</Text>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>{t('profit_loss')}</Text>
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
-                {[{ k: 'all' as const, l: 'Tümü' }, { k: 'profit' as const, l: 'Karlı' }, { k: 'loss' as const, l: 'Zararlı' }].map(o => (
+                {[{ k: 'all' as const, l: t('all') }, { k: 'profit' as const, l: t('profitable') }, { k: 'loss' as const, l: t('unprofitable') }].map(o => (
                   <TouchableOpacity key={o.k} style={[styles.filterChip, filterProfit === o.k && { backgroundColor: colors.primary, borderColor: colors.primary }, { borderColor: colors.border }]} onPress={() => setFilterProfit(o.k)}>
                     <Text style={[{ fontSize: 12, color: filterProfit === o.k ? '#fff' : colors.text }]}>{o.l}</Text>
                   </TouchableOpacity>
@@ -384,9 +386,9 @@ export default function StockScreen() {
               </View>
 
               {/* Miktar */}
-              <Text style={[styles.filterLabel, { color: colors.text }]}>Miktar</Text>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>{t('quantity')}</Text>
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
-                {[{ k: 'all' as const, l: 'Tümü' }, { k: 'low' as const, l: '<10' }, { k: 'mid' as const, l: '10-100' }, { k: 'high' as const, l: '100+' }].map(o => (
+                {[{ k: 'all' as const, l: t('all') }, { k: 'low' as const, l: '<10' }, { k: 'mid' as const, l: '10-100' }, { k: 'high' as const, l: '100+' }].map(o => (
                   <TouchableOpacity key={o.k} style={[styles.filterChip, filterQty === o.k && { backgroundColor: colors.primary, borderColor: colors.primary }, { borderColor: colors.border }]} onPress={() => setFilterQty(o.k)}>
                     <Text style={[{ fontSize: 12, color: filterQty === o.k ? '#fff' : colors.text }]}>{o.l}</Text>
                   </TouchableOpacity>
@@ -394,10 +396,10 @@ export default function StockScreen() {
               </View>
 
               {/* KDV */}
-              <Text style={[styles.filterLabel, { color: colors.text }]}>KDV Oranı</Text>
+              <Text style={[styles.filterLabel, { color: colors.text }]}>{t('vat_rate')}</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }} contentContainerStyle={{ gap: 6 }}>
                 <TouchableOpacity style={[styles.filterChip, filterKdv === '' && { backgroundColor: colors.primary, borderColor: colors.primary }]} onPress={() => setFilterKdv('')}>
-                  <Text style={[{ fontSize: 12, color: filterKdv === '' ? '#fff' : colors.text }]}>Tümü</Text>
+                  <Text style={[{ fontSize: 12, color: filterKdv === '' ? '#fff' : colors.text }]}>{t('all')}</Text>
                 </TouchableOpacity>
                 {kdvValues.map(k => (
                   <TouchableOpacity key={k} style={[styles.filterChip, filterKdv === k && { backgroundColor: colors.primary, borderColor: colors.primary }, { borderColor: colors.border }]} onPress={() => setFilterKdv(k)}>
@@ -407,7 +409,7 @@ export default function StockScreen() {
               </ScrollView>
 
               <TouchableOpacity style={[{ backgroundColor: colors.primary, borderRadius: 10, padding: 14, alignItems: 'center' }]} onPress={() => setShowFilterModal(false)}>
-                <Text style={[{ color: '#fff', fontWeight: '700' }]}>Uygula</Text>
+                <Text style={[{ color: '#fff', fontWeight: '700' }]}>{t('apply')}</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -456,7 +458,7 @@ export default function StockScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>{selectedStock?.AD || selectedStock?.STOK_ADI || 'Stok Detayı'}</Text>
+              <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>{selectedStock?.AD || selectedStock?.STOK_ADI || t('stock_label')}</Text>
               <TouchableOpacity onPress={() => { setSelectedStock(null); setDetailMiktar([]); setDetailExtre([]); }}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             </View>
             {selectedStock && (
@@ -466,16 +468,16 @@ export default function StockScreen() {
                   <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Satış</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: colors.primary }]}>₺{parseFloat(selectedStock.FIYAT || '0').toFixed(2)}</Text></View>
                   {parseFloat(selectedStock.SON_ALIS_FIYAT || '0') > 0 && <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Alış</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: colors.warning }]}>₺{parseFloat(selectedStock.SON_ALIS_FIYAT || '0').toFixed(2)}</Text></View>}
                   {selectedStock.KDV_PAREKENDE && <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>KDV</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text }]}>%{String(selectedStock.KDV_PAREKENDE).replace('.00','')}</Text></View>}
-                  <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Stok</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: parseFloat(selectedStock.MIKTAR || '0') > 0 ? colors.success : colors.error }]}>{parseFloat(selectedStock.MIKTAR || '0').toFixed(2)}</Text></View>
+                  <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('stock_label')}</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: parseFloat(selectedStock.MIKTAR || '0') > 0 ? colors.success : colors.error }]}>{parseFloat(selectedStock.MIKTAR || '0').toFixed(2)}</Text></View>
                 </View>
               </View>
             )}
             <View style={[{ flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.border }]}>
               <TouchableOpacity style={[styles.tab, detailTab === 'miktar' && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]} onPress={() => setDetailTab('miktar')}>
-                <Text style={[{ fontSize: 13, fontWeight: '600', color: detailTab === 'miktar' ? colors.primary : colors.textSecondary }]}>Miktar</Text>
+                <Text style={[{ fontSize: 13, fontWeight: '600', color: detailTab === 'miktar' ? colors.primary : colors.textSecondary }]}>{t('quantity')}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.tab, detailTab === 'extre' && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]} onPress={() => setDetailTab('extre')}>
-                <Text style={[{ fontSize: 13, fontWeight: '600', color: detailTab === 'extre' ? colors.primary : colors.textSecondary }]}>Ekstre</Text>
+                <Text style={[{ fontSize: 13, fontWeight: '600', color: detailTab === 'extre' ? colors.primary : colors.textSecondary }]}>{t('statement')}</Text>
               </TouchableOpacity>
             </View>
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
@@ -484,9 +486,9 @@ export default function StockScreen() {
               ) : detailTab === 'miktar' ? (
                 detailMiktar.length > 0 ? <View style={{ padding: 16 }}>{detailMiktar.map((loc: any, idx: number) => (
                   <View key={idx} style={[styles.miktarCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <Text style={[{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 8 }]}>{loc.AD || 'Lokasyon'}</Text>
+                    <Text style={[{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 8 }]}>{loc.AD || t('location_label')}</Text>
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                      {[{ k: 'MIKTAR', l: 'Mevcut', c: colors.text }, { k: 'MIKTAR_GIRIS', l: 'Giriş', c: colors.success }, { k: 'MIKTAR_CIKIS', l: 'Çıkış', c: colors.error }, { k: 'SATIS', l: 'Satış', c: colors.primary }].map(f => (
+                      {[{ k: 'MIKTAR', l: t('available'), c: colors.text }, { k: 'MIKTAR_GIRIS', l: t('in'), c: colors.success }, { k: 'MIKTAR_CIKIS', l: t('out'), c: colors.error }, { k: 'SATIS', l: t('sales_short'), c: colors.primary }].map(f => (
                         <View key={f.k} style={{ minWidth: 70 }}><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{f.l}</Text><Text style={[{ fontSize: 14, fontWeight: '700', color: f.c }]}>{parseFloat(loc[f.k] || '0').toFixed(2)}</Text></View>
                       ))}
                     </View>
@@ -498,7 +500,7 @@ export default function StockScreen() {
                   <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
                     <TouchableOpacity disabled={exportLoading} style={[{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.error + '15', opacity: exportLoading ? 0.5 : 1 }]} onPress={async () => {
                       setExportLoading(true); showToast('PDF hazırlanıyor...');
-                      const name = selectedStock?.AD || 'Stok';
+                      const name = selectedStock?.AD || t('stock_label');
                       const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:6px;font-size:11px}th{background:#f5f5f5}</style></head><body><h2>${name} - Stok Ekstre</h2><table><thead><tr><th>Tarih</th><th>Belge No</th><th>Lokasyon</th><th>Cari</th><th>Fiş Türü</th><th>Giriş</th><th>Çıkış</th><th>Bakiye</th></tr></thead><tbody>${detailExtre.map((r:any) => `<tr><td>${r.TARIH||''}</td><td>${r.BELGENO||''}</td><td>${r.LOKASYON_AD||''}</td><td>${r.CARI_AD||''}</td><td>${r.FIS_TURU||''}</td><td>${parseFloat(r.MIKTAR_GIRIS||'0').toFixed(2)}</td><td>${parseFloat(r.MIKTAR_CIKIS||'0').toFixed(2)}</td><td>${parseFloat(r.BAKIYE||'0').toFixed(2)}</td></tr>`).join('')}</tbody></table></body></html>`;
                       try { const { uri } = await Print.printToFileAsync({ html }); await Sharing.shareAsync(uri, { mimeType: 'application/pdf' }); showToast('PDF oluşturuldu'); } catch(e) { console.error('PDF error:', e); showToast('PDF oluşturulamadı'); }
                       finally { setExportLoading(false); }

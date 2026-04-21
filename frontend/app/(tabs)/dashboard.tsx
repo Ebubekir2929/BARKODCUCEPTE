@@ -339,7 +339,7 @@ export default function DashboardScreen() {
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <View>
-          <Text style={[styles.greeting, { color: colors.textSecondary }]}>Hoş geldiniz,</Text>
+          <Text style={[styles.greeting, { color: colors.textSecondary }]}>{t('welcome_greeting')}</Text>
           <Text style={[styles.userName, { color: colors.text }]}>{user?.full_name || 'Kullanıcı'}</Text>
         </View>
         <TouchableOpacity
@@ -347,7 +347,7 @@ export default function DashboardScreen() {
           onPress={() => setShowFilterModal(true)}
         >
           <Ionicons name="filter" size={20} color={colors.primary} />
-          <Text style={[styles.filterText, { color: colors.primary }]}>Filtre</Text>
+          <Text style={[styles.filterText, { color: colors.primary }]}>{t('filter_short')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -400,7 +400,7 @@ export default function DashboardScreen() {
               {dataLoading ? 'Filtreleniyor...' : 'Filtrelenmiş Veri'}
             </Text>
           </View>
-          <Text style={[styles.syncText, { color: colors.textSecondary }]}>Otomatik yenileme durdu</Text>
+          <Text style={[styles.syncText, { color: colors.textSecondary }]}>{t('auto_refresh_stopped')}</Text>
         </View>
       )}
 
@@ -408,7 +408,7 @@ export default function DashboardScreen() {
       {dataLoading && !sourceData?.weeklyComparison?.thisWeek?.total ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>Veriler yükleniyor...</Text>
+          <Text style={[styles.loadingText, { color: colors.textSecondary }]}>{t('loading_all_data')}</Text>
         </View>
       ) : (
       <>
@@ -416,7 +416,7 @@ export default function DashboardScreen() {
       {dataRefreshing && (
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, gap: 8, backgroundColor: colors.primary + '10' }}>
           <ActivityIndicator size="small" color={colors.primary} />
-          <Text style={[{ fontSize: 13, color: colors.primary, fontWeight: '600' }]}>Filtreleniyor...</Text>
+          <Text style={[{ fontSize: 13, color: colors.primary, fontWeight: '600' }]}>{t('filtering')}</Text>
         </View>
       )}
       <ScrollView
@@ -549,7 +549,7 @@ export default function DashboardScreen() {
                           <Ionicons name="restaurant-outline" size={16} color={getPaymentStatusColor(table)} />
                         </View>
                         <View>
-                          <Text style={[styles.openTableName, { color: colors.text }]}>Masa {table.tableNo}</Text>
+                          <Text style={[styles.openTableName, { color: colors.text }]}>{t('table_short')} {table.tableNo}</Text>
                           {table.section ? (
                             <Text style={[styles.openTableLocation, { color: colors.textSecondary }]}>{table.section}</Text>
                           ) : null}
@@ -581,7 +581,7 @@ export default function DashboardScreen() {
         {(sourceData?.hourlySales || []).length > 0 && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Saatlik Satışlar</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('hourly_sales')}</Text>
             <View style={[styles.bestHourBadge, { backgroundColor: colors.success + '20' }]}>
               <Ionicons name="trophy" size={14} color={colors.success} />
               <Text style={[styles.bestHourText, { color: colors.success }]}>
@@ -636,7 +636,7 @@ export default function DashboardScreen() {
         {/* Top Selling Products */}
         {(sourceData?.topSelling || []).length > 0 && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>En Çok Satan Ürünler</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('top_selling')}</Text>
           {(sourceData.topSelling || []).slice(0, 5).map((product, index) => (
             <View key={product.id} style={[styles.productItem, { borderBottomColor: colors.border }]}>
               <View style={[styles.productRank, { backgroundColor: colors.success + '20' }]}>
@@ -659,7 +659,7 @@ export default function DashboardScreen() {
         {/* Least Selling Products */}
         {(sourceData?.leastSelling || []).length > 0 && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>En Az Satan Ürünler</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('least_selling')}</Text>
           {(sourceData.leastSelling || []).slice(0, 5).map((product, index) => (
             <View key={product.id} style={[styles.productItem, { borderBottomColor: colors.border }]}>
               <View style={[styles.productRank, { backgroundColor: colors.error + '20' }]}>
@@ -695,19 +695,19 @@ export default function DashboardScreen() {
             <View style={[styles.section, { backgroundColor: colors.error + '08', borderColor: colors.error + '40', borderWidth: 1.5 }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                 <Ionicons name="close-circle" size={20} color={colors.error} />
-                <Text style={[styles.sectionTitle, { color: colors.error, marginBottom: 0 }]}>İptaller</Text>
+                <Text style={[styles.sectionTitle, { color: colors.error, marginBottom: 0 }]}>{t('cancellations')}</Text>
                 <View style={{ flex: 1 }} />
                 <Text style={[{ fontSize: 18, fontWeight: '800', color: colors.error }]}>₺{totalTutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</Text>
               </View>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
                 <View style={{ backgroundColor: colors.error + '12', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }}>
-                  <Text style={[{ fontSize: 10, color: colors.error, fontWeight: '700' }]}>Fiş İptal: {fisIptalAdet}</Text>
+                  <Text style={[{ fontSize: 10, color: colors.error, fontWeight: '700' }]}>{t('fis_iptal_label')}: {fisIptalAdet}</Text>
                 </View>
                 <View style={{ backgroundColor: colors.error + '12', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }}>
-                  <Text style={[{ fontSize: 10, color: colors.error, fontWeight: '700' }]}>Satır İptal: {satirIptalAdet}</Text>
+                  <Text style={[{ fontSize: 10, color: colors.error, fontWeight: '700' }]}>{t('satir_iptal_label')}: {satirIptalAdet}</Text>
                 </View>
                 <View style={{ backgroundColor: colors.error + '12', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 }}>
-                  <Text style={[{ fontSize: 10, color: colors.error, fontWeight: '700' }]}>Toplam: {totalAdet}</Text>
+                  <Text style={[{ fontSize: 10, color: colors.error, fontWeight: '700' }]}>{t('total_short')}: {totalAdet}</Text>
                 </View>
               </View>
               {locations.map((lok: string, idx: number) => {
@@ -736,7 +736,7 @@ export default function DashboardScreen() {
         {/* Location Summary */}
         {(sourceData?.branchSales || []).length > 0 && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Lokasyon Özeti</Text>
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('location_summary')}</Text>
           {(sourceData?.branchSales || []).map((branch, index) => {
             // Find iptal data for this location from iptal_ozet
             const locOzetRows = (sourceData?.iptalOzet || []).filter(
@@ -761,14 +761,14 @@ export default function DashboardScreen() {
                 <View style={styles.locationRow}>
                   <View style={styles.locationStat}>
                     <Ionicons name="cash-outline" size={14} color={colors.cash} />
-                    <Text style={[styles.locationLabel, { color: colors.textSecondary }]}>Nakit</Text>
+                    <Text style={[styles.locationLabel, { color: colors.textSecondary }]}>{t('cash_short')}</Text>
                     <Text style={[styles.locationValue, { color: colors.text }]}>
                       ₺{branch.sales.cash.toLocaleString('tr-TR')}
                     </Text>
                   </View>
                   <View style={styles.locationStat}>
                     <Ionicons name="card-outline" size={14} color={colors.primary} />
-                    <Text style={[styles.locationLabel, { color: colors.textSecondary }]}>Kart</Text>
+                    <Text style={[styles.locationLabel, { color: colors.textSecondary }]}>{t('card_short')}</Text>
                     <Text style={[styles.locationValue, { color: colors.text }]}>
                       ₺{branch.sales.card.toLocaleString('tr-TR')}
                     </Text>
@@ -777,14 +777,14 @@ export default function DashboardScreen() {
                 <View style={styles.locationRow}>
                   <View style={styles.locationStat}>
                     <Ionicons name="wallet-outline" size={14} color={colors.openAccount} />
-                    <Text style={[styles.locationLabel, { color: colors.textSecondary }]}>Açık</Text>
+                    <Text style={[styles.locationLabel, { color: colors.textSecondary }]}>{t('open_short')}</Text>
                     <Text style={[styles.locationValue, { color: colors.text }]}>
                       ₺{branch.sales.openAccount.toLocaleString('tr-TR')}
                     </Text>
                   </View>
                   <View style={styles.locationStat}>
                     <Ionicons name="stats-chart" size={14} color={colors.total} />
-                    <Text style={[styles.locationLabel, { color: colors.textSecondary }]}>Toplam</Text>
+                    <Text style={[styles.locationLabel, { color: colors.textSecondary }]}>{t('total_short')}</Text>
                     <Text style={[styles.locationValue, { color: colors.text }]}>
                       ₺{branch.sales.total.toLocaleString('tr-TR')}
                     </Text>
@@ -873,7 +873,7 @@ export default function DashboardScreen() {
                 );
               })}
               <View style={[styles.totalRow, { backgroundColor: colors.background, borderColor: colors.border }]}>
-                <Text style={[styles.totalLabel, { color: colors.text }]}>Toplam</Text>
+                <Text style={[styles.totalLabel, { color: colors.text }]}>{t('total_short')}</Text>
                 <Text style={[styles.totalValue, { color: getCardTypeColor(selectedCardType || '') }]}>
                   ₺{totals[selectedCardType || 'total'].toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                 </Text>
@@ -889,11 +889,11 @@ export default function DashboardScreen() {
                   <View>
                     <View style={[{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, marginTop: 8, borderRadius: 12, backgroundColor: diff >= 0 ? colors.success + '10' : colors.error + '10' }]}>
                       <View>
-                        <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>Geçen Hafta</Text>
+                        <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>{t('last_week_label')}</Text>
                         <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text }]}>₺{lwValue.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</Text>
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>Fark</Text>
+                        <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>{t('diff_label')}</Text>
                         <Text style={[{ fontSize: 14, fontWeight: '700', color: diff >= 0 ? colors.success : colors.error }]}>
                           {diff >= 0 ? '+' : ''}₺{diff.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ({pct >= 0 ? '+' : ''}{pct.toFixed(1)}%)
                         </Text>
@@ -902,7 +902,7 @@ export default function DashboardScreen() {
                     {/* Lokasyon dağılımı - geçen hafta */}
                     {lw?.locations && Object.keys(lw.locations).length > 0 && (
                       <View style={[{ marginTop: 8, borderRadius: 12, padding: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }]}>
-                        <Text style={[{ fontSize: 12, fontWeight: '700', color: colors.textSecondary, marginBottom: 6 }]}>Geçen Hafta Lokasyon Dağılımı</Text>
+                        <Text style={[{ fontSize: 12, fontWeight: '700', color: colors.textSecondary, marginBottom: 6 }]}>{t('last_week_location_dist')}</Text>
                         {Object.entries(lw.locations as Record<string, any>).map(([locName, locData]: [string, any]) => {
                           const locVal = selectedCardType === 'cash' ? locData.cash : selectedCardType === 'card' ? locData.card : selectedCardType === 'openAccount' ? locData.openAccount : locData.total;
                           return locVal > 0 ? (
@@ -942,7 +942,7 @@ export default function DashboardScreen() {
                     <Ionicons name="time-outline" size={28} color={colors.primary} />
                     <View>
                       <Text style={[styles.hourDetailTime, { color: colors.text, fontSize: 18 }]}>{selectedHour.hour}</Text>
-                      <Text style={[styles.hourDetailTx, { color: colors.textSecondary }]}>Tüm Lokasyonlar</Text>
+                      <Text style={[styles.hourDetailTx, { color: colors.textSecondary }]}>{t('all_locations_label')}</Text>
                     </View>
                   </View>
                   <Text style={[styles.hourDetailAmount, { color: colors.primary }]}>
@@ -951,7 +951,7 @@ export default function DashboardScreen() {
                 </View>
 
                 {/* POS Product Detail */}
-                <Text style={[{ fontSize: 15, fontWeight: '700', color: colors.text, marginTop: 16, marginBottom: 8 }]}>Ürün Detayı</Text>
+                <Text style={[{ fontSize: 15, fontWeight: '700', color: colors.text, marginTop: 16, marginBottom: 8 }]}>{t('product_detail')}</Text>
                 
                 {hourDetailLoading ? (
                   <View style={{ alignItems: 'center', paddingVertical: 30 }}>
@@ -961,9 +961,9 @@ export default function DashboardScreen() {
                 ) : hourDetailProducts.length > 0 ? (
                   <View style={[{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }]}>
                     <View style={[{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 12, backgroundColor: colors.background }]}>
-                      <Text style={[{ flex: 3, fontSize: 12, fontWeight: '700', color: colors.textSecondary }]}>Ürün</Text>
-                      <Text style={[{ flex: 1, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>Miktar</Text>
-                      <Text style={[{ flex: 1.5, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>Tutar</Text>
+                      <Text style={[{ flex: 3, fontSize: 12, fontWeight: '700', color: colors.textSecondary }]}>{t('product')}</Text>
+                      <Text style={[{ flex: 1, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>{t('quantity_short')}</Text>
+                      <Text style={[{ flex: 1.5, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>{t('amount_col')}</Text>
                     </View>
                     {hourDetailProducts.map((item: any, idx: number) => {
                       const tutar = parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0');
@@ -984,7 +984,7 @@ export default function DashboardScreen() {
                     })}
                     {/* Total row */}
                     <View style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 2, borderTopColor: colors.border, backgroundColor: colors.background }]}>
-                      <Text style={[{ flex: 4, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>Toplam</Text>
+                      <Text style={[{ flex: 4, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>{t('total_short')}</Text>
                       <Text style={[{ flex: 1.5, fontSize: 16, fontWeight: '800', color: colors.primary, textAlign: 'right' }]}>
                         ₺{hourDetailProducts.reduce((sum: number, item: any) => sum + parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0'), 0).toFixed(2)}
                       </Text>
@@ -993,7 +993,7 @@ export default function DashboardScreen() {
                 ) : (
                   <View style={{ alignItems: 'center', paddingVertical: 20 }}>
                     <Ionicons name="document-outline" size={32} color={colors.textSecondary} />
-                    <Text style={[{ color: colors.textSecondary, marginTop: 8, fontSize: 14 }]}>Ürün detayı bulunamadı</Text>
+                    <Text style={[{ color: colors.textSecondary, marginTop: 8, fontSize: 14 }]}>{t('no_product_detail')}</Text>
                   </View>
                 )}
               </ScrollView>
@@ -1044,7 +1044,7 @@ export default function DashboardScreen() {
               {iptalListLoading ? (
                 <View style={{ alignItems: 'center', paddingVertical: 30 }}>
                   <ActivityIndicator size="large" color={colors.error} />
-                  <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>İptal listesi yükleniyor...</Text>
+                  <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_cancellations')}</Text>
                 </View>
               ) : iptalListItems.length > 0 ? (
                 iptalListItems.map((item: any, idx: number) => (
@@ -1069,7 +1069,7 @@ export default function DashboardScreen() {
                         {item.TARIH_IPTAL || item.TARIH || ''}
                       </Text>
                       <View style={styles.receiptCardAction}>
-                        <Text style={[styles.receiptCardActionText, { color: colors.primary }]}>Detay</Text>
+                        <Text style={[styles.receiptCardActionText, { color: colors.primary }]}>{t('detail_short')}</Text>
                         <Ionicons name="chevron-forward" size={14} color={colors.primary} />
                       </View>
                     </View>
@@ -1077,7 +1077,7 @@ export default function DashboardScreen() {
                 ))
               ) : (
                 <View style={{ alignItems: 'center', paddingVertical: 20 }}>
-                  <Text style={[{ color: colors.textSecondary }]}>İptal fişi bulunamadı</Text>
+                  <Text style={[{ color: colors.textSecondary }]}>{t('no_cancellation_receipts')}</Text>
                 </View>
               )}
             </ScrollView>
@@ -1115,15 +1115,15 @@ export default function DashboardScreen() {
                 ) : iptalDetailItems.length > 0 ? (
                   <View style={[{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }]}>
                     <View style={[{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 12, backgroundColor: colors.background }]}>
-                      <Text style={[{ flex: 3, fontSize: 12, fontWeight: '700', color: colors.textSecondary }]}>Ürün</Text>
-                      <Text style={[{ flex: 1, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>Miktar</Text>
-                      <Text style={[{ flex: 1.5, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>Tutar</Text>
+                      <Text style={[{ flex: 3, fontSize: 12, fontWeight: '700', color: colors.textSecondary }]}>{t('product')}</Text>
+                      <Text style={[{ flex: 1, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>{t('quantity_short')}</Text>
+                      <Text style={[{ flex: 1.5, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>{t('amount_col')}</Text>
                     </View>
                     {iptalDetailItems.map((item: any, idx: number) => (
                       <View key={idx} style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border }]}>
                         <View style={{ flex: 3 }}>
                           <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]}>{item.STOK_ADI || 'Ürün'}</Text>
-                          <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>Masa: {item.MASA || '-'} · {item.SAAT || ''}</Text>
+                          <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{t('table_short')}: {item.MASA || '-'} · {item.SAAT || ''}</Text>
                         </View>
                         <Text style={[{ flex: 1, fontSize: 14, color: colors.text, textAlign: 'center' }]}>{parseFloat(item.MIKTAR || '0').toFixed(0)}</Text>
                         <Text style={[{ flex: 1.5, fontSize: 14, fontWeight: '700', color: '#EF4444', textAlign: 'right' }]}>₺{parseFloat(item.SATIR_TUTAR || '0').toFixed(2)}</Text>
@@ -1131,7 +1131,7 @@ export default function DashboardScreen() {
                     ))}
                     {/* Total row */}
                     <View style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 2, borderTopColor: colors.border, backgroundColor: colors.background }]}>
-                      <Text style={[{ flex: 4, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>Toplam</Text>
+                      <Text style={[{ flex: 4, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>{t('total_short')}</Text>
                       <Text style={[{ flex: 1.5, fontSize: 16, fontWeight: '800', color: '#EF4444', textAlign: 'right' }]}>
                         ₺{iptalDetailItems.reduce((sum: number, item: any) => sum + parseFloat(item.SATIR_TUTAR || '0'), 0).toFixed(2)}
                       </Text>
@@ -1140,7 +1140,7 @@ export default function DashboardScreen() {
                 ) : (
                   <View style={{ alignItems: 'center', paddingVertical: 20 }}>
                     <Ionicons name="document-outline" size={32} color={colors.textSecondary} />
-                    <Text style={[{ color: colors.textSecondary, marginTop: 8 }]}>Detay bilgisi bulunamadı</Text>
+                    <Text style={[{ color: colors.textSecondary, marginTop: 8 }]}>{t('no_detail_info')}</Text>
                   </View>
                 )}
               </ScrollView>
@@ -1168,7 +1168,7 @@ export default function DashboardScreen() {
                   <View style={[styles.tableDetailIcon, { backgroundColor: colors.primary + '20' }]}>
                     <Ionicons name="restaurant" size={32} color={colors.primary} />
                   </View>
-                  <Text style={[styles.tableDetailTitle, { color: colors.text }]}>Masa {selectedOpenTable.tableNo}</Text>
+                  <Text style={[styles.tableDetailTitle, { color: colors.text }]}>{t('table_short')} {selectedOpenTable.tableNo}</Text>
                   {selectedOpenTable.section ? (
                     <Text style={[styles.tableDetailCustomer, { color: colors.textSecondary }]}>{selectedOpenTable.section} · {selectedOpenTable.location}</Text>
                   ) : (
@@ -1180,7 +1180,7 @@ export default function DashboardScreen() {
                 </View>
 
                 {/* Detail Items */}
-                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 16, marginBottom: 8 }]}>Sipariş Detayı</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text, marginTop: 16, marginBottom: 8 }]}>{t('order_detail')}</Text>
                 
                 {tableDetailLoading ? (
                   <View style={{ alignItems: 'center', paddingVertical: 30 }}>
@@ -1191,9 +1191,9 @@ export default function DashboardScreen() {
                   <View style={[{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }]}>
                     {/* Table Header */}
                     <View style={[{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 12, backgroundColor: colors.background }]}>
-                      <Text style={[{ flex: 3, fontSize: 12, fontWeight: '700', color: colors.textSecondary }]}>Ürün</Text>
-                      <Text style={[{ flex: 1, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>Miktar</Text>
-                      <Text style={[{ flex: 1.5, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>Tutar</Text>
+                      <Text style={[{ flex: 3, fontSize: 12, fontWeight: '700', color: colors.textSecondary }]}>{t('product')}</Text>
+                      <Text style={[{ flex: 1, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>{t('quantity_short')}</Text>
+                      <Text style={[{ flex: 1.5, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>{t('amount_col')}</Text>
                     </View>
                     {tableDetailItems.map((item: any, idx: number) => {
                       const tutar = item.TUTAR ? parseFloat(item.TUTAR) : (parseFloat(item.MIKTAR || '0') * parseFloat(item.FIYAT || '0'));
@@ -1214,7 +1214,7 @@ export default function DashboardScreen() {
                     })}
                     {/* Total row */}
                     <View style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 2, borderTopColor: colors.border, backgroundColor: colors.background }]}>
-                      <Text style={[{ flex: 4, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>Toplam</Text>
+                      <Text style={[{ flex: 4, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>{t('total_short')}</Text>
                       <Text style={[{ flex: 1.5, fontSize: 16, fontWeight: '800', color: colors.primary, textAlign: 'right' }]}>
                         ₺{tableDetailItems.reduce((sum: number, item: any) => {
                           const tutar = item.TUTAR ? parseFloat(item.TUTAR) : (parseFloat(item.MIKTAR || '0') * parseFloat(item.FIYAT || '0'));
@@ -1226,7 +1226,7 @@ export default function DashboardScreen() {
                 ) : (
                   <View style={{ alignItems: 'center', paddingVertical: 20 }}>
                     <Ionicons name="document-outline" size={32} color={colors.textSecondary} />
-                    <Text style={[{ color: colors.textSecondary, marginTop: 8, fontSize: 14 }]}>Detay bilgisi bulunamadı</Text>
+                    <Text style={[{ color: colors.textSecondary, marginTop: 8, fontSize: 14 }]}>{t('no_detail_info')}</Text>
                   </View>
                 )}
               </ScrollView>
