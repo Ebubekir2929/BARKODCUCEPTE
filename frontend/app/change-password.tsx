@@ -8,6 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useThemeStore } from '../src/store/themeStore';
 import { useAuthStore } from '../src/store/authStore';
+import { useLanguageStore } from '../src/store/languageStore';
 import { useAlert, CustomAlert } from '../src/components/CustomAlert';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
@@ -15,6 +16,7 @@ const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 export default function ChangePasswordScreen() {
   const router = useRouter();
   const { colors } = useThemeStore();
+  const { t } = useLanguageStore();
   const { token, refreshUser } = useAuthStore();
   const params = useLocalSearchParams<{ force?: string }>();
   const isForced = params.force === '1';
@@ -91,7 +93,7 @@ export default function ChangePasswordScreen() {
             <Ionicons name="arrow-back" size={24} color={colors.text} />
           </TouchableOpacity>
         )}
-        <Text style={[styles.title, { color: colors.text }]}>{isForced ? 'Şifre Belirle' : 'Şifre Değiştir'}</Text>
+        <Text style={[styles.title, { color: colors.text }]}>{isForced ? t('set_password') : t('change_password')}</Text>
         <View style={{ width: 24 }} />
       </View>
 

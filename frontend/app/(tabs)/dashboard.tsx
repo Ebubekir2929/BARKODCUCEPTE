@@ -428,7 +428,7 @@ export default function DashboardScreen() {
         <View style={styles.cardsContainer}>
           <View style={styles.cardRow}>
             <SummaryCard
-              title="Nakit"
+              title={t('cash')}
               amount={totals.cash}
               icon="cash-outline"
               color={colors.cash}
@@ -437,7 +437,7 @@ export default function DashboardScreen() {
               changePercent={cardChangePercents.cash}
             />
             <SummaryCard
-              title="Kredi Kartı"
+              title={t('credit_card')}
               amount={totals.card}
               icon="card-outline"
               color={colors.primary}
@@ -448,7 +448,7 @@ export default function DashboardScreen() {
           </View>
           <View style={styles.cardRow}>
             <SummaryCard
-              title="Açık Hesap"
+              title={t('open_account')}
               amount={totals.openAccount}
               icon="wallet-outline"
               color={colors.openAccount}
@@ -457,7 +457,7 @@ export default function DashboardScreen() {
               changePercent={cardChangePercents.openAccount}
             />
             <SummaryCard
-              title="Toplam"
+              title={t('total')}
               amount={totals.total}
               icon="stats-chart"
               color={colors.total}
@@ -628,7 +628,7 @@ export default function DashboardScreen() {
             </View>
           </ScrollView>
           <Text style={[styles.chartHint, { color: colors.textSecondary }]}>
-            Saate dokunarak detay görüntüleyin
+            {t('tap_hour_detail')}
           </Text>
         </View>
         )}

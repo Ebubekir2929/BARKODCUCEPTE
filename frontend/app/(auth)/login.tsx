@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/authStore';
 import { useThemeStore } from '../../src/store/themeStore';
+import { useLanguageStore } from '../../src/store/languageStore';
 import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
@@ -23,6 +24,7 @@ export default function LoginScreen() {
   const router = useRouter();
   const { login } = useAuthStore();
   const { colors, isDark, toggleTheme } = useThemeStore();
+  const { language, setLanguage, t, loadLanguage } = useLanguageStore();
   const { showError, showSuccess, showWarning, alertProps } = useAlert();
   const [isOnline, setIsOnline] = useState(true);
 
@@ -35,6 +37,7 @@ export default function LoginScreen() {
 
   useEffect(() => {
     loadRememberedEmail();
+    loadLanguage();
     // Internet connectivity check
     const unsubscribe = NetInfo.addEventListener(state => {
       setIsOnline(state.isConnected ?? true);
@@ -56,13 +59,13 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (!email || !password) {
-      showError('Hata', 'Lütfen tüm alanları doldurun');
+      showError(t('error'), t('fill_all_fields'));
       return;
     }
 
     // Internet check
     if (!isOnline) {
-      showError('Bağlantı Hatası', 'İnternet bağlantınız yok. Lütfen bağlantınızı kontrol edip tekrar deneyin.');
+      showError(t('network_error'), t('offline_banner'));
       return;
     }
 
@@ -140,29 +143,40 @@ export default function LoginScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Theme Toggle */}
-          <TouchableOpacity style={styles.themeToggle} onPress={toggleTheme}>
-            <Ionicons
-              name={isDark ? 'sunny' : 'moon'}
-              size={24}
-              color={colors.text}
-            />
-          </TouchableOpacity>
+          {/* Top toolbar: Language + Theme */}
+          <View style={styles.topToolbar}>
+            <TouchableOpacity
+              style={[styles.langButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+              onPress={() => setLanguage(language === 'tr' ? 'en' : 'tr')}
+            >
+              <Ionicons name="language-outline" size={18} color={colors.text} />
+              <Text style={[styles.langText, { color: colors.text }]}>
+                {language === 'tr' ? 'TR' : 'EN'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.themeToggle} onPress={toggleTheme}>
+              <Ionicons
+                name={isDark ? 'sunny' : 'moon'}
+                size={24}
+                color={colors.text}
+              />
+            </TouchableOpacity>
+          </View>
 
           {/* Logo/Title */}
           {!isOnline && (
             <View style={[styles.offlineBanner, { backgroundColor: '#EF4444' }]}>
               <Ionicons name="cloud-offline-outline" size={18} color="#fff" />
-              <Text style={styles.offlineBannerText}>İnternet bağlantısı yok</Text>
+              <Text style={styles.offlineBannerText}>{t('offline_banner') || 'İnternet bağlantısı yok'}</Text>
             </View>
           )}
           <View style={styles.header}>
             <View style={[styles.logoContainer, { backgroundColor: colors.primary }]}>
               <Ionicons name="barcode-outline" size={48} color="#FFFFFF" />
             </View>
-            <Text style={[styles.title, { color: colors.text }]}>Barkodcu Cepte</Text>
+            <Text style={[styles.title, { color: colors.text }]}>{t('app_name')}</Text>
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-              Satış Yönetim Sistemi
+              {t('app_subtitle')}
             </Text>
           </View>
 
@@ -172,7 +186,7 @@ export default function LoginScreen() {
               <Ionicons name="person-outline" size={20} color={colors.textSecondary} />
               <TextInput
                 style={[styles.input, { color: colors.text }]}
-                placeholder="E-posta veya Kullanıcı Adı"
+                placeholder={t('email_or_username') || 'E-posta veya Kullanıcı Adı'}
                 placeholderTextColor={colors.textSecondary}
                 value={email}
                 onChangeText={setEmail}
@@ -185,7 +199,7 @@ export default function LoginScreen() {
               <Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} />
               <TextInput
                 style={[styles.input, { color: colors.text }]}
-                placeholder="Şifre"
+                placeholder={t('password')}
                 placeholderTextColor={colors.textSecondary}
                 value={password}
                 onChangeText={handlePasswordChange}
@@ -206,7 +220,7 @@ export default function LoginScreen() {
               <View style={[styles.capsWarning, { backgroundColor: colors.warning + '20' }]}>
                 <Ionicons name="warning-outline" size={16} color={colors.warning} />
                 <Text style={[styles.capsWarningText, { color: colors.warning }]}>
-                  Caps Lock açık olabilir
+                  {t('caps_lock_warning')}
                 </Text>
               </View>
             )}
@@ -225,7 +239,7 @@ export default function LoginScreen() {
                   {rememberMe && <Ionicons name="checkmark" size={14} color="#FFF" />}
                 </View>
                 <Text style={[styles.rememberMeText, { color: colors.textSecondary }]}>
-                  Beni Hatırla
+                  {t('remember_me')}
                 </Text>
               </TouchableOpacity>
 
@@ -233,7 +247,7 @@ export default function LoginScreen() {
                 onPress={() => router.push('/(auth)/forgot-password')}
               >
                 <Text style={[styles.forgotPasswordText, { color: colors.primary }]}>
-                  Şifremi Unuttum
+                  {t('forgot_password')}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -246,17 +260,17 @@ export default function LoginScreen() {
               {isLoading ? (
                 <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Text style={styles.loginButtonText}>Giriş Yap</Text>
+                <Text style={styles.loginButtonText}>{t('login')}</Text>
               )}
             </TouchableOpacity>
 
             <View style={styles.registerContainer}>
               <Text style={[styles.registerText, { color: colors.textSecondary }]}>
-                Hesabınız yok mu?{' '}
+                {t('no_account')}{' '}
               </Text>
               <TouchableOpacity onPress={() => router.push('/(auth)/register')}>
                 <Text style={[styles.registerLink, { color: colors.primary }]}>
-                  Kayıt Ol
+                  {t('register')}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -266,17 +280,17 @@ export default function LoginScreen() {
           <View style={[styles.demoInfo, { backgroundColor: colors.info + '20', borderColor: colors.info }]}>
             <Ionicons name="information-circle" size={20} color={colors.info} />
             <Text style={[styles.demoText, { color: colors.info }]}>
-              E-posta veya kullanıcı adı ile giriş yapabilirsiniz
+              {t('login_info') || 'E-posta veya kullanıcı adı ile giriş yapabilirsiniz'}
             </Text>
           </View>
 
           {/* Footer */}
           <View style={styles.footer}>
             <Text style={[styles.footerText, { color: colors.textSecondary }]}>
-              Berk Yazılım Tarafından Geliştirilmiştir
+              {t('developed_by')}
             </Text>
             <Text style={[styles.versionText, { color: colors.textSecondary }]}>
-              v1.0.0
+              {t('version')}
             </Text>
           </View>
         </ScrollView>
@@ -301,10 +315,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   themeToggle: {
+    padding: 8,
+  },
+  topToolbar: {
     position: 'absolute',
     top: 16,
     right: 16,
-    padding: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    zIndex: 10,
+  },
+  langButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  langText: {
+    fontSize: 13,
+    fontWeight: '700',
   },
   offlineBanner: {
     flexDirection: 'row',

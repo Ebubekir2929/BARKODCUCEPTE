@@ -294,7 +294,7 @@ export default function SettingsScreen() {
       showWarning('Uyarı', 'En az 1 veri kaynağı olmalıdır');
       return;
     }
-    showWarning('Veri Kaynağı Sil', `"${tenantName}" veri kaynağını silmek istediğinize emin misiniz?`, [
+    showWarning(t('delete_tenant_title'), `"${tenantName}" ${t('delete_tenant_msg')}`, [
       { text: 'İptal', style: 'cancel' },
       {
         text: 'Sil',
@@ -368,7 +368,7 @@ export default function SettingsScreen() {
           activeOpacity={0.7}
         >
           <Ionicons name="add-circle-outline" size={22} color={colors.primary} />
-          <Text style={[styles.addTenantText, { color: colors.primary }]}>Yeni Veri Kaynağı Ekle</Text>
+          <Text style={[styles.addTenantText, { color: colors.primary }]}>{t('add_new_tenant')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -678,7 +678,7 @@ export default function SettingsScreen() {
             >
               <View style={styles.menuItemLeft}>
                 <Ionicons name="key-outline" size={22} color={colors.primary} />
-                <Text style={[styles.menuItemLabel, { color: colors.text }]}>Şifre Değiştir</Text>
+                <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('change_password')}</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
             </TouchableOpacity>
@@ -787,7 +787,7 @@ export default function SettingsScreen() {
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
-                {tenantModalMode === 'add' ? 'Yeni Veri Kaynağı' : 'Veri Kaynağı Düzenle'}
+                {tenantModalMode === 'add' ? t('new_tenant') : t('edit_tenant')}
               </Text>
               <TouchableOpacity onPress={() => setShowTenantModal(false)}>
                 <Ionicons name="close" size={24} color={colors.text} />
@@ -820,7 +820,7 @@ export default function SettingsScreen() {
                 </View>
               )}
 
-              <Text style={[styles.inputLabel, { color: colors.text }]}>Veri Kaynağı Adı</Text>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>{t('tenant_name_field')}</Text>
               <View style={[styles.modalInput, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <Ionicons name="pricetag-outline" size={18} color={colors.textSecondary} />
                 <TextInput
