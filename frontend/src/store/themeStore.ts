@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Appearance, ColorSchemeName } from 'react-native';
 
 export interface ThemeColors {
   primary: string;
@@ -15,7 +16,6 @@ export interface ThemeColors {
   error: string;
   info: string;
   cash: string;
-  card: string;
   openAccount: string;
   total: string;
 }
@@ -56,30 +56,79 @@ const darkTheme: ThemeColors = {
   total: '#A78BFA',
 };
 
+export type ThemeMode = 'system' | 'light' | 'dark';
+
 interface ThemeStore {
+  mode: ThemeMode;
   isDark: boolean;
   colors: ThemeColors;
+  setMode: (mode: ThemeMode) => Promise<void>;
   toggleTheme: () => Promise<void>;
   loadTheme: () => Promise<void>;
+  _applySystemChange: (scheme: ColorSchemeName) => void;
 }
 
+const resolveIsDark = (mode: ThemeMode): boolean => {
+  if (mode === 'system') {
+    const scheme = Appearance.getColorScheme();
+    return scheme === 'dark';
+  }
+  return mode === 'dark';
+};
+
 export const useThemeStore = create<ThemeStore>((set, get) => ({
-  isDark: false,
-  colors: lightTheme,
+  mode: 'system',
+  isDark: Appearance.getColorScheme() === 'dark',
+  colors: Appearance.getColorScheme() === 'dark' ? darkTheme : lightTheme,
+
+  setMode: async (mode: ThemeMode) => {
+    await AsyncStorage.setItem('themeMode', mode);
+    const isDark = resolveIsDark(mode);
+    set({ mode, isDark, colors: isDark ? darkTheme : lightTheme });
+  },
 
   toggleTheme: async () => {
-    const newIsDark = !get().isDark;
-    await AsyncStorage.setItem('theme', newIsDark ? 'dark' : 'light');
-    set({ isDark: newIsDark, colors: newIsDark ? darkTheme : lightTheme });
+    // When toggling manually, switch to explicit light/dark mode
+    const currentIsDark = get().isDark;
+    const newMode: ThemeMode = currentIsDark ? 'light' : 'dark';
+    await AsyncStorage.setItem('themeMode', newMode);
+    set({
+      mode: newMode,
+      isDark: !currentIsDark,
+      colors: !currentIsDark ? darkTheme : lightTheme,
+    });
   },
 
   loadTheme: async () => {
     try {
-      const theme = await AsyncStorage.getItem('theme');
-      const isDark = theme === 'dark';
-      set({ isDark, colors: isDark ? darkTheme : lightTheme });
+      // Backward compat: legacy 'theme' key only stored 'dark' | 'light'
+      const legacy = await AsyncStorage.getItem('theme');
+      const storedMode = (await AsyncStorage.getItem('themeMode')) as ThemeMode | null;
+
+      let mode: ThemeMode = 'system';
+      if (storedMode === 'system' || storedMode === 'light' || storedMode === 'dark') {
+        mode = storedMode;
+      } else if (legacy === 'dark' || legacy === 'light') {
+        mode = legacy;
+        await AsyncStorage.setItem('themeMode', mode);
+      }
+
+      const isDark = resolveIsDark(mode);
+      set({ mode, isDark, colors: isDark ? darkTheme : lightTheme });
+
+      // Subscribe to system appearance changes once
+      Appearance.addChangeListener(({ colorScheme }) => {
+        get()._applySystemChange(colorScheme);
+      });
     } catch (error) {
       console.log('Error loading theme:', error);
     }
+  },
+
+  _applySystemChange: (scheme: ColorSchemeName) => {
+    const { mode } = get();
+    if (mode !== 'system') return;
+    const isDark = scheme === 'dark';
+    set({ isDark, colors: isDark ? darkTheme : lightTheme });
   },
 }));

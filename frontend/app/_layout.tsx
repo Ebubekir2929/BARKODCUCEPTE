@@ -3,8 +3,9 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useThemeStore } from '../src/store/themeStore';
 import { useAuthStore } from '../src/store/authStore';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as NavigationBar from 'expo-navigation-bar';
 
 function AppShell() {
   const { colors } = useThemeStore();
@@ -26,13 +27,23 @@ function AppShell() {
 }
 
 export default function RootLayout() {
-  const { colors, loadTheme } = useThemeStore();
+  const { colors, isDark, loadTheme } = useThemeStore();
   const { isLoading, checkAuth } = useAuthStore();
 
   useEffect(() => {
     loadTheme();
     checkAuth();
   }, []);
+
+  // Dynamically update Android system bars whenever theme flips (system or manual)
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      const bg = isDark ? '#000000' : '#FFFFFF';
+      const btn = isDark ? 'light' : 'dark';
+      NavigationBar.setBackgroundColorAsync(bg).catch(() => {});
+      NavigationBar.setButtonStyleAsync(btn as any).catch(() => {});
+    }
+  }, [isDark]);
 
   if (isLoading) {
     return (
@@ -44,7 +55,11 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="light" backgroundColor="#000000" translucent={false} />
+      <StatusBar
+        style={isDark ? 'light' : 'dark'}
+        backgroundColor={isDark ? '#000000' : '#FFFFFF'}
+        translucent={false}
+      />
       <AppShell />
     </SafeAreaProvider>
   );

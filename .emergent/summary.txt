@@ -1,147 +1,19 @@
-<analysis>**original_problem_statement**: The user requested a comprehensive sales/POS management mobile application built with Expo and React Native.
-**PRODUCT REQUIREMENTS:**
-- **Authentication**: JWT-based login, registration, forgot password (SMTP). Branded Barkodcu Cepte. Includes mandatory password change for temporary passwords.
-- **Dashboard**: Summary cards, hourly sales chart, best/worst selling products, open tables, and waiter sales. 
-- **Global Data Filter**: Global filter (Data 1, Data 2, Data 3) dictating the data source for Dashboard, Reports, Stock, and Customers.
-- **Stock & Customers**: Filterable lists with detailed history/modals, live MariaDB/sync.php integration.
-- **Reports**: Dynamically filterable reports mirroring the legacy PHP POS system. Must support parallel multi-page data fetching, dynamic lookup filters (), custom card layouts, top summary panels, and PDF/Excel export.
-- **Push Notifications**: Needs to be activated in settings.
-
-**User's preferred language**: Turkish (INSTRUCT next agent to respond in Turkish only)
-
-**what currently exists?** 
-A heavily featured, live-connected Expo application with a FastAPI backend. Authentication handles JWT, multi-tenant selection, duplicate username checks, and forced password resets via SMTP forgot-password flow. The Dashboard, Stock, and Customers tabs are fully live. The Reports tab is a highly optimized engine supporting dynamic parameters, parallelized fetching (fetching thousands of rows in seconds), and PDF/Excel exports. The first 4 reports (Fiyat Listeleri, Satış Adet Kar, Stok Envanter, Gelir Tablosu) are fully implemented with specialized card layouts, date pickers, and summary panels. The configuration for the final 3 reports (Personel Satış Özet, Fiş Kalem Listesi, Cari Hesap Ekstresi) was just injected into the frontend.
-
-**Last working item**:
-    - Last item agent was working: The agent received the PHP source files for the last 3 reports (Personel Satış, Fiş Kalem, Cari Ekstre). The agent extracted their mandatory parameters, dataset keys, and default values, and injected them into the  array in .
-    - Status: IN PROGRESS
-    - Agent Testing Done: N
-    - Which testing method agent to use?: screenshot tool
-    - User Testing Done: N
-
-**All Pending/In progress Issue list**:
-  - Issue 1: Finalize UI and Summary Panels for the last 3 reports
-     - Attempted fixes: Config is added, but layout specific columns (,  fields) might need fine-tuning.
-     - Next debug checklist: Check if running , , and  returns data correctly. Add custom  mapping and  definitions for them.
-     - Why fix this issue and what will be achieved with the fix?: Completes the entire Reports module matching the legacy POS functionality.
-     - Status: IN PROGRESS
-     - Is recurring issue?: N
-     - Should Test frontend/backend/both after fix?: Both
-     - Blocked on other issue: None
-     - Priority: P0
-
-  - Issue 2: Duplicate React Key warning potential in lists
-     - Attempted fixes: Replaced FlatList keys to  in most places, but ensure the new reports don't trigger two children with same key warnings.
-     - Next debug checklist: Verify React key extractors.
-     - Status: TESTING PENDING
-     - Priority: P2
-
-**In progress Task List**:
-  - Task 1: Complete the last 3 Reports UI implementation
-     - Where to resume:  -> check  configurations for the 3 newly added reports. Execute them, verify columns, and define  and summary panel fields.
-     - What will be achieved with this?: All 7 report types will be 100% functional.
-     - Status: IN PROGRESS
-     - Should Test frontend/backend/both after fix?: Both
-     - Blocked on something: None
-
-  - Task 2: Activate Push Notifications
-     - Where to resume: User explicitly requested this to be the next step after the reports. Need to implement Expo Push Tokens, backend endpoint to save tokens in  DB, and handle notification permissions in the app.
-     - What will be achieved with this?: Users can receive POS alerts.
-     - Status: NOT STARTED
-     - Should Test frontend/backend/both after fix?: Both
-     - Blocked on something: Task 1
-
-**Upcoming and Future Tasks**
-    Upcoming Tasks:
-    - (P0) Test and finalize layouts for: Personel Satış Özet, Fiş Kalem Listesi, Cari Hesap Ekstresi.
-    - (P1) Implement Push Notifications token registration, backend storage, and settings toggle.
-    
-    Future Tasks:
-    - Code refactoring:  is over 1400 lines. Extract , , and  into .
-
-**Completed work in this session**
-- Reports: Fixed 0 rows bug by ensuring ALL  keys (even empty strings) are sent to . (DONE)
-- Reports: Implemented  Excel export and parallelized  for massive performance gains (2400+ rows in ~5 seconds). (DONE)
-- Reports: Added DatePicker () for date filters. (DONE)
-- UI/UX: Replaced all native  with a custom, modern  modal globally. (DONE)
-- Auth: Fixed login bug where duplicate  usernames caused hash mismatch. (DONE)
-- Auth: Implemented SMTP-based Forgot Password feature and a Forced Password Change flow () for temporary passwords. (DONE)
-- Reports: Fully implemented Satış Adet Kar, Stok Envanter (with summary panels), and Gelir Tablosu (with hierarchical rendering). (DONE)
-
-**Earlier issues found/mentioned but not fixed**
-   - None.
-
-**Known issue recurrence from previous fork**
-  - Issue recurrence in previous fork: None
-  - Recurrence count: 0
-  - Status: RESOLVED
-
-**Code Architecture**
-
-
-**Key Technical Concepts**
-- **Parallel Fetching**: POS API paginates at 500 rows.  in  uses  to fetch remaining pages in parallel for massive speedups.
-- **Strict Parameter Matching**: Legacy POS SQL requires *exact* parameter keys to be present in the JSON payload. Missing a key (like ) returns 0 rows or wrong data.
-- **Forced Password Change**:  table now has  flag. If , user is trapped in  until they update it.
-
-**key DB schema**
-  - : Added  (TINYINT(1) DEFAULT 0).
-  - : Stores JSON strings of POS data. 
-
-**changes in tech stack**
-  - Added  library for Excel exports.
-  - Added  for native iOS/Android date selection.
-
-**All files of reference** 
-  - : Updated with forgot-password logic, SMTP usage, and change-password logic.
-  - : New SMTP email sending service.
-  - : New screen for updating passwords.
-  - : Massively updated with card layouts, top summary panels, Excel export, and new report stubs.
-  - : Centralized alert UI.
-
-**Areas that need refactoring**: 
-  -  has grown very large and handles too many responsibilities (fetching, filtering UI, rendering lists, rendering summaries, PDF/Excel generation).
-
-**key api endpoints**
-  - 
-  - 
-  - 
-  - 
-
-**Critical Info for New Agent** 
-- **Filter Payloads**: Whenever configuring a new report, copy the  exactly from the PHP files. Do not skip any parameters.
-- **Excel Exports**: To prevent UI locking during heavy XLSX generation, the actual generation logic is deferred using  so the loading spinner can render first.
-- **Duplicate Usernames**: The backend  and  now strictly match the provided email/username AND the valid password hash, as the user has multiple accounts with the same username () across different emails.
-
-**documents and test reports created in this job** 
-  -  (Check this file for valid auth tokens)
-
-**Last 10 User Messages and any pending HUMAN messages** 
- 1. (User): SATIŞ ADET KAR RAPORUNDA SADECE LOKASYON PARAMETRESİ ZORUNLU OLSUN VE EN ÜST KISIMDA TOPLAMLARI YAZSIN... (Agent implemented summary panel).
- 2. (User): NORMALDE 17 KAYIT VAR BİZDE DAHA AZ YAZIYOR (Agent fixed default date to start of year).
- 3. (User): BAZI VERİLERDE YANLIŞLIK VAR Zıt Kardeşler... SON ALIŞI YOK AMA SEN 1500 YAZMISSIN (Agent fixed  parameter).
- 4. (User uploads Stok Envanter PHP): çok güzel sadece başlangıç ve bitiş kısmına bir date picker koy seçimde birde en üsteki toplam kısmı yana kayar olduğunu müşteriye geri bildirim yapalım ve stok envanter raporunu attım... (Agent implemented DatePicker and scroll hints).
- 5. (User uploads screenshot): Bu hata var şuan (Agent fixed Duplicate React Key warning).
- 6. (User uploads Gelir Tablosu PHP): buda tamam pdf ve exel kısmındada göster toplam baremini sana örnek olsun diye attım gelir tablosu dizaynını (Agent implemented hierarchical render and PDF/Excel summaries).
- 7. (User uploads 3 PHP files): 3 raporu da attım son olarak sonra bildirim kısmına geçecez (Agent extracted the parameters for these final 3 reports and put them into ).
- *(Pending: Agent needs to configure the specific UI/Summary panels for the last 3 reports, verify them, and then proceed to Push Notifications).*
-
-**Project Health Check:**
-- Broken: None.
-- Mocked: None. SMTP is fully integrated via Gmail app passwords.
-
-**3rd Party Integrations** 
-  - Remote POS Sync () - requires Tenant ID
-  - SMTP Gmail (Emailing) - requires App Password (configured in backend )
-
-**Testing status**
-  - Testing agent used after significant changes: NO (Screenshot and manual python scripts used instead due to complexity of dynamic filters).
-  - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: , 
-  - Known regressions: None.
-
-**Credentials to test flow:**
-  - Standard user login:  /  (Check ).
-
-**What agent forgot to execute**
-  - The agent updated the parameter configuration ( array) for the final 3 reports, but didn't actually configure their visual representation (e.g. what fields go into the , or what fields are aggregated in the ). The next agent must finalize these UI mapping details before considering the reports fully complete.</analysis>
+<analysis>notification_watcher.pysync.phpexpo-navigation-barnotification_watcher.py/app/frontend/app/(tabs)/reports.tsxReportCardReportSummaryPanelTopBannerFilterModal/app/frontend/src/components/MinBakiyeMaxBakiyeuser_push_tokensnotification_settingsnotification_watcher.pysync.phpfis_iptalsatir_iptalhigh_saleslow_stockexpo-navigation-barfatih@berkyazilim.com
+/app/
+├── backend/
+│   ├── routes/
+│   │   ├── auth.py
+│   │   ├── data.py         
+│   │   └── notifications.py # Push token & settings CRUD
+│   ├── services/
+│   │   ├── mailer.py       
+│   │   └── notification_watcher.py # Asyncio background polling loop
+│   └── server.py            # Wires up routers and starts the watcher task
+├── frontend/
+│   ├── app/(tabs)/
+│   │   ├── reports.tsx      # Handles 7 report types, dynamic UI, PDF/Excel
+│   │   └── settings.tsx     # Includes new notification config UI
+│   ├── app/_layout.tsx      # Configured with Status/Navigation bar overrides
+│   ├── src/services/
+│   │   └── notificationService.ts # Expo notification registration & syncing
+asyncio.create_tasknotification_watcher.pysync.phpexpo-navigation-barpatron.user_push_tokensiduser_idtokenplatformdevice_idactivepatron.notification_settingsuser_idnotify_cancellationsnotify_line_cancellationsnotify_high_saleshigh_sales_thresholdnotify_low_stockcheck_interval_minutesexpo-navigation-bar/app/backend/services/notification_watcher.py/app/backend/routes/notifications.py/app/frontend/src/services/notificationService.ts/app/frontend/app/(tabs)/reports.tsx/app/frontend/app/(tabs)/settings.tsx/app/frontend/app/_layout.tsx/app/frontend/app/(tabs)/reports.tsxReportCardTopBannerFilterModalPOST /api/notifications/register-tokenPOST /api/notifications/unregister-tokenGET /api/notifications/settingsPOST /api/notifications/settingsi18n/app/frontend/src/i18n/translations.ts/app/test_result.md/app/memory/test_credentials.mdcakmak.ebubekir29@gmail.comadminexpo-navigation-barNavigationBar.setBackgroundColorAsyncsync.php/api/notifications/*adminadmincakmak.ebubekir29@gmail.comadmin/app/memory/test_credentials.md</analysis>

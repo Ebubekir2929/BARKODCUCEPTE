@@ -23,7 +23,7 @@ import notificationService from '../../src/services/notificationService';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { colors, isDark, toggleTheme } = useThemeStore();
+  const { colors, isDark, mode: themeMode, setMode: setThemeMode } = useThemeStore();
   const { user, logout, addTenant, updateTenantName, removeTenant } = useAuthStore();
   const { language, setLanguage, t, loadLanguage } = useLanguageStore();
   const { showSuccess, showError, showInfo, showWarning, alertProps } = useAlert();
@@ -422,15 +422,40 @@ export default function SettingsScreen() {
           <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}>
               <View style={styles.menuItemLeft}>
-                <Ionicons name="moon-outline" size={22} color={colors.primary} />
-                <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('dark_theme')}</Text>
+                <Ionicons name="contrast-outline" size={22} color={colors.primary} />
+                <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('theme_mode') || 'Tema'}</Text>
               </View>
-              <Switch
-                value={isDark}
-                onValueChange={toggleTheme}
-                trackColor={{ false: colors.border, true: colors.primary }}
-                thumbColor="#FFF"
-              />
+            </View>
+            <View style={{ flexDirection: 'row', padding: 10, gap: 8 }}>
+              {(['system', 'light', 'dark'] as const).map((m) => {
+                const active = themeMode === m;
+                const label = m === 'system' ? (t('theme_system') || 'Sistem')
+                  : m === 'light' ? (t('theme_light') || 'Açık')
+                  : (t('theme_dark') || 'Koyu');
+                const icon: any = m === 'system' ? 'phone-portrait-outline' : m === 'light' ? 'sunny-outline' : 'moon-outline';
+                return (
+                  <TouchableOpacity
+                    key={m}
+                    onPress={() => setThemeMode(m)}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 10,
+                      paddingHorizontal: 8,
+                      borderRadius: 10,
+                      backgroundColor: active ? colors.primary : colors.surface,
+                      borderWidth: 1,
+                      borderColor: active ? colors.primary : colors.border,
+                      alignItems: 'center',
+                      flexDirection: 'row',
+                      justifyContent: 'center',
+                      gap: 6,
+                    }}
+                  >
+                    <Ionicons name={icon} size={16} color={active ? '#FFFFFF' : colors.text} />
+                    <Text style={{ color: active ? '#FFFFFF' : colors.text, fontWeight: '600', fontSize: 13 }}>{label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
             
             {/* Language Selection */}
@@ -512,8 +537,8 @@ export default function SettingsScreen() {
                     <View style={styles.menuItemLeft}>
                       <Ionicons name="pricetag-outline" size={20} color={colors.success} />
                       <View>
-                        <Text style={[styles.menuItemLabel, { color: colors.text, fontSize: 13 }]}>Yüksek Satış Eşiği (₺)</Text>
-                        <Text style={[styles.menuItemSub, { color: colors.textSecondary, fontSize: 10 }]}>Bu tutarın üzerindeki Perakende / Satış faturaları için bildirim</Text>
+                        <Text style={[styles.menuItemLabel, { color: colors.text, fontSize: 13 }]}>{t('high_sales_threshold')}</Text>
+                        <Text style={[styles.menuItemSub, { color: colors.textSecondary, fontSize: 10 }]}>{t('high_sales_threshold_desc')}</Text>
                       </View>
                     </View>
                     <TextInput

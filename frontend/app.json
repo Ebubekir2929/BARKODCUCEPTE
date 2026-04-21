@@ -21,6 +21,15 @@
         "backgroundColor": "#2563EB"
       },
       "edgeToEdgeEnabled": false,
+      "statusBar": {
+        "backgroundColor": "#000000",
+        "barStyle": "light-content",
+        "translucent": false
+      },
+      "navigationBar": {
+        "backgroundColor": "#000000",
+        "visible": "sticky-immersive"
+      },
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.VIBRATE",
