@@ -387,7 +387,7 @@ export default function DashboardScreen() {
           </View>
           {lastSynced && (
             <Text style={[styles.syncText, { color: colors.textSecondary }]}>
-              Son: {new Date(lastSynced).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+              {t('last_synced')}: {new Date(lastSynced).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
             </Text>
           )}
         </View>

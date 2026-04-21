@@ -58,7 +58,7 @@ export const SummaryCard: React.FC<SummaryCardProps> = ({
       </Text>
       {lastWeekAmount !== undefined && (
         <View style={styles.lastWeekRow}>
-          <Text style={[styles.lastWeekLabel, { color: colors.textSecondary }]}>Geçen hafta: </Text>
+          <Text style={[styles.lastWeekLabel, { color: colors.textSecondary }]}>{t('last_week_colon')}</Text>
           <Text style={[styles.lastWeekValue, { color: colors.textSecondary }]}>
             ₺{lastWeekAmount.toLocaleString('tr-TR')}
           </Text>

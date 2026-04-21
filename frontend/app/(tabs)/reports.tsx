@@ -665,6 +665,35 @@ export default function ReportsScreen() {
   const { user } = useAuthStore();
   const { activeSource } = useDataSourceStore();
 
+  // i18n helpers for report titles / descriptions / filter groups
+  const getReportTitle = (report: any) => {
+    const key = `report_${report.key}` as any;
+    const tr = t(key);
+    return tr !== key ? tr : report.title;
+  };
+  const getReportDesc = (report: any) => {
+    const key = `report_${report.key}_desc` as any;
+    const tr = t(key);
+    return tr !== key ? tr : report.description;
+  };
+  const getGroupLabel = (group: string) => {
+    const map: Record<string, any> = {
+      'Temel': 'filter_group_temel',
+      'Stok': 'filter_group_stok',
+      'Filtreler': 'filter_group_filtreler',
+      'Seçenekler': 'filter_group_secenekler',
+      'Tarih': 'filter_group_tarih',
+      'Tarih Aralığı': 'filter_group_tarih_araligi',
+      'Özel Kodlar': 'filter_group_ozel_kodlar',
+      'Cari': 'filter_group_cari',
+      'Finans': 'filter_group_finans',
+      'Bakiye': 'filter_group_bakiye',
+    };
+    const key = map[group];
+    return key ? t(key) : group;
+  };
+
+
   const activeTenantId = useMemo(() => {
     if (!user?.tenants || user.tenants.length === 0) return '';
     const keys = ['data1', 'data2', 'data3'];
@@ -1442,7 +1471,7 @@ export default function ReportsScreen() {
           <TouchableOpacity key={report.key} style={[styles.reportCard, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => openReportFilter(report)} activeOpacity={0.7}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <View style={[styles.reportIcon, { backgroundColor: colors.primary + '15' }]}><Ionicons name={report.icon} size={22} color={colors.primary} /></View>
-              <View style={{ flex: 1 }}><Text style={[{ fontSize: 15, fontWeight: '700', color: colors.text }]}>{report.title}</Text><Text style={[{ fontSize: 12, color: colors.textSecondary }]}>{report.description}</Text></View>
+              <View style={{ flex: 1 }}><Text style={[{ fontSize: 15, fontWeight: '700', color: colors.text }]}>{getReportTitle(report)}</Text><Text style={[{ fontSize: 12, color: colors.textSecondary }]}>{getReportDesc(report)}</Text></View>
               <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
             </View>
           </TouchableOpacity>
@@ -1454,7 +1483,7 @@ export default function ReportsScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '85%' }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[{ fontSize: 17, fontWeight: '700', color: colors.text, flex: 1 }]}>{selectedReport?.title} - Filtreler</Text>
+              <Text style={[{ fontSize: 17, fontWeight: '700', color: colors.text, flex: 1 }]}>{selectedReport ? getReportTitle(selectedReport) : ''} - {t('filters_suffix')}</Text>
               <TouchableOpacity onPress={() => setShowFilterModal(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             </View>
             <ScrollView style={{ padding: 16 }} contentContainerStyle={{ gap: 10, paddingBottom: 30 }}>
@@ -1478,7 +1507,7 @@ export default function ReportsScreen() {
                       onPress={() => setDatePickerFor(filter.name)}
                     >
                       <Text style={[{ fontSize: 13, color: filterValues[filter.name] ? colors.text : colors.textSecondary }]}>
-                        {filterValues[filter.name] ? formatDateTR(filterValues[filter.name]) : 'Tarih Seçin'}
+                        {filterValues[filter.name] ? formatDateTR(filterValues[filter.name]) : t('select_date')}
                       </Text>
                       <Ionicons name="calendar-outline" size={16} color={colors.primary} />
                     </TouchableOpacity>
@@ -1497,7 +1526,7 @@ export default function ReportsScreen() {
                       onPress={() => openPicker(filter)}
                     >
                       <Text style={[{ fontSize: 13, color: filterValues[filter.name] ? colors.text : colors.textSecondary, flex: 1 }]} numberOfLines={1}>
-                        {filterValues[filter.name] ? getSelectedLabels(filter.name, filter.source) : 'Seçiniz...'}
+                        {filterValues[filter.name] ? getSelectedLabels(filter.name, filter.source) : t('select_placeholder')}
                       </Text>
                       <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
                     </TouchableOpacity>
@@ -1506,7 +1535,7 @@ export default function ReportsScreen() {
                       style={[styles.filterInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
                       value={filterValues[filter.name] || ''}
                       onChangeText={v => setFilterValues(prev => ({ ...prev, [filter.name]: v }))}
-                      placeholder={filter.placeholder || 'Metin girin...'} placeholderTextColor={colors.textSecondary}
+                      placeholder={filter.placeholder || t('enter_text')} placeholderTextColor={colors.textSecondary}
                       autoCapitalize="none"
                       keyboardType={filter.numeric ? 'numbers-and-punctuation' : 'default'}
                     />
@@ -1515,7 +1544,7 @@ export default function ReportsScreen() {
               ));
               })()}
               <TouchableOpacity style={[{ backgroundColor: colors.primary, borderRadius: 10, padding: 14, alignItems: 'center', marginTop: 8 }]} onPress={runReport}>
-                <Text style={[{ color: '#fff', fontWeight: '700', fontSize: 15 }]}>Raporu Çalıştır</Text>
+                <Text style={[{ color: '#fff', fontWeight: '700', fontSize: 15 }]}>{t('run_report')}</Text>
               </TouchableOpacity>
             </ScrollView>
           </View>
@@ -1610,7 +1639,7 @@ export default function ReportsScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text, flex: 1 }]}>{selectedReport?.title}</Text>
+              <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text, flex: 1 }]}>{selectedReport ? getReportTitle(selectedReport) : ''}</Text>
               <TouchableOpacity style={{ marginRight: 8 }} onPress={() => {
                 // Abort any in-flight page fetches when user returns to filter
                 if (abortRef.current) { try { abortRef.current.abort(); } catch(_){} }
