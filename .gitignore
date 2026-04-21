@@ -90,3 +90,7 @@ credentials.json
 *.pem
 *.key
 .credentials
+
+# Allow committing the example env template
+!backend/.env.example
+!.env.example
