@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
+import { useLanguageStore } from '../store/languageStore';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 interface Branch {
@@ -38,6 +39,7 @@ export const FilterModal: React.FC<FilterModalProps> = ({
   branches = [],
 }) => {
   const { colors } = useThemeStore();
+  const { t } = useLanguageStore();
   const [selectedBranch, setSelectedBranch] = useState<string | null>(currentFilters.branchId);
   const [dateRange, setDateRange] = useState({
     start: currentFilters.startDate,
@@ -82,12 +84,12 @@ export const FilterModal: React.FC<FilterModalProps> = ({
   };
 
   const quickDateOptions = [
-    { label: 'Bugün', getValue: () => { const d = new Date(); return { start: d, end: d }; } },
-    { label: 'Dün', getValue: () => { const d = new Date(); d.setDate(d.getDate() - 1); return { start: d, end: d }; } },
-    { label: 'Son 7 Gün', getValue: () => { const end = new Date(); const start = new Date(); start.setDate(start.getDate() - 7); return { start, end }; } },
-    { label: 'Son 30 Gün', getValue: () => { const end = new Date(); const start = new Date(); start.setDate(start.getDate() - 30); return { start, end }; } },
-    { label: 'Bu Ay', getValue: () => { const end = new Date(); const start = new Date(end.getFullYear(), end.getMonth(), 1); return { start, end }; } },
-    { label: 'Geçen Ay', getValue: () => { const now = new Date(); const start = new Date(now.getFullYear(), now.getMonth() - 1, 1); const end = new Date(now.getFullYear(), now.getMonth(), 0); return { start, end }; } },
+    { label: t('today_label'), getValue: () => { const d = new Date(); return { start: d, end: d }; } },
+    { label: t('yesterday_label'), getValue: () => { const d = new Date(); d.setDate(d.getDate() - 1); return { start: d, end: d }; } },
+    { label: t('last_7_days'), getValue: () => { const end = new Date(); const start = new Date(); start.setDate(start.getDate() - 7); return { start, end }; } },
+    { label: t('last_30_days'), getValue: () => { const end = new Date(); const start = new Date(); start.setDate(start.getDate() - 30); return { start, end }; } },
+    { label: t('this_month'), getValue: () => { const end = new Date(); const start = new Date(end.getFullYear(), end.getMonth(), 1); return { start, end }; } },
+    { label: t('last_month'), getValue: () => { const now = new Date(); const start = new Date(now.getFullYear(), now.getMonth() - 1, 1); const end = new Date(now.getFullYear(), now.getMonth(), 0); return { start, end }; } },
   ];
 
   const selectQuickDate = (option: typeof quickDateOptions[0]) => {
@@ -144,7 +146,7 @@ export const FilterModal: React.FC<FilterModalProps> = ({
       <View style={styles.overlay}>
         <View style={[styles.container, { backgroundColor: colors.surface }]}>
           <View style={[styles.header, { borderBottomColor: colors.border }]}>
-            <Text style={[styles.headerTitle, { color: colors.text }]}>Filtreler</Text>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>{t('filters')}</Text>
             <TouchableOpacity onPress={onClose}>
               <Ionicons name="close" size={24} color={colors.text} />
             </TouchableOpacity>
@@ -154,7 +156,7 @@ export const FilterModal: React.FC<FilterModalProps> = ({
             {/* Branch Selection - from live data */}
             {branches.length > 0 && (
               <>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>Şube Seçimi</Text>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('branch_select')}</Text>
                 <View style={styles.branchList}>
                   <TouchableOpacity
                     style={[
@@ -188,7 +190,7 @@ export const FilterModal: React.FC<FilterModalProps> = ({
             )}
 
             {/* Quick Date Selection */}
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Hızlı Tarih</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('quick_date')}</Text>
             <View style={styles.quickDateList}>
               {quickDateOptions.map((option) => (
                 <TouchableOpacity
@@ -202,10 +204,10 @@ export const FilterModal: React.FC<FilterModalProps> = ({
             </View>
 
             {/* Manual Date Entry */}
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Tarih Seçimi</Text>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('date_select')}</Text>
             <View style={styles.dateInputsRow}>
               <View style={styles.dateInputWrapper}>
-                <Text style={[styles.dateInputLabel, { color: colors.textSecondary }]}>Başlangıç</Text>
+                <Text style={[styles.dateInputLabel, { color: colors.textSecondary }]}>{t('start_placeholder')}</Text>
                 <View style={[styles.dateInputContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
                   <TextInput
                     style={[styles.dateInput, { color: colors.text }]}
@@ -222,7 +224,7 @@ export const FilterModal: React.FC<FilterModalProps> = ({
                 </View>
               </View>
               <View style={styles.dateInputWrapper}>
-                <Text style={[styles.dateInputLabel, { color: colors.textSecondary }]}>Bitiş</Text>
+                <Text style={[styles.dateInputLabel, { color: colors.textSecondary }]}>{t('end_placeholder')}</Text>
                 <View style={[styles.dateInputContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
                   <TextInput
                     style={[styles.dateInput, { color: colors.text }]}
@@ -273,14 +275,14 @@ export const FilterModal: React.FC<FilterModalProps> = ({
               onPress={handleReset}
             >
               <Ionicons name="refresh-outline" size={18} color={colors.text} />
-              <Text style={[styles.resetButtonText, { color: colors.text }]}>Sıfırla</Text>
+              <Text style={[styles.resetButtonText, { color: colors.text }]}>{t('reset')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.applyButton, { backgroundColor: colors.primary }]}
               onPress={handleApply}
             >
               <Ionicons name="checkmark" size={18} color="#FFF" />
-              <Text style={styles.applyButtonText}>Uygula</Text>
+              <Text style={styles.applyButtonText}>{t('apply')}</Text>
             </TouchableOpacity>
           </View>
         </View>

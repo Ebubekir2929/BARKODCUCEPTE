@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAuthStore } from '../../src/store/authStore';
+import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import * as Print from 'expo-print';
@@ -660,6 +661,7 @@ const ALL_REPORTS = [FIYAT_LISTELERI, ...OTHER_REPORTS];
 // === COMPONENT ===
 export default function ReportsScreen() {
   const { colors } = useThemeStore();
+  const { t } = useLanguageStore();
   const { user } = useAuthStore();
   const { activeSource } = useDataSourceStore();
 
@@ -1424,7 +1426,7 @@ export default function ReportsScreen() {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
         <ActiveSourceIndicator />
-        <View style={styles.emptyContainer}><Ionicons name="document-text-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>Veri kaynağı seçilmedi</Text></View>
+        <View style={styles.emptyContainer}><Ionicons name="document-text-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_data_source_selected') || 'Veri kaynağı seçilmedi'}</Text></View>
       </SafeAreaView>
     );
   }

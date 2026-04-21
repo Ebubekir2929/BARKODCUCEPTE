@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
+import { useLanguageStore } from '../store/languageStore';
 
 interface SummaryCardProps {
   title: string;
@@ -25,6 +26,7 @@ export const SummaryCard: React.FC<SummaryCardProps> = ({
   changePercent,
 }) => {
   const { colors } = useThemeStore();
+  const { t } = useLanguageStore();
   const isPositive = changePercent !== undefined && changePercent >= 0;
 
   return (

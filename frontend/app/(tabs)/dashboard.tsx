@@ -314,10 +314,10 @@ export default function DashboardScreen() {
 
   const getCardTypeLabel = (type: string) => {
     switch (type) {
-      case 'cash': return 'Nakit';
-      case 'card': return 'Kredi Kartı';
-      case 'openAccount': return 'Açık Hesap';
-      case 'total': return 'Toplam';
+      case 'cash': return t('cash');
+      case 'card': return t('credit_card');
+      case 'openAccount': return t('open_account');
+      case 'total': return t('total');
       default: return '';
     }
   };
@@ -840,7 +840,7 @@ export default function DashboardScreen() {
           <TouchableOpacity activeOpacity={1} style={[styles.modalContent]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
-                {getCardTypeLabel(selectedCardType || '')} - Lokasyon Dağılımı
+                {getCardTypeLabel(selectedCardType || '')} - {t('location_dist_suffix')}
               </Text>
               <TouchableOpacity onPress={() => setSelectedCardType(null)}>
                 <Ionicons name="close" size={24} color={colors.text} />

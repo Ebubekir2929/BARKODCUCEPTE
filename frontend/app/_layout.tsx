@@ -3,6 +3,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useThemeStore } from '../src/store/themeStore';
 import { useAuthStore } from '../src/store/authStore';
+import { useLanguageStore } from '../src/store/languageStore';
 import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as NavigationBar from 'expo-navigation-bar';
@@ -29,13 +30,15 @@ function AppShell() {
 export default function RootLayout() {
   const { colors, isDark, loadTheme } = useThemeStore();
   const { isLoading, checkAuth } = useAuthStore();
+  const { isReady: langReady, loadLanguage } = useLanguageStore();
 
   useEffect(() => {
     loadTheme();
+    loadLanguage();
     checkAuth();
   }, []);
 
-  // Dynamically update Android system bars whenever theme flips (system or manual)
+  // Apply Android navigation bar color whenever theme flips (system or manual)
   useEffect(() => {
     if (Platform.OS === 'android') {
       const bg = isDark ? '#000000' : '#FFFFFF';
@@ -45,7 +48,7 @@ export default function RootLayout() {
     }
   }, [isDark]);
 
-  if (isLoading) {
+  if (isLoading || !langReady) {
     return (
       <View style={[styles.loading, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />

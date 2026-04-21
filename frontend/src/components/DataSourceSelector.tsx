@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
+import { useLanguageStore } from '../store/languageStore';
 import { useDataSourceStore, DataSource } from '../store/dataSourceStore';
 import { useAuthStore } from '../store/authStore';
 
@@ -88,6 +89,7 @@ export const DataSourceSelector: React.FC<DataSourceSelectorProps> = ({ totals }
 // === OTHER PAGES: Elegant active source display ===
 export const ActiveSourceIndicator: React.FC = () => {
   const { colors } = useThemeStore();
+  const { t } = useLanguageStore();
   const { activeSource } = useDataSourceStore();
   const { user } = useAuthStore();
 
@@ -106,7 +108,7 @@ export const ActiveSourceIndicator: React.FC = () => {
   return (
     <View style={[styles.indicatorBar, { borderBottomColor: colors.border }]}>
       <Ionicons name="server-outline" size={14} color={colors.primary} />
-      <Text style={[styles.indicatorLabel, { color: colors.textSecondary }]}>Veri Kaynağı:</Text>
+      <Text style={[styles.indicatorLabel, { color: colors.textSecondary }]}>{t('data_source')}:</Text>
       <Text style={[styles.indicatorName, { color: colors.primary }]} numberOfLines={1}>{activeLabel}</Text>
     </View>
   );
