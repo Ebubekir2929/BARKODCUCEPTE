@@ -600,7 +600,12 @@ async def scan_now(body: ScanNowBody, current_user: dict = Depends(get_current_u
 
 @router.post("/settings")
 async def set_settings(body: NotificationSettings, current_user: dict = Depends(get_current_user)):
-    """Upsert the current user's notification preferences."""
+    """Upsert the current user's notification preferences.
+
+    Also resets `last_check_at` so the watcher picks up the new interval
+    immediately on the next tick (otherwise users stuck in the old 15-min
+    window would have to wait for it to expire).
+    """
     user_id = current_user["user_id"]
     pool = await get_patron_pool()
     async with pool.acquire() as conn:
@@ -608,8 +613,8 @@ async def set_settings(body: NotificationSettings, current_user: dict = Depends(
             await cur.execute("""
                 INSERT INTO user_notification_settings
                     (user_id, notify_cancellations, notify_line_cancellations, notify_high_sales,
-                     high_sales_threshold, notify_low_stock, check_interval_minutes, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                     high_sales_threshold, notify_low_stock, check_interval_minutes, last_check_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, NOW())
                 ON DUPLICATE KEY UPDATE
                     notify_cancellations=VALUES(notify_cancellations),
                     notify_line_cancellations=VALUES(notify_line_cancellations),
@@ -617,6 +622,7 @@ async def set_settings(body: NotificationSettings, current_user: dict = Depends(
                     high_sales_threshold=VALUES(high_sales_threshold),
                     notify_low_stock=VALUES(notify_low_stock),
                     check_interval_minutes=VALUES(check_interval_minutes),
+                    last_check_at=NULL,
                     updated_at=NOW()
             """, (
                 user_id,
