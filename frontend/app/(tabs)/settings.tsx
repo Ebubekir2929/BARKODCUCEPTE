@@ -37,6 +37,12 @@ export default function SettingsScreen() {
   const [checkIntervalMinutes, setCheckIntervalMinutes] = useState('15');
   const [showLanguageModal, setShowLanguageModal] = useState(false);
 
+  // Scan-now (manual trigger) state
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanResult, setScanResult] = useState<any>(null);
+  const [scanModalVisible, setScanModalVisible] = useState(false);
+  const [scanResetDedup, setScanResetDedup] = useState(false);
+
   // Tenant Management State
   const [showTenantModal, setShowTenantModal] = useState(false);
   const [tenantModalMode, setTenantModalMode] = useState<'add' | 'edit'>('add');
@@ -201,6 +207,41 @@ export default function SettingsScreen() {
       'Merkez Şube'
     );
     showSuccess(t('sent_title'), t('test_notif_sent'));
+  };
+
+  const runScanNow = async (resetDedup: boolean = false) => {
+    try {
+      setScanLoading(true);
+      setScanResetDedup(resetDedup);
+      const { token } = useAuthStore.getState();
+      if (!token) {
+        showError(t('error'), 'Oturum bulunamadı');
+        setScanLoading(false);
+        return;
+      }
+      const resp = await fetch(`${API_URL}/api/notifications/scan-now`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          days_back: 2,
+          reset_dedup: resetDedup,
+          send_push: true,
+          page_size: 500,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        showError('Tarama Hatası', data?.detail || `HTTP ${resp.status}`);
+        setScanLoading(false);
+        return;
+      }
+      setScanResult(data);
+      setScanModalVisible(true);
+    } catch (e: any) {
+      showError('Tarama Hatası', e?.message || String(e));
+    } finally {
+      setScanLoading(false);
+    }
   };
 
   const handleLogout = () => {
@@ -626,6 +667,61 @@ export default function SettingsScreen() {
                   </View>
                   <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
                 </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.menuItem, { borderTopColor: colors.border, borderTopWidth: 1 }]}
+                  onPress={() => runScanNow(false)}
+                  disabled={scanLoading}
+                >
+                  <View style={styles.menuItemLeft}>
+                    <Ionicons name="search-outline" size={22} color={colors.primary} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>
+                        🔍 Şimdi Tara (Debug)
+                      </Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>
+                        POS'u hemen tara, iptal fişlerini kontrol et
+                      </Text>
+                    </View>
+                  </View>
+                  {scanLoading ? (
+                    <ActivityIndicator color={colors.primary} />
+                  ) : (
+                    <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => {
+                    showWarning(
+                      'Tarama Sıfırlanacak',
+                      'Daha önce bildirim gönderilmiş tüm iptaller tekrar gönderilecek. Devam edilsin mi?',
+                      [
+                        { text: t('cancel'), style: 'cancel' },
+                        {
+                          text: 'Sıfırla ve Tara',
+                          style: 'destructive',
+                          onPress: () => runScanNow(true),
+                        },
+                      ]
+                    );
+                  }}
+                  disabled={scanLoading}
+                >
+                  <View style={styles.menuItemLeft}>
+                    <Ionicons name="refresh-circle-outline" size={22} color={colors.error} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>
+                        🧹 Tekrar Gönder (Dedup Sıfırla)
+                      </Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>
+                        Aynı iptalleri yeniden bildirim olarak yolla
+                      </Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+                </TouchableOpacity>
               </>
             )}
           </View>
@@ -848,6 +944,172 @@ export default function SettingsScreen() {
                     </Text>
                   </>
                 )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Scan Result Modal */}
+      <Modal visible={scanModalVisible} animationType="slide" transparent onRequestClose={() => setScanModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '85%' }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>🔍 Tarama Sonucu</Text>
+              <TouchableOpacity onPress={() => setScanModalVisible(false)}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ padding: 16 }}>
+              {scanResult && (
+                <>
+                  {/* Top summary */}
+                  <View style={{
+                    backgroundColor: colors.background, padding: 12, borderRadius: 10, marginBottom: 12,
+                    borderWidth: 1, borderColor: colors.border,
+                  }}>
+                    <Text style={{ color: colors.text, fontWeight: '700', marginBottom: 4 }}>
+                      Özet
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
+                      • Aktif cihaz: {scanResult.active_tokens ?? 0}
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
+                      • Gönderilen bildirim: {scanResult.push_sent_total ?? 0}
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
+                      • Dedup sıfırlandı mı: {scanResult.reset_dedup ? 'Evet' : 'Hayır'}
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
+                      • Fiş İptali Uyarısı: {scanResult.settings?.notify_cancellations ? 'Açık' : 'Kapalı'}
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
+                      • Satır İptali Uyarısı: {scanResult.settings?.notify_line_cancellations ? 'Açık' : 'Kapalı'}
+                    </Text>
+                  </View>
+
+                  {/* Per-tenant details */}
+                  {(scanResult.tenants || []).map((tr: any, idx: number) => (
+                    <View key={`${tr.tenant_id}-${idx}`} style={{
+                      backgroundColor: colors.background, padding: 12, borderRadius: 10, marginBottom: 12,
+                      borderWidth: 1, borderColor: colors.border,
+                    }}>
+                      <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 15, marginBottom: 4 }}>
+                        🏪 {tr.tenant_name}
+                      </Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 6 }}>
+                        {tr.date_range?.from} → {tr.date_range?.to} · {tr.total_rows} satır · {tr.unique_belge_count} fiş
+                      </Text>
+
+                      {tr.pos_error && (
+                        <View style={{ backgroundColor: '#fee', padding: 8, borderRadius: 6, marginBottom: 6 }}>
+                          <Text style={{ color: '#900', fontSize: 12 }}>❌ POS Hata: {tr.pos_error}</Text>
+                        </View>
+                      )}
+
+                      {tr.total_rows === 0 && !tr.pos_error && (
+                        <Text style={{ color: colors.warning, fontSize: 12 }}>
+                          ⚠️ Son 2 günde hiç fiş bulunamadı. POS senkronu kontrol edilmeli.
+                        </Text>
+                      )}
+
+                      {/* Cancelled belges */}
+                      <Text style={{ color: colors.text, fontWeight: '700', marginTop: 8, marginBottom: 4 }}>
+                        🚫 İptal Fişleri ({tr.cancelled_belges?.length || 0})
+                      </Text>
+                      {(tr.cancelled_belges || []).length === 0 ? (
+                        <Text style={{ color: colors.textSecondary, fontSize: 12, fontStyle: 'italic' }}>
+                          Tarihte iptal edilmiş fiş yok.
+                        </Text>
+                      ) : (
+                        (tr.cancelled_belges || []).map((c: any, i: number) => (
+                          <View key={i} style={{
+                            paddingVertical: 6, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: colors.border,
+                          }}>
+                            <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>
+                              {c.belgeno} · {c.fis_turu || 'Fiş'}
+                            </Text>
+                            <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
+                              Durum: {c.fis_durumu || '-'} · IPTAL={String(c.iptal_flag ?? '-')}
+                            </Text>
+                            <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
+                              Tutar: ₺{Number(c.total).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                            </Text>
+                            <Text style={{
+                              color: c.push_sent ? colors.success : colors.warning,
+                              fontSize: 11, fontWeight: '700',
+                            }}>
+                              {c.push_sent ? '✅ Bildirim gönderildi' : `⚠️ ${c.result}`}
+                            </Text>
+                          </View>
+                        ))
+                      )}
+
+                      {/* Line cancellations */}
+                      {(tr.line_cancellations || []).length > 0 && (
+                        <>
+                          <Text style={{ color: colors.text, fontWeight: '700', marginTop: 8, marginBottom: 4 }}>
+                            ❌ Satır İptalleri ({tr.line_cancellations.length})
+                          </Text>
+                          {tr.line_cancellations.slice(0, 10).map((c: any, i: number) => (
+                            <View key={i} style={{
+                              paddingVertical: 6, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: colors.border,
+                            }}>
+                              <Text style={{ color: colors.text, fontSize: 12 }}>
+                                {c.belgeno} · {c.stok_ad} ({c.miktar})
+                              </Text>
+                              <Text style={{
+                                color: c.push_sent ? colors.success : colors.warning,
+                                fontSize: 11, fontWeight: '700',
+                              }}>
+                                {c.push_sent ? '✅ Gönderildi' : `⚠️ ${c.result}`}
+                              </Text>
+                            </View>
+                          ))}
+                        </>
+                      )}
+
+                      {/* High sales */}
+                      {(tr.high_sales || []).length > 0 && (
+                        <>
+                          <Text style={{ color: colors.text, fontWeight: '700', marginTop: 8, marginBottom: 4 }}>
+                            💰 Yüksek Satışlar ({tr.high_sales.length})
+                          </Text>
+                          {tr.high_sales.slice(0, 10).map((c: any, i: number) => (
+                            <Text key={i} style={{ color: colors.textSecondary, fontSize: 12 }}>
+                              {c.belgeno}: ₺{Number(c.total).toLocaleString('tr-TR')} — {c.push_sent ? '✅' : `⚠️ ${c.result}`}
+                            </Text>
+                          ))}
+                        </>
+                      )}
+
+                      {/* First row sample — helpful if nothing matched */}
+                      {tr.total_rows > 0 && (tr.cancelled_belges || []).length === 0 && (
+                        <View style={{ marginTop: 10, padding: 8, backgroundColor: colors.surface, borderRadius: 6 }}>
+                          <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700' }}>
+                            Örnek satır (ilk fiş):
+                          </Text>
+                          <Text style={{ color: colors.textSecondary, fontSize: 10, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }}>
+                            FIS_TURU: {String(tr.sample_row?.FIS_TURU || '-')}{'\n'}
+                            FIS_DURUMU: {String(tr.sample_row?.FIS_DURUMU || '-')}{'\n'}
+                            IPTAL: {String(tr.sample_row?.IPTAL ?? '-')}{'\n'}
+                            BELGENO: {String(tr.sample_row?.BELGENO || '-')}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  ))}
+                </>
+              )}
+            </ScrollView>
+
+            <View style={{ padding: 12, borderTopWidth: 1, borderTopColor: colors.border }}>
+              <TouchableOpacity
+                style={{ backgroundColor: colors.primary, padding: 12, borderRadius: 10, alignItems: 'center' }}
+                onPress={() => setScanModalVisible(false)}
+              >
+                <Text style={{ color: '#fff', fontWeight: '700' }}>Kapat</Text>
               </TouchableOpacity>
             </View>
           </View>
