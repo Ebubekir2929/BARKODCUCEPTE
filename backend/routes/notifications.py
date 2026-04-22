@@ -431,9 +431,7 @@ async def scan_now(body: ScanNowBody, current_user: dict = Depends(get_current_u
       4) If send_push=True, de-dup and actually deliver Expo push notifications.
     """
     from datetime import datetime, timedelta
-    from services.notification_watcher import (
-        _pos_run, _mark_event_seen, _push_many
-    )
+    from services.notification_watcher import _mark_event_seen, _push_many
 
     user_id = current_user["user_id"]
     pool = await get_patron_pool()
@@ -523,15 +521,14 @@ async def scan_now(body: ScanNowBody, current_user: dict = Depends(get_current_u
                     )
                 await conn.commit()
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    today_dt = datetime.now()
+    today = today_dt.strftime("%Y-%m-%d")
     days_back = max(1, int(body.days_back or 2))
-    since = (datetime.now() - timedelta(days=days_back)).strftime("%Y-%m-%d")
+    since_dt = today_dt - timedelta(days=days_back - 1)
+    since = since_dt.strftime("%Y-%m-%d")
 
-    stok_empty = {
-        "Stoklar": "", "StokGrup": "", "StokCinsi": "", "StokMarka": "", "StokVergi": "",
-        "StokOzelKod1": "", "StokOzelKod2": "", "StokOzelKod3": "", "StokOzelKod4": "",
-        "StokOzelKod5": "", "StokOzelKod6": "", "StokOzelKod7": "", "StokOzelKod8": "", "StokOzelKod9": "",
-    }
+    # Import the helper used by the watcher so we use the *working* dataset_get path
+    from services.notification_watcher import _pos_dataset_get
 
     total_push_sent = 0
     tenants_report = []
@@ -540,116 +537,100 @@ async def scan_now(body: ScanNowBody, current_user: dict = Depends(get_current_u
         tenant_id = t["tenant_id"]
         tenant_name = t["name"] or "Veri"
 
-        fis_params = {
-            "BASTARIH": since, "BITTARIH": today,
-            "FisTuru": "", "FisAltTuru": "", "Lokasyon": "", "Proje": "", "BelgeNo": "",
-            "Personel": "", "Cariler": "", "CariTur": "", "CariGrup": "", "Adresler": "", "Temsilci": "",
-            "CariOzelKod1": "", "CariOzelKod2": "", "CariOzelKod3": "", "CariOzelKod4": "", "CariOzelKod5": "",
-            "FisOzelKod1": "", "FisOzelKod2": "", "FisOzelKod3": "", "FisOzelKod4": "", "FisOzelKod5": "",
-            "Detayli": 0, "Page": 1, "PageSize": int(body.page_size or 500),
-            **stok_empty,
-        }
-
+        # Fetch iptal_detay for each day within the window
+        all_rows: list = []
         pos_error: Optional[str] = None
-        rows: list = []
         try:
-            rows = await _pos_run(tenant_id, "rap_fis_kalem_listesi_web", fis_params)
+            day = since_dt
+            while day.date() <= today_dt.date():
+                dt_str = day.strftime("%Y-%m-%d")
+                day_rows = await _pos_dataset_get(tenant_id, "iptal_detay", {
+                    "sdate": f"{dt_str} 00:00:00",
+                    "edate": f"{dt_str} 23:59:59",
+                    "IPTAL_ID": None,
+                })
+                all_rows.extend(day_rows)
+                day = day + timedelta(days=1)
         except Exception as e:
             pos_error = f"{type(e).__name__}: {e}"
 
-        # --- Sample first row keys to help diagnose field names ---
         sample_keys: list = []
         sample_row: dict = {}
-        if rows:
-            sample_row = {k: rows[0].get(k) for k in list(rows[0].keys())[:40]}
-            sample_keys = list(rows[0].keys())
+        if all_rows:
+            sample_row = {k: all_rows[0].get(k) for k in list(all_rows[0].keys())[:40]}
+            sample_keys = list(all_rows[0].keys())
 
-        # --- Line cancellations ---
+        cancelled_belges = []
         line_cancellations = []
-        for r in rows:
-            row_iptal = (
-                str(r.get("SATIR_DURUMU") or "").lower().find("iptal") >= 0
-                or r.get("SATIR_IPTAL") in (1, "1", True, "E")
-                or r.get("IPTAL") in (1, "1", True, "E")
-                or str(r.get("DURUM") or "").lower() == "iptal"
-            )
-            if not row_iptal:
+
+        for r in all_rows:
+            iptal_id = r.get("IPTAL_ID")
+            if iptal_id is None:
                 continue
-            bn = str(r.get("BELGENO") or "").strip()
-            stok_kod = str(r.get("STOK_KOD") or r.get("KOD") or "").strip()
-            stok_ad = str(r.get("STOK_AD") or r.get("AD") or "Stok kalemi")
-            miktar = float(r.get("MIKTAR_FIS") or 0)
-            satir_toplam = float(r.get("SATIR_GENEL_TOPLAM") or r.get("DAHIL_NET_TUTAR") or 0)
-            key = f"{bn}::{stok_kod}::{miktar}"
+            iptal_tipi = str(r.get("IPTAL_TIPI") or "").strip()
+            personel = str(r.get("PERSONEL_AD") or "").strip()
+            lokasyon = str(r.get("LOKASYON") or "").strip()
+            fis_no = str(r.get("FIS_NO") or r.get("BELGE_NO") or r.get("BELGENO") or "").strip()
+            try:
+                tutar = float(r.get("TUTAR") or 0)
+            except (TypeError, ValueError):
+                tutar = 0.0
+            detay_satir = r.get("DETAY_SATIR_SAYISI") or 0
+
+            is_line_cancel = "satır" in iptal_tipi.lower() or "satir" in iptal_tipi.lower()
+            key = str(iptal_id)
 
             sent = False
             dedup_result = "skipped_disabled"
-            if notify_line_cancellations and body.send_push:
-                is_new = await _mark_event_seen(tenant_id, "satir_iptal", key)
-                if is_new:
-                    await _push_many(
-                        tokens,
-                        f"❌ Satır İptali · {tenant_name}",
-                        f"{bn} · {stok_ad} ({miktar:g}) iptal edildi · ₺{satir_toplam:,.2f}",
-                        {"type": "line_cancellation", "belgeno": bn, "stok_kod": stok_kod,
-                         "tenant": tenant_id, "tenant_name": tenant_name},
-                    )
-                    sent = True
-                    total_push_sent += 1
-                    dedup_result = "sent"
-                else:
-                    dedup_result = "already_seen"
-            elif not notify_line_cancellations:
-                dedup_result = "disabled_by_user"
 
-            line_cancellations.append({
-                "belgeno": bn, "stok_kod": stok_kod, "stok_ad": stok_ad,
-                "miktar": miktar, "satir_toplam": satir_toplam,
-                "fields_detected": {
-                    "SATIR_DURUMU": r.get("SATIR_DURUMU"),
-                    "SATIR_IPTAL": r.get("SATIR_IPTAL"),
-                    "IPTAL": r.get("IPTAL"),
-                    "DURUM": r.get("DURUM"),
-                },
-                "result": dedup_result,
-                "push_sent": sent,
-            })
-
-        # --- Fiş-level cancellations + high sales ---
-        seen_belge = {}
-        for r in rows:
-            bn = str(r.get("BELGENO") or "").strip()
-            if not bn:
-                continue
-            if bn not in seen_belge:
-                seen_belge[bn] = {"row": r, "__total": float(r.get("SATIR_GENEL_TOPLAM") or 0)}
-            else:
-                seen_belge[bn]["__total"] += float(r.get("SATIR_GENEL_TOPLAM") or 0)
-
-        cancelled_belges = []
-        high_sales = []
-        for bn, agg in seen_belge.items():
-            r = agg["row"]
-            total = float(agg["__total"] or 0)
-            fis_turu_raw = r.get("FIS_TURU") or ""
-            fis_durumu_raw = r.get("FIS_DURUMU") or ""
-            fis_turu = str(fis_turu_raw).lower()
-            fis_durumu = str(fis_durumu_raw).lower()
-
-            is_cancelled = ("iptal" in fis_durumu) or (r.get("IPTAL") in (1, "1", True, "E"))
-            if is_cancelled:
-                sent = False
-                dedup_result = "skipped_disabled"
-                if notify_cancellations and body.send_push:
-                    is_new = await _mark_event_seen(tenant_id, "iptal", bn)
+            if is_line_cancel:
+                if notify_line_cancellations and body.send_push:
+                    is_new = await _mark_event_seen(tenant_id, "satir_iptal", key)
                     if is_new:
-                        await _push_many(
-                            tokens,
-                            f"🚫 Fiş İptali · {tenant_name}",
-                            f"{fis_turu_raw or 'Fiş'} {bn} iptal edildi · ₺{total:,.2f}",
-                            {"type": "cancellation", "belgeno": bn,
-                             "tenant": tenant_id, "tenant_name": tenant_name},
-                        )
+                        title = f"❌ Satır İptali · {tenant_name}"
+                        body_msg = f"{personel or 'Personel'} · {lokasyon or ''} · {detay_satir} satır · ₺{tutar:,.2f}"
+                        await _push_many(tokens, title, body_msg.strip(), {
+                            "type": "line_cancellation", "iptal_id": iptal_id,
+                            "tenant": tenant_id, "tenant_name": tenant_name,
+                        })
+                        sent = True
+                        total_push_sent += 1
+                        dedup_result = "sent"
+                    else:
+                        dedup_result = "already_seen"
+                elif not notify_line_cancellations:
+                    dedup_result = "disabled_by_user"
+
+                line_cancellations.append({
+                    "belgeno": fis_no or str(iptal_id),
+                    "stok_kod": "",
+                    "stok_ad": f"{iptal_tipi} — {detay_satir} satır",
+                    "miktar": detay_satir,
+                    "satir_toplam": tutar,
+                    "iptal_id": iptal_id,
+                    "personel": personel,
+                    "lokasyon": lokasyon,
+                    "result": dedup_result,
+                    "push_sent": sent,
+                })
+            else:
+                if notify_cancellations and body.send_push:
+                    is_new = await _mark_event_seen(tenant_id, "iptal", key)
+                    if is_new:
+                        title = f"🚫 Fiş İptali · {tenant_name}"
+                        parts = []
+                        if personel:
+                            parts.append(personel)
+                        if lokasyon:
+                            parts.append(lokasyon)
+                        if fis_no:
+                            parts.append(f"#{fis_no}")
+                        prefix = " · ".join(parts) if parts else (iptal_tipi or "İptal")
+                        body_msg = f"{prefix} · ₺{tutar:,.2f}"
+                        await _push_many(tokens, title, body_msg, {
+                            "type": "cancellation", "iptal_id": iptal_id,
+                            "tenant": tenant_id, "tenant_name": tenant_name,
+                        })
                         sent = True
                         total_push_sent += 1
                         dedup_result = "sent"
@@ -659,54 +640,30 @@ async def scan_now(body: ScanNowBody, current_user: dict = Depends(get_current_u
                     dedup_result = "disabled_by_user"
 
                 cancelled_belges.append({
-                    "belgeno": bn,
-                    "fis_turu": fis_turu_raw,
-                    "fis_durumu": fis_durumu_raw,
-                    "total": total,
-                    "iptal_flag": r.get("IPTAL"),
+                    "belgeno": fis_no or str(iptal_id),
+                    "fis_turu": iptal_tipi or "Fiş İptal",
+                    "fis_durumu": iptal_tipi,
+                    "total": tutar,
+                    "iptal_flag": None,
+                    "iptal_id": iptal_id,
+                    "personel": personel,
+                    "lokasyon": lokasyon,
                     "result": dedup_result,
                     "push_sent": sent,
-                })
-
-            is_sale_doc = any(x in fis_turu for x in ("perakende", "satış fatura", "satis fatura"))
-            if is_sale_doc and not is_cancelled and total >= high_sales_threshold:
-                sent = False
-                dedup_result = "skipped_disabled"
-                if notify_high_sales and body.send_push:
-                    is_new = await _mark_event_seen(tenant_id, "yuksek_satis", bn)
-                    if is_new:
-                        await _push_many(
-                            tokens,
-                            f"💰 Yüksek Satış · {tenant_name}",
-                            f"{fis_turu_raw or 'Satış'} {bn}: ₺{total:,.2f}",
-                            {"type": "high_sale", "belgeno": bn, "amount": total,
-                             "tenant": tenant_id, "tenant_name": tenant_name},
-                        )
-                        sent = True
-                        total_push_sent += 1
-                        dedup_result = "sent"
-                    else:
-                        dedup_result = "already_seen"
-                elif not notify_high_sales:
-                    dedup_result = "disabled_by_user"
-
-                high_sales.append({
-                    "belgeno": bn, "fis_turu": fis_turu_raw,
-                    "total": total, "result": dedup_result, "push_sent": sent,
                 })
 
         tenants_report.append({
             "tenant_id": tenant_id,
             "tenant_name": tenant_name,
             "date_range": {"from": since, "to": today},
-            "total_rows": len(rows),
-            "unique_belge_count": len(seen_belge),
+            "total_rows": len(all_rows),
+            "unique_belge_count": len({str(r.get("IPTAL_ID")) for r in all_rows if r.get("IPTAL_ID") is not None}),
             "pos_error": pos_error,
             "sample_keys": sample_keys,
             "sample_row": sample_row,
             "cancelled_belges": cancelled_belges,
             "line_cancellations": line_cancellations,
-            "high_sales": high_sales,
+            "high_sales": [],  # iptal_detay has no sales info; see watcher for dedicated path
         })
 
     return {
