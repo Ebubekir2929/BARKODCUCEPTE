@@ -109,25 +109,18 @@ async def register_token(body: RegisterTokenBody, current_user: dict = Depends(g
 
 @router.post("/unregister-token")
 async def unregister_token(body: RegisterTokenBody, current_user: dict = Depends(get_current_user)):
-    """Mark a push token inactive for the current user."""
-    token = (body.token or "").strip()
+    """NO-OP: Keeps token active regardless of client request.
+
+    Historically this used to deactivate the push token when the user toggled
+    the "Push Bildirimleri" switch off. That turned out to be fragile: users
+    toggled accidentally and were left without notifications. We now keep the
+    token active as long as it's registered — the in-app toggle still governs
+    whether local notifications are shown, but the backend watcher can still
+    reach the device.
+    """
     user_id = current_user["user_id"]
-    pool = await get_patron_pool()
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            if token:
-                await cur.execute(
-                    "UPDATE user_push_tokens SET active=0 WHERE user_id=%s AND token=%s",
-                    (user_id, token),
-                )
-            else:
-                # Deactivate all tokens for this user
-                await cur.execute(
-                    "UPDATE user_push_tokens SET active=0 WHERE user_id=%s",
-                    (user_id,),
-                )
-            await conn.commit()
-    return {"ok": True}
+    logger.info(f"unregister-token called by user {user_id} - keeping token active (no-op)")
+    return {"ok": True, "noop": True}
 
 
 async def _send_to_expo(tokens: List[str], title: str, body: str, data: dict = None) -> dict:
