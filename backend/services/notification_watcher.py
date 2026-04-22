@@ -206,6 +206,13 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
     # Look back 2 days to catch recent events
     two_days_ago = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
 
+    logger.info(
+        f"[scan] START user={user['user_id']} tenant={tenant_id} ({tenant_name}) "
+        f"tokens={len(tokens)} notify_cancel={user['notify_cancellations']} "
+        f"notify_line={user.get('notify_line_cancellations')} "
+        f"notify_high={user['notify_high_sales']} threshold={user['high_sales_threshold']}"
+    )
+
     stok_empty = {
         "Stoklar": "", "StokGrup": "", "StokCinsi": "", "StokMarka": "", "StokVergi": "",
         "StokOzelKod1": "", "StokOzelKod2": "", "StokOzelKod3": "", "StokOzelKod4": "",
@@ -213,7 +220,7 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
     }
 
     # --- 1) Fiş İptalleri + Yüksek Satışlar (single query to fis_kalem) ---
-    if user["notify_cancellations"] or user["notify_high_sales"]:
+    if user["notify_cancellations"] or user["notify_high_sales"] or user.get("notify_line_cancellations"):
         try:
             fis_params = {
                 "BASTARIH": two_days_ago, "BITTARIH": today,
@@ -225,7 +232,24 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
                 **stok_empty,
             }
             rows = await _pos_run(tenant_id, "rap_fis_kalem_listesi_web", fis_params)
+            logger.info(f"[scan] tenant={tenant_id} fetched rows={len(rows)} (range {two_days_ago} -> {today})")
+            if rows:
+                sample_row = rows[0]
+                logger.info(
+                    f"[scan] sample_keys={list(sample_row.keys())[:30]}"
+                )
+                logger.info(
+                    f"[scan] sample_row FIS_TURU={sample_row.get('FIS_TURU')!r} "
+                    f"FIS_DURUMU={sample_row.get('FIS_DURUMU')!r} IPTAL={sample_row.get('IPTAL')!r} "
+                    f"SATIR_DURUMU={sample_row.get('SATIR_DURUMU')!r} SATIR_IPTAL={sample_row.get('SATIR_IPTAL')!r} "
+                    f"DURUM={sample_row.get('DURUM')!r} BELGENO={sample_row.get('BELGENO')!r}"
+                )
+            else:
+                logger.warning(f"[scan] tenant={tenant_id} NO ROWS returned from POS! Check sync.")
+
             # --- 1a) SATIR İPTALLERİ — iterate each row and check row-level cancel flag ---
+            line_cancel_count = 0
+            line_pushed = 0
             if user.get("notify_line_cancellations"):
                 for r in rows:
                     row_iptal = (
@@ -236,6 +260,7 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
                     )
                     if not row_iptal:
                         continue
+                    line_cancel_count += 1
                     bn = str(r.get("BELGENO") or "").strip()
                     stok_kod = str(r.get("STOK_KOD") or r.get("KOD") or "").strip()
                     stok_ad = str(r.get("STOK_AD") or r.get("AD") or "Stok kalemi")
@@ -243,6 +268,7 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
                     satir_toplam = float(r.get("SATIR_GENEL_TOPLAM") or r.get("DAHIL_NET_TUTAR") or 0)
                     key = f"{bn}::{stok_kod}::{miktar}"
                     if await _mark_event_seen(tenant_id, "satir_iptal", key):
+                        logger.info(f"[scan] ❌ LINE CANCEL NEW: belgeno={bn} stok={stok_kod} miktar={miktar}")
                         await _push_many(
                             tokens,
                             f"❌ Satır İptali · {tenant_name}",
@@ -250,6 +276,11 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
                             {"type": "line_cancellation", "belgeno": bn, "stok_kod": stok_kod,
                              "tenant": tenant_id, "tenant_name": tenant_name},
                         )
+                        line_pushed += 1
+                    else:
+                        logger.info(f"[scan] LINE CANCEL already_seen: belgeno={bn} stok={stok_kod}")
+            logger.info(f"[scan] line_cancellations found={line_cancel_count} pushed={line_pushed}")
+
             # --- 1b) Fiş seviyesi iptalleri + Yüksek Satış: aggregate by BELGENO ---
             seen_belge = {}
             for r in rows:
@@ -261,20 +292,38 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
                     seen_belge[bn]["__total"] = float(r.get("SATIR_GENEL_TOPLAM") or 0)
                 else:
                     seen_belge[bn]["__total"] = seen_belge[bn].get("__total", 0) + float(r.get("SATIR_GENEL_TOPLAM") or 0)
+
+            cancel_count = 0
+            cancel_pushed = 0
+            high_count = 0
+            high_pushed = 0
+
             for bn, r in seen_belge.items():
                 total = float(r.get("__total") or 0)
                 fis_turu = str(r.get("FIS_TURU") or "").lower()
                 fis_durumu = str(r.get("FIS_DURUMU") or "").lower()
 
                 is_cancelled = ("iptal" in fis_durumu) or (r.get("IPTAL") in (1, "1", True, "E"))
-                if is_cancelled and user["notify_cancellations"]:
-                    if await _mark_event_seen(tenant_id, "iptal", bn):
-                        await _push_many(
-                            tokens,
-                            f"🚫 Fiş İptali · {tenant_name}",
-                            f"{(r.get('FIS_TURU') or 'Fiş')} {bn} iptal edildi · ₺{total:,.2f}",
-                            {"type": "cancellation", "belgeno": bn, "tenant": tenant_id, "tenant_name": tenant_name},
-                        )
+                if is_cancelled:
+                    cancel_count += 1
+                    logger.info(
+                        f"[scan] 🚫 CANCEL FOUND belgeno={bn} fis_turu={r.get('FIS_TURU')!r} "
+                        f"fis_durumu={r.get('FIS_DURUMU')!r} iptal_flag={r.get('IPTAL')!r} total={total:.2f}"
+                    )
+                    if user["notify_cancellations"]:
+                        if await _mark_event_seen(tenant_id, "iptal", bn):
+                            await _push_many(
+                                tokens,
+                                f"🚫 Fiş İptali · {tenant_name}",
+                                f"{(r.get('FIS_TURU') or 'Fiş')} {bn} iptal edildi · ₺{total:,.2f}",
+                                {"type": "cancellation", "belgeno": bn, "tenant": tenant_id, "tenant_name": tenant_name},
+                            )
+                            cancel_pushed += 1
+                            logger.info(f"[scan] ✅ CANCEL PUSHED belgeno={bn}")
+                        else:
+                            logger.info(f"[scan] CANCEL already_seen belgeno={bn}")
+                    else:
+                        logger.info(f"[scan] CANCEL disabled_by_user belgeno={bn}")
 
                 is_sale_doc = any(x in fis_turu for x in ("perakende", "satış fatura", "satis fatura"))
                 if (
@@ -283,6 +332,7 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
                     and not is_cancelled
                     and total >= user["high_sales_threshold"]
                 ):
+                    high_count += 1
                     if await _mark_event_seen(tenant_id, "yuksek_satis", bn):
                         await _push_many(
                             tokens,
@@ -290,8 +340,17 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
                             f"{(r.get('FIS_TURU') or 'Satış')} {bn}: ₺{total:,.2f}",
                             {"type": "high_sale", "belgeno": bn, "amount": total, "tenant": tenant_id, "tenant_name": tenant_name},
                         )
+                        high_pushed += 1
+                        logger.info(f"[scan] ✅ HIGH_SALE PUSHED belgeno={bn} total={total:.2f}")
+                    else:
+                        logger.info(f"[scan] HIGH_SALE already_seen belgeno={bn}")
+
+            logger.info(
+                f"[scan] SUMMARY tenant={tenant_id} belge_cancels={cancel_count} pushed={cancel_pushed} "
+                f"high_sales={high_count} pushed={high_pushed}"
+            )
         except Exception as e:
-            logger.warning(f"fis_kalem watcher failed (user {user['user_id']}, tenant {tenant_id}): {e}")
+            logger.warning(f"[scan] fis_kalem watcher failed (user {user['user_id']}, tenant {tenant_id}): {e}")
 
     # --- 2) Eksi Stok ---
     if user["notify_low_stock"]:
