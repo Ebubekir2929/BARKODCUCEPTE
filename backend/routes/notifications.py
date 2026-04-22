@@ -633,5 +633,12 @@ async def set_settings(body: NotificationSettings, current_user: dict = Depends(
                 1 if body.notify_low_stock else 0,
                 max(1, int(body.check_interval_minutes or 15)),
             ))
+            # Re-activate all push tokens so the watcher can deliver events.
+            # Prevents the "user toggled Push off then on, but tokens stayed
+            # active=0" situation from blocking notifications.
+            await cur.execute(
+                "UPDATE user_push_tokens SET active=1, updated_at=NOW() WHERE user_id=%s",
+                (user_id,),
+            )
             await conn.commit()
     return {"ok": True}
