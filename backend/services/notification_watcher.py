@@ -117,21 +117,16 @@ async def _push_many(tokens: List[str], title: str, body: str, data: dict | None
                             if status == "error":
                                 msg = ticket.get("message") or "unknown"
                                 err_code = (ticket.get("details") or {}).get("error")
-                                logger.warning(f"[push] Expo ERROR for token {tk[:25]}... status={status} code={err_code} msg={msg}")
-                                # Auto-deactivate invalid tokens
-                                if err_code in ("DeviceNotRegistered", "InvalidCredentials"):
-                                    try:
-                                        pool = await get_patron_pool()
-                                        async with pool.acquire() as conn:
-                                            async with conn.cursor() as cur:
-                                                await cur.execute(
-                                                    "UPDATE user_push_tokens SET active=0 WHERE token=%s",
-                                                    (tk,),
-                                                )
-                                                await conn.commit()
-                                        logger.info(f"[push] Deactivated invalid token {tk[:25]}...")
-                                    except Exception as de:
-                                        logger.warning(f"[push] deactivate failed: {de}")
+                                logger.warning(
+                                    f"[push] Expo ERROR for token {tk[:25]}... "
+                                    f"status={status} code={err_code} msg={msg}"
+                                )
+                                # NOTE: We used to auto-deactivate invalid tokens here.
+                                # Disabled because it was deactivating tokens that the
+                                # device would actually re-register minutes later on
+                                # app re-open, causing a thrash of active flags.
+                                # Just log the error and let the next register-token
+                                # call refresh the token naturally.
                             elif status == "ok":
                                 logger.info(f"[push] ✅ Ticket OK for token {tk[:25]}... id={ticket.get('id')}")
     except Exception as e:
