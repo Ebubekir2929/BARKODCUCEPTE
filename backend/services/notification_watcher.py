@@ -408,43 +408,79 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
         except Exception as e:
             logger.warning(f"[scan] iptal_detay watcher failed (user {user['user_id']}, tenant {tenant_id}): {e}")
 
-    # --- 2) Eksi Stok ---
+    # --- 2) Eksi Stok (MIKTAR < 0) — local dataset_cache via get_data_pool ---
     if user["notify_low_stock"]:
         try:
-            stok_empty = {
-                "Stoklar": "", "StokGrup": "", "StokCinsi": "", "StokMarka": "", "StokVergi": "",
-                "StokOzelKod1": "", "StokOzelKod2": "", "StokOzelKod3": "", "StokOzelKod4": "",
-                "StokOzelKod5": "", "StokOzelKod6": "", "StokOzelKod7": "", "StokOzelKod8": "", "StokOzelKod9": "",
-            }
-            stok_params = {
-                "TARIH": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "Lokasyon": "", "Proje": "", "Dovizler": "",
-                "StokAlisFiyat": 1, "StokSatisFiyat": 1, "StokMaliyet": "", "StokStokKart": 1,
-                "Page": 1, "PageSize": 500,
-                **stok_empty,
-            }
-            rows = await _pos_run(tenant_id, "rap_stok_envanter_web", stok_params)
+            from services import get_data_pool
+            import json as _json
+            data_pool = await get_data_pool()
+            async with data_pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("""
+                        SELECT data_json FROM dataset_cache
+                        WHERE tenant_id=%s AND dataset_key='stock_list'
+                        ORDER BY updated_at DESC
+                    """, (tenant_id,))
+                    rows = await cur.fetchall()
+
+            # Merge all cached pages and de-duplicate by stok kod
             totals: Dict[str, Dict[str, Any]] = {}
-            for r in rows:
-                kod = str(r.get("STOK_KOD") or r.get("KOD") or "").strip()
-                if not kod:
+            total_items = 0
+            for (data_json,) in rows:
+                if not data_json:
                     continue
-                miktar = float(r.get("MIKTAR") or 0)
-                if kod not in totals:
-                    totals[kod] = {"ad": r.get("STOK_AD") or r.get("AD") or kod, "miktar": 0.0}
-                totals[kod]["miktar"] += miktar
+                try:
+                    items = _json.loads(data_json)
+                except Exception:
+                    continue
+                if not isinstance(items, list):
+                    continue
+                for it in items:
+                    total_items += 1
+                    kod = str(it.get("STOK_KOD") or it.get("KOD") or it.get("ID") or "").strip()
+                    if not kod:
+                        continue
+                    try:
+                        miktar = float(it.get("MIKTAR") or it.get("STOK_MIKTAR") or 0)
+                    except (TypeError, ValueError):
+                        miktar = 0.0
+                    if kod not in totals:
+                        totals[kod] = {
+                            "ad": it.get("STOK_AD") or it.get("AD") or it.get("STOK_ADI") or kod,
+                            "miktar": 0.0,
+                        }
+                    totals[kod]["miktar"] += miktar
+
+            low_stock_count = sum(1 for _, info in totals.items() if info["miktar"] < 0)
+            logger.info(
+                f"[scan] stock_list tenant={tenant_id} cached_items={total_items} "
+                f"unique_codes={len(totals)} negative={low_stock_count}"
+            )
+
+            pushed_stock = 0
+            today_str = datetime.now().strftime("%Y-%m-%d")
             for kod, info in totals.items():
-                if info["miktar"] < 0:
-                    key = f"{kod}:{datetime.now().strftime('%Y-%m-%d')}"
-                    if await _mark_event_seen(tenant_id, "eksi_stok", key):
-                        await _push_many(
-                            tokens,
-                            f"📦 Eksi Stok · {tenant_name}",
-                            f"{info['ad']} (Kod: {kod}) — Toplam: {info['miktar']:,.2f}",
-                            {"type": "low_stock", "stok_kod": kod, "tenant": tenant_id, "tenant_name": tenant_name},
-                        )
+                if info["miktar"] >= 0:
+                    continue
+                # Re-alert once per day per stock code
+                key = f"{kod}:{today_str}"
+                if await _mark_event_seen(tenant_id, "eksi_stok", key):
+                    await _push_many(
+                        tokens,
+                        f"📦 Eksi Stok · {tenant_name}",
+                        f"{info['ad']} (Kod: {kod}) — {info['miktar']:,.2f} adet",
+                        {
+                            "type": "low_stock", "stok_kod": kod,
+                            "miktar": info["miktar"],
+                            "tenant": tenant_id, "tenant_name": tenant_name,
+                        },
+                    )
+                    pushed_stock += 1
+                    logger.info(f"[scan] ✅ LOW_STOCK PUSHED kod={kod} miktar={info['miktar']}")
+            if pushed_stock:
+                logger.info(f"[scan] SUMMARY tenant={tenant_id} low_stock_pushed={pushed_stock}")
         except Exception as e:
-            logger.warning(f"stok watcher failed (user {user['user_id']}, tenant {tenant_id}): {e}")
+            logger.warning(f"[scan] stok watcher failed (user {user['user_id']}, tenant {tenant_id}): {e}")
 
     await _update_last_check(user["user_id"])
 
