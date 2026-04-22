@@ -88,18 +88,54 @@ async def _pos_dataset_get(tenant_id: str, dataset_key: str, params: dict) -> li
 
 async def _push_many(tokens: List[str], title: str, body: str, data: dict | None = None) -> None:
     if not tokens:
+        logger.warning("[push] _push_many called with 0 tokens")
         return
     msgs = [{
         "to": t, "sound": "default", "title": title, "body": body,
-        "data": data or {}, "priority": "high", "channelId": "cancellations",
+        "data": data or {}, "priority": "high", "channelId": "default",
     } for t in tokens]
     try:
         async with httpx.AsyncClient(timeout=20) as client:
-            await client.post(EXPO_PUSH_URL, json=msgs, headers={
+            resp = await client.post(EXPO_PUSH_URL, json=msgs, headers={
                 "Accept": "application/json", "Content-Type": "application/json",
             })
+            status_code = resp.status_code
+            try:
+                body_json = resp.json()
+            except Exception:
+                body_json = {"raw": resp.text[:500]}
+            logger.info(f"[push] Expo response status={status_code} body={body_json}")
+
+            # Parse tickets to detect delivery issues (DeviceNotRegistered etc.)
+            if isinstance(body_json, dict):
+                tickets = body_json.get("data") or []
+                if isinstance(tickets, list):
+                    for idx, ticket in enumerate(tickets):
+                        tk = tokens[idx] if idx < len(tokens) else "?"
+                        if isinstance(ticket, dict):
+                            status = ticket.get("status")
+                            if status == "error":
+                                msg = ticket.get("message") or "unknown"
+                                err_code = (ticket.get("details") or {}).get("error")
+                                logger.warning(f"[push] Expo ERROR for token {tk[:25]}... status={status} code={err_code} msg={msg}")
+                                # Auto-deactivate invalid tokens
+                                if err_code in ("DeviceNotRegistered", "InvalidCredentials"):
+                                    try:
+                                        pool = await get_patron_pool()
+                                        async with pool.acquire() as conn:
+                                            async with conn.cursor() as cur:
+                                                await cur.execute(
+                                                    "UPDATE user_push_tokens SET active=0 WHERE token=%s",
+                                                    (tk,),
+                                                )
+                                                await conn.commit()
+                                        logger.info(f"[push] Deactivated invalid token {tk[:25]}...")
+                                    except Exception as de:
+                                        logger.warning(f"[push] deactivate failed: {de}")
+                            elif status == "ok":
+                                logger.info(f"[push] ✅ Ticket OK for token {tk[:25]}... id={ticket.get('id')}")
     except Exception as e:
-        logger.warning(f"Push send failed: {e}")
+        logger.warning(f"[push] send failed: {e}")
 
 
 async def _mark_event_seen(tenant_id: str, event_type: str, event_key: str) -> bool:
