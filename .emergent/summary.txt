@@ -1,19 +1,141 @@
-<analysis>notification_watcher.pysync.phpexpo-navigation-barnotification_watcher.py/app/frontend/app/(tabs)/reports.tsxReportCardReportSummaryPanelTopBannerFilterModal/app/frontend/src/components/MinBakiyeMaxBakiyeuser_push_tokensnotification_settingsnotification_watcher.pysync.phpfis_iptalsatir_iptalhigh_saleslow_stockexpo-navigation-barfatih@berkyazilim.com
-/app/
-├── backend/
-│   ├── routes/
-│   │   ├── auth.py
-│   │   ├── data.py         
-│   │   └── notifications.py # Push token & settings CRUD
-│   ├── services/
-│   │   ├── mailer.py       
-│   │   └── notification_watcher.py # Asyncio background polling loop
-│   └── server.py            # Wires up routers and starts the watcher task
-├── frontend/
-│   ├── app/(tabs)/
-│   │   ├── reports.tsx      # Handles 7 report types, dynamic UI, PDF/Excel
-│   │   └── settings.tsx     # Includes new notification config UI
-│   ├── app/_layout.tsx      # Configured with Status/Navigation bar overrides
-│   ├── src/services/
-│   │   └── notificationService.ts # Expo notification registration & syncing
-asyncio.create_tasknotification_watcher.pysync.phpexpo-navigation-barpatron.user_push_tokensiduser_idtokenplatformdevice_idactivepatron.notification_settingsuser_idnotify_cancellationsnotify_line_cancellationsnotify_high_saleshigh_sales_thresholdnotify_low_stockcheck_interval_minutesexpo-navigation-bar/app/backend/services/notification_watcher.py/app/backend/routes/notifications.py/app/frontend/src/services/notificationService.ts/app/frontend/app/(tabs)/reports.tsx/app/frontend/app/(tabs)/settings.tsx/app/frontend/app/_layout.tsx/app/frontend/app/(tabs)/reports.tsxReportCardTopBannerFilterModalPOST /api/notifications/register-tokenPOST /api/notifications/unregister-tokenGET /api/notifications/settingsPOST /api/notifications/settingsi18n/app/frontend/src/i18n/translations.ts/app/test_result.md/app/memory/test_credentials.mdcakmak.ebubekir29@gmail.comadminexpo-navigation-barNavigationBar.setBackgroundColorAsyncsync.php/api/notifications/*adminadmincakmak.ebubekir29@gmail.comadmin/app/memory/test_credentials.md</analysis>
+<analysis>**original_problem_statement**: The user requested a comprehensive sales/POS management mobile application built with Expo and React Native.
+PRODUCT REQUIREMENTS:
+- Authentication: JWT-based login, registration, forgot password (SMTP). Branded Barkodcu Cepte. Includes mandatory password change for temporary passwords.
+- Dashboard: Summary cards, hourly sales chart, best/worst selling products, open tables, and waiter sales. 
+- Global Data Filter: Global filter (Data 1, Data 2, Data 3) dictating the data source for Dashboard, Reports, Stock, and Customers.
+- Stock & Customers: Filterable lists with detailed history/modals, live MariaDB/sync.php integration.
+- Reports: Dynamically filterable reports mirroring the legacy PHP POS system.
+- Push Notifications: Push notifications for cancellations, high sales, and low stock alerts polling directly from the legacy POS system.
+- Deployment: Backend hosted on Railway, Frontend built via Expo Application Services (EAS) for iOS and Android.
+
+**User's preferred language**: Turkish (INSTRUCT next agent to respond in Turkish only. Lütfen sadece Türkçe yanıt verin.)
+
+**what currently exists?** 
+A heavily featured, live-connected Expo application with a FastAPI backend. In this session, the application was fully localized to support both Turkish and English, and the theme was updated to automatically toggle Light/Dark mode based on system settings. The backend has been successfully containerized (Dockerfile, railway.json) and deployed to a production Railway environment. The email service was rewritten to use the Brevo HTTP API to bypass Railway's SMTP blocks. The frontend is correctly configured with  for APK generation, and the user has successfully built and tested the APK on their device. 
+
+**Last working item**:
+    - Last item agent was working: The user requested to change the default Emergent splash screen text/image shown when the app opens. The agent was inspecting the  directory to prepare for this change.
+    - Status: IN PROGRESS
+    - Agent Testing Done: N
+    - Which testing method agent to use?: Frontend testing agent/screenshot tool (to verify asset placement and  config).
+    - User Testing Done: N
+
+**All Pending/In progress Issue list**:
+  Issue 1: Update Splash Screen and App Icons
+     - Attempted fixes: Agent verified the existence of default assets (, , ) in .
+     - Next debug checklist: Generate or instruct the user to provide new brand images for the splash screen and app icon. Replace the existing default files or update  to point to the new assets.
+     - Why fix this issue and what will be achieved with the fix?: Removes placeholder/default Emergent branding so the app is fully white-labeled as Barkodcu Cepte for production release.
+     - Status: IN PROGRESS
+     - Is recurring issue?: N
+     - Should Test frontend/backend/both after fix?: Frontend
+     - Blocked on other issue: None
+     - Priority: P0
+
+**In progress Task List**:
+  Task 1: Prepare App for Store Submission
+     - Where to resume: After fixing the splash screen and icons, assist the user in generating the final production  (Android) and  (iOS) builds using EAS, and guide them through the store submission processes.
+     - What will be achieved with this?: App will be published to Google Play and Apple App Store.
+     - Status: NOT STARTED
+     - Should Test frontend/backend/both after fix?: Both (User Verification)
+     - Blocked on something: Splash screen completion and User's developer accounts.
+     - Priority: P1
+
+**Upcoming and Future Tasks**
+    Upcoming Tasks:
+    - (P1) App Store & Google Play Submission: Prepare assets (icons, screenshots), privacy policy, and final EAS production builds.
+    
+    Future Tasks:
+    - (P2) Code refactoring:  is over 2200 lines. Extract , , , and  into  to improve maintainability.
+
+**Completed work in this session**
+- UI/UX: Implemented automatic System Light/Dark mode toggling and translation of Appearance settings. (DONE)
+- Localization: Extracted all hardcoded Turkish strings into  and applied them globally across Dashboard, Reports, Stock, Customers, Settings, and Auth screens. (DONE)
+- Deployment (Backend): Created , , , and cleaned . Successfully guided user to deploy FastAPI backend to Railway. (DONE)
+- Deployment (Frontend): Created , fixed  configuration, removed deprecated , and guided user to build an Android APK via --platform is required when building in non-interactive mode. (DONE)
+- Fix: Switched Mailer service () from SMTP to Brevo HTTP API to bypass Railway's outgoing SMTP port blockages. (DONE)
+- Fix: Fixed Railway MongoDB connection integration. (DONE)
+
+**Earlier issues found/mentioned but not fixed**
+   - None. All backend deployment and build issues were handled perfectly during the session.
+
+**Known issue recurrence from previous fork**
+  - Issue recurrence in previous fork: None
+  - Recurrence count: 0
+  - Status: RESOLVED
+
+**Code Architecture**
+
+
+**Key Technical Concepts**
+- **Railway Deployment**: Backend is hosted on Railway using a Dockerfile.
+- **EAS Build**: Frontend is compiled using Expo Application Services (An Expo user account is required to proceed.
+Either log in with eas login or set the EXPO_TOKEN environment variable if you're using EAS CLI on CI (Learn more: https://docs.expo.dev/accounts/programmatic-access/)).
+- **Brevo Email API**: Because Railway blocks SMTP ports, transactional emails are sent via Brevo HTTP API.
+- **Zustand State**: Stores are utilized for Language and Theme selections.
+- **New Architecture**:  is set to  in  due to  worklets dependency in SDK 53.
+
+**key DB schema**
+  - : uid=0(root) gid=0(root) groups=0(root), , , , , 
+  - : , ...
+
+**changes in tech stack**
+  - Backend deployment shifted from local preview to **Railway**.
+  - Replaced SMTP email delivery with **Brevo HTTP API**.
+  - Removed deprecated  (using  natively).
+
+**All files of reference** 
+  - , , : Created/updated for Railway deployment.
+  - : Updated for Brevo integration.
+  - : Created for EAS APK builds.
+  - : Fixed plugins, splash image path, and enabled .
+  - : Expanded massively for localization.
+  - : Location of the splash screen images that need to be replaced.
+
+**Areas that need refactoring**: 
+  -  is over 2200 lines and urgently needs its sub-components abstracted out.
+
+**key api endpoints**
+  - All existing Fast API endpoints (Auth, Dashboard, Data, Notifications).
+
+**Critical Info for New Agent** 
+- **Production URL**: The user's backend is LIVE on Railway. The  in the frontend  points to the Railway URL. Do not change this to the local Emergent preview URL unless explicitly doing local web testing. 
+- **EAS Builds**: The user is testing on their physical device using APKs generated via --platform is required when building in non-interactive mode. Any native module changes or splash/icon changes will require a new APK build to reflect on their device.
+- **Language**: The user speaks Turkish. Respond ONLY in Turkish.
+
+**documents and test reports created in this job** 
+  -  (Created deployment guide for user)
+
+**Last 10 User Messages and any pending HUMAN messages** 
+ 1. (User): RAİLWAY İÇİN AYARLARI YAPALIM MI BAŞTAN HERŞEYİ
+ 2. (User): DİREK BURDAN SAVE DİYECEM DİMİ DOSYALAR İÇİNDE
+ 3. (User): PUSH BAŞARILI
+ 4. (User): BUİİD FAİLED HATASI VERDİ (Agent fixed Railway Root Directory config)
+ 5. (User uploads screenshot): ŞÖYLE BİR HATA VERDİ (Agent fixed DB connection block)
+ 6. (User uploads screenshot): EN SON BU (Agent fixed  in railway.json)
+ 7. (User uploads screenshots): BU EKRAN (Agent confirmed backend is live and working)
+ 8. (User): a seçeneğini ilk test edelim ve bir apk oluşturalım onu androidde bir test edeyim... (Agent setup eas.json and fixed app.json prebuild errors)
+ 9. (User): şimdi giriş yaparken bekletiyor apk oluştu ama bağlantı hatası diyor (Agent detected Railway needed MongoDB and had SMTP blocked, guided user to fix DB and setup Brevo email).
+ 10. (User): çok güzel çalşıtı tek şey uygulama açılırken splash ekranında emergent yaxıyor ınu değiştirebiliyor muyuz *(Pending Action: Agent needs to change the default splash screen image).*
+
+**Project Health Check:**
+- Broken: None. 
+- Mocked: None.
+
+**3rd Party Integrations** 
+  - Remote POS Sync ()
+  - Brevo HTTP API (Emailing)
+  - Railway (Backend Hosting)
+  - Expo Push Notifications
+
+**Testing status**
+  - Testing agent used after significant changes: NO (User verified changes directly via Railway Logs and EAS APKs)
+  - Troubleshoot agent used after agent stuck in loop: NO (Support agent used to provide publishing instructions)
+  - Test files created: None
+  - Known regressions: None
+
+**Credentials to test flow:**
+  - Standard user login:  /  or  /  
+  - Brevo, Railway, and SMTP integrations exist in Railway Variables, not directly in the repo code.
+
+**What agent forgot to execute**
+  - No user requests were forgotten, the agent was interrupted right after checking the  directory to fulfill the splash screen update request.</analysis>
