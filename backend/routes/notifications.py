@@ -69,6 +69,22 @@ async def ensure_tokens_table():
                     INDEX idx_tenant_type (tenant_id, event_type)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
+            # One-time cleanup: remove obvious fake/test push tokens that were
+            # seeded during development. They look like:
+            #   ExponentPushToken[test-abc-123]
+            #   ExponentPushToken[test-fake-token-123]
+            # These will never deliver push and would block real tokens.
+            try:
+                await cur.execute("""
+                    DELETE FROM user_push_tokens
+                    WHERE token LIKE '%test-%' OR token LIKE '%fake%'
+                       OR token LIKE '%dummy%' OR token LIKE '%abc-123%'
+                       OR token LIKE '%placeholder%'
+                """)
+                if cur.rowcount:
+                    logger.info(f"[cleanup] Deleted {cur.rowcount} fake/test push tokens on startup.")
+            except Exception as e:
+                logger.warning(f"[cleanup] fake-token purge failed: {e}")
             await conn.commit()
     logger.info("user_push_tokens + notification_settings tables ready")
 
@@ -87,15 +103,34 @@ class TestNotificationBody(BaseModel):
 
 @router.post("/register-token")
 async def register_token(body: RegisterTokenBody, current_user: dict = Depends(get_current_user)):
-    """Save / re-activate a push token for the current user."""
+    """Save / re-activate a push token for the current user.
+
+    Before inserting, we wipe every other token for this user so stale/fake
+    tokens from prior installs or test data cannot remain and pollute delivery.
+    """
     token = (body.token or "").strip()
     if not token:
         raise HTTPException(status_code=400, detail="Token gerekli")
+
+    # Basic sanity check — reject obviously-fake tokens so we never store them.
+    # Real Expo tokens look like: ExponentPushToken[xxxxxxxxxxxxx]
+    lower = token.lower()
+    fake_markers = ("test-", "fake", "dummy", "placeholder", "abc-123")
+    if any(m in lower for m in fake_markers):
+        logger.warning(f"[register-token] Rejecting obviously-fake token: {token!r}")
+        raise HTTPException(status_code=400, detail="Geçersiz görünen bir push token — kayıt reddedildi.")
 
     user_id = current_user["user_id"]
     pool = await get_patron_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            # Purge any other (stale / fake) tokens for this user so the device
+            # only has ONE valid token going forward.
+            await cur.execute(
+                "DELETE FROM user_push_tokens WHERE user_id=%s AND token<>%s",
+                (user_id, token),
+            )
+            deleted = cur.rowcount or 0
             await cur.execute("""
                 INSERT INTO user_push_tokens (user_id, token, platform, device_id, active, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, 1, NOW(), NOW())
@@ -103,8 +138,8 @@ async def register_token(body: RegisterTokenBody, current_user: dict = Depends(g
                     device_id=VALUES(device_id), updated_at=NOW()
             """, (user_id, token, body.platform or "", body.device_id or ""))
             await conn.commit()
-    logger.info(f"Push token registered for user {user_id}: {token[:20]}...")
-    return {"ok": True}
+    logger.info(f"Push token registered for user {user_id}: {token[:30]}... (purged {deleted} stale tokens)")
+    return {"ok": True, "purged_stale_tokens": deleted}
 
 
 @router.post("/unregister-token")
