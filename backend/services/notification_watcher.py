@@ -122,11 +122,13 @@ async def _get_users_to_check() -> List[Dict[str, Any]]:
             skipped_interval = 0
             skipped_no_tokens = 0
             skipped_no_tenant = 0
+            user_diag = []  # per-user diagnostic
             for r in rows:
                 interval_min = int(r[6] or 15)
                 last_check = r[7]
                 if last_check and (now - last_check).total_seconds() < interval_min * 60:
                     skipped_interval += 1
+                    user_diag.append(f"user={r[0]}:interval_wait")
                     continue
                 # Get active tokens for this user
                 await cur.execute(
@@ -135,7 +137,16 @@ async def _get_users_to_check() -> List[Dict[str, Any]]:
                 )
                 tokens = [t[0] for t in await cur.fetchall()]
                 if not tokens:
+                    # Also count how many inactive tokens exist for extra diagnosis
+                    await cur.execute(
+                        "SELECT COUNT(*), SUM(active) FROM user_push_tokens WHERE user_id=%s",
+                        (r[0],),
+                    )
+                    cnt_row = await cur.fetchone()
+                    total_tok = int(cnt_row[0] or 0)
+                    active_tok = int(cnt_row[1] or 0) if cnt_row[1] is not None else 0
                     skipped_no_tokens += 1
+                    user_diag.append(f"user={r[0]}:no_active_tokens(total={total_tok},active={active_tok},tenant={r[1]})")
                     continue
 
                 # Gather ALL tenant ids/names for this user
@@ -196,6 +207,8 @@ async def _get_users_to_check() -> List[Dict[str, Any]]:
         f"skipped_interval={skipped_interval} skipped_no_tokens={skipped_no_tokens} "
         f"skipped_no_tenant={skipped_no_tenant} -> due_entries={len(users)}"
     )
+    if user_diag:
+        logger.info(f"[_get_users_to_check] per_user: {' | '.join(user_diag)}")
     return users
 
 

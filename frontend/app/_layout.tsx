@@ -7,6 +7,8 @@ import { useLanguageStore } from '../src/store/languageStore';
 import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as NavigationBar from 'expo-navigation-bar';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import notificationService from '../src/services/notificationService';
 
 function AppShell() {
   const { colors } = useThemeStore();
@@ -29,7 +31,7 @@ function AppShell() {
 
 export default function RootLayout() {
   const { colors, isDark, loadTheme } = useThemeStore();
-  const { isLoading, checkAuth } = useAuthStore();
+  const { isLoading, checkAuth, isAuthenticated, token } = useAuthStore();
   const { isReady: langReady, loadLanguage } = useLanguageStore();
 
   useEffect(() => {
@@ -37,6 +39,28 @@ export default function RootLayout() {
     loadLanguage();
     checkAuth();
   }, []);
+
+  // Auto-register push token every time the user becomes authenticated so the
+  // backend watcher always has a live active token (the token can otherwise be
+  // marked inactive after a previous logout).
+  useEffect(() => {
+    if (!isAuthenticated || !token) return;
+    (async () => {
+      try {
+        const enabled = await AsyncStorage.getItem('notificationsEnabled');
+        // Only skip if explicitly disabled; default to registering so the
+        // background watcher works out of the box after login.
+        if (enabled === 'false') return;
+        if (Platform.OS === 'web') return;
+        await notificationService.registerForPushNotifications();
+        if (enabled === null) {
+          await AsyncStorage.setItem('notificationsEnabled', 'true');
+        }
+      } catch (e) {
+        console.log('[layout] auto-register push token failed:', e);
+      }
+    })();
+  }, [isAuthenticated, token]);
 
   // Apply Android navigation bar color whenever theme flips (system or manual)
   useEffect(() => {

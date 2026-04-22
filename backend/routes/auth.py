@@ -281,6 +281,20 @@ async def login(data: UserLogin):
 
     logger.info(f"User logged in via MySQL: {email} (identifier={identifier})")
 
+    # Re-activate any push tokens this user had on previous sessions so the
+    # background notification watcher can deliver push notifications again.
+    try:
+        pool = await get_patron_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE user_push_tokens SET active=1, updated_at=NOW() WHERE user_id=%s",
+                    (user_id,),
+                )
+                await conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to reactivate push tokens for user {user_id}: {e}")
+
     return TokenResponse(access_token=token, user=user_resp, license=license_status)
 
 
