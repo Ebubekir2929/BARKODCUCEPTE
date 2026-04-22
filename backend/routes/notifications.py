@@ -220,6 +220,65 @@ class NotificationSettings(BaseModel):
     check_interval_minutes: Optional[int] = 15
 
 
+@router.post("/reset-dedup")
+async def reset_dedup(current_user: dict = Depends(get_current_user)):
+    """Wipes the notification_events_seen table for this user's tenants.
+
+    Next watcher scan will treat every cancellation (and high sale / low stock)
+    as brand-new and re-send push notifications for them — useful for
+    debugging whether push delivery itself is working.
+    """
+    user_id = current_user["user_id"]
+    # Collect user's tenants from MySQL + Mongo
+    tenants: List[str] = []
+    pool = await get_patron_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT tenant_id FROM users WHERE user_id=%s", (user_id,))
+            r = await cur.fetchone()
+            if r and r[0]:
+                tenants.append(r[0])
+
+    # Also include extra tenants stored in Mongo
+    try:
+        from server import db as mongo_db  # type: ignore
+        if mongo_db is not None:
+            extras = await mongo_db.user_tenants.find({"user_id": user_id}).to_list(50)
+            for et in extras or []:
+                tid = et.get("tenant_id")
+                if tid and tid not in tenants:
+                    tenants.append(tid)
+    except Exception:
+        pass
+
+    if not tenants:
+        raise HTTPException(status_code=404, detail="Kullanıcı için tenant bulunamadı.")
+
+    deleted_total = 0
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            for tid in tenants:
+                await cur.execute(
+                    "DELETE FROM notification_events_seen WHERE tenant_id=%s",
+                    (tid,),
+                )
+                deleted_total += cur.rowcount or 0
+            # Also reset last_check_at so the next scan happens immediately
+            await cur.execute(
+                "UPDATE user_notification_settings SET last_check_at=NULL WHERE user_id=%s",
+                (user_id,),
+            )
+            await conn.commit()
+
+    logger.info(f"[reset-dedup] user={user_id} tenants={tenants} deleted={deleted_total}")
+    return {
+        "ok": True,
+        "tenants_cleared": tenants,
+        "events_deleted": deleted_total,
+        "message": "Dedup temizlendi. Sıradaki taramada tüm iptaller yeniden push olarak gönderilecek.",
+    }
+
+
 @router.get("/settings")
 async def get_settings(current_user: dict = Depends(get_current_user)):
     """Return the current user's notification preferences (creates defaults if missing)."""
