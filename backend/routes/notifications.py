@@ -153,11 +153,52 @@ async def _send_to_expo(tokens: List[str], title: str, body: str, data: dict = N
                     "Content-Type": "application/json",
                 },
             )
-            result = resp.json()
-            logger.info(f"Expo push response: {result}")
-            return {"ok": True, "sent": len(tokens), "expo_response": result}
+            status_code = resp.status_code
+            try:
+                result = resp.json()
+            except Exception:
+                result = {"raw": resp.text[:500]}
+            logger.info(f"[send-test] Expo HTTP {status_code} response: {result}")
+
+            # Analyse tickets to find delivery errors per token
+            ticket_summary = []
+            tickets = []
+            if isinstance(result, dict):
+                tickets = result.get("data") or []
+            if isinstance(tickets, list):
+                for idx, ticket in enumerate(tickets):
+                    tk = tokens[idx] if idx < len(tokens) else "?"
+                    if isinstance(ticket, dict):
+                        status = ticket.get("status")
+                        err_code = (ticket.get("details") or {}).get("error")
+                        msg = ticket.get("message") or ""
+                        ticket_summary.append({
+                            "token_preview": tk[:30] + "..." if len(tk) > 30 else tk,
+                            "status": status,
+                            "error_code": err_code,
+                            "message": msg,
+                            "id": ticket.get("id"),
+                        })
+                        if status == "error":
+                            logger.warning(
+                                f"[send-test] ❌ Expo ERROR for token {tk[:25]}... "
+                                f"code={err_code} msg={msg}"
+                            )
+                        elif status == "ok":
+                            logger.info(
+                                f"[send-test] ✅ Expo OK for token {tk[:25]}... "
+                                f"ticket_id={ticket.get('id')}"
+                            )
+
+            return {
+                "ok": status_code < 400,
+                "sent": len(tokens),
+                "http_status": status_code,
+                "expo_response": result,
+                "tickets": ticket_summary,
+            }
     except Exception as e:
-        logger.error(f"Expo push error: {e}")
+        logger.error(f"[send-test] Expo push error: {e}")
         return {"ok": False, "sent": 0, "error": str(e)}
 
 
