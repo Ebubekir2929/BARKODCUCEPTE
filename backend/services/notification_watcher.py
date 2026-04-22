@@ -118,10 +118,15 @@ async def _get_users_to_check() -> List[Dict[str, Any]]:
                 WHERE u.active = 1
             """)
             rows = await cur.fetchall()
+            total_settings = len(rows)
+            skipped_interval = 0
+            skipped_no_tokens = 0
+            skipped_no_tenant = 0
             for r in rows:
                 interval_min = int(r[6] or 15)
                 last_check = r[7]
                 if last_check and (now - last_check).total_seconds() < interval_min * 60:
+                    skipped_interval += 1
                     continue
                 # Get active tokens for this user
                 await cur.execute(
@@ -130,6 +135,7 @@ async def _get_users_to_check() -> List[Dict[str, Any]]:
                 )
                 tokens = [t[0] for t in await cur.fetchall()]
                 if not tokens:
+                    skipped_no_tokens += 1
                     continue
 
                 # Gather ALL tenant ids/names for this user
@@ -166,6 +172,7 @@ async def _get_users_to_check() -> List[Dict[str, Any]]:
                         pass
 
                 if not tenant_list:
+                    skipped_no_tenant += 1
                     continue
 
                 # One entry per (user, tenant)
@@ -183,6 +190,12 @@ async def _get_users_to_check() -> List[Dict[str, Any]]:
                         "last_check_at": last_check,
                         "tokens": tokens,
                     })
+
+    logger.info(
+        f"[_get_users_to_check] settings_rows={total_settings} "
+        f"skipped_interval={skipped_interval} skipped_no_tokens={skipped_no_tokens} "
+        f"skipped_no_tenant={skipped_no_tenant} -> due_entries={len(users)}"
+    )
     return users
 
 
@@ -391,19 +404,25 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
 async def _watcher_loop():
     """Main watcher loop — runs forever until cancelled."""
     logger.info("🔔 Notification watcher started")
+    iteration = 0
     while True:
+        iteration += 1
         try:
             users = await _get_users_to_check()
             if users:
-                logger.info(f"Checking notifications for {len(users)} user(s)")
+                logger.info(f"[watcher] iter={iteration} Checking notifications for {len(users)} user(s)")
                 # Group by tenant to avoid redundant POS calls (simple approach: process sequentially)
                 for user in users:
                     try:
                         await _check_tenant_for_user(user)
                     except Exception as inner_e:
-                        logger.warning(f"check failed for user {user.get('user_id')}: {inner_e}")
+                        logger.warning(f"[watcher] check failed for user {user.get('user_id')}: {inner_e}")
+            else:
+                # _get_users_to_check already logs the breakdown every iteration;
+                # nothing extra to add here.
+                pass
         except Exception as e:
-            logger.error(f"Watcher loop error: {e}")
+            logger.error(f"[watcher] loop error: {e}")
         await asyncio.sleep(60)  # run every 1 minute; per-user interval is enforced via last_check_at
 
 
