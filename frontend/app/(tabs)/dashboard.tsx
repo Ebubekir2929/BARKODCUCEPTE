@@ -961,32 +961,42 @@ export default function DashboardScreen() {
                 ) : hourDetailProducts.length > 0 ? (
                   <View style={[{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }]}>
                     <View style={[{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 12, backgroundColor: colors.background }]}>
-                      <Text style={[{ flex: 3, fontSize: 12, fontWeight: '700', color: colors.textSecondary }]}>{t('product')}</Text>
-                      <Text style={[{ flex: 1, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>{t('quantity_short')}</Text>
-                      <Text style={[{ flex: 1.5, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>{t('amount_col')}</Text>
+                      <Text style={[{ flex: 2.4, fontSize: 12, fontWeight: '700', color: colors.textSecondary }]}>{t('product')}</Text>
+                      <Text style={[{ flex: 0.8, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>{t('quantity_short')}</Text>
+                      <Text style={[{ flex: 1.8, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>{t('amount_col')}</Text>
                     </View>
                     {hourDetailProducts.map((item: any, idx: number) => {
                       const tutar = parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0');
                       return (
                         <View key={idx} style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border, alignItems: 'center' }]}>
-                          <View style={{ flex: 3 }}>
+                          <View style={{ flex: 2.4, paddingRight: 6 }}>
                             <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]} numberOfLines={1}>{item.STOK_ADI || t('product')}</Text>
-                            <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{item.LOKASYON || ''}</Text>
+                            <Text style={[{ fontSize: 11, color: colors.textSecondary }]} numberOfLines={1}>{item.LOKASYON || ''}</Text>
                           </View>
-                          <Text style={[{ flex: 1, fontSize: 14, fontWeight: '600', color: colors.text, textAlign: 'center' }]}>
+                          <Text style={[{ flex: 0.8, fontSize: 14, fontWeight: '600', color: colors.text, textAlign: 'center' }]}>
                             {parseFloat(item.TOPLAM_MIKTAR || '0').toFixed(0)}
                           </Text>
-                          <Text style={[{ flex: 1.5, fontSize: 14, fontWeight: '700', color: colors.primary, textAlign: 'right' }]}>
-                            ₺{tutar.toFixed(2)}
+                          <Text
+                            style={[{ flex: 1.8, fontSize: 13, fontWeight: '700', color: colors.primary, textAlign: 'right' }]}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.7}
+                          >
+                            ₺{tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </Text>
                         </View>
                       );
                     })}
                     {/* Total row */}
-                    <View style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 2, borderTopColor: colors.border, backgroundColor: colors.background }]}>
-                      <Text style={[{ flex: 4, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>{t('total_short')}</Text>
-                      <Text style={[{ flex: 1.5, fontSize: 16, fontWeight: '800', color: colors.primary, textAlign: 'right' }]}>
-                        ₺{hourDetailProducts.reduce((sum: number, item: any) => sum + parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0'), 0).toFixed(2)}
+                    <View style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 2, borderTopColor: colors.border, backgroundColor: colors.background, alignItems: 'center' }]}>
+                      <Text style={[{ flex: 3.2, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>{t('total_short')}</Text>
+                      <Text
+                        style={[{ flex: 1.8, fontSize: 15, fontWeight: '800', color: colors.primary, textAlign: 'right' }]}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.6}
+                      >
+                        ₺{hourDetailProducts.reduce((sum: number, item: any) => sum + parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0'), 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </Text>
                     </View>
                   </View>
@@ -1118,20 +1128,32 @@ export default function DashboardScreen() {
                       <Text style={[{ flex: 1.5, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>{t('amount_col')}</Text>
                     </View>
                     {iptalDetailItems.map((item: any, idx: number) => (
-                      <View key={idx} style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border }]}>
-                        <View style={{ flex: 3 }}>
-                          <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]}>{item.STOK_ADI || t('product')}</Text>
-                          <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{t('table_short')}: {item.MASA || '-'} · {item.SAAT || ''}</Text>
+                      <View key={idx} style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border, alignItems: 'center' }]}>
+                        <View style={{ flex: 2.4, paddingRight: 6 }}>
+                          <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]} numberOfLines={1}>{item.STOK_ADI || t('product')}</Text>
+                          <Text style={[{ fontSize: 11, color: colors.textSecondary }]} numberOfLines={1}>{t('table_short')}: {item.MASA || '-'} · {item.SAAT || ''}</Text>
                         </View>
-                        <Text style={[{ flex: 1, fontSize: 14, color: colors.text, textAlign: 'center' }]}>{parseFloat(item.MIKTAR || '0').toFixed(0)}</Text>
-                        <Text style={[{ flex: 1.5, fontSize: 14, fontWeight: '700', color: '#EF4444', textAlign: 'right' }]}>₺{parseFloat(item.SATIR_TUTAR || '0').toFixed(2)}</Text>
+                        <Text style={[{ flex: 0.8, fontSize: 14, color: colors.text, textAlign: 'center' }]}>{parseFloat(item.MIKTAR || '0').toFixed(0)}</Text>
+                        <Text
+                          style={[{ flex: 1.8, fontSize: 13, fontWeight: '700', color: '#EF4444', textAlign: 'right' }]}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.7}
+                        >
+                          ₺{parseFloat(item.SATIR_TUTAR || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </Text>
                       </View>
                     ))}
                     {/* Total row */}
-                    <View style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 2, borderTopColor: colors.border, backgroundColor: colors.background }]}>
-                      <Text style={[{ flex: 4, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>{t('total_short')}</Text>
-                      <Text style={[{ flex: 1.5, fontSize: 16, fontWeight: '800', color: '#EF4444', textAlign: 'right' }]}>
-                        ₺{iptalDetailItems.reduce((sum: number, item: any) => sum + parseFloat(item.SATIR_TUTAR || '0'), 0).toFixed(2)}
+                    <View style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 2, borderTopColor: colors.border, backgroundColor: colors.background, alignItems: 'center' }]}>
+                      <Text style={[{ flex: 3.2, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>{t('total_short')}</Text>
+                      <Text
+                        style={[{ flex: 1.8, fontSize: 15, fontWeight: '800', color: '#EF4444', textAlign: 'right' }]}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.6}
+                      >
+                        ₺{iptalDetailItems.reduce((sum: number, item: any) => sum + parseFloat(item.SATIR_TUTAR || '0'), 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </Text>
                     </View>
                   </View>
@@ -1187,35 +1209,45 @@ export default function DashboardScreen() {
                   <View style={[{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }]}>
                     {/* Table Header */}
                     <View style={[{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 12, backgroundColor: colors.background }]}>
-                      <Text style={[{ flex: 3, fontSize: 12, fontWeight: '700', color: colors.textSecondary }]}>{t('product')}</Text>
-                      <Text style={[{ flex: 1, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>{t('quantity_short')}</Text>
-                      <Text style={[{ flex: 1.5, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>{t('amount_col')}</Text>
+                      <Text style={[{ flex: 2.4, fontSize: 12, fontWeight: '700', color: colors.textSecondary }]}>{t('product')}</Text>
+                      <Text style={[{ flex: 0.8, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>{t('quantity_short')}</Text>
+                      <Text style={[{ flex: 1.8, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>{t('amount_col')}</Text>
                     </View>
                     {tableDetailItems.map((item: any, idx: number) => {
                       const tutar = item.TUTAR ? parseFloat(item.TUTAR) : (parseFloat(item.MIKTAR || '0') * parseFloat(item.FIYAT || '0'));
                       return (
                         <View key={idx} style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border, alignItems: 'center' }]}>
-                          <View style={{ flex: 3 }}>
-                            <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]}>{item.AD || 'Ürün'}</Text>
-                            <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>₺{parseFloat(item.FIYAT || '0').toFixed(2)} / {item.STOK_BIRIM_AD || 'Adet'}</Text>
+                          <View style={{ flex: 2.4, paddingRight: 6 }}>
+                            <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]} numberOfLines={1}>{item.AD || 'Ürün'}</Text>
+                            <Text style={[{ fontSize: 11, color: colors.textSecondary }]} numberOfLines={1}>₺{parseFloat(item.FIYAT || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} / {item.STOK_BIRIM_AD || 'Adet'}</Text>
                           </View>
-                          <Text style={[{ flex: 1, fontSize: 14, fontWeight: '600', color: colors.text, textAlign: 'center' }]}>
+                          <Text style={[{ flex: 0.8, fontSize: 14, fontWeight: '600', color: colors.text, textAlign: 'center' }]}>
                             {parseFloat(item.MIKTAR || '0').toFixed(item.STOK_BIRIM_AD === 'Kg' ? 3 : 0)}
                           </Text>
-                          <Text style={[{ flex: 1.5, fontSize: 14, fontWeight: '700', color: colors.primary, textAlign: 'right' }]}>
-                            ₺{tutar.toFixed(2)}
+                          <Text
+                            style={[{ flex: 1.8, fontSize: 13, fontWeight: '700', color: colors.primary, textAlign: 'right' }]}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.7}
+                          >
+                            ₺{tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </Text>
                         </View>
                       );
                     })}
                     {/* Total row */}
-                    <View style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 2, borderTopColor: colors.border, backgroundColor: colors.background }]}>
-                      <Text style={[{ flex: 4, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>{t('total_short')}</Text>
-                      <Text style={[{ flex: 1.5, fontSize: 16, fontWeight: '800', color: colors.primary, textAlign: 'right' }]}>
+                    <View style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 2, borderTopColor: colors.border, backgroundColor: colors.background, alignItems: 'center' }]}>
+                      <Text style={[{ flex: 3.2, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>{t('total_short')}</Text>
+                      <Text
+                        style={[{ flex: 1.8, fontSize: 15, fontWeight: '800', color: colors.primary, textAlign: 'right' }]}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.6}
+                      >
                         ₺{tableDetailItems.reduce((sum: number, item: any) => {
                           const tutar = item.TUTAR ? parseFloat(item.TUTAR) : (parseFloat(item.MIKTAR || '0') * parseFloat(item.FIYAT || '0'));
                           return sum + tutar;
-                        }, 0).toFixed(2)}
+                        }, 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </Text>
                     </View>
                   </View>
