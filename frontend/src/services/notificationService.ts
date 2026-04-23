@@ -104,31 +104,30 @@ class NotificationService {
   }
 
   async saveTokenToBackend(token: string): Promise<boolean> {
-    try {
-      const { token: authToken } = useAuthStore.getState();
-      if (!authToken) {
-        console.log('No auth token, skipping backend token sync');
-        return false;
-      }
-      const resp = await fetch(`${API_URL}/api/notifications/register-token`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({
-          token,
-          platform: Platform.OS,
-          device_id: (Device?.osInternalBuildId || Device?.deviceName || 'unknown').toString().slice(0, 100),
-        }),
-      });
-      const data = await resp.json();
-      console.log('Backend token-register response:', data);
-      return resp.ok && !!data?.ok;
-    } catch (error) {
-      console.error('saveTokenToBackend error:', error);
-      return false;
+    const { token: authToken } = useAuthStore.getState();
+    if (!authToken) {
+      throw new Error('Oturum yok — önce giriş yapın.');
     }
+    const resp = await fetch(`${API_URL}/api/notifications/register-token`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`,
+      },
+      body: JSON.stringify({
+        token,
+        platform: Platform.OS,
+        device_id: (Device?.osInternalBuildId || Device?.deviceName || 'unknown').toString().slice(0, 100),
+      }),
+    });
+    const data = await resp.json().catch(() => ({} as any));
+    console.log('Backend token-register response:', resp.status, data);
+    if (!resp.ok || !data?.ok) {
+      throw new Error(
+        `Backend token kaydı başarısız (HTTP ${resp.status}): ${data?.detail || JSON.stringify(data).slice(0, 200)}`,
+      );
+    }
+    return true;
   }
 
   async unregisterFromBackend(): Promise<boolean> {

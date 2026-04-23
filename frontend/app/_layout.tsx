@@ -43,18 +43,22 @@ export default function RootLayout() {
   // Auto-register push token every time the user becomes authenticated so the
   // backend watcher always has a live active token (the token can otherwise be
   // marked inactive after a previous logout).
+  //
+  // We intentionally ignore the local "notificationsEnabled" preference here so
+  // that reinstalled APKs / fresh logins always yield a real backend token.
+  // The user can still mute notifications from the Settings screen (that only
+  // controls the local UI behaviour now; the backend watcher is always ready).
   useEffect(() => {
     if (!isAuthenticated || !token) return;
+    if (Platform.OS === 'web') return;
     (async () => {
       try {
-        const enabled = await AsyncStorage.getItem('notificationsEnabled');
-        // Only skip if explicitly disabled; default to registering so the
-        // background watcher works out of the box after login.
-        if (enabled === 'false') return;
-        if (Platform.OS === 'web') return;
-        await notificationService.registerForPushNotifications();
-        if (enabled === null) {
+        const result = await notificationService.registerForPushNotifications();
+        if (result) {
           await AsyncStorage.setItem('notificationsEnabled', 'true');
+          console.log('[layout] push token registered:', result.substring(0, 40));
+        } else {
+          console.log('[layout] push token was null (no permission or emulator?)');
         }
       } catch (e) {
         console.log('[layout] auto-register push token failed:', e);

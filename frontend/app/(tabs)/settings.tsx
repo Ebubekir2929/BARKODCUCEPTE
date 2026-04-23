@@ -123,15 +123,42 @@ export default function SettingsScreen() {
 
   const toggleNotifications = async () => {
     const newValue = !notificationsEnabled;
-    
+
     if (newValue && Platform.OS !== 'web') {
       try {
         const token = await notificationService.registerForPushNotifications();
         if (!token) {
-          console.log('Push token not available, but local notifications will work');
+          // Diagnose why there's no token
+          const permStatus = await (async () => {
+            try {
+              const { getPermissionsAsync } = require('expo-notifications');
+              const { status } = await getPermissionsAsync();
+              return status;
+            } catch {
+              return 'unknown';
+            }
+          })();
+          const isDev = (require('expo-device') as any)?.isDevice;
+          showError(
+            'Token Alınamadı',
+            `Push token alınamadı.\n\n` +
+            `• İzin: ${permStatus}\n` +
+            `• Fiziksel cihaz mı: ${isDev}\n\n` +
+            (permStatus !== 'granted'
+              ? 'Bildirim izinlerini açıp tekrar deneyin: Android Ayarları → Uygulamalar → Barkodcu Cepte → Bildirimler'
+              : 'Internet bağlantınızı kontrol edip tekrar deneyin.')
+          );
+        } else {
+          showSuccess(
+            '✅ Token Kaydedildi',
+            `Push aktif.\n${token.substring(0, 40)}...`,
+          );
         }
-      } catch (error) {
-        console.log('Push notification registration error:', error);
+      } catch (error: any) {
+        showError(
+          'Kayıt Hatası',
+          `Push kaydı başarısız oldu:\n${String(error?.message || error)}`,
+        );
       }
     } else if (!newValue && Platform.OS !== 'web') {
       // Turning off → unregister on backend so server won't push anymore
@@ -141,17 +168,13 @@ export default function SettingsScreen() {
         console.log('Push notification unregister error:', error);
       }
     }
-    
+
     setNotificationsEnabled(newValue);
     await AsyncStorage.setItem('notificationsEnabled', newValue.toString());
-    
-    if (newValue) {
-      if (Platform.OS === 'web') {
-        showSuccess(t('notif_active_title'), t('notif_web_msg'));
-      } else {
-        showSuccess(t('notif_active_title'), t('notif_granted_msg'));
-      }
-    } else if (Platform.OS !== 'web') {
+
+    if (newValue && Platform.OS === 'web') {
+      showInfo(t('notif_active_title'), t('notif_web_msg'));
+    } else if (!newValue && Platform.OS !== 'web') {
       showInfo(t('notif_off_title'), t('notif_off_msg'));
     }
   };
