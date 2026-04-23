@@ -447,10 +447,16 @@ export default function SettingsScreen() {
         <Text style={[styles.headerTitle, { color: colors.text }]}>{t('settings')}</Text>
       </View>
 
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      >
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={{ paddingBottom: 12 }}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
       >
         <View style={[styles.userCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={[styles.userAvatar, { backgroundColor: colors.primary + '20' }]}>
@@ -783,6 +789,7 @@ export default function SettingsScreen() {
           <Text style={[styles.logoutText, { color: colors.error }]}>{t('logout')}</Text>
         </TouchableOpacity>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Language Selection Modal */}
       <Modal visible={showLanguageModal} animationType="slide" transparent>
