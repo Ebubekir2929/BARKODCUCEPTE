@@ -10,6 +10,9 @@ import {
   Modal,
   TextInput,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  TouchableWithoutFeedback,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -439,12 +442,16 @@ export default function SettingsScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>{t('settings')}</Text>
       </View>
 
-      <ScrollView style={styles.scrollView}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={{ paddingBottom: 12 }}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={[styles.userCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={[styles.userAvatar, { backgroundColor: colors.primary + '20' }]}>
             <Text style={[styles.userAvatarText, { color: colors.primary }]}>
@@ -775,8 +782,6 @@ export default function SettingsScreen() {
           <Ionicons name="log-out-outline" size={22} color={colors.error} />
           <Text style={[styles.logoutText, { color: colors.error }]}>{t('logout')}</Text>
         </TouchableOpacity>
-
-        <View style={{ height: 4 }} />
       </ScrollView>
 
       {/* Language Selection Modal */}
@@ -835,76 +840,93 @@ export default function SettingsScreen() {
       </Modal>
 
       {/* Tenant Add/Edit Modal */}
-      <Modal visible={showTenantModal} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
-            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>
-                {tenantModalMode === 'add' ? t('new_tenant') : t('edit_tenant')}
-              </Text>
-              <TouchableOpacity onPress={() => setShowTenantModal(false)}>
-                <Ionicons name="close" size={24} color={colors.text} />
-              </TouchableOpacity>
-            </View>
-            <View style={styles.modalBody}>
-              {tenantModalMode === 'add' && (
-                <>
-                  <Text style={[styles.inputLabel, { color: colors.text }]}>Tenant ID</Text>
-                  <View style={[styles.modalInput, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <Ionicons name="key-outline" size={18} color={colors.textSecondary} />
-                    <TextInput
-                      style={[styles.modalInputField, { color: colors.text }]}
-                      placeholder="Windows tarafında oluşturulan ID"
-                      placeholderTextColor={colors.textSecondary}
-                      value={tenantIdInput}
-                      onChangeText={setTenantIdInput}
-                      autoCapitalize="none"
-                    />
-                  </View>
-                </>
-              )}
-
-              {tenantModalMode === 'edit' && (
-                <View style={[styles.editTenantIdDisplay, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <Ionicons name="key-outline" size={16} color={colors.textSecondary} />
-                  <Text style={[styles.editTenantIdText, { color: colors.textSecondary }]}>
-                    {editingTenantId}
-                  </Text>
-                </View>
-              )}
-
-              <Text style={[styles.inputLabel, { color: colors.text }]}>{t('tenant_name_field')}</Text>
-              <View style={[styles.modalInput, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Ionicons name="pricetag-outline" size={18} color={colors.textSecondary} />
-                <TextInput
-                  style={[styles.modalInputField, { color: colors.text }]}
-                  placeholder="Örn: Merkez Şube, Kadıköy Mağaza"
-                  placeholderTextColor={colors.textSecondary}
-                  value={tenantNameInput}
-                  onChangeText={setTenantNameInput}
-                />
-              </View>
-
-              <TouchableOpacity
-                style={[styles.saveTenantBtn, { backgroundColor: colors.primary }]}
-                onPress={handleSaveTenant}
-                disabled={tenantLoading}
-                activeOpacity={0.8}
-              >
-                {tenantLoading ? (
-                  <ActivityIndicator color="#FFF" />
-                ) : (
-                  <>
-                    <Ionicons name={tenantModalMode === 'add' ? 'add-circle-outline' : 'checkmark-circle-outline'} size={20} color="#FFF" />
-                    <Text style={styles.saveTenantBtnText}>
-                      {tenantModalMode === 'add' ? 'Ekle' : 'Güncelle'}
+      <Modal visible={showTenantModal} animationType="slide" transparent onRequestClose={() => setShowTenantModal(false)}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={{ flex: 1 }}
+        >
+          <TouchableWithoutFeedback onPress={() => setShowTenantModal(false)}>
+            <View style={styles.modalOverlay}>
+              <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+                <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+                  <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+                    <Text style={[styles.modalTitle, { color: colors.text }]}>
+                      {tenantModalMode === 'add' ? t('new_tenant') : t('edit_tenant')}
                     </Text>
-                  </>
-                )}
-              </TouchableOpacity>
+                    <TouchableOpacity onPress={() => setShowTenantModal(false)}>
+                      <Ionicons name="close" size={24} color={colors.text} />
+                    </TouchableOpacity>
+                  </View>
+                  <ScrollView
+                    style={{ maxHeight: '100%' }}
+                    contentContainerStyle={styles.modalBody}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                  >
+                    {tenantModalMode === 'add' && (
+                      <>
+                        <Text style={[styles.inputLabel, { color: colors.text }]}>Tenant ID</Text>
+                        <View style={[styles.modalInput, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                          <Ionicons name="key-outline" size={18} color={colors.textSecondary} />
+                          <TextInput
+                            style={[styles.modalInputField, { color: colors.text }]}
+                            placeholder="Windows tarafında oluşturulan ID"
+                            placeholderTextColor={colors.textSecondary}
+                            value={tenantIdInput}
+                            onChangeText={setTenantIdInput}
+                            autoCapitalize="none"
+                            returnKeyType="next"
+                          />
+                        </View>
+                      </>
+                    )}
+
+                    {tenantModalMode === 'edit' && (
+                      <View style={[styles.editTenantIdDisplay, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                        <Ionicons name="key-outline" size={16} color={colors.textSecondary} />
+                        <Text style={[styles.editTenantIdText, { color: colors.textSecondary }]}>
+                          {editingTenantId}
+                        </Text>
+                      </View>
+                    )}
+
+                    <Text style={[styles.inputLabel, { color: colors.text }]}>{t('tenant_name_field')}</Text>
+                    <View style={[styles.modalInput, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                      <Ionicons name="pricetag-outline" size={18} color={colors.textSecondary} />
+                      <TextInput
+                        style={[styles.modalInputField, { color: colors.text }]}
+                        placeholder="Örn: Merkez Şube, Kadıköy Mağaza"
+                        placeholderTextColor={colors.textSecondary}
+                        value={tenantNameInput}
+                        onChangeText={setTenantNameInput}
+                        returnKeyType="done"
+                        onSubmitEditing={handleSaveTenant}
+                      />
+                    </View>
+
+                    <TouchableOpacity
+                      style={[styles.saveTenantBtn, { backgroundColor: colors.primary }]}
+                      onPress={handleSaveTenant}
+                      disabled={tenantLoading}
+                      activeOpacity={0.8}
+                    >
+                      {tenantLoading ? (
+                        <ActivityIndicator color="#FFF" />
+                      ) : (
+                        <>
+                          <Ionicons name={tenantModalMode === 'add' ? 'add-circle-outline' : 'checkmark-circle-outline'} size={20} color="#FFF" />
+                          <Text style={styles.saveTenantBtnText}>
+                            {tenantModalMode === 'add' ? 'Ekle' : 'Güncelle'}
+                          </Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </ScrollView>
+                </View>
+              </TouchableWithoutFeedback>
             </View>
-          </View>
-        </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Scan Result Modal */}
