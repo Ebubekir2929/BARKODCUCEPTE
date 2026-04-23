@@ -319,6 +319,13 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
             # Log a sample row so we know the real field names
             if all_rows:
                 sample = all_rows[0]
+                iptal_ids_found = sorted(
+                    [str(r.get("IPTAL_ID")) for r in all_rows if r.get("IPTAL_ID") is not None]
+                )
+                logger.info(
+                    f"[scan] tenant={tenant_id} all iptal_ids in POS ({len(iptal_ids_found)}): "
+                    f"{iptal_ids_found[-10:] if len(iptal_ids_found) > 10 else iptal_ids_found}"
+                )
                 logger.info(f"[scan] sample_keys={list(sample.keys())[:30]}")
                 logger.info(
                     f"[scan] sample_row IPTAL_ID={sample.get('IPTAL_ID')!r} "
