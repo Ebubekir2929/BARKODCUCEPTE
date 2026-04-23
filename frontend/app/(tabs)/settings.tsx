@@ -679,72 +679,6 @@ export default function SettingsScreen() {
                     }}
                   />
                 </View>
-
-                <TouchableOpacity style={styles.menuItem} onPress={testCancellationNotification}>
-                  <View style={styles.menuItemLeft}>
-                    <Ionicons name="paper-plane-outline" size={22} color={colors.info} />
-                    <View>
-                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('test_notification')}</Text>
-                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>{t('test_notification_desc')}</Text>
-                    </View>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.menuItem, { borderTopColor: colors.border, borderTopWidth: 1 }]}
-                  onPress={() => runScanNow(false)}
-                  disabled={scanLoading}
-                >
-                  <View style={styles.menuItemLeft}>
-                    <Ionicons name="search-outline" size={22} color={colors.primary} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>
-                        🔍 Şimdi Tara (Debug)
-                      </Text>
-                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>
-                        POS'u hemen tara, iptal fişlerini kontrol et
-                      </Text>
-                    </View>
-                  </View>
-                  {scanLoading ? (
-                    <ActivityIndicator color={colors.primary} />
-                  ) : (
-                    <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-                  )}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.menuItem}
-                  onPress={() => {
-                    showWarning(
-                      'Tarama Sıfırlanacak',
-                      'Daha önce bildirim gönderilmiş tüm iptaller tekrar gönderilecek. Devam edilsin mi?',
-                      [
-                        { text: t('cancel'), style: 'cancel' },
-                        {
-                          text: 'Sıfırla ve Tara',
-                          style: 'destructive',
-                          onPress: () => runScanNow(true),
-                        },
-                      ]
-                    );
-                  }}
-                  disabled={scanLoading}
-                >
-                  <View style={styles.menuItemLeft}>
-                    <Ionicons name="refresh-circle-outline" size={22} color={colors.error} />
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.menuItemLabel, { color: colors.text }]}>
-                        🧹 Tekrar Gönder (Dedup Sıfırla)
-                      </Text>
-                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>
-                        Aynı iptalleri yeniden bildirim olarak yolla
-                      </Text>
-                    </View>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
-                </TouchableOpacity>
               </>
             )}
           </View>
@@ -842,7 +776,7 @@ export default function SettingsScreen() {
           <Text style={[styles.logoutText, { color: colors.error }]}>{t('logout')}</Text>
         </TouchableOpacity>
 
-        <View style={{ height: 20 }} />
+        <View style={{ height: 4 }} />
       </ScrollView>
 
       {/* Language Selection Modal */}
