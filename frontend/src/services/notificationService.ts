@@ -67,11 +67,22 @@ class NotificationService {
         Constants?.expoConfig?.extra?.eas?.projectId ??
         Constants?.easConfig?.projectId;
 
-      const tokenData = projectId
-        ? await Notifications.getExpoPushTokenAsync({ projectId })
-        : await Notifications.getExpoPushTokenAsync();
+      let tokenData: any = null;
+      try {
+        tokenData = projectId
+          ? await Notifications.getExpoPushTokenAsync({ projectId })
+          : await Notifications.getExpoPushTokenAsync();
+      } catch (tokenErr: any) {
+        // Re-throw with a clear message so the Settings screen can show the real reason
+        const msg = tokenErr?.message || String(tokenErr);
+        throw new Error(
+          `Expo getExpoPushTokenAsync() hatası:\n${msg}\n\n` +
+          `projectId=${projectId || '(boş)'}\n\n` +
+          `Bu hata genellikle Firebase/FCM kurulumunun eksik olmasından kaynaklanır.`,
+        );
+      }
 
-      this.expoPushToken = tokenData.data;
+      this.expoPushToken = tokenData?.data || null;
       console.log('Push token:', this.expoPushToken);
 
       if (Platform.OS === 'android') {
