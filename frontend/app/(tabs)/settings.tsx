@@ -471,7 +471,7 @@ export default function SettingsScreen() {
       >
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={{ paddingBottom: tabBarHeight + 16 }}
+        contentContainerStyle={{ paddingBottom: tabBarHeight + 4 }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
