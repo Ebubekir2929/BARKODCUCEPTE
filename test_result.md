@@ -224,7 +224,19 @@ backend:
         comment: "Implemented 4 endpoints: POST /api/notifications/register-token (upsert token+platform+device_id for user in MySQL user_push_tokens), POST /api/notifications/unregister-token (soft-deactivate by token; empty token deactivates all user tokens), GET /api/notifications/my-tokens (returns {ok,tokens:[{token,platform,device_id,active,...}]}), POST /api/notifications/send-test (sends real push via Expo API for user's active tokens). MySQL table auto-created. Integrated in notificationService.ts on toggle."
       - working: true
         agent: "testing"
-        comment: "✅ FULL SUITE PASSED (2026-04-18, 10/10 including regression): Verified against https://barkodcu-preview.preview.emergentagent.com/api with cakmak.ebubekir29@gmail.com. (1) register-token ExponentPushToken[test-abc-123] ios/test-device-001 -> 200 {ok:true}. (2) Idempotency: same payload second call -> 200 {ok:true}. (3) my-tokens -> 200, token found with active=true (total=2 tokens for user). (4) send-test {title:'Test',body:'Merhaba'} -> 200 {ok:true, sent:1, expo_response:{data:[{status:'error',message:'... not a valid Expo push token', details:{error:'DeviceNotRegistered'}}]}} — endpoint correctly returns ok:true even when Expo reports DeviceNotRegistered for fake token (as designed). (5) unregister-token -> 200 {ok:true}. (6) my-tokens after unregister -> token active=false (soft delete). (7) Error cases: no-auth -> 403 (FastAPI/HTTPBearer default); empty token -> 400 'Token gerekli'; send-test with 0 active tokens -> 404 'Cihazınız için kayıtlı push token yok. Lütfen bildirimleri açın.' (correct Turkish). Backend logs show proper MySQL upsert and Expo HTTPS calls (exp.host/--/api/v2/push/send 200 OK)."
+        comment: "✅ FULL SUITE PASSED (2026-04-18, 10/10 including regression): Verified against https://barkodcu-pos.preview.emergentagent.com/api with cakmak.ebubekir29@gmail.com. (1) register-token ExponentPushToken[test-abc-123] ios/test-device-001 -> 200 {ok:true}. (2) Idempotency: same payload second call -> 200 {ok:true}. (3) my-tokens -> 200, token found with active=true (total=2 tokens for user). (4) send-test {title:'Test',body:'Merhaba'} -> 200 {ok:true, sent:1, expo_response:{data:[{status:'error',message:'... not a valid Expo push token', details:{error:'DeviceNotRegistered'}}]}} — endpoint correctly returns ok:true even when Expo reports DeviceNotRegistered for fake token (as designed). (5) unregister-token -> 200 {ok:true}. (6) my-tokens after unregister -> token active=false (soft delete). (7) Error cases: no-auth -> 403 (FastAPI/HTTPBearer default); empty token -> 400 'Token gerekli'; send-test with 0 active tokens -> 404 'Cihazınız için kayıtlı push token yok. Lütfen bildirimleri açın.' (correct Turkish). Backend logs show proper MySQL upsert and Expo HTTPS calls (exp.host/--/api/v2/push/send 200 OK)."
+
+  - task: "High Sales Push Notifications"
+    implemented: true
+    working: true
+    file: "services/notification_watcher.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Yüksek meblağlı satış (fis_gunluk_bildirim_feed) bildirimi çalışıyor. POS API dataset_get desteklemediği için request_create + request_status polling akışına geçildi (iptal_detay için de aynı). Kullanıcı sync.php tarafında ilgili dataset için server-side düzeltmeyi yaptı. Canlı doğrulama: tenant d5587c87... için 4 high_sale bulundu ve 4 push başarıyla gönderildi (fis_id 14993774 ₺10,136.40, 15009642 ₺10,800.00, 14440453 ₺20,000.00, 14451412 ₺20,000.00). iptal_detay da aynı akışa geçti, canlıda 167 row dönüyor. Eskimiş _pos_run ve _pos_dataset_get helper'ları temizlendi."
 
 frontend:
   - task: "Login Screen"

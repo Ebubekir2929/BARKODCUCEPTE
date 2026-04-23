@@ -28,62 +28,81 @@ EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 _watcher_task: asyncio.Task | None = None
 
 
-async def _pos_run(tenant_id: str, dataset_key: str, params: dict) -> list:
-    """Run a dataset on the remote POS and return rows (simple one-page call)."""
+async def _pos_request_data(
+    tenant_id: str,
+    dataset_key: str,
+    params: dict,
+    timeout_s: int = 45,
+) -> list:
+    """Async request_create + poll request_status until done.
+
+    Uses the POS /api/sync.php endpoint with `request_create` and `request_status`
+    actions — the same pattern used by /app/backend/routes/data.py::_on_demand_request.
+    Required for datasets not materialised in `dataset_cache` (e.g.
+    `fis_gunluk_bildirim_feed`).
+    """
     async with httpx.AsyncClient(timeout=60) as client:
         # 1) Create request
         create_body = {
             "tenant_id": tenant_id,
             "action": "request_create",
-            "Key": dataset_key,
-            **params,
-        }
-        r = await client.post(POS_API_URL, json=create_body)
-        j = r.json()
-        req_uid = j.get("request_uid", "") or j.get("requestId", "")
-        if not req_uid:
-            return []
-        # 2) Poll status up to ~30s
-        for _ in range(30):
-            await asyncio.sleep(1)
-            st = await client.post(POS_API_URL, json={
-                "tenant_id": tenant_id, "action": "request_status", "RequestUid": req_uid,
-            })
-            sj = st.json()
-            status = (sj.get("status") or "").lower()
-            if status in ("done", "completed", "hazir", "ok"):
-                data = sj.get("data") or sj.get("Data") or sj.get("result") or []
-                return data if isinstance(data, list) else []
-            if status in ("error", "fail", "failed"):
-                return []
-        return []
-
-
-async def _pos_dataset_get(tenant_id: str, dataset_key: str, params: dict) -> list:
-    """Call POS sync.php directly with action=dataset_get (synchronous fast path).
-
-    This is the same approach the working /api/data/iptal-list endpoint uses.
-    """
-    async with httpx.AsyncClient(timeout=60) as client:
-        payload = {
-            "tenant_id": tenant_id,
-            "action": "dataset_get",
             "dataset_key": dataset_key,
             "params": params,
+            "priority_no": 1,
+            "requested_by": "backend-watcher",
         }
         try:
-            r = await client.post(POS_API_URL, json=payload, headers={
+            r = await client.post(POS_API_URL, json=create_body, headers={
                 "Content-Type": "application/json; charset=utf-8",
             })
             j = r.json()
-            if r.status_code >= 400:
-                logger.warning(f"[pos] dataset_get {dataset_key} HTTP {r.status_code}: {j}")
-                return []
-            data = j.get("data") or []
-            return data if isinstance(data, list) else []
         except Exception as e:
-            logger.warning(f"[pos] dataset_get {dataset_key} failed: {e}")
+            logger.warning(f"[pos] request_create {dataset_key} failed: {e}")
             return []
+
+        if r.status_code >= 400 or not j.get("ok", True):
+            logger.warning(
+                f"[pos] request_create {dataset_key} HTTP {r.status_code}: {j}"
+            )
+            return []
+
+        request_uid = str(j.get("request_uid") or j.get("requestId") or "")
+        if not request_uid:
+            logger.warning(f"[pos] request_create {dataset_key} returned no request_uid: {j}")
+            return []
+
+        # 2) Poll request_status with include_data=true
+        started = datetime.utcnow()
+        last_status = "queued"
+        while (datetime.utcnow() - started).total_seconds() < timeout_s:
+            await asyncio.sleep(0.7)
+            try:
+                st = await client.post(POS_API_URL, json={
+                    "tenant_id": tenant_id,
+                    "action": "request_status",
+                    "request_uid": request_uid,
+                    "include_data": True,
+                }, headers={"Content-Type": "application/json; charset=utf-8"})
+                sj = st.json()
+            except Exception as e:
+                logger.warning(f"[pos] request_status poll failed: {e}")
+                return []
+
+            if not sj.get("ok", True):
+                logger.warning(f"[pos] request_status {dataset_key} not ok: {sj}")
+                return []
+
+            last_status = str(sj.get("status") or "unknown").lower()
+            if last_status == "done":
+                cache = sj.get("cache") or {}
+                data = cache.get("data")
+                return data if isinstance(data, list) else []
+            if last_status == "error":
+                logger.warning(f"[pos] request_status {dataset_key} error: {sj.get('error_text')}")
+                return []
+
+        logger.warning(f"[pos] request_status {dataset_key} timed out last_status={last_status}")
+        return []
 
 
 async def _push_many(tokens: List[str], title: str, body: str, data: dict | None = None) -> None:
@@ -314,7 +333,7 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
             # Check today + yesterday to catch events near midnight
             for d in (today, yesterday):
                 dt_str = d.strftime("%Y-%m-%d")
-                day_rows = await _pos_dataset_get(tenant_id, "iptal_detay", {
+                day_rows = await _pos_request_data(tenant_id, "iptal_detay", {
                     "sdate": f"{dt_str} 00:00:00",
                     "edate": f"{dt_str} 23:59:59",
                     "IPTAL_ID": None,
@@ -430,8 +449,7 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
 
             all_sales: list = []
             for dt_str in (today_str, yesterday_str):
-                # Try both lowercase and SP-style parameter names for flexibility
-                day_rows = await _pos_dataset_get(tenant_id, "fis_gunluk_bildirim_feed", {
+                day_rows = await _pos_request_data(tenant_id, "fis_gunluk_bildirim_feed", {
                     "TARIH": dt_str,
                     "MinTutar": threshold,
                     "SonFisId": 0,
