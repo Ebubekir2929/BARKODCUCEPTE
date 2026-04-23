@@ -140,7 +140,7 @@ async def _mark_event_seen(tenant_id: str, event_type: str, event_key: str) -> b
         async with conn.cursor() as cur:
             try:
                 await cur.execute(
-                    "INSERT INTO notification_events_seen (tenant_id, event_type, event_key, seen_at) VALUES (%s, %s, %s, NOW())",
+                    "INSERT INTO notification_events_seen (tenant_id, event_type, event_key, seen_at) VALUES (%s, %s, %s, UTC_TIMESTAMP())",
                     (tenant_id, event_type, event_key),
                 )
                 await conn.commit()
@@ -163,7 +163,7 @@ async def _get_users_to_check() -> List[Dict[str, Any]]:
 
     pool = await get_patron_pool()
     users: List[Dict[str, Any]] = []
-    now = datetime.now()
+    now = datetime.utcnow()
 
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -186,7 +186,11 @@ async def _get_users_to_check() -> List[Dict[str, Any]]:
                 last_check = r[7]
                 if last_check and (now - last_check).total_seconds() < interval_min * 60:
                     skipped_interval += 1
-                    user_diag.append(f"user={r[0]}:interval_wait")
+                    wait_sec = int(interval_min * 60 - (now - last_check).total_seconds())
+                    user_diag.append(
+                        f"user={r[0]}:interval_wait(last_check={last_check.strftime('%H:%M:%S') if last_check else 'NULL'},"
+                        f"interval={interval_min}m,wait={wait_sec}s)"
+                    )
                     continue
                 # Get active tokens for this user
                 await cur.execute(
@@ -275,7 +279,7 @@ async def _update_last_check(user_id: int) -> None:
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "UPDATE user_notification_settings SET last_check_at=NOW() WHERE user_id=%s",
+                "UPDATE user_notification_settings SET last_check_at=UTC_TIMESTAMP() WHERE user_id=%s",
                 (user_id,),
             )
             await conn.commit()
@@ -291,7 +295,9 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
     tenant_id = user["tenant_id"]
     tenant_name = user.get("tenant_name") or "Veri"
     tokens = user["tokens"]
-    today = datetime.now()
+    # For POS date filters, use UTC — iptal_detay scan both today and yesterday
+    # covers the edge of timezone boundaries anyway.
+    today = datetime.utcnow()
     yesterday = today - timedelta(days=1)
 
     logger.info(

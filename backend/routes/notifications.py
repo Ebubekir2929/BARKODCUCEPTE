@@ -85,6 +85,18 @@ async def ensure_tokens_table():
                     logger.info(f"[cleanup] Deleted {cur.rowcount} fake/test push tokens on startup.")
             except Exception as e:
                 logger.warning(f"[cleanup] fake-token purge failed: {e}")
+            # Reset any `last_check_at` values that are in the future — these are
+            # leftovers from the pre-UTC migration where NOW() stored local time.
+            try:
+                await cur.execute("""
+                    UPDATE user_notification_settings
+                    SET last_check_at = NULL
+                    WHERE last_check_at > UTC_TIMESTAMP()
+                """)
+                if cur.rowcount:
+                    logger.info(f"[cleanup] Reset {cur.rowcount} future-dated last_check_at rows (timezone migration).")
+            except Exception as e:
+                logger.warning(f"[cleanup] last_check_at reset failed: {e}")
             await conn.commit()
     logger.info("user_push_tokens + notification_settings tables ready")
 
@@ -134,12 +146,26 @@ async def register_token(body: RegisterTokenBody, current_user: dict = Depends(g
             deleted = cur.rowcount or 0
             await cur.execute("""
                 INSERT INTO user_push_tokens (user_id, token, platform, device_id, active, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, 1, NOW(), NOW())
+                VALUES (%s, %s, %s, %s, 1, UTC_TIMESTAMP(), UTC_TIMESTAMP())
                 ON DUPLICATE KEY UPDATE active=1, platform=VALUES(platform),
-                    device_id=VALUES(device_id), updated_at=NOW()
+                    device_id=VALUES(device_id), updated_at=UTC_TIMESTAMP()
             """, (user_id, token, body.platform or "", body.device_id or ""))
             await conn.commit()
     logger.info(f"Push token registered for user {user_id}: {token[:30]}... (purged {deleted} stale tokens)")
+
+    # Reset last_check_at so the watcher scans this user on its next tick
+    # instead of waiting for the full interval window.
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE user_notification_settings SET last_check_at=NULL WHERE user_id=%s",
+                    (user_id,),
+                )
+                await conn.commit()
+    except Exception as e:
+        logger.warning(f"[register-token] failed to reset last_check_at: {e}")
+
     return {"ok": True, "purged_stale_tokens": deleted}
 
 
@@ -374,7 +400,7 @@ async def get_settings(current_user: dict = Depends(get_current_user)):
                     INSERT INTO user_notification_settings
                         (user_id, notify_cancellations, notify_line_cancellations, notify_high_sales,
                          high_sales_threshold, notify_low_stock, check_interval_minutes, updated_at)
-                    VALUES (%s, 1, 1, 1, 5000.00, 1, 15, NOW())
+                    VALUES (%s, 1, 1, 1, 5000.00, 1, 15, UTC_TIMESTAMP())
                 """, (user_id,))
                 await conn.commit()
                 return {
@@ -522,7 +548,7 @@ async def scan_now(body: ScanNowBody, current_user: dict = Depends(get_current_u
                     )
                 await conn.commit()
 
-    today_dt = datetime.now()
+    today_dt = datetime.utcnow()
     today = today_dt.strftime("%Y-%m-%d")
     days_back = max(1, int(body.days_back or 2))
     since_dt = today_dt - timedelta(days=days_back - 1)
@@ -700,7 +726,7 @@ async def set_settings(body: NotificationSettings, current_user: dict = Depends(
                 INSERT INTO user_notification_settings
                     (user_id, notify_cancellations, notify_line_cancellations, notify_high_sales,
                      high_sales_threshold, notify_low_stock, check_interval_minutes, last_check_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, NOW())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, UTC_TIMESTAMP())
                 ON DUPLICATE KEY UPDATE
                     notify_cancellations=VALUES(notify_cancellations),
                     notify_line_cancellations=VALUES(notify_line_cancellations),
@@ -709,7 +735,7 @@ async def set_settings(body: NotificationSettings, current_user: dict = Depends(
                     notify_low_stock=VALUES(notify_low_stock),
                     check_interval_minutes=VALUES(check_interval_minutes),
                     last_check_at=NULL,
-                    updated_at=NOW()
+                    updated_at=UTC_TIMESTAMP()
             """, (
                 user_id,
                 1 if body.notify_cancellations else 0,
@@ -723,7 +749,7 @@ async def set_settings(body: NotificationSettings, current_user: dict = Depends(
             # Prevents the "user toggled Push off then on, but tokens stayed
             # active=0" situation from blocking notifications.
             await cur.execute(
-                "UPDATE user_push_tokens SET active=1, updated_at=NOW() WHERE user_id=%s",
+                "UPDATE user_push_tokens SET active=1, updated_at=UTC_TIMESTAMP() WHERE user_id=%s",
                 (user_id,),
             )
             await conn.commit()

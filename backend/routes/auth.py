@@ -288,7 +288,7 @@ async def login(data: UserLogin):
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "UPDATE user_push_tokens SET active=1, updated_at=NOW() WHERE user_id=%s",
+                    "UPDATE user_push_tokens SET active=1, updated_at=UTC_TIMESTAMP() WHERE user_id=%s",
                     (user_id,),
                 )
                 await conn.commit()
