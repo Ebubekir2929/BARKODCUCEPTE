@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "593493499759",
+    "project_id": "barkodcu-cepte",
+    "storage_bucket": "barkodcu-cepte.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:593493499759:android:87d3ffb2f3347125b4129a",
+        "android_client_info": {
+          "package_name": "com.berkyazilim.barkodcucepte"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB1hdw1pw2CYa10HhvCLaezhCeew1UXdN4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

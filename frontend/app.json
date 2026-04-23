@@ -20,6 +20,7 @@
     "android": {
       "package": "com.berkyazilim.barkodcucepte",
       "versionCode": 1,
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#2563EB"
