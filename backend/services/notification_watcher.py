@@ -408,6 +408,98 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
         except Exception as e:
             logger.warning(f"[scan] iptal_detay watcher failed (user {user['user_id']}, tenant {tenant_id}): {e}")
 
+    # --- 1.5) Yüksek Meblağlı Satışlar (fis_gunluk_bildirim_feed) ---
+    if user["notify_high_sales"]:
+        try:
+            threshold = float(user["high_sales_threshold"] or 5000.0)
+            today_str = today.strftime("%Y-%m-%d")
+            yesterday_str = yesterday.strftime("%Y-%m-%d")
+
+            all_sales: list = []
+            for dt_str in (today_str, yesterday_str):
+                # Try both lowercase and SP-style parameter names for flexibility
+                day_rows = await _pos_dataset_get(tenant_id, "fis_gunluk_bildirim_feed", {
+                    "TARIH": dt_str,
+                    "MinTutar": threshold,
+                    "SonFisId": 0,
+                    "Lokasyon": "",
+                    "Personel": "",
+                    "FisTuru": "",
+                })
+                logger.info(
+                    f"[scan] fis_gunluk_bildirim_feed tenant={tenant_id} date={dt_str} "
+                    f"threshold={threshold} rows={len(day_rows)}"
+                )
+                all_sales.extend(day_rows)
+
+            if all_sales:
+                s0 = all_sales[0]
+                logger.info(
+                    f"[scan] high_sales sample FIS_ID={s0.get('FIS_ID')!r} "
+                    f"BELGENO={s0.get('BELGENO')!r} TUTAR={s0.get('TUTAR')!r} "
+                    f"LOKASYON={s0.get('LOKASYON')!r} KESEN_PERSONEL={s0.get('KESEN_PERSONEL')!r} "
+                    f"FIS_TURU_AD={s0.get('FIS_TURU_AD')!r} BILDIRIMLIK={s0.get('BILDIRIMLIK')!r}"
+                )
+
+            hs_count = 0
+            hs_pushed = 0
+            for s in all_sales:
+                fis_id = s.get("FIS_ID")
+                if fis_id is None:
+                    continue
+                bildirimlik = s.get("BILDIRIMLIK")
+                try:
+                    tutar = float(s.get("TUTAR") or 0)
+                except (TypeError, ValueError):
+                    tutar = 0.0
+                # Respect BILDIRIMLIK flag if present, otherwise compare to threshold
+                if bildirimlik is not None and str(bildirimlik) not in ("1", "True", "true"):
+                    continue
+                if tutar < threshold:
+                    continue
+                hs_count += 1
+
+                belgeno = str(s.get("BELGENO") or "").strip()
+                lokasyon = str(s.get("LOKASYON") or "").strip()
+                personel = str(s.get("KESEN_PERSONEL") or "").strip()
+                fis_turu_ad = str(s.get("FIS_TURU_AD") or "").strip()
+
+                key = str(fis_id)
+                if await _mark_event_seen(tenant_id, "yuksek_satis", key):
+                    title_parts = []
+                    if fis_turu_ad and fis_turu_ad != "-":
+                        title_parts.append(fis_turu_ad)
+                    if lokasyon and lokasyon != "-":
+                        title_parts.append(lokasyon)
+                    title = f"💰 Yüksek Satış · {tenant_name}"
+                    body_parts = []
+                    if belgeno:
+                        body_parts.append(f"#{belgeno}")
+                    if personel and personel != "-":
+                        body_parts.append(personel)
+                    if lokasyon and lokasyon != "-":
+                        body_parts.append(lokasyon)
+                    prefix = " · ".join(body_parts) if body_parts else "Satış"
+                    body_msg = f"{prefix} · ₺{tutar:,.2f}"
+                    await _push_many(tokens, title, body_msg, {
+                        "type": "high_sale",
+                        "fis_id": fis_id,
+                        "belgeno": belgeno,
+                        "amount": tutar,
+                        "tenant": tenant_id,
+                        "tenant_name": tenant_name,
+                    })
+                    hs_pushed += 1
+                    logger.info(f"[scan] ✅ HIGH_SALE PUSHED fis_id={fis_id} tutar={tutar:.2f}")
+                else:
+                    logger.info(f"[scan] HIGH_SALE already_seen fis_id={fis_id}")
+
+            logger.info(
+                f"[scan] high_sales tenant={tenant_id} found={hs_count} pushed={hs_pushed} threshold={threshold}"
+            )
+        except Exception as e:
+            logger.warning(f"[scan] high_sales watcher failed (user {user['user_id']}, tenant {tenant_id}): {e}")
+
     # --- 2) Eksi Stok (MIKTAR < 0) — local dataset_cache via get_data_pool ---
     if user["notify_low_stock"]:
         try:

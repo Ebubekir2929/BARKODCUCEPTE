@@ -114,8 +114,9 @@ async def register_token(body: RegisterTokenBody, current_user: dict = Depends(g
 
     # Basic sanity check — reject obviously-fake tokens so we never store them.
     # Real Expo tokens look like: ExponentPushToken[xxxxxxxxxxxxx]
+    # We only reject clear placeholder patterns to avoid false positives.
     lower = token.lower()
-    fake_markers = ("test-", "fake", "dummy", "placeholder", "abc-123")
+    fake_markers = ("fake", "dummy", "placeholder", "abc-123", "test-fake", "test-abc")
     if any(m in lower for m in fake_markers):
         logger.warning(f"[register-token] Rejecting obviously-fake token: {token!r}")
         raise HTTPException(status_code=400, detail="Geçersiz görünen bir push token — kayıt reddedildi.")
