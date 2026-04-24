@@ -353,12 +353,21 @@ export default function DashboardScreen() {
           <Text style={[styles.userName, { color: colors.text }]}>{user?.full_name || 'Kullanıcı'}</Text>
         </View>
         <TouchableOpacity
-          style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border, marginRight: 8 }]}
+          style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border, marginRight: 8, position: 'relative' }]}
           onPress={() => setShowCompareModal(true)}
           hitSlop={6}
         >
           <Ionicons name="git-compare-outline" size={20} color={colors.primary} />
           <Text style={[styles.filterText, { color: colors.primary }]}>{t('compare')}</Text>
+          <View style={{
+            position: 'absolute', top: -6, right: -6,
+            backgroundColor: '#8B5CF6',
+            paddingHorizontal: 6, paddingVertical: 1,
+            borderRadius: 8,
+            borderWidth: 1.5, borderColor: colors.background,
+          }}>
+            <Text style={{ color: '#FFF', fontSize: 9, fontWeight: '900', letterSpacing: 0.3 }}>AI</Text>
+          </View>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border }]}
