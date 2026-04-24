@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from services import get_data_pool
 from routes.auth import get_current_user
-from typing import Optional
+from typing import Optional, Dict, List, Any
 import json
 import logging
 from datetime import date, datetime, timedelta
@@ -686,6 +686,74 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
         await asyncio.sleep(0.7)
     
     raise HTTPException(status_code=504, detail="Detay zamanında gelmedi. Lütfen tekrar deneyin.")
+
+
+@router.post("/hourly-detail-full")
+async def get_hourly_stock_detail_full(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """On-demand: Full-day hourly stock detail. Fetches stock-detail rows for an
+    entire date (or date range) in ONE request, then groups by SAAT_ADI so the
+    client doesn't have to call /hourly-detail for each hour individually.
+
+    Body: { tenant_id, date: YYYY-MM-DD [or sdate/edate], lokasyon_id?: int }
+
+    Returns: { ok, by_hour: { "HH:00 - HH:00": [rows...] } }
+    """
+    tenant_id = body.get("tenant_id", "")
+    filter_date = body.get("date", "") or body.get("sdate", "")
+    edate_in = body.get("edate", "")
+    lokasyon_id = body.get("lokasyon_id")
+
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id gerekli")
+
+    if not filter_date:
+        from datetime import date as date_cls
+        filter_date = date_cls.today().strftime("%Y-%m-%d")
+
+    # If no edate provided, treat as single day
+    if not edate_in:
+        edate_in = filter_date
+
+    # Build full-day sdate/edate for the POS query
+    params = {
+        "sdate": f"{filter_date} 00:00:00",
+        "edate": f"{edate_in} 23:59:59",
+        "lokasyonID": int(lokasyon_id) if lokasyon_id else None,
+    }
+
+    try:
+        result = await _on_demand_request(tenant_id, "hourly_stock_detail", params, timeout_sec=45)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Hourly full detail error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    rows = result.get("data", []) if isinstance(result, dict) else []
+
+    # Group by SAAT_ADI (already aligned to hour ranges by POS). If SAAT_ADI
+    # isn't present, derive a "HH:00 - HH+1:00" label from the row's timestamp.
+    import re
+    by_hour: Dict[str, List[Any]] = {}
+    for r in rows:
+        hour_label = r.get("SAAT_ADI") or r.get("SAAT") or ""
+        if not hour_label:
+            # Try derive from any timestamp field
+            ts = r.get("TARIH") or r.get("ISLEM_TARIHI") or r.get("FIS_TARIHI") or ""
+            m = re.search(r"(\d{1,2}):\d{2}", str(ts))
+            if m:
+                h = int(m.group(1))
+                hour_label = f"{h:02d}:00 - {(h + 1) % 24:02d}:00"
+        if not hour_label:
+            hour_label = "Bilinmeyen"
+        if hour_label not in by_hour:
+            by_hour[hour_label] = []
+        by_hour[hour_label].append(r)
+
+    return {"ok": True, "by_hour": by_hour, "row_count": len(rows)}
 
 
 @router.post("/hourly-detail")

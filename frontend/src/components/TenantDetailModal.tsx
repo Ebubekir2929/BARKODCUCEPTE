@@ -107,56 +107,47 @@ export const TenantDetailModal: React.FC<{
     setProductHourMap({});
 
     (async () => {
-      // Fire one /hourly-detail per unique (hour) — it aggregates across all locations
-      const results: { hour: string; rows: any[] }[] = [];
-      const CHUNK = 3;
-      for (let i = 0; i < allHours.length; i += CHUNK) {
-        if (cancelled) return;
-        const slice = allHours.slice(i, i + CHUNK);
-        const chunk = await Promise.all(slice.map(async (h) => {
-          try {
-            const resp = await fetch(`${API_URL}/api/data/hourly-detail`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-              body: JSON.stringify({
-                tenant_id: snapshot.tenant.tenant_id,
-                hour_label: h,
-                lokasyon_id: null,
-                ...(filterDate ? { date: filterDate } : {}),
-              }),
-            });
-            const j = await resp.json();
-            return { hour: h, rows: Array.isArray(j?.data) ? j.data : [] };
-          } catch {
-            return { hour: h, rows: [] };
-          }
-        }));
-        results.push(...chunk);
-      }
-      if (cancelled) return;
-
-      // Build the map
-      const map: Record<string, Record<string, Record<string, { qty: number; amount: number }>>> = {};
-      results.forEach(({ hour, rows }) => {
-        rows.forEach((r: any) => {
-          const name = r?.STOK_ADI || r?.STOK_AD || r?.URUN_ADI || '-';
-          const loc = r?.LOKASYON || r?.LOKASYON_ADI || '-';
-          const qty = parseFloat(r?.TOPLAM_MIKTAR || r?.MIKTAR || '0');
-          const amount = parseFloat(r?.KDV_DAHIL_TOPLAM_TUTAR || r?.TOPLAM_TUTAR || '0');
-          if (!map[loc]) map[loc] = {};
-          if (!map[loc][name]) map[loc][name] = {};
-          if (!map[loc][name][hour]) map[loc][name][hour] = { qty: 0, amount: 0 };
-          map[loc][name][hour].qty += qty;
-          map[loc][name][hour].amount += amount;
+      // Single full-day call (1 request instead of N per hour)
+      try {
+        const resp = await fetch(`${API_URL}/api/data/hourly-detail-full`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            tenant_id: snapshot.tenant.tenant_id,
+            date: filterDate,
+            lokasyon_id: null,
+          }),
         });
-      });
-      setProductHourMap(map);
-      setPhLoading(false);
+        const j = await resp.json();
+        const byHour: Record<string, any[]> = j?.by_hour || {};
+
+        if (cancelled) return;
+
+        const map: Record<string, Record<string, Record<string, { qty: number; amount: number }>>> = {};
+        Object.entries(byHour).forEach(([hour, rows]) => {
+          rows.forEach((r: any) => {
+            const name = r?.STOK_ADI || r?.STOK_AD || r?.URUN_ADI || '-';
+            const loc = r?.LOKASYON || r?.LOKASYON_ADI || '-';
+            const qty = parseFloat(r?.TOPLAM_MIKTAR || r?.MIKTAR || '0');
+            const amount = parseFloat(r?.KDV_DAHIL_TOPLAM_TUTAR || r?.TOPLAM_TUTAR || '0');
+            if (!map[loc]) map[loc] = {};
+            if (!map[loc][name]) map[loc][name] = {};
+            if (!map[loc][name][hour]) map[loc][name][hour] = { qty: 0, amount: 0 };
+            map[loc][name][hour].qty += qty;
+            map[loc][name][hour].amount += amount;
+          });
+        });
+        setProductHourMap(map);
+      } catch {
+        // silently skip on error
+      } finally {
+        if (!cancelled) setPhLoading(false);
+      }
     })();
 
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, snapshot.tenant.tenant_id, filterDate, allHours.join('|')]);
+  }, [visible, snapshot.tenant.tenant_id, filterDate]);
 
   return (
     <Modal

@@ -330,61 +330,53 @@ export const CompareModal: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, isTodayOnly]);
 
-  // ─── Fetch per-tenant per-hour product data (on-demand) ───
-  // Triggered once snapshots are loaded; uses the union of hours across tenants.
+  // ─── Fetch per-tenant per-hour product data (on-demand, ONE request per tenant) ───
   useEffect(() => {
     if (!visible || !hasLoadedOnce || !token) return;
     if (snapshots.length === 0) return;
 
-    const hoursUnion = new Set<string>();
-    snapshots.forEach((s) => {
-      Object.keys(s.hourly).forEach((h) => hoursUnion.add(h));
-    });
-    const hoursArr = Array.from(hoursUnion);
-    if (hoursArr.length === 0) return;
-
     const sdate = fmtDate(startDate);
+    const edate = fmtDate(endDate);
     let cancelled = false;
     setPhLoading(true);
 
     (async () => {
-      const CHUNK = 4; // requests in parallel
-      const tasks: { tenantId: string; hour: string }[] = [];
-      snapshots.forEach((s) => {
-        hoursArr.forEach((h) => tasks.push({ tenantId: s.tenant.tenant_id, hour: h }));
-      });
-
+      const CHUNK = 3; // tenants in parallel
       const fresh: Record<string, Record<string, Record<string, { qty: number; amount: number }>>> = {};
 
-      for (let i = 0; i < tasks.length; i += CHUNK) {
+      for (let i = 0; i < snapshots.length; i += CHUNK) {
         if (cancelled) return;
-        const slice = tasks.slice(i, i + CHUNK);
-        await Promise.all(slice.map(async ({ tenantId, hour }) => {
+        const slice = snapshots.slice(i, i + CHUNK);
+        await Promise.all(slice.map(async (s) => {
           try {
-            const resp = await fetch(`${API_URL}/api/data/hourly-detail`, {
+            const resp = await fetch(`${API_URL}/api/data/hourly-detail-full`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
               body: JSON.stringify({
-                tenant_id: tenantId,
-                hour_label: hour,
-                lokasyon_id: null,
+                tenant_id: s.tenant.tenant_id,
                 date: sdate,
+                edate: edate,
+                lokasyon_id: null,
               }),
             });
             const j = await resp.json();
-            const rows: any[] = Array.isArray(j?.data) ? j.data : [];
-            rows.forEach((r: any) => {
-              const name = r?.STOK_ADI || r?.STOK_AD || r?.URUN_ADI || '-';
-              const qty = parseFloat(r?.TOPLAM_MIKTAR || r?.MIKTAR || '0');
-              const amount = parseFloat(r?.KDV_DAHIL_TOPLAM_TUTAR || r?.TOPLAM_TUTAR || '0');
-              if (!fresh[tenantId]) fresh[tenantId] = {};
-              if (!fresh[tenantId][name]) fresh[tenantId][name] = {};
-              if (!fresh[tenantId][name][hour]) fresh[tenantId][name][hour] = { qty: 0, amount: 0 };
-              fresh[tenantId][name][hour].qty += qty;
-              fresh[tenantId][name][hour].amount += amount;
+            const byHour: Record<string, any[]> = j?.by_hour || {};
+
+            const tMap: Record<string, Record<string, { qty: number; amount: number }>> = {};
+            Object.entries(byHour).forEach(([hour, rows]) => {
+              rows.forEach((r: any) => {
+                const name = r?.STOK_ADI || r?.STOK_AD || r?.URUN_ADI || '-';
+                const qty = parseFloat(r?.TOPLAM_MIKTAR || r?.MIKTAR || '0');
+                const amount = parseFloat(r?.KDV_DAHIL_TOPLAM_TUTAR || r?.TOPLAM_TUTAR || '0');
+                if (!tMap[name]) tMap[name] = {};
+                if (!tMap[name][hour]) tMap[name][hour] = { qty: 0, amount: 0 };
+                tMap[name][hour].qty += qty;
+                tMap[name][hour].amount += amount;
+              });
             });
+            fresh[s.tenant.tenant_id] = tMap;
           } catch {
-            // silently skip per-cell failure
+            // silently skip on per-tenant error
           }
         }));
         if (!cancelled) setProductHourByTenant({ ...fresh });
