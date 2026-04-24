@@ -164,8 +164,8 @@ export const CompareModal: React.FC<{
   const [silentBadge, setSilentBadge] = useState(false);
   const [detailTenantIdx, setDetailTenantIdx] = useState<number | null>(null);
   const isFetchingRef = useRef(false);
-  // productHourByTenant[tenantId][productName][hour] = { qty, amount }
-  const [productHourByTenant, setProductHourByTenant] = useState<Record<string, Record<string, Record<string, { qty: number; amount: number }>>>>({});
+  // productHourByTenant[tenantId][location][productName][hour] = { qty, amount }
+  const [productHourByTenant, setProductHourByTenant] = useState<Record<string, Record<string, Record<string, Record<string, { qty: number; amount: number }>>>>>({});
   const [phLoading, setPhLoading] = useState(false);
 
   const applyPreset = (p: PresetKey) => {
@@ -342,7 +342,7 @@ export const CompareModal: React.FC<{
 
     (async () => {
       const CHUNK = 3; // tenants in parallel
-      const fresh: Record<string, Record<string, Record<string, { qty: number; amount: number }>>> = {};
+      const fresh: Record<string, Record<string, Record<string, Record<string, { qty: number; amount: number }>>>> = {};
 
       for (let i = 0; i < snapshots.length; i += CHUNK) {
         if (cancelled) return;
@@ -362,16 +362,19 @@ export const CompareModal: React.FC<{
             const j = await resp.json();
             const byHour: Record<string, any[]> = j?.by_hour || {};
 
-            const tMap: Record<string, Record<string, { qty: number; amount: number }>> = {};
+            // tenant -> location -> product -> hour -> {qty, amount}
+            const tMap: Record<string, Record<string, Record<string, { qty: number; amount: number }>>> = {};
             Object.entries(byHour).forEach(([hour, rows]) => {
               rows.forEach((r: any) => {
                 const name = r?.STOK_ADI || r?.STOK_AD || r?.URUN_ADI || '-';
+                const loc = r?.LOKASYON || r?.LOKASYON_ADI || '-';
                 const qty = parseFloat(r?.TOPLAM_MIKTAR || r?.MIKTAR || '0');
                 const amount = parseFloat(r?.KDV_DAHIL_TOPLAM_TUTAR || r?.TOPLAM_TUTAR || '0');
-                if (!tMap[name]) tMap[name] = {};
-                if (!tMap[name][hour]) tMap[name][hour] = { qty: 0, amount: 0 };
-                tMap[name][hour].qty += qty;
-                tMap[name][hour].amount += amount;
+                if (!tMap[loc]) tMap[loc] = {};
+                if (!tMap[loc][name]) tMap[loc][name] = {};
+                if (!tMap[loc][name][hour]) tMap[loc][name][hour] = { qty: 0, amount: 0 };
+                tMap[loc][name][hour].qty += qty;
+                tMap[loc][name][hour].amount += amount;
               });
             });
             fresh[s.tenant.tenant_id] = tMap;
@@ -910,16 +913,34 @@ export const CompareModal: React.FC<{
               );
             })()}
 
-            {/* Ürünlerin Saatlik Satışları · Veri Kaynağı Bazlı */}
+            {/* Ürünlerin Saatlik Satışları · Lokasyon Bazlı */}
             {(() => {
-              // Union of products across tenants, sorted by total amount
+              // Union of products across tenants × locations
+              // productTotals[productName] = total amount across everything
               const productTotals: Record<string, number> = {};
-              Object.values(productHourByTenant).forEach((tenantMap) => {
-                Object.entries(tenantMap).forEach(([name, hours]) => {
-                  const sum = Object.values(hours).reduce((a, h) => a + h.amount, 0);
-                  productTotals[name] = (productTotals[name] || 0) + sum;
+              const tenantLocPairs: { tenantId: string; tenantName: string; tenantIdx: number; location: string }[] = [];
+              const seenPairs = new Set<string>();
+
+              snapshots.forEach((s, idx) => {
+                const tenantData = productHourByTenant[s.tenant.tenant_id] || {};
+                Object.entries(tenantData).forEach(([loc, products]) => {
+                  const pairKey = `${s.tenant.tenant_id}__${loc}`;
+                  if (!seenPairs.has(pairKey)) {
+                    seenPairs.add(pairKey);
+                    tenantLocPairs.push({
+                      tenantId: s.tenant.tenant_id,
+                      tenantName: s.tenant.name || `Veri ${idx + 1}`,
+                      tenantIdx: idx,
+                      location: loc,
+                    });
+                  }
+                  Object.entries(products).forEach(([name, hours]) => {
+                    const sum = Object.values(hours).reduce((a, h) => a + h.amount, 0);
+                    productTotals[name] = (productTotals[name] || 0) + sum;
+                  });
                 });
               });
+
               const allProducts = Object.keys(productTotals).sort((a, b) => productTotals[b] - productTotals[a]);
 
               if (allProducts.length === 0 && !phLoading) return null;
@@ -934,12 +955,12 @@ export const CompareModal: React.FC<{
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14, paddingBottom: 4 }}>
                     <Ionicons name="time-outline" size={16} color={colors.primary} />
                     <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0, flex: 1 }]} numberOfLines={1}>
-                      Ürünlerin Saatlik Satışları · Veri Kaynağı Bazlı
+                      Ürünlerin Saatlik Satışları · Lokasyon Bazlı
                     </Text>
                     {phLoading && <ActivityIndicator size="small" color={colors.primary} />}
                   </View>
                   <Text style={{ color: colors.textSecondary, fontSize: 11, paddingHorizontal: 14, paddingBottom: 6 }}>
-                    En çoktan en aza sıralı · her ürünün saat × veri kaynağı kırılımı
+                    En çoktan en aza sıralı · her ürünün veri kaynağı × lokasyon × saat kırılımı
                   </Text>
 
                   {allProducts.length === 0 && phLoading && (
@@ -952,20 +973,22 @@ export const CompareModal: React.FC<{
 
                   {allProducts.map((productName, pIdx) => {
                     const productTotal = productTotals[productName];
-                    // Gather product's hour data per tenant
-                    const cellsByTenant: Record<string, Record<string, { qty: number; amount: number }>> = {};
-                    snapshots.forEach((s) => {
-                      const data = productHourByTenant[s.tenant.tenant_id]?.[productName] || {};
-                      cellsByTenant[s.tenant.tenant_id] = data;
+                    // Collect rows for this product: each row is a (tenant, location) pair
+                    // where this product has any sale
+                    const rowsForProduct = tenantLocPairs.filter((pair) => {
+                      const data = productHourByTenant[pair.tenantId]?.[pair.location]?.[productName];
+                      if (!data) return false;
+                      return Object.values(data).some((c) => c.qty > 0 || c.amount > 0);
                     });
-                    // Filter to hours where this product had sales somewhere
+                    if (rowsForProduct.length === 0) return null;
+
+                    // Hours where this product had sales anywhere
                     const productHours = allHours.filter((h) =>
-                      snapshots.some((s) => {
-                        const c = cellsByTenant[s.tenant.tenant_id]?.[h];
+                      rowsForProduct.some((pair) => {
+                        const c = productHourByTenant[pair.tenantId]?.[pair.location]?.[productName]?.[h];
                         return c && (c.qty > 0 || c.amount > 0);
                       })
                     );
-                    if (productHours.length === 0) return null;
 
                     return (
                       <View key={productName + pIdx} style={{ marginBottom: 4, borderTopWidth: 1, borderTopColor: colors.border }}>
@@ -991,20 +1014,18 @@ export const CompareModal: React.FC<{
                           </Text>
                         </View>
 
-                        {/* Horizontal matrix: Saat × Tenant */}
+                        {/* Horizontal matrix: Tenant × Lokasyon as rows, Saat as cols */}
                         <SwipeHint color={colors.primary} />
                         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                           <View>
                             {/* Header row */}
                             <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.background }}>
-                              <View style={{ width: 70, paddingVertical: 6, paddingHorizontal: 8 }}>
-                                <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '700' }}>Saat</Text>
+                              <View style={{ width: 180, paddingVertical: 6, paddingHorizontal: 8 }}>
+                                <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '700' }}>Veri · Lokasyon</Text>
                               </View>
-                              {snapshots.map((s, i) => (
-                                <View key={s.tenant.tenant_id} style={{ width: 90, paddingVertical: 6, paddingHorizontal: 4, alignItems: 'flex-end' }}>
-                                  <Text style={{ color: getTenantColor(i), fontSize: 10, fontWeight: '700' }} numberOfLines={1}>
-                                    {s.tenant.name || `Veri ${i + 1}`}
-                                  </Text>
+                              {productHours.map((h) => (
+                                <View key={h} style={{ width: 72, paddingVertical: 6, paddingHorizontal: 4, alignItems: 'center' }}>
+                                  <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '700' }}>{String(h).slice(0, 5)}</Text>
                                 </View>
                               ))}
                               <View style={{ width: 90, paddingVertical: 6, paddingHorizontal: 8, alignItems: 'flex-end', backgroundColor: colors.primary + '10' }}>
@@ -1012,28 +1033,35 @@ export const CompareModal: React.FC<{
                               </View>
                             </View>
 
-                            {/* Hour rows */}
-                            {productHours.map((h) => {
+                            {/* Rows — one per (tenant, location) */}
+                            {rowsForProduct.map((pair, rIdx) => {
+                              const tenantColor = getTenantColor(pair.tenantIdx);
+                              const cellData = productHourByTenant[pair.tenantId]?.[pair.location]?.[productName] || {};
                               let rowQty = 0;
                               let rowAmount = 0;
-                              snapshots.forEach((s) => {
-                                const c = cellsByTenant[s.tenant.tenant_id]?.[h];
-                                if (c) { rowQty += c.qty; rowAmount += c.amount; }
-                              });
+                              Object.values(cellData).forEach((c) => { rowQty += c.qty; rowAmount += c.amount; });
                               return (
-                                <View key={h} style={{ flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                                  <View style={{ width: 70, paddingVertical: 8, paddingHorizontal: 8 }}>
-                                    <Text style={{ color: colors.text, fontSize: 11, fontWeight: '700' }}>{String(h).slice(0, 5)}</Text>
+                                <View key={pair.tenantId + pair.location + rIdx} style={{ flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                                  <View style={{ width: 180, paddingVertical: 8, paddingHorizontal: 8 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                                      <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: tenantColor }} />
+                                      <Text style={{ color: tenantColor, fontSize: 11, fontWeight: '800' }} numberOfLines={1}>
+                                        {pair.tenantName}
+                                      </Text>
+                                    </View>
+                                    <Text style={{ color: colors.text, fontSize: 11, fontWeight: '600', marginTop: 1 }} numberOfLines={1}>
+                                      📍 {pair.location}
+                                    </Text>
                                   </View>
-                                  {snapshots.map((s, i) => {
-                                    const c = cellsByTenant[s.tenant.tenant_id]?.[h];
+                                  {productHours.map((h) => {
+                                    const c = cellData[h];
                                     const qty = c?.qty || 0;
                                     const amount = c?.amount || 0;
                                     return (
-                                      <View key={s.tenant.tenant_id} style={{ width: 90, paddingVertical: 6, paddingHorizontal: 4, alignItems: 'flex-end' }}>
+                                      <View key={h} style={{ width: 72, paddingVertical: 6, paddingHorizontal: 2, alignItems: 'center' }}>
                                         {qty > 0 ? (
                                           <>
-                                            <Text style={{ color: getTenantColor(i), fontSize: 11, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                                            <Text style={{ color: tenantColor, fontSize: 10, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
                                               ₺{fmtTL(amount)}
                                             </Text>
                                             <Text style={{ color: colors.textSecondary, fontSize: 9 }}>
@@ -1047,7 +1075,7 @@ export const CompareModal: React.FC<{
                                     );
                                   })}
                                   <View style={{ width: 90, paddingVertical: 6, paddingHorizontal: 8, alignItems: 'flex-end', backgroundColor: colors.primary + '06' }}>
-                                    <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                                    <Text style={{ color: tenantColor, fontSize: 11, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
                                       ₺{fmtTL(rowAmount)}
                                     </Text>
                                     <Text style={{ color: colors.textSecondary, fontSize: 9 }}>
