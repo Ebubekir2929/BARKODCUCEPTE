@@ -232,9 +232,15 @@ export function useLiveData(filter?: DashboardFilter) {
       if (filter?.branchId) {
         const filteredBranch = transformed.branchSales.find(b => b.branchId === filter.branchId);
         if (filteredBranch) {
+          // Also filter hourly location sales to the selected branch so totals match
+          const filteredHourlyLoc = (transformed.hourlyLocationSales || []).filter((r: any) =>
+            r?.LOKASYON === filteredBranch.branchName ||
+            String(r?.LOKASYON_ID || '') === String(filter.branchId)
+          );
           transformed = {
             ...transformed,
             branchSales: [filteredBranch],
+            hourlyLocationSales: filteredHourlyLoc,
             weeklyComparison: {
               thisWeek: filteredBranch.sales,
               lastWeek: { cash: 0, card: 0, openAccount: 0, total: 0 },
