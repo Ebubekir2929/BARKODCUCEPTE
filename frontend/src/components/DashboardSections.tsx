@@ -195,7 +195,17 @@ export const CancellationSection: React.FC<{ ozet: any[]; detay: any[]; tenantId
 };
 
 // === Lokasyon Bazlı Saatlik Satış Grafiği (Dikey Bar Chart) ===
-export const HourlyLocationSection: React.FC<{ data: any[]; tenantId: string; filterDate?: string }> = ({ data, tenantId, filterDate }) => {
+export const HourlyLocationSection: React.FC<{
+  data: any[];
+  tenantId: string;
+  filterDate?: string;
+  /** Optional map of { [locationName]: authoritativeTotalTL }. When provided,
+   *  these values are used for the section badge and per-location header so
+   *  they stay consistent with 'Lokasyon Özeti' (which comes from
+   *  financial_data_location). Otherwise falls back to summing the hourly
+   *  rows. */
+  branchTotalsByName?: Record<string, number>;
+}> = ({ data, tenantId, filterDate, branchTotalsByName }) => {
   const { colors } = useThemeStore();
   const [detailData, setDetailData] = useState<any[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -204,9 +214,7 @@ export const HourlyLocationSection: React.FC<{ data: any[]; tenantId: string; fi
 
   if (!data || data.length === 0) return null;
 
-  const totalAmount = data.reduce((s: number, r: any) => s + parseFloat(r.TOPLAM || '0'), 0);
-
-  // Group by LOKASYON
+  // Group by LOKASYON (needed for both totals and render)
   const byLocation: Record<string, any[]> = {};
   data.forEach((r: any) => {
     const loc = r.LOKASYON || 'Bilinmeyen';
@@ -214,8 +222,20 @@ export const HourlyLocationSection: React.FC<{ data: any[]; tenantId: string; fi
     byLocation[loc].push(r);
   });
 
-  const fetchDetail = useCallback(async (hourLabel: string, lokasyonId: any, lokasyonName: string) => {
-    setSelectedItem({ hourLabel, lokasyonName });
+  // Prefer authoritative branch totals from Lokasyon Özeti; else sum rows.
+  const getLocTotal = (loc: string, rows: any[]): number => {
+    if (branchTotalsByName && branchTotalsByName[loc] != null) {
+      return branchTotalsByName[loc];
+    }
+    return rows.reduce((s: number, r: any) => s + parseFloat(r.TOPLAM || '0'), 0);
+  };
+  const totalAmount = Object.entries(byLocation).reduce(
+    (s, [loc, rows]) => s + getLocTotal(loc, rows),
+    0
+  );
+
+  const fetchDetail = useCallback(async (hourLabel: string, lokasyonId: any, lokasyonName: string, hourAmount: number) => {
+    setSelectedItem({ hourLabel, lokasyonName, hourAmount });
     setDetailData([]);
     setDetailLoading(true);
     
@@ -250,7 +270,7 @@ export const HourlyLocationSection: React.FC<{ data: any[]; tenantId: string; fi
       </View>
 
       {Object.entries(byLocation).map(([locName, hours]) => {
-        const locTotal = hours.reduce((s: number, r: any) => s + parseFloat(r.TOPLAM || '0'), 0);
+        const locTotal = getLocTotal(locName, hours);
         const locMax = Math.max(...hours.map((r: any) => parseFloat(r.TOPLAM || '0')), 1);
         const isExpanded = expandedLoc === locName;
         
@@ -286,7 +306,7 @@ export const HourlyLocationSection: React.FC<{ data: any[]; tenantId: string; fi
                         <TouchableOpacity
                           key={idx}
                           style={{ alignItems: 'center', width: 42 }}
-                          onPress={() => fetchDetail(hour.SAAT_ADI || '', hour.LOKASYON_ID || null, locName)}
+                          onPress={() => fetchDetail(hour.SAAT_ADI || '', hour.LOKASYON_ID || null, locName, amount)}
                         >
                           <Text style={{ fontSize: 9, color: colors.textSecondary, marginBottom: 2 }}>
                             {amount >= 1000 ? `${(amount / 1000).toFixed(0)}K` : amount.toFixed(0)}
@@ -324,7 +344,16 @@ export const HourlyLocationSection: React.FC<{ data: any[]; tenantId: string; fi
                 <View style={[styles.detailInfo, { backgroundColor: colors.primary + '10' }]}>
                   <Ionicons name="time" size={28} color={colors.primary} />
                   <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text }]}>{selectedItem.hourLabel}</Text>
-                  <Text style={[{ fontSize: 13, color: colors.textSecondary }]}>{selectedItem.lokasyonName}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <Text style={[{ fontSize: 13, color: colors.textSecondary }]}>{selectedItem.lokasyonName}</Text>
+                    {typeof selectedItem.hourAmount === 'number' && selectedItem.hourAmount > 0 && (
+                      <View style={{ backgroundColor: colors.primary + '15', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 }}>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: colors.primary }}>
+                          ₺{selectedItem.hourAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
               )}
 

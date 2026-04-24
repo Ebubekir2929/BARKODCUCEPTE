@@ -833,6 +833,10 @@ export default function DashboardScreen() {
             data={sourceData.hourlyLocationSales}
             tenantId={activeTenantId}
             filterDate={filters?.startDate ? filters.startDate.toISOString().slice(0, 10) : undefined}
+            branchTotalsByName={(sourceData?.branchSales || []).reduce((acc: Record<string, number>, b: any) => {
+              if (b?.branchName) acc[b.branchName] = (b?.sales?.total ?? 0);
+              return acc;
+            }, {} as Record<string, number>)}
           />
         )}
 

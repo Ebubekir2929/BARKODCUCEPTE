@@ -36,6 +36,8 @@ interface TenantSnapshot {
   totals: { cash: number; card: number; openAccount: number; total: number };
   branches: { branchId: string; branchName: string; sales: { cash: number; card: number; openAccount: number; total: number } }[];
   cancels: { count: number; amount: number };
+  /** Map of hour label -> amount for that tenant */
+  hourly: Record<string, number>;
 }
 
 const DATA_SOURCE_LABELS = ['Data 1', 'Data 2', 'Data 3'];
@@ -123,6 +125,15 @@ export const CompareModal: React.FC<{
             { count: 0, amount: 0 }
           );
 
+          // Parse hourly data (hourly_data.data)
+          const hourlyRaw: any[] = apiData?.hourly_data?.data || [];
+          const hourly: Record<string, number> = {};
+          hourlyRaw.forEach((row: any) => {
+            const label = row?.SAAT_ADI || row?.SAAT || '';
+            if (!label) return;
+            hourly[label] = (hourly[label] || 0) + parseFloat(row?.TOPLAM || '0');
+          });
+
           return {
             tenant: tn,
             loading: false,
@@ -130,6 +141,7 @@ export const CompareModal: React.FC<{
             totals,
             branches,
             cancels,
+            hourly,
           };
         } catch (e: any) {
           return {
@@ -139,6 +151,7 @@ export const CompareModal: React.FC<{
             totals: { cash: 0, card: 0, openAccount: 0, total: 0 },
             branches: [],
             cancels: { count: 0, amount: 0 },
+            hourly: {},
           };
         }
       })
@@ -263,31 +276,115 @@ export const CompareModal: React.FC<{
             contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
             showsVerticalScrollIndicator={false}
           >
-            {/* Summary comparison bar chart */}
-            <View style={[styles.summaryBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                {t('total')} — {t('compare')}
-              </Text>
+            {/* Hero summary cards — one per tenant, gradient-ish look */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
               {snapshots.map((snap, idx) => {
-                const pct = maxTotal > 0 ? (snap.totals.total / maxTotal) * 100 : 0;
                 const color = [colors.primary, colors.total, colors.openAccount][idx % 3];
+                const pct = maxTotal > 0 ? (snap.totals.total / maxTotal) * 100 : 0;
+                const totalTenants = snapshots.length;
+                const width = totalTenants === 1 ? '100%' : totalTenants === 2 ? '48%' : '31.5%';
                 return (
-                  <View key={snap.tenant.tenant_id} style={{ marginBottom: 12 }}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }} numberOfLines={1}>
+                  <View
+                    key={snap.tenant.tenant_id}
+                    style={{
+                      width: width as any,
+                      borderRadius: 16,
+                      padding: 14,
+                      backgroundColor: color + '12',
+                      borderWidth: 1.5,
+                      borderColor: color + '40',
+                      minWidth: 130,
+                      flexGrow: 1,
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: color }} />
+                      <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '600' }} numberOfLines={1}>
                         {snap.tenant.tenant_name || DATA_SOURCE_LABELS[idx]}
                       </Text>
-                      <Text style={{ color: color, fontWeight: '700', fontSize: 13 }}>
-                        ₺{fmtTL(snap.totals.total)}
-                      </Text>
                     </View>
-                    <View style={{ height: 10, borderRadius: 5, backgroundColor: colors.background, overflow: 'hidden' }}>
-                      <View style={{ width: `${Math.max(pct, 1)}%`, height: '100%', backgroundColor: color, borderRadius: 5 }} />
+                    <Text
+                      style={{ color: color, fontWeight: '800', fontSize: 22, marginBottom: 4 }}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.6}
+                    >
+                      ₺{fmtTL(snap.totals.total)}
+                    </Text>
+                    <View style={{ height: 4, backgroundColor: color + '22', borderRadius: 2, overflow: 'hidden' }}>
+                      <View style={{ width: `${Math.max(pct, 2)}%`, height: '100%', backgroundColor: color, borderRadius: 2 }} />
                     </View>
+                    <Text style={{ color: colors.textSecondary, fontSize: 10, marginTop: 6 }}>
+                      {snap.branches.length} lokasyon · {snap.cancels.count} iptal
+                    </Text>
                   </View>
                 );
               })}
             </View>
+
+            {/* Hourly sales comparison chart */}
+            {(() => {
+              // Collect union of hour labels across all tenants
+              const hourSet = new Set<string>();
+              snapshots.forEach((s) => Object.keys(s.hourly).forEach((h) => hourSet.add(h)));
+              const hoursArr = Array.from(hourSet).sort();
+              if (hoursArr.length === 0) return null;
+              const maxHourly = Math.max(
+                1,
+                ...hoursArr.flatMap((h) => snapshots.map((s) => s.hourly[h] || 0))
+              );
+              return (
+                <View style={[styles.summaryBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Ionicons name="time-outline" size={16} color={colors.primary} />
+                      <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
+                        Saatlik Satış Karşılaştırması
+                      </Text>
+                    </View>
+                  </View>
+                  {/* Legend */}
+                  <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+                    {snapshots.map((s, i) => {
+                      const color = [colors.primary, colors.total, colors.openAccount][i % 3];
+                      return (
+                        <View key={s.tenant.tenant_id} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <View style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: color }} />
+                          <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '600' }}>
+                            {s.tenant.tenant_name || DATA_SOURCE_LABELS[i]}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                  {/* Chart */}
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4, paddingVertical: 6, minHeight: 150 }}>
+                      {hoursArr.map((h) => (
+                        <View key={h} style={{ alignItems: 'center', width: 42 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: 120 }}>
+                            {snapshots.map((s, i) => {
+                              const amt = s.hourly[h] || 0;
+                              const bh = Math.max((amt / maxHourly) * 110, amt > 0 ? 3 : 0);
+                              const color = [colors.primary, colors.total, colors.openAccount][i % 3];
+                              return (
+                                <View
+                                  key={s.tenant.tenant_id}
+                                  style={{ width: 10, height: bh, backgroundColor: color, borderTopLeftRadius: 3, borderTopRightRadius: 3 }}
+                                />
+                              );
+                            })}
+                          </View>
+                          <Text style={{ fontSize: 9, color: colors.textSecondary, marginTop: 4, fontWeight: '600' }}>
+                            {h.slice(0, 5)}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </ScrollView>
+                </View>
+              );
+            })()}
 
             {/* Per-metric comparison table */}
             <View style={[styles.tableBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
