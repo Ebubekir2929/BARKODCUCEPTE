@@ -20,6 +20,7 @@ import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { DataSourceSelector } from '../../src/components/DataSourceSelector';
 import { SummaryCard } from '../../src/components/SummaryCard';
 import { FilterModal } from '../../src/components/FilterModal';
+import { CompareModal } from '../../src/components/CompareModal';
 import { useLiveData } from '../../src/hooks/useLiveData';
 import { WaiterSalesSection, HourlyLocationSection } from '../../src/components/DashboardSections';
 import { BranchSales, HourlySales, OpenTable } from '../../src/types';
@@ -34,6 +35,7 @@ export default function DashboardScreen() {
   const { activeSource } = useDataSourceStore();
 
   const [showFilterModal, setShowFilterModal] = useState(false);
+  const [showCompareModal, setShowCompareModal] = useState(false);
   const [filters, setFilters] = useState({
     branchId: null as string | null,
     startDate: new Date(),
@@ -346,10 +348,18 @@ export default function DashboardScreen() {
       <View style={[styles.statusBarLine, { backgroundColor: colors.border }]} />
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={[styles.greeting, { color: colors.textSecondary }]}>{t('welcome_greeting')}</Text>
           <Text style={[styles.userName, { color: colors.text }]}>{user?.full_name || 'Kullanıcı'}</Text>
         </View>
+        <TouchableOpacity
+          style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border, marginRight: 8 }]}
+          onPress={() => setShowCompareModal(true)}
+          hitSlop={6}
+        >
+          <Ionicons name="git-compare-outline" size={20} color={colors.primary} />
+          <Text style={[styles.filterText, { color: colors.primary }]}>{t('compare')}</Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border }]}
           onPress={() => setShowFilterModal(true)}
@@ -844,6 +854,12 @@ export default function DashboardScreen() {
             .filter(b => !(sourceData?.allLocations || []).includes(b.branchName))
             .map(b => ({ id: b.branchId, name: b.branchName || b.branchId })),
         ]}
+      />
+
+      {/* Compare Modal - tenant (data source) comparison */}
+      <CompareModal
+        visible={showCompareModal}
+        onClose={() => setShowCompareModal(false)}
       />
 
       {/* Card Type Location Modal */}
