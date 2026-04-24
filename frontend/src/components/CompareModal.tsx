@@ -164,6 +164,9 @@ export const CompareModal: React.FC<{
   const [silentBadge, setSilentBadge] = useState(false);
   const [detailTenantIdx, setDetailTenantIdx] = useState<number | null>(null);
   const isFetchingRef = useRef(false);
+  // productHourByTenant[tenantId][productName][hour] = { qty, amount }
+  const [productHourByTenant, setProductHourByTenant] = useState<Record<string, Record<string, Record<string, { qty: number; amount: number }>>>>({});
+  const [phLoading, setPhLoading] = useState(false);
 
   const applyPreset = (p: PresetKey) => {
     const { start, end } = computePreset(p);
@@ -326,6 +329,72 @@ export const CompareModal: React.FC<{
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, isTodayOnly]);
+
+  // ─── Fetch per-tenant per-hour product data (on-demand) ───
+  // Triggered once snapshots are loaded; uses the union of hours across tenants.
+  useEffect(() => {
+    if (!visible || !hasLoadedOnce || !token) return;
+    if (snapshots.length === 0) return;
+
+    const hoursUnion = new Set<string>();
+    snapshots.forEach((s) => {
+      Object.keys(s.hourly).forEach((h) => hoursUnion.add(h));
+    });
+    const hoursArr = Array.from(hoursUnion);
+    if (hoursArr.length === 0) return;
+
+    const sdate = fmtDate(startDate);
+    let cancelled = false;
+    setPhLoading(true);
+
+    (async () => {
+      const CHUNK = 4; // requests in parallel
+      const tasks: { tenantId: string; hour: string }[] = [];
+      snapshots.forEach((s) => {
+        hoursArr.forEach((h) => tasks.push({ tenantId: s.tenant.tenant_id, hour: h }));
+      });
+
+      const fresh: Record<string, Record<string, Record<string, { qty: number; amount: number }>>> = {};
+
+      for (let i = 0; i < tasks.length; i += CHUNK) {
+        if (cancelled) return;
+        const slice = tasks.slice(i, i + CHUNK);
+        await Promise.all(slice.map(async ({ tenantId, hour }) => {
+          try {
+            const resp = await fetch(`${API_URL}/api/data/hourly-detail`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              body: JSON.stringify({
+                tenant_id: tenantId,
+                hour_label: hour,
+                lokasyon_id: null,
+                date: sdate,
+              }),
+            });
+            const j = await resp.json();
+            const rows: any[] = Array.isArray(j?.data) ? j.data : [];
+            rows.forEach((r: any) => {
+              const name = r?.STOK_ADI || r?.STOK_AD || r?.URUN_ADI || '-';
+              const qty = parseFloat(r?.TOPLAM_MIKTAR || r?.MIKTAR || '0');
+              const amount = parseFloat(r?.KDV_DAHIL_TOPLAM_TUTAR || r?.TOPLAM_TUTAR || '0');
+              if (!fresh[tenantId]) fresh[tenantId] = {};
+              if (!fresh[tenantId][name]) fresh[tenantId][name] = {};
+              if (!fresh[tenantId][name][hour]) fresh[tenantId][name][hour] = { qty: 0, amount: 0 };
+              fresh[tenantId][name][hour].qty += qty;
+              fresh[tenantId][name][hour].amount += amount;
+            });
+          } catch {
+            // silently skip per-cell failure
+          }
+        }));
+        if (!cancelled) setProductHourByTenant({ ...fresh });
+      }
+      if (!cancelled) setPhLoading(false);
+    })();
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, hasLoadedOnce, snapshots.length, startDate.getTime(), endDate.getTime()]);
 
   const maxTotal = useMemo(
     () => snapshots.reduce((m, s) => Math.max(m, s.totals.total), 0),
@@ -845,6 +914,162 @@ export const CompareModal: React.FC<{
                       ))}
                     </View>
                   </ScrollView>
+                </View>
+              );
+            })()}
+
+            {/* Ürünlerin Saatlik Satışları · Veri Kaynağı Bazlı */}
+            {(() => {
+              // Union of products across tenants, sorted by total amount
+              const productTotals: Record<string, number> = {};
+              Object.values(productHourByTenant).forEach((tenantMap) => {
+                Object.entries(tenantMap).forEach(([name, hours]) => {
+                  const sum = Object.values(hours).reduce((a, h) => a + h.amount, 0);
+                  productTotals[name] = (productTotals[name] || 0) + sum;
+                });
+              });
+              const allProducts = Object.keys(productTotals).sort((a, b) => productTotals[b] - productTotals[a]);
+
+              if (allProducts.length === 0 && !phLoading) return null;
+
+              // Union of hours across all tenants
+              const hoursUnion = new Set<string>();
+              snapshots.forEach((s) => Object.keys(s.hourly).forEach((h) => hoursUnion.add(h)));
+              const allHours = Array.from(hoursUnion).sort();
+
+              return (
+                <View style={[styles.sectionBox, { backgroundColor: colors.card, borderColor: colors.border, padding: 0 }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14, paddingBottom: 4 }}>
+                    <Ionicons name="time-outline" size={16} color={colors.primary} />
+                    <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0, flex: 1 }]} numberOfLines={1}>
+                      Ürünlerin Saatlik Satışları · Veri Kaynağı Bazlı
+                    </Text>
+                    {phLoading && <ActivityIndicator size="small" color={colors.primary} />}
+                  </View>
+                  <Text style={{ color: colors.textSecondary, fontSize: 11, paddingHorizontal: 14, paddingBottom: 6 }}>
+                    En çoktan en aza sıralı · her ürünün saat × veri kaynağı kırılımı
+                  </Text>
+
+                  {allProducts.length === 0 && phLoading && (
+                    <View style={{ padding: 24, alignItems: 'center' }}>
+                      <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+                        Saatlik ürün detayları yükleniyor...
+                      </Text>
+                    </View>
+                  )}
+
+                  {allProducts.map((productName, pIdx) => {
+                    const productTotal = productTotals[productName];
+                    // Gather product's hour data per tenant
+                    const cellsByTenant: Record<string, Record<string, { qty: number; amount: number }>> = {};
+                    snapshots.forEach((s) => {
+                      const data = productHourByTenant[s.tenant.tenant_id]?.[productName] || {};
+                      cellsByTenant[s.tenant.tenant_id] = data;
+                    });
+                    // Filter to hours where this product had sales somewhere
+                    const productHours = allHours.filter((h) =>
+                      snapshots.some((s) => {
+                        const c = cellsByTenant[s.tenant.tenant_id]?.[h];
+                        return c && (c.qty > 0 || c.amount > 0);
+                      })
+                    );
+                    if (productHours.length === 0) return null;
+
+                    return (
+                      <View key={productName + pIdx} style={{ marginBottom: 4, borderTopWidth: 1, borderTopColor: colors.border }}>
+                        {/* Product header */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.primary + '06' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                            <View style={{
+                              minWidth: 22, height: 20, borderRadius: 10, paddingHorizontal: 5,
+                              backgroundColor: pIdx < 3 ? colors.primary + '22' : colors.background,
+                              borderWidth: 1, borderColor: pIdx < 3 ? colors.primary : colors.border,
+                              alignItems: 'center', justifyContent: 'center',
+                            }}>
+                              <Text style={{ color: pIdx < 3 ? colors.primary : colors.textSecondary, fontSize: 10, fontWeight: '800' }}>
+                                #{pIdx + 1}
+                              </Text>
+                            </View>
+                            <Text style={{ color: colors.text, fontSize: 13, fontWeight: '800', flex: 1 }} numberOfLines={2}>
+                              {productName}
+                            </Text>
+                          </View>
+                          <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                            ₺{fmtTL(productTotal)}
+                          </Text>
+                        </View>
+
+                        {/* Horizontal matrix: Saat × Tenant */}
+                        <SwipeHint color={colors.primary} />
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                          <View>
+                            {/* Header row */}
+                            <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.background }}>
+                              <View style={{ width: 70, paddingVertical: 6, paddingHorizontal: 8 }}>
+                                <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '700' }}>Saat</Text>
+                              </View>
+                              {snapshots.map((s, i) => (
+                                <View key={s.tenant.tenant_id} style={{ width: 90, paddingVertical: 6, paddingHorizontal: 4, alignItems: 'flex-end' }}>
+                                  <Text style={{ color: getTenantColor(i), fontSize: 10, fontWeight: '700' }} numberOfLines={1}>
+                                    {s.tenant.name || `Veri ${i + 1}`}
+                                  </Text>
+                                </View>
+                              ))}
+                              <View style={{ width: 90, paddingVertical: 6, paddingHorizontal: 8, alignItems: 'flex-end', backgroundColor: colors.primary + '10' }}>
+                                <Text style={{ color: colors.primary, fontSize: 10, fontWeight: '800' }}>TOPLAM</Text>
+                              </View>
+                            </View>
+
+                            {/* Hour rows */}
+                            {productHours.map((h) => {
+                              let rowQty = 0;
+                              let rowAmount = 0;
+                              snapshots.forEach((s) => {
+                                const c = cellsByTenant[s.tenant.tenant_id]?.[h];
+                                if (c) { rowQty += c.qty; rowAmount += c.amount; }
+                              });
+                              return (
+                                <View key={h} style={{ flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                                  <View style={{ width: 70, paddingVertical: 8, paddingHorizontal: 8 }}>
+                                    <Text style={{ color: colors.text, fontSize: 11, fontWeight: '700' }}>{String(h).slice(0, 5)}</Text>
+                                  </View>
+                                  {snapshots.map((s, i) => {
+                                    const c = cellsByTenant[s.tenant.tenant_id]?.[h];
+                                    const qty = c?.qty || 0;
+                                    const amount = c?.amount || 0;
+                                    return (
+                                      <View key={s.tenant.tenant_id} style={{ width: 90, paddingVertical: 6, paddingHorizontal: 4, alignItems: 'flex-end' }}>
+                                        {qty > 0 ? (
+                                          <>
+                                            <Text style={{ color: getTenantColor(i), fontSize: 11, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                                              ₺{fmtTL(amount)}
+                                            </Text>
+                                            <Text style={{ color: colors.textSecondary, fontSize: 9 }}>
+                                              {qty.toFixed(0)} ad
+                                            </Text>
+                                          </>
+                                        ) : (
+                                          <Text style={{ color: colors.border, fontSize: 11 }}>—</Text>
+                                        )}
+                                      </View>
+                                    );
+                                  })}
+                                  <View style={{ width: 90, paddingVertical: 6, paddingHorizontal: 8, alignItems: 'flex-end', backgroundColor: colors.primary + '06' }}>
+                                    <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                                      ₺{fmtTL(rowAmount)}
+                                    </Text>
+                                    <Text style={{ color: colors.textSecondary, fontSize: 9 }}>
+                                      {rowQty.toFixed(0)} ad
+                                    </Text>
+                                  </View>
+                                </View>
+                              );
+                            })}
+                          </View>
+                        </ScrollView>
+                      </View>
+                    );
+                  })}
                 </View>
               );
             })()}
