@@ -297,6 +297,12 @@ export const HourlyLocationSection: React.FC<{
 
             {isExpanded && (
               <View style={{ paddingHorizontal: 12, paddingBottom: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingTop: 4, paddingBottom: 2 }}>
+                  <Ionicons name="swap-horizontal" size={11} color={colors.textSecondary} />
+                  <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600', fontStyle: 'italic' }}>
+                    ← Yana kaydırın →
+                  </Text>
+                </View>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                   <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingVertical: 8, gap: 4, minHeight: 180 }}>
                     {hours.map((hour: any, idx: number) => {

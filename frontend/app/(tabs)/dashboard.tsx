@@ -618,6 +618,12 @@ export default function DashboardScreen() {
           </View>
 
           {/* Bar Chart */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 4, paddingBottom: 6 }}>
+            <Ionicons name="swap-horizontal" size={12} color={colors.textSecondary} />
+            <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600', fontStyle: 'italic' }}>
+              ← Yana kaydırın →
+            </Text>
+          </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chartScroll}>
             <View style={styles.barChart}>
               {(sourceData?.hourlySales || []).map((hour, index) => {

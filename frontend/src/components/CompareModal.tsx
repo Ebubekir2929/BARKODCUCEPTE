@@ -103,6 +103,16 @@ const PRESETS: { key: PresetKey; label: string }[] = [
   { key: 'lastYear', label: 'Geçen Yıl' },
 ];
 
+// Small reusable "swipe" hint for horizontal scroll sections
+const SwipeHint: React.FC<{ color: string }> = ({ color }) => (
+  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 14, paddingBottom: 6 }}>
+    <Ionicons name="swap-horizontal" size={12} color={color} />
+    <Text style={{ color, fontSize: 10, fontWeight: '600', fontStyle: 'italic' }}>
+      ← Yana kaydırın →
+    </Text>
+  </View>
+);
+
 const parseFisFromRow = (row: any): number => {
   const v = row?.FIS_ADEDI ?? row?.FIS_SAYISI ?? row?.FIS_SAY ?? row?.ADET ?? row?.FIS_TOPLAM_ADET;
   const n = parseInt(String(v || '0'));
@@ -565,6 +575,7 @@ export const CompareModal: React.FC<{
                     <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>{totalFisAll} fiş</Text>
                   </View>
                 </View>
+                <SwipeHint color={colors.primary} />
                 <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                   <View>
                     {/* Header row */}
@@ -633,6 +644,7 @@ export const CompareModal: React.FC<{
                 <Ionicons name="grid-outline" size={16} color={colors.primary} />
                 <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Metrik Karşılaştırması</Text>
               </View>
+              <SwipeHint color={colors.primary} />
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 <View>
                   <View style={[styles.tableRow, { borderBottomColor: colors.border, backgroundColor: colors.background }]}>
@@ -706,6 +718,137 @@ export const CompareModal: React.FC<{
               </ScrollView>
             </View>
 
+            {/* Product Comparison — ALL tenants × ALL products (sorted desc) */}
+            {(() => {
+              // Build aggregated product map: productName -> { [tenantId]: {qty, amount} }
+              const productMap: Record<string, { name: string; totalAmount: number; totalQty: number; perTenant: Record<string, { amount: number; qty: number; location: string }> }> = {};
+              snapshots.forEach((snap) => {
+                snap.topProducts.forEach((p) => {
+                  const key = p.name;
+                  if (!productMap[key]) {
+                    productMap[key] = { name: p.name, totalAmount: 0, totalQty: 0, perTenant: {} };
+                  }
+                  productMap[key].totalAmount += p.amount;
+                  productMap[key].totalQty += p.qty;
+                  const existing = productMap[key].perTenant[snap.tenant.tenant_id];
+                  if (existing) {
+                    existing.amount += p.amount;
+                    existing.qty += p.qty;
+                  } else {
+                    productMap[key].perTenant[snap.tenant.tenant_id] = {
+                      amount: p.amount,
+                      qty: p.qty,
+                      location: p.location,
+                    };
+                  }
+                });
+              });
+              const allProductsRows = Object.values(productMap).sort((a, b) => b.totalAmount - a.totalAmount);
+              if (allProductsRows.length === 0) return null;
+              return (
+                <View style={[styles.sectionBox, { backgroundColor: colors.card, borderColor: colors.border, padding: 0 }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14, paddingBottom: 8 }}>
+                    <Ionicons name="list-outline" size={16} color={colors.primary} />
+                    <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0, flex: 1 }]} numberOfLines={1}>
+                      Ürün Karşılaştırması · Tüm Veri Kaynakları
+                    </Text>
+                    <View style={{ backgroundColor: colors.primary + '18', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
+                      <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>{allProductsRows.length} ürün</Text>
+                    </View>
+                  </View>
+                  <SwipeHint color={colors.primary} />
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View>
+                      {/* Header */}
+                      <View style={{ flexDirection: 'row', borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.background }}>
+                        <View style={{ width: 40, paddingVertical: 8, paddingHorizontal: 6, alignItems: 'center' }}>
+                          <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '700' }}>#</Text>
+                        </View>
+                        <View style={{ width: 180, paddingVertical: 8, paddingHorizontal: 10 }}>
+                          <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700' }}>Ürün</Text>
+                        </View>
+                        {snapshots.map((s, i) => (
+                          <View key={s.tenant.tenant_id} style={{ width: 110, paddingVertical: 8, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                            <Text style={{ color: getTenantColor(i), fontSize: 11, fontWeight: '700' }} numberOfLines={1}>
+                              {s.tenant.name || `Veri ${i + 1}`}
+                            </Text>
+                          </View>
+                        ))}
+                        <View style={{ width: 110, paddingVertical: 8, paddingHorizontal: 10, alignItems: 'flex-end', backgroundColor: colors.primary + '10' }}>
+                          <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '800' }}>TOPLAM</Text>
+                        </View>
+                      </View>
+                      {/* Rows */}
+                      {allProductsRows.map((row, idx) => (
+                        <View key={row.name + idx} style={{ flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                          <View style={{ width: 40, paddingVertical: 10, paddingHorizontal: 6, alignItems: 'center' }}>
+                            <View style={{
+                              minWidth: 24, height: 22, borderRadius: 11, paddingHorizontal: 6,
+                              backgroundColor: idx < 3 ? colors.primary + '20' : colors.background,
+                              borderWidth: 1, borderColor: idx < 3 ? colors.primary : colors.border,
+                              alignItems: 'center', justifyContent: 'center',
+                            }}>
+                              <Text style={{ color: idx < 3 ? colors.primary : colors.textSecondary, fontSize: 10, fontWeight: '800' }}>
+                                {idx + 1}
+                              </Text>
+                            </View>
+                          </View>
+                          <View style={{ width: 180, paddingVertical: 10, paddingHorizontal: 10 }}>
+                            <Text style={{ color: colors.text, fontSize: 12, fontWeight: '700' }} numberOfLines={2}>
+                              {row.name}
+                            </Text>
+                            <Text style={{ color: colors.textSecondary, fontSize: 10, marginTop: 1 }}>
+                              {row.totalQty.toFixed(0)} adet
+                            </Text>
+                          </View>
+                          {snapshots.map((s, i) => {
+                            const val = row.perTenant[s.tenant.tenant_id];
+                            return (
+                              <View key={s.tenant.tenant_id} style={{ width: 110, paddingVertical: 10, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                                {val && val.amount > 0 ? (
+                                  <>
+                                    <Text
+                                      style={{ color: getTenantColor(i), fontSize: 12, fontWeight: '800' }}
+                                      numberOfLines={1}
+                                      adjustsFontSizeToFit
+                                      minimumFontScale={0.7}
+                                    >
+                                      ₺{fmtTL(val.amount)}
+                                    </Text>
+                                    <Text style={{ color: colors.textSecondary, fontSize: 9 }}>
+                                      {val.qty.toFixed(0)} ad
+                                    </Text>
+                                    <Text style={{ color: colors.textSecondary, fontSize: 8, marginTop: 1 }} numberOfLines={1}>
+                                      {val.location}
+                                    </Text>
+                                  </>
+                                ) : (
+                                  <Text style={{ color: colors.border, fontSize: 12 }}>—</Text>
+                                )}
+                              </View>
+                            );
+                          })}
+                          <View style={{ width: 110, paddingVertical: 10, paddingHorizontal: 10, alignItems: 'flex-end', backgroundColor: colors.primary + '08' }}>
+                            <Text
+                              style={{ color: colors.primary, fontSize: 13, fontWeight: '800' }}
+                              numberOfLines={1}
+                              adjustsFontSizeToFit
+                              minimumFontScale={0.7}
+                            >
+                              ₺{fmtTL(row.totalAmount)}
+                            </Text>
+                            <Text style={{ color: colors.textSecondary, fontSize: 9 }}>
+                              {row.totalQty.toFixed(0)} ad
+                            </Text>
+                          </View>
+                        </View>
+                      ))}
+                    </View>
+                  </ScrollView>
+                </View>
+              );
+            })()}
+
             {/* GLOBAL Top Seller — best across all tenants */}
             {(() => {
               const allProducts: TopProductRow[] = snapshots
@@ -775,6 +918,7 @@ export const CompareModal: React.FC<{
           snapshot={snapshots[detailTenantIdx]}
           color={getTenantColor(detailTenantIdx)}
           periodLabel={periodLabel}
+          filterDate={fmtDate(startDate)}
         />
       )}
     </Modal>
