@@ -272,6 +272,16 @@ export const CompareModal: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startDate, endDate]);
 
+  // Silent 30-second live refresh in background (no visible spinner/indicator)
+  useEffect(() => {
+    if (!visible) return;
+    const interval = setInterval(() => {
+      if (!initialLoading && !refreshing) fetchAll(false);
+    }, 30000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, initialLoading, refreshing]);
+
   const maxTotal = useMemo(
     () => snapshots.reduce((m, s) => Math.max(m, s.totals.total), 0),
     [snapshots]
