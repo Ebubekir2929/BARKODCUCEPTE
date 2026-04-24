@@ -467,13 +467,15 @@ export default function SettingsScreen() {
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        keyboardVerticalOffset={0}
       >
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={{ paddingBottom: tabBarHeight + 4 }}
+        contentContainerStyle={{ paddingBottom: tabBarHeight - 16 }}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets
+        showsVerticalScrollIndicator={false}
       >
         <View style={[styles.userCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={[styles.userAvatar, { backgroundColor: colors.primary + '20' }]}>

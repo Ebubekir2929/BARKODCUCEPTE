@@ -119,8 +119,7 @@ export default function DashboardScreen() {
     setTableDetailItems([]);
     setTableDetailLoading(true);
     
-    const tenantId = user?.tenants?.[0]?.tenant_id;
-    if (!tenantId || !table.posId) {
+    if (!activeTenantId || !table.posId) {
       setTableDetailLoading(false);
       return;
     }
@@ -133,7 +132,7 @@ export default function DashboardScreen() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${authToken}`,
         },
-        body: JSON.stringify({ tenant_id: tenantId, pos_id: table.posId }),
+        body: JSON.stringify({ tenant_id: activeTenantId, pos_id: table.posId }),
       });
       
       const data = await response.json();
@@ -145,7 +144,7 @@ export default function DashboardScreen() {
     } finally {
       setTableDetailLoading(false);
     }
-  }, [user?.tenants]);
+  }, [activeTenantId]);
 
 
   // Calculate totals from all branches
@@ -233,10 +232,19 @@ export default function DashboardScreen() {
     const fetchHourlyDetail = async () => {
       try {
         const { token: authToken } = useAuthStore.getState();
+        // Respect currently-active dashboard filters (date + branch)
+        const fmt = (d: Date) => d.toISOString().slice(0, 10);
+        const filterDate = filters?.startDate ? fmt(filters.startDate) : undefined;
+        const lokasyonId = filters?.branchId ? parseInt(filters.branchId) : null;
         const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/data/hourly-detail`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-          body: JSON.stringify({ tenant_id: activeTenantId, hour_label: hour.hour, lokasyon_id: null }),
+          body: JSON.stringify({
+            tenant_id: activeTenantId,
+            hour_label: hour.hour,
+            lokasyon_id: lokasyonId,
+            ...(filterDate ? { date: filterDate } : {}),
+          }),
         });
         const data = await response.json();
         if (data.ok && data.data) {
