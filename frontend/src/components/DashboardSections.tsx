@@ -195,7 +195,7 @@ export const CancellationSection: React.FC<{ ozet: any[]; detay: any[]; tenantId
 };
 
 // === Lokasyon Bazlı Saatlik Satış Grafiği (Dikey Bar Chart) ===
-export const HourlyLocationSection: React.FC<{ data: any[]; tenantId: string }> = ({ data, tenantId }) => {
+export const HourlyLocationSection: React.FC<{ data: any[]; tenantId: string; filterDate?: string }> = ({ data, tenantId, filterDate }) => {
   const { colors } = useThemeStore();
   const [detailData, setDetailData] = useState<any[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -224,7 +224,12 @@ export const HourlyLocationSection: React.FC<{ data: any[]; tenantId: string }> 
       const response = await fetch(`${API_URL}/api/data/hourly-detail`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ tenant_id: tenantId, hour_label: hourLabel, lokasyon_id: lokasyonId || null }),
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          hour_label: hourLabel,
+          lokasyon_id: lokasyonId || null,
+          ...(filterDate ? { date: filterDate } : {}),
+        }),
       });
       const result = await response.json();
       if (result.ok && result.data) setDetailData(result.data);
@@ -233,7 +238,7 @@ export const HourlyLocationSection: React.FC<{ data: any[]; tenantId: string }> 
     } finally {
       setDetailLoading(false);
     }
-  }, [tenantId]);
+  }, [tenantId, filterDate]);
 
   return (
     <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -331,25 +336,37 @@ export const HourlyLocationSection: React.FC<{ data: any[]; tenantId: string }> 
               ) : detailData.length > 0 ? (
                 <View style={[{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', marginTop: 12 }]}>
                   <View style={[{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 12, backgroundColor: colors.background }]}>
-                    <Text style={[{ flex: 3, fontSize: 12, fontWeight: '700', color: colors.textSecondary }]}>Ürün</Text>
-                    <Text style={[{ flex: 1, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>Miktar</Text>
-                    <Text style={[{ flex: 1.5, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>Tutar</Text>
+                    <Text style={[{ flex: 2.4, fontSize: 12, fontWeight: '700', color: colors.textSecondary }]}>Ürün</Text>
+                    <Text style={[{ flex: 0.8, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>Miktar</Text>
+                    <Text style={[{ flex: 1.8, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>Tutar</Text>
                   </View>
                   {detailData.map((item: any, idx: number) => (
-                    <View key={idx} style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border }]}>
-                      <View style={{ flex: 3 }}>
-                        <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]}>{item.STOK_ADI || 'Ürün'}</Text>
-                        <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{item.LOKASYON || ''}</Text>
+                    <View key={idx} style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border, alignItems: 'center' }]}>
+                      <View style={{ flex: 2.4, paddingRight: 6 }}>
+                        <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]} numberOfLines={1}>{item.STOK_ADI || 'Ürün'}</Text>
+                        <Text style={[{ fontSize: 11, color: colors.textSecondary }]} numberOfLines={1}>{item.LOKASYON || ''}</Text>
                       </View>
-                      <Text style={[{ flex: 1, fontSize: 14, color: colors.text, textAlign: 'center' }]}>{parseFloat(item.TOPLAM_MIKTAR || '0').toFixed(0)}</Text>
-                      <Text style={[{ flex: 1.5, fontSize: 14, fontWeight: '700', color: colors.primary, textAlign: 'right' }]}>₺{parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0').toFixed(2)}</Text>
+                      <Text style={[{ flex: 0.8, fontSize: 14, color: colors.text, textAlign: 'center' }]}>{parseFloat(item.TOPLAM_MIKTAR || '0').toFixed(0)}</Text>
+                      <Text
+                        style={[{ flex: 1.8, fontSize: 13, fontWeight: '700', color: colors.primary, textAlign: 'right' }]}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.7}
+                      >
+                        ₺{parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </Text>
                     </View>
                   ))}
                   {/* Total row */}
-                  <View style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 2, borderTopColor: colors.border, backgroundColor: colors.background }]}>
-                    <Text style={[{ flex: 4, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>Toplam</Text>
-                    <Text style={[{ flex: 1.5, fontSize: 16, fontWeight: '800', color: colors.primary, textAlign: 'right' }]}>
-                      ₺{detailData.reduce((sum: number, item: any) => sum + parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0'), 0).toFixed(2)}
+                  <View style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 2, borderTopColor: colors.border, backgroundColor: colors.background, alignItems: 'center' }]}>
+                    <Text style={[{ flex: 3.2, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>Toplam</Text>
+                    <Text
+                      style={[{ flex: 1.8, fontSize: 15, fontWeight: '800', color: colors.primary, textAlign: 'right' }]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.6}
+                    >
+                      ₺{detailData.reduce((sum: number, item: any) => sum + parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0'), 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </Text>
                   </View>
                 </View>

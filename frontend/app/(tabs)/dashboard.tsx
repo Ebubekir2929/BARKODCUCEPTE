@@ -819,7 +819,11 @@ export default function DashboardScreen() {
 
         {/* Lokasyon Saatlik Satışlar */}
         {(sourceData?.hourlyLocationSales || []).length > 0 && (
-          <HourlyLocationSection data={sourceData.hourlyLocationSales} tenantId={activeTenantId} />
+          <HourlyLocationSection
+            data={sourceData.hourlyLocationSales}
+            tenantId={activeTenantId}
+            filterDate={filters?.startDate ? filters.startDate.toISOString().slice(0, 10) : undefined}
+          />
         )}
 
         {/* Bottom Spacing - Reduced */}
