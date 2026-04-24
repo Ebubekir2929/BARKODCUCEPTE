@@ -326,7 +326,12 @@ export const CompareModal: React.FC<{
                 const color = [colors.primary, colors.total, colors.openAccount, colors.cash, '#8B5CF6', '#F59E0B'][idx % 6];
                 const pct = maxTotal > 0 ? (snap.totals.total / maxTotal) * 100 : 0;
                 const totalTenants = snapshots.length;
-                const width = totalTenants === 1 ? '100%' : totalTenants === 2 ? '48%' : '31.5%';
+                // Better widths for many tenants:
+                //  1 -> 100%,  2 -> 48%,  3 -> 31.5%,  4+ -> 48% (2 per row)
+                const width =
+                  totalTenants === 1 ? '100%' :
+                  totalTenants === 2 ? '48%' :
+                  totalTenants === 3 ? '31.5%' : '48%';
                 const isActive = snap.tenant.tenant_id === activeTenantId;
                 return (
                   <View
@@ -446,64 +451,71 @@ export const CompareModal: React.FC<{
               );
             })()}
 
-            {/* Per-metric comparison table */}
+            {/* Per-metric comparison table — horizontally scrollable for many tenants */}
             <View style={[styles.tableBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <View style={[styles.tableHeader, { borderBottomColor: colors.border }]}>
-                <Text style={[styles.tableCol, styles.colLabel, { color: colors.textSecondary }]}>Metrik</Text>
-                {snapshots.map((s, i) => (
-                  <Text
-                    key={s.tenant.tenant_id}
-                    style={[styles.tableCol, styles.colVal, { color: colors.textSecondary }]}
-                    numberOfLines={1}
-                  >
-                    {s.tenant.tenant_name || DATA_SOURCE_LABELS[i]}
-                  </Text>
-                ))}
-              </View>
-
-              {[
-                { key: 'cash', label: t('cash_short'), icon: 'cash-outline' as const, color: colors.cash },
-                { key: 'card', label: t('card_short'), icon: 'card-outline' as const, color: colors.primary },
-                { key: 'openAccount', label: t('open_short'), icon: 'wallet-outline' as const, color: colors.openAccount },
-                { key: 'total', label: t('total_short'), icon: 'stats-chart' as const, color: colors.total },
-              ].map((metric) => (
-                <View key={metric.key} style={[styles.tableRow, { borderBottomColor: colors.border }]}>
-                  <View style={[styles.tableCol, styles.colLabel, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
-                    <Ionicons name={metric.icon} size={14} color={metric.color} />
-                    <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>{metric.label}</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View>
+                  <View style={[styles.tableHeader, { borderBottomColor: colors.border }]}>
+                    <Text style={[{ width: 120, fontSize: 12, fontWeight: '700' }, { color: colors.textSecondary }]}>Metrik</Text>
+                    {snapshots.map((s, i) => {
+                      const isActive = s.tenant.tenant_id === activeTenantId;
+                      return (
+                        <Text
+                          key={s.tenant.tenant_id}
+                          style={[{ width: 120, fontSize: 12, fontWeight: '700', textAlign: 'right' }, { color: isActive ? colors.primary : colors.textSecondary }]}
+                          numberOfLines={1}
+                        >
+                          {isActive ? '★ ' : ''}{s.tenant.tenant_name || DATA_SOURCE_LABELS[i] || `Data ${i + 1}`}
+                        </Text>
+                      );
+                    })}
                   </View>
-                  {snapshots.map((s) => (
-                    <Text
-                      key={s.tenant.tenant_id}
-                      style={[styles.tableCol, styles.colVal, { color: colors.text, fontWeight: '700', fontSize: 13 }]}
-                      numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.7}
-                    >
-                      ₺{fmtTL((s.totals as any)[metric.key])}
-                    </Text>
-                  ))}
-                </View>
-              ))}
 
-              {/* Cancellations row */}
-              <View style={[styles.tableRow, { borderBottomColor: colors.border, borderBottomWidth: 0 }]}>
-                <View style={[styles.tableCol, styles.colLabel, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
-                  <Ionicons name="close-circle-outline" size={14} color={colors.error} />
-                  <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>{t('compare_cancels_label')}</Text>
+                  {[
+                    { key: 'cash', label: t('cash_short'), icon: 'cash-outline' as const, color: colors.cash },
+                    { key: 'card', label: t('card_short'), icon: 'card-outline' as const, color: colors.primary },
+                    { key: 'openAccount', label: t('open_short'), icon: 'wallet-outline' as const, color: colors.openAccount },
+                    { key: 'total', label: t('total_short'), icon: 'stats-chart' as const, color: colors.total },
+                  ].map((metric) => (
+                    <View key={metric.key} style={[styles.tableRow, { borderBottomColor: colors.border }]}>
+                      <View style={{ width: 120, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Ionicons name={metric.icon} size={14} color={metric.color} />
+                        <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>{metric.label}</Text>
+                      </View>
+                      {snapshots.map((s) => (
+                        <Text
+                          key={s.tenant.tenant_id}
+                          style={[{ width: 120, fontSize: 13, fontWeight: '700', textAlign: 'right', paddingLeft: 4 }, { color: colors.text }]}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.7}
+                        >
+                          ₺{fmtTL((s.totals as any)[metric.key])}
+                        </Text>
+                      ))}
+                    </View>
+                  ))}
+
+                  {/* Cancellations row */}
+                  <View style={[styles.tableRow, { borderBottomColor: colors.border, borderBottomWidth: 0 }]}>
+                    <View style={{ width: 120, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="close-circle-outline" size={14} color={colors.error} />
+                      <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>{t('compare_cancels_label')}</Text>
+                    </View>
+                    {snapshots.map((s) => (
+                      <Text
+                        key={s.tenant.tenant_id}
+                        style={[{ width: 120, fontSize: 12, fontWeight: '700', textAlign: 'right', paddingLeft: 4 }, { color: colors.error }]}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.7}
+                      >
+                        {s.cancels.count} · ₺{fmtTL(s.cancels.amount)}
+                      </Text>
+                    ))}
+                  </View>
                 </View>
-                {snapshots.map((s) => (
-                  <Text
-                    key={s.tenant.tenant_id}
-                    style={[styles.tableCol, styles.colVal, { color: colors.error, fontWeight: '700', fontSize: 12 }]}
-                    numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.7}
-                  >
-                    {s.cancels.count} · ₺{fmtTL(s.cancels.amount)}
-                  </Text>
-                ))}
-              </View>
+              </ScrollView>
             </View>
 
             {/* Per-tenant branch breakdown */}
