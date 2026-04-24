@@ -75,42 +75,85 @@ def aggregate_dataset(key: str, raw_items: list) -> list:
         return result
     
     elif key == 'hourly_data':
-        # Group by SAAT_ADI, sum TOPLAM
+        # Group by SAAT_ADI, sum TOPLAM + FIS_ADEDI/FIS_SAYISI (receipt count per hour)
         hour_map = {}
+        fis_fields = ('FIS_ADEDI', 'FIS_SAYISI', 'FIS_SAY', 'ADET', 'FIS_TOPLAM_ADET')
         for item in raw_items:
             hour = item.get('SAAT_ADI', '')
             if hour not in hour_map:
                 hour_map[hour] = dict(item)
                 hour_map[hour]['TOPLAM'] = _sum_float(item.get('TOPLAM'))
+                for f in fis_fields:
+                    if f in item:
+                        hour_map[hour][f] = _sum_float(item.get(f))
             else:
                 hour_map[hour]['TOPLAM'] = hour_map[hour].get('TOPLAM', 0) + _sum_float(item.get('TOPLAM'))
+                for f in fis_fields:
+                    if f in item:
+                        hour_map[hour][f] = hour_map[hour].get(f, 0) + _sum_float(item.get(f))
         result = []
         for h, data in sorted(hour_map.items()):
             row = dict(data)
             row['TOPLAM'] = f"{row['TOPLAM']:.8f}" if isinstance(row['TOPLAM'], (int, float)) else row['TOPLAM']
+            for f in fis_fields:
+                if f in row and isinstance(row[f], (int, float)):
+                    row[f] = f"{row[f]:.0f}"
+            result.append(row)
+        return result
+
+    elif key == 'hourly_location_data':
+        # Group by SAAT_ADI + LOKASYON, sum TOPLAM + FIS_ADEDI
+        comp_map = {}
+        fis_fields = ('FIS_ADEDI', 'FIS_SAYISI', 'FIS_SAY', 'ADET', 'FIS_TOPLAM_ADET')
+        for item in raw_items:
+            hour = item.get('SAAT_ADI', '')
+            loc = item.get('LOKASYON', 'Bilinmeyen')
+            ck = f"{hour}__{loc}"
+            if ck not in comp_map:
+                comp_map[ck] = dict(item)
+                comp_map[ck]['TOPLAM'] = _sum_float(item.get('TOPLAM'))
+                for f in fis_fields:
+                    if f in item:
+                        comp_map[ck][f] = _sum_float(item.get(f))
+            else:
+                comp_map[ck]['TOPLAM'] = comp_map[ck].get('TOPLAM', 0) + _sum_float(item.get('TOPLAM'))
+                for f in fis_fields:
+                    if f in item:
+                        comp_map[ck][f] = comp_map[ck].get(f, 0) + _sum_float(item.get(f))
+        result = []
+        for _, data in sorted(comp_map.items()):
+            row = dict(data)
+            if isinstance(row.get('TOPLAM'), (int, float)):
+                row['TOPLAM'] = f"{row['TOPLAM']:.8f}"
+            for f in fis_fields:
+                if f in row and isinstance(row[f], (int, float)):
+                    row[f] = f"{row[f]:.0f}"
             result.append(row)
         return result
     
     elif key in ('top10_stock_movements', 'down10_stock_movements'):
-        # Group by STOK_AD, sum MIKTAR_CIKIS and TUTAR_CIKIS
+        # Group by STOK_AD + LOKASYON (composite) to preserve per-branch detail
         stock_map = {}
         for item in raw_items:
             name = item.get('STOK_AD', '')
-            if name not in stock_map:
-                stock_map[name] = dict(item)
-                stock_map[name]['MIKTAR_CIKIS'] = _sum_float(item.get('MIKTAR_CIKIS'))
-                stock_map[name]['TUTAR_CIKIS'] = _sum_float(item.get('TUTAR_CIKIS'))
+            loc = item.get('LOKASYON', item.get('LOKASYON_ADI', '-'))
+            key_c = f"{name}__{loc}"
+            if key_c not in stock_map:
+                stock_map[key_c] = dict(item)
+                stock_map[key_c]['MIKTAR_CIKIS'] = _sum_float(item.get('MIKTAR_CIKIS'))
+                stock_map[key_c]['TUTAR_CIKIS'] = _sum_float(item.get('TUTAR_CIKIS'))
             else:
-                stock_map[name]['MIKTAR_CIKIS'] = stock_map[name].get('MIKTAR_CIKIS', 0) + _sum_float(item.get('MIKTAR_CIKIS'))
-                stock_map[name]['TUTAR_CIKIS'] = stock_map[name].get('TUTAR_CIKIS', 0) + _sum_float(item.get('TUTAR_CIKIS'))
-        
+                stock_map[key_c]['MIKTAR_CIKIS'] = stock_map[key_c].get('MIKTAR_CIKIS', 0) + _sum_float(item.get('MIKTAR_CIKIS'))
+                stock_map[key_c]['TUTAR_CIKIS'] = stock_map[key_c].get('TUTAR_CIKIS', 0) + _sum_float(item.get('TUTAR_CIKIS'))
+
         result = list(stock_map.values())
         result.sort(key=lambda x: x.get('TUTAR_CIKIS', 0), reverse=(key == 'top10_stock_movements'))
         for row in result:
             for f in ('MIKTAR_CIKIS', 'TUTAR_CIKIS'):
                 if isinstance(row.get(f), (int, float)):
                     row[f] = f"{row[f]:.6f}"
-        return result[:10]
+        # Return more rows to cover multiple branches (was 10, now 50)
+        return result[:50]
     
     elif key == 'cancel_data':
         # Group by LOKASYON, sum amounts
