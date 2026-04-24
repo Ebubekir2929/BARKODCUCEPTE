@@ -849,54 +849,6 @@ export const CompareModal: React.FC<{
               );
             })()}
 
-            {/* GLOBAL Top Seller — best across all tenants */}
-            {(() => {
-              const allProducts: TopProductRow[] = snapshots
-                .flatMap((s, idx) =>
-                  s.topProducts.map((p) => ({
-                    ...p,
-                    tenantName: s.tenant.name || `Veri ${idx + 1}`,
-                    tenantId: s.tenant.tenant_id,
-                    colorIdx: idx,
-                  }))
-                )
-                .sort((a, b) => b.amount - a.amount);
-              if (allProducts.length === 0) return null;
-              const top = allProducts[0];
-              const topColor = getTenantColor(top.colorIdx || 0);
-              return (
-                <View style={[styles.sectionBox, { backgroundColor: topColor + '10', borderColor: topColor + '60' }]}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                    <Ionicons name="trophy" size={18} color={topColor} />
-                    <Text style={[styles.sectionTitle, { color: topColor, marginBottom: 0 }]}>
-                      En Çok Satan Ürün (Tümü)
-                    </Text>
-                  </View>
-                  <Text style={{ color: colors.text, fontSize: 18, fontWeight: '800', marginBottom: 4 }} numberOfLines={2}>
-                    {top.name}
-                  </Text>
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: topColor + '18', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
-                      <Ionicons name="business-outline" size={11} color={topColor} />
-                      <Text style={{ color: topColor, fontSize: 11, fontWeight: '700' }}>{top.tenantName}</Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.background, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}>
-                      <Ionicons name="location-outline" size={11} color={colors.text} />
-                      <Text style={{ color: colors.text, fontSize: 11, fontWeight: '600' }}>{top.location}</Text>
-                    </View>
-                  </View>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-                    <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-                      {top.qty.toFixed(0)} adet
-                    </Text>
-                    <Text style={{ color: topColor, fontSize: 22, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                      ₺{fmtTL(top.amount)}
-                    </Text>
-                  </View>
-                </View>
-              );
-            })()}
-
             {/* Errors */}
             {snapshots.filter((s) => s.error).length > 0 && (
               <View style={[styles.errorBox, { backgroundColor: colors.error + '10', borderColor: colors.error }]}>

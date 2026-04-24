@@ -309,7 +309,7 @@ export const TenantDetailModal: React.FC<{
                             <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '700' }}>Ürün</Text>
                           </View>
                           {allHours.map((h) => (
-                            <View key={h} style={{ width: 44, paddingVertical: 6, alignItems: 'center' }}>
+                            <View key={h} style={{ width: 64, paddingVertical: 6, alignItems: 'center' }}>
                               <Text style={{ color: colors.textSecondary, fontSize: 9, fontWeight: '700' }}>{String(h).slice(0, 5)}</Text>
                             </View>
                           ))}
@@ -322,8 +322,6 @@ export const TenantDetailModal: React.FC<{
                         {products.map((p, i) => {
                           const phEntry = branchPH[p.name] || {};
                           const hasAnyHour = Object.keys(phEntry).length > 0;
-                          // Per-product max qty for bar scaling
-                          const maxQtyThis = Math.max(1, ...Object.values(phEntry).map((v) => v.qty));
                           return (
                             <View key={p.name + i} style={{ flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border }}>
                               <View style={{ width: 40, paddingVertical: 8, alignItems: 'center' }}>
@@ -349,16 +347,16 @@ export const TenantDetailModal: React.FC<{
                               {allHours.map((h) => {
                                 const cell = phEntry[h];
                                 const qty = cell?.qty || 0;
-                                const heightPct = maxQtyThis > 0 ? (qty / maxQtyThis) * 100 : 0;
+                                const amount = cell?.amount || 0;
                                 return (
-                                  <View key={h} style={{ width: 44, alignItems: 'center', justifyContent: 'center', paddingVertical: 6 }}>
+                                  <View key={h} style={{ width: 64, alignItems: 'center', justifyContent: 'center', paddingVertical: 6, paddingHorizontal: 2 }}>
                                     {qty > 0 ? (
                                       <>
-                                        <View style={{ width: 18, height: 26, backgroundColor: bColor + '18', borderRadius: 3, justifyContent: 'flex-end', overflow: 'hidden' }}>
-                                          <View style={{ width: '100%', height: `${Math.max(heightPct, 10)}%`, backgroundColor: bColor }} />
-                                        </View>
-                                        <Text style={{ color: colors.text, fontSize: 9, fontWeight: '700', marginTop: 2 }}>
-                                          {qty.toFixed(0)}
+                                        <Text style={{ color: bColor, fontSize: 10, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                                          ₺{fmtTL(amount)}
+                                        </Text>
+                                        <Text style={{ color: colors.text, fontSize: 9, fontWeight: '700', marginTop: 1 }}>
+                                          {qty.toFixed(0)} ad
                                         </Text>
                                       </>
                                     ) : (
