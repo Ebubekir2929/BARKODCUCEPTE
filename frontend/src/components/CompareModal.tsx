@@ -25,9 +25,13 @@ interface Tenant {
 
 interface TopProductRow {
   name: string;
+  location: string;
   qty: number;
   amount: number;
   hours: string[]; // distinct hours
+  tenantName?: string;
+  tenantId?: string;
+  colorIdx?: number;
 }
 
 interface TenantSnapshot {
@@ -125,6 +129,10 @@ export const CompareModal: React.FC<{
   const [snapshots, setSnapshots] = useState<TenantSnapshot[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [expandedTenants, setExpandedTenants] = useState<Record<string, boolean>>({});
+
+  const toggleExpand = (tenantId: string) =>
+    setExpandedTenants((prev) => ({ ...prev, [tenantId]: !prev[tenantId] }));
 
   const applyPreset = (p: PresetKey) => {
     const { start, end } = computePreset(p);
@@ -198,24 +206,26 @@ export const CompareModal: React.FC<{
         hourly[label] = (hourly[label] || 0) + parseFloat(row?.TOPLAM || '0');
       });
 
-      // Top products (aggregate across hourly_stock_data or best_products)
+      // Top products (aggregate by name+location)
       const stockHour: any[] = apiData?.hourly_stock_data?.data || apiData?.best_products?.data || [];
-      const productMap: Record<string, { name: string; qty: number; amount: number; hours: Set<string> }> = {};
+      const productMap: Record<string, { name: string; location: string; qty: number; amount: number; hours: Set<string> }> = {};
       stockHour.forEach((row: any) => {
         const name = row?.STOK_ADI || row?.URUN_ADI || row?.AD;
         if (!name) return;
+        const loc = row?.LOKASYON || row?.LOKASYON_ADI || '-';
+        const key = `${name}__${loc}`;
         const qty = parseFloat(row?.TOPLAM_MIKTAR || row?.MIKTAR || '0');
         const amount = parseFloat(row?.KDV_DAHIL_TOPLAM_TUTAR || row?.TOPLAM_TUTAR || row?.TUTAR || '0');
         const hour = row?.SAAT_ADI || row?.SAAT || '';
-        if (!productMap[name]) productMap[name] = { name, qty: 0, amount: 0, hours: new Set() };
-        productMap[name].qty += qty;
-        productMap[name].amount += amount;
-        if (hour) productMap[name].hours.add(String(hour).slice(0, 5));
+        if (!productMap[key]) productMap[key] = { name, location: loc, qty: 0, amount: 0, hours: new Set() };
+        productMap[key].qty += qty;
+        productMap[key].amount += amount;
+        if (hour) productMap[key].hours.add(String(hour).slice(0, 5));
       });
       const topProducts: TopProductRow[] = Object.values(productMap)
-        .map((p) => ({ name: p.name, qty: p.qty, amount: p.amount, hours: Array.from(p.hours).sort() }))
+        .map((p) => ({ name: p.name, location: p.location, qty: p.qty, amount: p.amount, hours: Array.from(p.hours).sort() }))
         .sort((a, b) => b.amount - a.amount)
-        .slice(0, 5);
+        .slice(0, 8);
 
       return { tenant: tn, loading: false, error: null, totals, branches, cancels, hourly, topProducts };
     } catch (e: any) {
@@ -256,21 +266,11 @@ export const CompareModal: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
-  // Re-fetch when date range changes (not on first open)
+  // Silent background re-fetch when date range changes (no big spinner)
   useEffect(() => {
     if (visible && !initialLoading) fetchAll(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startDate, endDate]);
-
-  // Auto-refresh every 30 seconds for live data feel
-  useEffect(() => {
-    if (!visible) return;
-    const interval = setInterval(() => {
-      if (!initialLoading && !refreshing) fetchAll(false);
-    }, 30000);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, initialLoading, refreshing]);
 
   const maxTotal = useMemo(
     () => snapshots.reduce((m, s) => Math.max(m, s.totals.total), 0),
@@ -306,16 +306,12 @@ export const CompareModal: React.FC<{
             <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
               Veri Kaynağı Karşılaştırması
             </Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <View style={[styles.liveDot, { backgroundColor: colors.error }]} />
-              <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '600' }}>
-                Canlı · 30sn otomatik
-              </Text>
-              {refreshing && <ActivityIndicator size="small" color={colors.primary} />}
-            </View>
+            <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '500' }} numberOfLines={1}>
+              Kartlara dokunarak lokasyon dağılımını görün
+            </Text>
           </View>
           <TouchableOpacity onPress={() => fetchAll(false)} style={styles.headerBtn} hitSlop={12} disabled={refreshing}>
-            <Ionicons name="refresh" size={22} color={refreshing ? colors.textSecondary : colors.primary} />
+            <Ionicons name="refresh" size={22} color={colors.primary} />
           </TouchableOpacity>
         </View>
 
@@ -413,7 +409,7 @@ export const CompareModal: React.FC<{
             contentContainerStyle={{ padding: 16, paddingBottom: 32 + insets.bottom }}
             showsVerticalScrollIndicator={false}
           >
-            {/* Hero summary cards */}
+            {/* Hero summary cards (tap to expand location breakdown) */}
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
               {snapshots.map((snap, idx) => {
                 const color = getColor(idx);
@@ -421,11 +417,14 @@ export const CompareModal: React.FC<{
                 const n = snapshots.length;
                 const width: any = n === 1 ? '100%' : n === 2 ? '48%' : n === 3 ? '31.5%' : '48%';
                 const isActive = snap.tenant.tenant_id === activeTenantId;
+                const isExpanded = !!expandedTenants[snap.tenant.tenant_id];
                 return (
-                  <View
+                  <TouchableOpacity
                     key={snap.tenant.tenant_id}
+                    onPress={() => toggleExpand(snap.tenant.tenant_id)}
+                    activeOpacity={0.75}
                     style={{
-                      width,
+                      width: isExpanded ? '100%' : width,
                       borderRadius: 16,
                       padding: 14,
                       backgroundColor: color + '12',
@@ -455,6 +454,7 @@ export const CompareModal: React.FC<{
                       >
                         {snap.tenant.name || `Veri ${idx + 1}`}
                       </Text>
+                      <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={14} color={color} />
                     </View>
                     {snap.loading ? (
                       <View style={{ height: 30, justifyContent: 'center' }}>
@@ -476,7 +476,45 @@ export const CompareModal: React.FC<{
                     <Text style={{ color: colors.textSecondary, fontSize: 10, marginTop: 6 }}>
                       {snap.branches.length} lokasyon · {snap.cancels.count} iptal
                     </Text>
-                  </View>
+
+                    {/* Expanded: location breakdown */}
+                    {isExpanded && snap.branches.length > 0 && (
+                      <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: color + '25' }}>
+                        <Text style={{ color: color, fontSize: 11, fontWeight: '800', marginBottom: 8, letterSpacing: 0.3 }}>
+                          LOKASYON DAĞILIMI
+                        </Text>
+                        {snap.branches.map((b) => {
+                          const bPct = snap.totals.total > 0 ? (b.sales.total / snap.totals.total) * 100 : 0;
+                          return (
+                            <View key={b.branchId} style={{ marginBottom: 10 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                                  <Ionicons name="location" size={12} color={color} />
+                                  <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600', flex: 1 }} numberOfLines={1}>
+                                    {b.branchName}
+                                  </Text>
+                                </View>
+                                <Text
+                                  style={{ color, fontSize: 13, fontWeight: '700' }}
+                                  numberOfLines={1}
+                                  adjustsFontSizeToFit
+                                  minimumFontScale={0.7}
+                                >
+                                  ₺{fmtTL(b.sales.total)}
+                                </Text>
+                              </View>
+                              <View style={{ height: 6, backgroundColor: color + '22', borderRadius: 3, overflow: 'hidden' }}>
+                                <View style={{ width: `${Math.max(bPct, 1)}%`, height: '100%', backgroundColor: color, borderRadius: 3 }} />
+                              </View>
+                              <Text style={{ color: colors.textSecondary, fontSize: 10, marginTop: 3 }}>
+                                %{bPct.toFixed(1)} · Nakit ₺{fmtTL(b.sales.cash)} · Kart ₺{fmtTL(b.sales.card)} · Açık ₺{fmtTL(b.sales.openAccount)}
+                              </Text>
+                            </View>
+                          );
+                        })}
+                      </View>
+                    )}
+                  </TouchableOpacity>
                 );
               })}
             </View>
@@ -612,44 +650,111 @@ export const CompareModal: React.FC<{
               </ScrollView>
             </View>
 
-            {/* Top products per tenant with hours */}
+            {/* GLOBAL Top Seller — best across all tenants, highlighted at top */}
+            {(() => {
+              const allProducts: TopProductRow[] = snapshots
+                .flatMap((s, idx) =>
+                  s.topProducts.map((p) => ({
+                    ...p,
+                    tenantName: s.tenant.name || `Veri ${idx + 1}`,
+                    tenantId: s.tenant.tenant_id,
+                    colorIdx: idx,
+                  }))
+                )
+                .sort((a, b) => b.amount - a.amount);
+              if (allProducts.length === 0) return null;
+              const top = allProducts[0];
+              const topColor = getColor(top.colorIdx || 0);
+              const hoursLabel = top.hours.length > 0
+                ? `${top.hours[0]} — ${top.hours[top.hours.length - 1]}`
+                : '—';
+              return (
+                <View style={[styles.sectionBox, { backgroundColor: topColor + '10', borderColor: topColor + '60' }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                    <Ionicons name="trophy" size={18} color={topColor} />
+                    <Text style={[styles.sectionTitle, { color: topColor, marginBottom: 0 }]}>
+                      En Çok Satan Ürün (Tümü)
+                    </Text>
+                  </View>
+                  <Text style={{ color: colors.text, fontSize: 18, fontWeight: '800', marginBottom: 4 }} numberOfLines={2}>
+                    {top.name}
+                  </Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: topColor + '18', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
+                      <Ionicons name="business-outline" size={11} color={topColor} />
+                      <Text style={{ color: topColor, fontSize: 11, fontWeight: '700' }}>{top.tenantName}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.background, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}>
+                      <Ionicons name="location-outline" size={11} color={colors.text} />
+                      <Text style={{ color: colors.text, fontSize: 11, fontWeight: '600' }}>{top.location}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.background, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}>
+                      <Ionicons name="time-outline" size={11} color={colors.text} />
+                      <Text style={{ color: colors.text, fontSize: 11, fontWeight: '600' }}>{hoursLabel}</Text>
+                    </View>
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+                    <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+                      {top.qty.toFixed(0)} adet
+                    </Text>
+                    <Text style={{ color: topColor, fontSize: 22, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                      ₺{fmtTL(top.amount)}
+                    </Text>
+                  </View>
+                </View>
+              );
+            })()}
+
+            {/* Per-tenant top products with location + hour range + total */}
             {snapshots.map((snap, idx) => {
               if (snap.loading || snap.topProducts.length === 0) return null;
               const color = getColor(idx);
               return (
-                <View key={snap.tenant.tenant_id} style={[styles.sectionBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View key={`top-${snap.tenant.tenant_id}`} style={[styles.sectionBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                     <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: color }} />
-                    <Ionicons name="trophy-outline" size={16} color={color} />
+                    <Ionicons name="medal-outline" size={16} color={color} />
                     <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0, flex: 1 }]} numberOfLines={1}>
                       {snap.tenant.name || `Veri ${idx + 1}`} · En Çok Satanlar
                     </Text>
                   </View>
-                  {snap.topProducts.map((p, i) => (
-                    <View key={p.name + i} style={[styles.productRow, { borderBottomColor: colors.border }]}>
-                      <View style={[styles.rank, { backgroundColor: color + '18' }]}>
-                        <Text style={{ color, fontWeight: '800', fontSize: 12 }}>#{i + 1}</Text>
-                      </View>
-                      <View style={{ flex: 1, paddingHorizontal: 8 }}>
-                        <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }} numberOfLines={1}>
-                          {p.name}
-                        </Text>
-                        {p.hours.length > 0 && (
-                          <Text style={{ color: colors.textSecondary, fontSize: 10, marginTop: 2 }} numberOfLines={2}>
-                            Saatler: {p.hours.slice(0, 8).join(' · ')}{p.hours.length > 8 ? ` +${p.hours.length - 8}` : ''}
+                  {snap.topProducts.map((p, i) => {
+                    const hoursLabel = p.hours.length > 0
+                      ? `${p.hours[0]} — ${p.hours[p.hours.length - 1]}`
+                      : '';
+                    return (
+                      <View key={p.name + p.location + i} style={[styles.productRow, { borderBottomColor: colors.border }]}>
+                        <View style={[styles.rank, { backgroundColor: color + '18' }]}>
+                          <Text style={{ color, fontWeight: '800', fontSize: 12 }}>#{i + 1}</Text>
+                        </View>
+                        <View style={{ flex: 1, paddingHorizontal: 8 }}>
+                          <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }} numberOfLines={1}>
+                            {p.name}
                           </Text>
-                        )}
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 3 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                              <Ionicons name="location-outline" size={10} color={colors.textSecondary} />
+                              <Text style={{ color: colors.textSecondary, fontSize: 10 }}>{p.location}</Text>
+                            </View>
+                            {hoursLabel && (
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                                <Ionicons name="time-outline" size={10} color={colors.textSecondary} />
+                                <Text style={{ color: colors.textSecondary, fontSize: 10 }}>{hoursLabel}</Text>
+                              </View>
+                            )}
+                          </View>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                          <Text style={{ color, fontWeight: '700', fontSize: 13 }} numberOfLines={1}>
+                            ₺{fmtTL(p.amount)}
+                          </Text>
+                          <Text style={{ color: colors.textSecondary, fontSize: 10, marginTop: 2 }}>
+                            {p.qty.toFixed(0)} adet
+                          </Text>
+                        </View>
                       </View>
-                      <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={{ color, fontWeight: '700', fontSize: 13 }} numberOfLines={1}>
-                          ₺{fmtTL(p.amount)}
-                        </Text>
-                        <Text style={{ color: colors.textSecondary, fontSize: 10, marginTop: 2 }}>
-                          {p.qty.toFixed(0)} adet
-                        </Text>
-                      </View>
-                    </View>
-                  ))}
+                    );
+                  })}
                 </View>
               );
             })}
