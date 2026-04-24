@@ -49,6 +49,14 @@ interface TenantSnapshot {
   hourly: Record<string, number>;
   /** Top products in the period */
   topProducts: TopProductRow[];
+  /** Product-level hourly breakdown: productKey -> {name, location, totalQty, totalAmount, byHour: {hour->qty}} */
+  productHourly: {
+    name: string;
+    location: string;
+    totalQty: number;
+    totalAmount: number;
+    byHour: Record<string, { qty: number; amount: number }>;
+  }[];
 }
 
 const COLOR_PALETTE = ['#3B82F6', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#06B6D4', '#EF4444', '#84CC16'];
@@ -126,6 +134,21 @@ export const CompareModal: React.FC<{
   const [showEndPicker, setShowEndPicker] = useState(false);
   const [activePreset, setActivePreset] = useState<PresetKey | null>('today');
 
+  // Helper: is the current range "today only" (no filter) — used to decide
+  // whether we silently auto-refresh and whether to show spinner on fetch.
+  const isTodayOnly = useMemo(() => {
+    const now = new Date();
+    const same = (a: Date, b: Date) => fmtDate(a) === fmtDate(b);
+    return same(startDate, now) && same(endDate, now);
+  }, [startDate, endDate]);
+
+  const resetFilter = () => {
+    const now = new Date();
+    setStartDate(now);
+    setEndDate(now);
+    setActivePreset('today');
+  };
+
   const [snapshots, setSnapshots] = useState<TenantSnapshot[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -150,6 +173,7 @@ export const CompareModal: React.FC<{
     cancels: { count: 0, amount: 0 },
     hourly: {},
     topProducts: [],
+    productHourly: [],
   });
 
   const fetchOne = useCallback(async (tn: Tenant, sdate: string, edate: string): Promise<TenantSnapshot> => {
@@ -206,9 +230,9 @@ export const CompareModal: React.FC<{
         hourly[label] = (hourly[label] || 0) + parseFloat(row?.TOPLAM || '0');
       });
 
-      // Top products (aggregate by name+location)
+      // Top products (aggregate by name+location) + per-product hourly breakdown
       const stockHour: any[] = apiData?.hourly_stock_data?.data || apiData?.best_products?.data || [];
-      const productMap: Record<string, { name: string; location: string; qty: number; amount: number; hours: Set<string> }> = {};
+      const productMap: Record<string, { name: string; location: string; qty: number; amount: number; hours: Set<string>; byHour: Record<string, { qty: number; amount: number }> }> = {};
       stockHour.forEach((row: any) => {
         const name = row?.STOK_ADI || row?.URUN_ADI || row?.AD;
         if (!name) return;
@@ -216,18 +240,34 @@ export const CompareModal: React.FC<{
         const key = `${name}__${loc}`;
         const qty = parseFloat(row?.TOPLAM_MIKTAR || row?.MIKTAR || '0');
         const amount = parseFloat(row?.KDV_DAHIL_TOPLAM_TUTAR || row?.TOPLAM_TUTAR || row?.TUTAR || '0');
-        const hour = row?.SAAT_ADI || row?.SAAT || '';
-        if (!productMap[key]) productMap[key] = { name, location: loc, qty: 0, amount: 0, hours: new Set() };
+        const hour = String(row?.SAAT_ADI || row?.SAAT || '').slice(0, 5);
+        if (!productMap[key]) productMap[key] = { name, location: loc, qty: 0, amount: 0, hours: new Set(), byHour: {} };
         productMap[key].qty += qty;
         productMap[key].amount += amount;
-        if (hour) productMap[key].hours.add(String(hour).slice(0, 5));
+        if (hour) {
+          productMap[key].hours.add(hour);
+          if (!productMap[key].byHour[hour]) productMap[key].byHour[hour] = { qty: 0, amount: 0 };
+          productMap[key].byHour[hour].qty += qty;
+          productMap[key].byHour[hour].amount += amount;
+        }
       });
       const topProducts: TopProductRow[] = Object.values(productMap)
         .map((p) => ({ name: p.name, location: p.location, qty: p.qty, amount: p.amount, hours: Array.from(p.hours).sort() }))
         .sort((a, b) => b.amount - a.amount)
         .slice(0, 8);
+      // Product-level hourly: top 6 products with their hourly distribution
+      const productHourly = Object.values(productMap)
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 6)
+        .map((p) => ({
+          name: p.name,
+          location: p.location,
+          totalQty: p.qty,
+          totalAmount: p.amount,
+          byHour: p.byHour,
+        }));
 
-      return { tenant: tn, loading: false, error: null, totals, branches, cancels, hourly, topProducts };
+      return { tenant: tn, loading: false, error: null, totals, branches, cancels, hourly, topProducts, productHourly };
     } catch (e: any) {
       return { ...emptySnapshot(tn, false), error: e?.message || 'Hata' };
     }
@@ -259,28 +299,32 @@ export const CompareModal: React.FC<{
     setRefreshing(false);
   }, [tenants, token, startDate, endDate, fetchOne]);
 
-  // Initial fetch on open
+  // Initial fetch on open — keep last used range in state (no reset on close)
   useEffect(() => {
     if (visible) fetchAll(true);
-    else { setSnapshots([]); setInitialLoading(true); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
-  // Silent background re-fetch when date range changes (no big spinner)
+  // Filter change: show spinner (not silent) — user explicitly changed range
   useEffect(() => {
-    if (visible && !initialLoading) fetchAll(false);
+    if (!visible || initialLoading) return;
+    // If filter is "today", silently refresh. Else, show spinner.
+    if (isTodayOnly) fetchAll(false);
+    else fetchAll(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startDate, endDate]);
 
-  // Silent 30-second live refresh in background (no visible spinner/indicator)
+  // Silent 30-second auto-refresh — ONLY when no filter (today-only).
+  // If user selected a past/filter date, their data is frozen and never
+  // auto-refreshes (they explicitly chose a historical period).
   useEffect(() => {
-    if (!visible) return;
+    if (!visible || !isTodayOnly) return;
     const interval = setInterval(() => {
       if (!initialLoading && !refreshing) fetchAll(false);
     }, 30000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, initialLoading, refreshing]);
+  }, [visible, initialLoading, refreshing, isTodayOnly]);
 
   const maxTotal = useMemo(
     () => snapshots.reduce((m, s) => Math.max(m, s.totals.total), 0),
@@ -329,7 +373,18 @@ export const CompareModal: React.FC<{
         <View style={[styles.dateBox, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
           <View style={styles.dateHeaderRow}>
             <Text style={[styles.dateLabel, { color: colors.textSecondary }]}>Karşılaştırma Dönemi</Text>
-            <Text style={[{ color: colors.text, fontSize: 12, fontWeight: '700' }]}>{periodLabel}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <Text style={[{ color: colors.text, fontSize: 12, fontWeight: '700' }]}>{periodLabel}</Text>
+              {!isTodayOnly && (
+                <TouchableOpacity
+                  onPress={resetFilter}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: colors.error + '15', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}
+                >
+                  <Ionicons name="close-circle" size={12} color={colors.error} />
+                  <Text style={{ color: colors.error, fontSize: 11, fontWeight: '700' }}>Temizle</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
             <TouchableOpacity
@@ -419,167 +474,213 @@ export const CompareModal: React.FC<{
             contentContainerStyle={{ padding: 16, paddingBottom: 32 + insets.bottom }}
             showsVerticalScrollIndicator={false}
           >
-            {/* Hero summary cards (tap to expand location breakdown) */}
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
-              {snapshots.map((snap, idx) => {
-                const color = getColor(idx);
-                const pct = maxTotal > 0 ? (snap.totals.total / maxTotal) * 100 : 0;
-                const n = snapshots.length;
-                const width: any = n === 1 ? '100%' : n === 2 ? '48%' : n === 3 ? '31.5%' : '48%';
-                const isActive = snap.tenant.tenant_id === activeTenantId;
-                const isExpanded = !!expandedTenants[snap.tenant.tenant_id];
-                return (
-                  <TouchableOpacity
-                    key={snap.tenant.tenant_id}
-                    onPress={() => toggleExpand(snap.tenant.tenant_id)}
-                    activeOpacity={0.75}
-                    style={{
-                      width: isExpanded ? '100%' : width,
-                      borderRadius: 16,
-                      padding: 14,
-                      backgroundColor: color + '12',
-                      borderWidth: isActive ? 2.5 : 1.5,
-                      borderColor: isActive ? color : color + '40',
-                      minWidth: 130,
-                      flexGrow: 1,
-                      position: 'relative',
-                    }}
-                  >
-                    {isActive && (
-                      <View style={{
-                        position: 'absolute', top: -10, right: 10,
-                        backgroundColor: color, borderRadius: 10,
-                        paddingHorizontal: 8, paddingVertical: 2,
-                        flexDirection: 'row', alignItems: 'center', gap: 3,
-                      }}>
-                        <Ionicons name="checkmark-circle" size={11} color="#FFF" />
-                        <Text style={{ color: '#FFF', fontSize: 10, fontWeight: '800' }}>Seçili</Text>
-                      </View>
-                    )}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: color }} />
-                      <Text
-                        style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '600', flex: 1 }}
-                        numberOfLines={1}
+            {/* Hero summary cards (tap to expand location breakdown).
+                Expanded cards are rendered on their own row (order={-1} hack
+                via a wrapper) so they always hit max width cleanly. */}
+            {(() => {
+              const anyExpanded = snapshots.some((s) => expandedTenants[s.tenant.tenant_id]);
+              return (
+                <View style={{ flexDirection: anyExpanded ? 'column' : 'row', flexWrap: anyExpanded ? 'nowrap' : 'wrap', gap: 10, marginBottom: 14 }}>
+                  {snapshots.map((snap, idx) => {
+                    const color = getColor(idx);
+                    const pct = maxTotal > 0 ? (snap.totals.total / maxTotal) * 100 : 0;
+                    const n = snapshots.length;
+                    const width: any = anyExpanded
+                      ? '100%'
+                      : n === 1 ? '100%' : n === 2 ? '48%' : n === 3 ? '31.5%' : '48%';
+                    const isActive = snap.tenant.tenant_id === activeTenantId;
+                    const isExpanded = !!expandedTenants[snap.tenant.tenant_id];
+                    return (
+                      <TouchableOpacity
+                        key={snap.tenant.tenant_id}
+                        onPress={() => toggleExpand(snap.tenant.tenant_id)}
+                        activeOpacity={0.75}
+                        style={{
+                          width,
+                          borderRadius: 16,
+                          padding: 14,
+                          backgroundColor: color + '12',
+                          borderWidth: isActive ? 2.5 : 1.5,
+                          borderColor: isActive ? color : color + '40',
+                          minWidth: 130,
+                          flexGrow: anyExpanded ? 0 : 1,
+                          position: 'relative',
+                        }}
                       >
-                        {snap.tenant.name || `Veri ${idx + 1}`}
-                      </Text>
-                      <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={14} color={color} />
-                    </View>
-                    {snap.loading ? (
-                      <View style={{ height: 30, justifyContent: 'center' }}>
-                        <ActivityIndicator size="small" color={color} />
-                      </View>
-                    ) : (
-                      <Text
-                        style={{ color, fontWeight: '800', fontSize: 22, marginBottom: 4 }}
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.6}
-                      >
-                        ₺{fmtTL(snap.totals.total)}
-                      </Text>
-                    )}
-                    <View style={{ height: 4, backgroundColor: color + '22', borderRadius: 2, overflow: 'hidden' }}>
-                      <View style={{ width: `${Math.max(pct, 2)}%`, height: '100%', backgroundColor: color }} />
-                    </View>
-                    <Text style={{ color: colors.textSecondary, fontSize: 10, marginTop: 6 }}>
-                      {snap.branches.length} lokasyon · {snap.cancels.count} iptal
-                    </Text>
-
-                    {/* Expanded: location breakdown */}
-                    {isExpanded && snap.branches.length > 0 && (
-                      <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: color + '25' }}>
-                        <Text style={{ color: color, fontSize: 11, fontWeight: '800', marginBottom: 8, letterSpacing: 0.3 }}>
-                          LOKASYON DAĞILIMI
+                        {isActive && (
+                          <View style={{
+                            position: 'absolute', top: -10, right: 10,
+                            backgroundColor: color, borderRadius: 10,
+                            paddingHorizontal: 8, paddingVertical: 2,
+                            flexDirection: 'row', alignItems: 'center', gap: 3,
+                          }}>
+                            <Ionicons name="checkmark-circle" size={11} color="#FFF" />
+                            <Text style={{ color: '#FFF', fontSize: 10, fontWeight: '800' }}>Seçili</Text>
+                          </View>
+                        )}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                          <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: color }} />
+                          <Text
+                            style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '600', flex: 1 }}
+                            numberOfLines={1}
+                          >
+                            {snap.tenant.name || `Veri ${idx + 1}`}
+                          </Text>
+                          <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={14} color={color} />
+                        </View>
+                        {snap.loading ? (
+                          <View style={{ height: 30, justifyContent: 'center' }}>
+                            <ActivityIndicator size="small" color={color} />
+                          </View>
+                        ) : (
+                          <Text
+                            style={{ color, fontWeight: '800', fontSize: 22, marginBottom: 4 }}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.6}
+                          >
+                            ₺{fmtTL(snap.totals.total)}
+                          </Text>
+                        )}
+                        <View style={{ height: 4, backgroundColor: color + '22', borderRadius: 2, overflow: 'hidden' }}>
+                          <View style={{ width: `${Math.max(pct, 2)}%`, height: '100%', backgroundColor: color }} />
+                        </View>
+                        <Text style={{ color: colors.textSecondary, fontSize: 10, marginTop: 6 }}>
+                          {snap.branches.length} lokasyon · {snap.cancels.count} iptal
                         </Text>
-                        {snap.branches.map((b) => {
-                          const bPct = snap.totals.total > 0 ? (b.sales.total / snap.totals.total) * 100 : 0;
-                          return (
-                            <View key={b.branchId} style={{ marginBottom: 10 }}>
-                              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                                  <Ionicons name="location" size={12} color={color} />
-                                  <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600', flex: 1 }} numberOfLines={1}>
-                                    {b.branchName}
+
+                        {/* Expanded: location breakdown */}
+                        {isExpanded && snap.branches.length > 0 && (
+                          <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: color + '25' }}>
+                            <Text style={{ color: color, fontSize: 11, fontWeight: '800', marginBottom: 8, letterSpacing: 0.3 }}>
+                              LOKASYON DAĞILIMI
+                            </Text>
+                            {snap.branches.map((b) => {
+                              const bPct = snap.totals.total > 0 ? (b.sales.total / snap.totals.total) * 100 : 0;
+                              return (
+                                <View key={b.branchId} style={{ marginBottom: 10 }}>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                                      <Ionicons name="location" size={12} color={color} />
+                                      <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600', flex: 1 }} numberOfLines={1}>
+                                        {b.branchName}
+                                      </Text>
+                                    </View>
+                                    <Text
+                                      style={{ color, fontSize: 13, fontWeight: '700' }}
+                                      numberOfLines={1}
+                                      adjustsFontSizeToFit
+                                      minimumFontScale={0.7}
+                                    >
+                                      ₺{fmtTL(b.sales.total)}
+                                    </Text>
+                                  </View>
+                                  <View style={{ height: 6, backgroundColor: color + '22', borderRadius: 3, overflow: 'hidden' }}>
+                                    <View style={{ width: `${Math.max(bPct, 1)}%`, height: '100%', backgroundColor: color, borderRadius: 3 }} />
+                                  </View>
+                                  <Text style={{ color: colors.textSecondary, fontSize: 10, marginTop: 3 }}>
+                                    %{bPct.toFixed(1)} · Nakit ₺{fmtTL(b.sales.cash)} · Kart ₺{fmtTL(b.sales.card)} · Açık ₺{fmtTL(b.sales.openAccount)}
                                   </Text>
                                 </View>
-                                <Text
-                                  style={{ color, fontSize: 13, fontWeight: '700' }}
-                                  numberOfLines={1}
-                                  adjustsFontSizeToFit
-                                  minimumFontScale={0.7}
-                                >
-                                  ₺{fmtTL(b.sales.total)}
-                                </Text>
-                              </View>
-                              <View style={{ height: 6, backgroundColor: color + '22', borderRadius: 3, overflow: 'hidden' }}>
-                                <View style={{ width: `${Math.max(bPct, 1)}%`, height: '100%', backgroundColor: color, borderRadius: 3 }} />
-                              </View>
-                              <Text style={{ color: colors.textSecondary, fontSize: 10, marginTop: 3 }}>
-                                %{bPct.toFixed(1)} · Nakit ₺{fmtTL(b.sales.cash)} · Kart ₺{fmtTL(b.sales.card)} · Açık ₺{fmtTL(b.sales.openAccount)}
-                              </Text>
-                            </View>
-                          );
-                        })}
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            {/* Hourly comparison */}
-            {(() => {
-              const hourSet = new Set<string>();
-              snapshots.forEach((s) => Object.keys(s.hourly).forEach((h) => hourSet.add(h)));
-              const hoursArr = Array.from(hourSet).sort();
-              if (hoursArr.length === 0) return null;
-              const maxHourly = Math.max(1, ...hoursArr.flatMap((h) => snapshots.map((s) => s.hourly[h] || 0)));
-              return (
-                <View style={[styles.sectionBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                    <Ionicons name="time-outline" size={16} color={colors.primary} />
-                    <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
-                      Saatlik Satış Karşılaştırması
-                    </Text>
-                  </View>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
-                    {snapshots.map((s, i) => (
-                      <View key={s.tenant.tenant_id} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <View style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: getColor(i) }} />
-                        <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '600' }} numberOfLines={1}>
-                          {s.tenant.name || `Veri ${i + 1}`}
-                        </Text>
-                      </View>
-                    ))}
-                  </ScrollView>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 4, paddingVertical: 6, minHeight: 150 }}>
-                      {hoursArr.map((h) => (
-                        <View key={h} style={{ alignItems: 'center', width: 46 }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: 120 }}>
-                            {snapshots.map((s, i) => {
-                              const amt = s.hourly[h] || 0;
-                              const bh = Math.max((amt / maxHourly) * 110, amt > 0 ? 3 : 0);
-                              return (
-                                <View
-                                  key={s.tenant.tenant_id}
-                                  style={{ width: 10, height: bh, backgroundColor: getColor(i), borderTopLeftRadius: 3, borderTopRightRadius: 3 }}
-                                />
                               );
                             })}
                           </View>
-                          <Text style={{ fontSize: 9, color: colors.textSecondary, marginTop: 4, fontWeight: '600' }}>
-                            {h.slice(0, 5)}
-                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              );
+            })()}
+
+            {/* ÜRÜN BAZLI SAATLİK SATIŞLAR — per tenant, per product hour breakdown */}
+            {snapshots.map((snap, idx) => {
+              if (snap.loading || snap.productHourly.length === 0) return null;
+              const color = getColor(idx);
+              // Build set of all hours across products for this tenant
+              const allHours = new Set<string>();
+              snap.productHourly.forEach((p) => Object.keys(p.byHour).forEach((h) => allHours.add(h)));
+              const hoursArr = Array.from(allHours).sort();
+              if (hoursArr.length === 0) return null;
+              // Max qty across all product x hour cells for this tenant (to scale mini bars)
+              let maxCell = 1;
+              snap.productHourly.forEach((p) => {
+                hoursArr.forEach((h) => {
+                  const q = p.byHour[h]?.qty || 0;
+                  if (q > maxCell) maxCell = q;
+                });
+              });
+              return (
+                <View key={`ph-${snap.tenant.tenant_id}`} style={[styles.sectionBox, { backgroundColor: colors.card, borderColor: colors.border, padding: 0 }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14, paddingBottom: 8 }}>
+                    <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: color }} />
+                    <Ionicons name="bar-chart-outline" size={16} color={color} />
+                    <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0, flex: 1 }]} numberOfLines={1}>
+                      {snap.tenant.name || `Veri ${idx + 1}`} · Ürün Bazlı Saatlik
+                    </Text>
+                  </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View>
+                      {/* Header row */}
+                      <View style={{ flexDirection: 'row', borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.background }}>
+                        <View style={{ width: 140, paddingVertical: 8, paddingHorizontal: 12 }}>
+                          <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700' }}>Ürün</Text>
+                        </View>
+                        {hoursArr.map((h) => (
+                          <View key={h} style={{ width: 52, paddingVertical: 8, alignItems: 'center' }}>
+                            <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '700' }}>{h}</Text>
+                          </View>
+                        ))}
+                        <View style={{ width: 90, paddingVertical: 8, paddingHorizontal: 8, alignItems: 'flex-end' }}>
+                          <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700' }}>Toplam</Text>
+                        </View>
+                      </View>
+                      {/* Product rows */}
+                      {snap.productHourly.map((p, pIdx) => (
+                        <View key={p.name + p.location + pIdx} style={{ flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                          <View style={{ width: 140, paddingVertical: 10, paddingHorizontal: 12 }}>
+                            <Text style={{ color: colors.text, fontSize: 12, fontWeight: '600' }} numberOfLines={1}>{p.name}</Text>
+                            <Text style={{ color: colors.textSecondary, fontSize: 9, marginTop: 1 }} numberOfLines={1}>{p.location}</Text>
+                          </View>
+                          {hoursArr.map((h) => {
+                            const cell = p.byHour[h];
+                            const qty = cell?.qty || 0;
+                            const heightPct = maxCell > 0 ? (qty / maxCell) * 100 : 0;
+                            return (
+                              <View key={h} style={{ width: 52, alignItems: 'center', justifyContent: 'center', paddingVertical: 8 }}>
+                                {qty > 0 ? (
+                                  <>
+                                    <View style={{ width: 22, height: 34, backgroundColor: color + '18', borderRadius: 3, justifyContent: 'flex-end', overflow: 'hidden' }}>
+                                      <View style={{ width: '100%', height: `${Math.max(heightPct, 10)}%`, backgroundColor: color }} />
+                                    </View>
+                                    <Text style={{ color: colors.text, fontSize: 10, fontWeight: '700', marginTop: 2 }}>
+                                      {qty.toFixed(0)}
+                                    </Text>
+                                  </>
+                                ) : (
+                                  <Text style={{ color: colors.border, fontSize: 12 }}>·</Text>
+                                )}
+                              </View>
+                            );
+                          })}
+                          <View style={{ width: 90, paddingHorizontal: 8, alignItems: 'flex-end' }}>
+                            <Text
+                              style={{ color, fontSize: 12, fontWeight: '800' }}
+                              numberOfLines={1}
+                              adjustsFontSizeToFit
+                              minimumFontScale={0.7}
+                            >
+                              ₺{fmtTL(p.totalAmount)}
+                            </Text>
+                            <Text style={{ color: colors.textSecondary, fontSize: 10 }}>{p.totalQty.toFixed(0)} adet</Text>
+                          </View>
                         </View>
                       ))}
                     </View>
                   </ScrollView>
                 </View>
               );
-            })()}
+            })}
 
             {/* Per-metric comparison table — horizontal scroll */}
             <View style={[styles.sectionBox, { backgroundColor: colors.card, borderColor: colors.border, padding: 0 }]}>
