@@ -864,6 +864,7 @@ export default function DashboardScreen() {
       <CompareModal
         visible={showCompareModal}
         onClose={() => setShowCompareModal(false)}
+        activeTenantId={activeTenantId}
       />
 
       {/* Card Type Location Modal */}

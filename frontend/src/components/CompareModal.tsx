@@ -54,12 +54,20 @@ const fmtTL2 = (n: number) =>
 export const CompareModal: React.FC<{
   visible: boolean;
   onClose: () => void;
-}> = ({ visible, onClose }) => {
+  activeTenantId?: string;
+}> = ({ visible, onClose, activeTenantId }) => {
   const { colors } = useThemeStore();
   const { user, token } = useAuthStore();
   const { t } = useLanguageStore();
 
-  const tenants: Tenant[] = useMemo(() => user?.tenants || [], [user?.tenants]);
+  // Sorted: active tenant first, then the rest in original order
+  const tenants: Tenant[] = useMemo(() => {
+    const list = user?.tenants || [];
+    if (!activeTenantId) return list;
+    const active = list.find((t) => t.tenant_id === activeTenantId);
+    if (!active) return list;
+    return [active, ...list.filter((t) => t.tenant_id !== activeTenantId)];
+  }, [user?.tenants, activeTenantId]);
 
   const today = new Date();
   const [startDate, setStartDate] = useState<Date>(today);
@@ -70,94 +78,130 @@ export const CompareModal: React.FC<{
   const [snapshots, setSnapshots] = useState<TenantSnapshot[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Fetch dashboard data for each tenant
+  // Fetch dashboard data for each tenant (throttled to 2 parallel to avoid
+  // overwhelming the POS sync endpoint when user has many tenants)
   const fetchAll = async () => {
     if (!tenants.length || !token) return;
     setLoading(true);
     const sdate = fmtDate(startDate);
     const edate = fmtDate(endDate);
 
-    const results = await Promise.all(
-      tenants.map(async (tn, idx): Promise<TenantSnapshot> => {
-        try {
-          const url = `${API_URL}/api/data/dashboard?tenant_id=${encodeURIComponent(tn.tenant_id)}&sdate=${sdate}&edate=${edate}`;
-          const resp = await fetch(url, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-          const apiData = await resp.json();
+    const fetchOne = async (tn: Tenant): Promise<TenantSnapshot> => {
+      try {
+        const url = `${API_URL}/api/data/dashboard?tenant_id=${encodeURIComponent(tn.tenant_id)}&sdate=${sdate}&edate=${edate}`;
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 45000);
+        const resp = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const apiData = await resp.json();
 
-          // Parse branchSales from financial_data_location.data (matches useLiveData)
-          const branchRaw: any[] = apiData?.financial_data_location?.data || [];
-          const branches = branchRaw.map((b: any, i: number) => ({
-            branchId: `loc-${i}`,
-            branchName: b?.LOKASYON || 'Bilinmeyen',
-            sales: {
-              cash: parseFloat(b?.NAKIT || '0'),
-              card: parseFloat(b?.KREDI_KARTI || '0'),
-              openAccount: parseFloat(b?.VERESIYE || b?.ACIK_HESAP || '0'),
-              total: parseFloat(b?.TOPLAM || b?.GENELTOPLAM || '0'),
-            },
-          }));
-          const totals = branches.reduce(
-            (acc, b) => ({
-              cash: acc.cash + b.sales.cash,
-              card: acc.card + b.sales.card,
-              openAccount: acc.openAccount + b.sales.openAccount,
-              total: acc.total + b.sales.total,
-            }),
-            { cash: 0, card: 0, openAccount: 0, total: 0 }
-          );
+        // Parse branchSales from financial_data_location.data (matches useLiveData)
+        const branchRaw: any[] = apiData?.financial_data_location?.data || [];
+        const branches = branchRaw.map((b: any, i: number) => ({
+          branchId: `loc-${i}`,
+          branchName: b?.LOKASYON || 'Bilinmeyen',
+          sales: {
+            cash: parseFloat(b?.NAKIT || '0'),
+            card: parseFloat(b?.KREDI_KARTI || '0'),
+            openAccount: parseFloat(b?.VERESIYE || b?.ACIK_HESAP || '0'),
+            total: parseFloat(b?.TOPLAM || b?.GENELTOPLAM || '0'),
+          },
+        }));
+        const totals = branches.reduce(
+          (acc, b) => ({
+            cash: acc.cash + b.sales.cash,
+            card: acc.card + b.sales.card,
+            openAccount: acc.openAccount + b.sales.openAccount,
+            total: acc.total + b.sales.total,
+          }),
+          { cash: 0, card: 0, openAccount: 0, total: 0 }
+        );
 
-          // Parse cancellations from iptal_ozet
-          const iptalRaw: any[] = apiData?.iptal_ozet?.data || [];
-          const cancels = iptalRaw.reduce(
-            (acc, row: any) => ({
-              count:
-                acc.count +
-                parseInt(row.FIS_IPTAL_ADET || '0') +
-                parseInt(row.SATIR_IPTAL_ADET || '0'),
-              amount:
-                acc.amount +
-                parseFloat(row.FIS_IPTAL_TUTAR || '0') +
-                parseFloat(row.SATIR_IPTAL_TUTAR || '0'),
-            }),
-            { count: 0, amount: 0 }
-          );
+        // Parse cancellations from iptal_ozet
+        const iptalRaw: any[] = apiData?.iptal_ozet?.data || [];
+        const cancels = iptalRaw.reduce(
+          (acc, row: any) => ({
+            count:
+              acc.count +
+              parseInt(row.FIS_IPTAL_ADET || '0') +
+              parseInt(row.SATIR_IPTAL_ADET || '0'),
+            amount:
+              acc.amount +
+              parseFloat(row.FIS_IPTAL_TUTAR || '0') +
+              parseFloat(row.SATIR_IPTAL_TUTAR || '0'),
+          }),
+          { count: 0, amount: 0 }
+        );
 
-          // Parse hourly data (hourly_data.data)
-          const hourlyRaw: any[] = apiData?.hourly_data?.data || [];
-          const hourly: Record<string, number> = {};
-          hourlyRaw.forEach((row: any) => {
-            const label = row?.SAAT_ADI || row?.SAAT || '';
-            if (!label) return;
-            hourly[label] = (hourly[label] || 0) + parseFloat(row?.TOPLAM || '0');
-          });
+        // Parse hourly data (hourly_data.data)
+        const hourlyRaw: any[] = apiData?.hourly_data?.data || [];
+        const hourly: Record<string, number> = {};
+        hourlyRaw.forEach((row: any) => {
+          const label = row?.SAAT_ADI || row?.SAAT || '';
+          if (!label) return;
+          hourly[label] = (hourly[label] || 0) + parseFloat(row?.TOPLAM || '0');
+        });
 
-          return {
+        return {
+          tenant: tn,
+          loading: false,
+          error: null,
+          totals,
+          branches,
+          cancels,
+          hourly,
+        };
+      } catch (e: any) {
+        return {
+          tenant: tn,
+          loading: false,
+          error: e?.message || 'Hata',
+          totals: { cash: 0, card: 0, openAccount: 0, total: 0 },
+          branches: [],
+          cancels: { count: 0, amount: 0 },
+          hourly: {},
+        };
+      }
+    };
+
+    // Chunked parallel execution: 2 at a time
+    const CHUNK = 2;
+    const all: TenantSnapshot[] = new Array(tenants.length);
+    // Initialize with loading placeholders so UI can render incrementally
+    setSnapshots(
+      tenants.map((tn) => ({
+        tenant: tn,
+        loading: true,
+        error: null,
+        totals: { cash: 0, card: 0, openAccount: 0, total: 0 },
+        branches: [],
+        cancels: { count: 0, amount: 0 },
+        hourly: {},
+      }))
+    );
+    for (let i = 0; i < tenants.length; i += CHUNK) {
+      const slice = tenants.slice(i, i + CHUNK);
+      const chunkResults = await Promise.all(slice.map((tn) => fetchOne(tn)));
+      chunkResults.forEach((r, k) => (all[i + k] = r));
+      // Progressive update
+      setSnapshots(
+        tenants.map((tn, idx) =>
+          all[idx] || {
             tenant: tn,
-            loading: false,
+            loading: idx >= i + CHUNK,
             error: null,
-            totals,
-            branches,
-            cancels,
-            hourly,
-          };
-        } catch (e: any) {
-          return {
-            tenant: tn,
-            loading: false,
-            error: e?.message || 'Hata',
             totals: { cash: 0, card: 0, openAccount: 0, total: 0 },
             branches: [],
             cancels: { count: 0, amount: 0 },
             hourly: {},
-          };
-        }
-      })
-    );
-
-    setSnapshots(results);
+          }
+        )
+      );
+    }
     setLoading(false);
   };
 
@@ -279,10 +323,11 @@ export const CompareModal: React.FC<{
             {/* Hero summary cards — one per tenant, gradient-ish look */}
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
               {snapshots.map((snap, idx) => {
-                const color = [colors.primary, colors.total, colors.openAccount][idx % 3];
+                const color = [colors.primary, colors.total, colors.openAccount, colors.cash, '#8B5CF6', '#F59E0B'][idx % 6];
                 const pct = maxTotal > 0 ? (snap.totals.total / maxTotal) * 100 : 0;
                 const totalTenants = snapshots.length;
                 const width = totalTenants === 1 ? '100%' : totalTenants === 2 ? '48%' : '31.5%';
+                const isActive = snap.tenant.tenant_id === activeTenantId;
                 return (
                   <View
                     key={snap.tenant.tenant_id}
@@ -291,16 +336,31 @@ export const CompareModal: React.FC<{
                       borderRadius: 16,
                       padding: 14,
                       backgroundColor: color + '12',
-                      borderWidth: 1.5,
-                      borderColor: color + '40',
+                      borderWidth: isActive ? 2.5 : 1.5,
+                      borderColor: isActive ? color : color + '40',
                       minWidth: 130,
                       flexGrow: 1,
+                      position: 'relative',
                     }}
                   >
+                    {isActive && (
+                      <View style={{
+                        position: 'absolute', top: -10, right: 10,
+                        backgroundColor: color, borderRadius: 10,
+                        paddingHorizontal: 8, paddingVertical: 2,
+                        flexDirection: 'row', alignItems: 'center', gap: 3,
+                      }}>
+                        <Ionicons name="checkmark-circle" size={11} color="#FFF" />
+                        <Text style={{ color: '#FFF', fontSize: 10, fontWeight: '800' }}>Seçili</Text>
+                      </View>
+                    )}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                       <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: color }} />
-                      <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '600' }} numberOfLines={1}>
-                        {snap.tenant.tenant_name || DATA_SOURCE_LABELS[idx]}
+                      <Text
+                        style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '600', flex: 1 }}
+                        numberOfLines={1}
+                      >
+                        {snap.tenant.tenant_name || DATA_SOURCE_LABELS[idx] || `Data ${idx + 1}`}
                       </Text>
                     </View>
                     <Text
@@ -346,7 +406,7 @@ export const CompareModal: React.FC<{
                   {/* Legend */}
                   <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
                     {snapshots.map((s, i) => {
-                      const color = [colors.primary, colors.total, colors.openAccount][i % 3];
+                      const color = [colors.primary, colors.total, colors.openAccount, colors.cash, '#8B5CF6', '#F59E0B'][i % 6];
                       return (
                         <View key={s.tenant.tenant_id} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                           <View style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: color }} />
@@ -366,7 +426,7 @@ export const CompareModal: React.FC<{
                             {snapshots.map((s, i) => {
                               const amt = s.hourly[h] || 0;
                               const bh = Math.max((amt / maxHourly) * 110, amt > 0 ? 3 : 0);
-                              const color = [colors.primary, colors.total, colors.openAccount][i % 3];
+                              const color = [colors.primary, colors.total, colors.openAccount, colors.cash, '#8B5CF6', '#F59E0B'][i % 6];
                               return (
                                 <View
                                   key={s.tenant.tenant_id}
