@@ -162,6 +162,7 @@ export const CompareModal: React.FC<{
   const [snapshots, setSnapshots] = useState<TenantSnapshot[]>([]);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [silentBadge, setSilentBadge] = useState(false);
+  const [filterLoading, setFilterLoading] = useState(false);
   const [detailTenantIdx, setDetailTenantIdx] = useState<number | null>(null);
   const isFetchingRef = useRef(false);
   // productHourByTenant[tenantId][location][productName][hour] = { qty, amount }
@@ -313,10 +314,11 @@ export const CompareModal: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
-  // Filter change: also silent refresh (no spinner)
+  // Filter change: show spinner during refresh
   useEffect(() => {
     if (!visible || !hasLoadedOnce) return;
-    fetchAll();
+    setFilterLoading(true);
+    fetchAll().finally(() => setFilterLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startDate, endDate]);
 
@@ -438,12 +440,14 @@ export const CompareModal: React.FC<{
               <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>
                 Veri Kaynağı Karşılaştırması
               </Text>
-              {silentBadge && (
+              {filterLoading ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : silentBadge ? (
                 <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary }} />
-              )}
+              ) : null}
             </View>
             <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '500' }} numberOfLines={1}>
-              Karta dokun → şube detayı
+              {filterLoading ? 'Filtre uygulanıyor...' : 'Karta dokun → şube detayı'}
             </Text>
           </View>
           <TouchableOpacity onPress={() => fetchAll()} style={styles.headerBtn} hitSlop={12}>
