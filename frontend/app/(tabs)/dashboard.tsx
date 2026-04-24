@@ -87,11 +87,11 @@ export default function DashboardScreen() {
   // Check if filter is active (from live data hook)
   const isFilterActive = isDataFiltered;
 
-  // Compute active tenant ID based on selected data source
+  // Compute active tenant ID based on selected data source key (dataN → index N-1)
   const activeTenantId = useMemo(() => {
     if (!user?.tenants || user.tenants.length === 0) return '';
-    const DATA_SOURCE_KEYS = ['data1', 'data2', 'data3'];
-    const index = DATA_SOURCE_KEYS.indexOf(activeSource);
+    const match = /^data(\d+)$/.exec(activeSource || '');
+    const index = match ? parseInt(match[1], 10) - 1 : -1;
     if (index >= 0 && index < user.tenants.length) {
       return user.tenants[index].tenant_id || '';
     }
@@ -486,8 +486,8 @@ export default function DashboardScreen() {
           </View>
         </View>
 
-        {/* Open Tables Section - Only for Restoran */}
-        {user?.business_type === 'restoran' && (
+        {/* Open Tables Section — Restoran + has open tables */}
+        {user?.business_type === 'restoran' && (sourceData?.openTables || []).length > 0 && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.sectionHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>

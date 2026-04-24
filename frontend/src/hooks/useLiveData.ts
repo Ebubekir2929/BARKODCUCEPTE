@@ -1,13 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuthStore } from '../store/authStore';
-import { useDataSourceStore, DataSource } from '../store/dataSourceStore';
+import { useDataSourceStore } from '../store/dataSourceStore';
 import {
   BranchSales, HourlySales, CancelledReceipt, OpenTable,
   TopProduct, WaiterLocation,
 } from '../types';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
-const DATA_SOURCE_KEYS: DataSource[] = ['data1', 'data2', 'data3'];
 
 export interface DashboardFilter {
   branchId: string | null;
@@ -188,7 +187,8 @@ export function useLiveData(filter?: DashboardFilter) {
 
   const activeTenantId = useCallback(() => {
     if (!user?.tenants || user.tenants.length === 0) return null;
-    const index = DATA_SOURCE_KEYS.indexOf(activeSource);
+    const match = /^data(\d+)$/.exec(activeSource || '');
+    const index = match ? parseInt(match[1], 10) - 1 : -1;
     if (index >= 0 && index < user.tenants.length) {
       return user.tenants[index].tenant_id;
     }

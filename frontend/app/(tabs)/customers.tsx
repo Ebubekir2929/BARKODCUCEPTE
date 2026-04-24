@@ -32,8 +32,8 @@ export default function CustomersScreen() {
 
   const activeTenantId = useMemo(() => {
     if (!user?.tenants || user.tenants.length === 0) return '';
-    const keys = ['data1', 'data2', 'data3'];
-    const idx = keys.indexOf(activeSource);
+    const match = /^data(\d+)$/.exec(activeSource || '');
+    const idx = match ? parseInt(match[1], 10) - 1 : -1;
     if (idx >= 0 && idx < user.tenants.length) return user.tenants[idx].tenant_id || '';
     return user.tenants[0]?.tenant_id || '';
   }, [user?.tenants, activeSource]);

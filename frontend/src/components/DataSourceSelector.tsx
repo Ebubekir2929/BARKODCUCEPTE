@@ -6,7 +6,8 @@ import { useLanguageStore } from '../store/languageStore';
 import { useDataSourceStore, DataSource } from '../store/dataSourceStore';
 import { useAuthStore } from '../store/authStore';
 
-const DATA_SOURCE_KEYS: DataSource[] = ['data1', 'data2', 'data3'];
+// Build dynamic keys based on count: data1, data2, ..., dataN
+const keyFor = (index: number): DataSource => `data${index + 1}`;
 
 const formatCurrency = (amount: number) => {
   return '₺' + amount.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -24,8 +25,9 @@ export const DataSourceSelector: React.FC<DataSourceSelectorProps> = ({ totals }
 
   const dataSources = React.useMemo(() => {
     if (user?.tenants && user.tenants.length > 0) {
-      return user.tenants.slice(0, 10).map((tenant, index) => {
-        const key = DATA_SOURCE_KEYS[index] || (`data${index + 1}` as DataSource);
+      // Unlimited tenants — every tenant gets its own data source key
+      return user.tenants.map((tenant, index) => {
+        const key = keyFor(index);
         const total = totals?.[key] ?? 0;
         return { key, label: tenant.name || `Data ${index + 1}`, total };
       });
@@ -95,7 +97,9 @@ export const ActiveSourceIndicator: React.FC = () => {
 
   const activeLabel = React.useMemo(() => {
     if (user?.tenants && user.tenants.length > 0) {
-      const index = DATA_SOURCE_KEYS.indexOf(activeSource);
+      // Extract numeric index from 'dataN' key
+      const match = /^data(\d+)$/.exec(activeSource || '');
+      const index = match ? parseInt(match[1], 10) - 1 : -1;
       if (index >= 0 && index < user.tenants.length) {
         return user.tenants[index].name;
       }
