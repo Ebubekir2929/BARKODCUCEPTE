@@ -600,8 +600,8 @@ export default function DashboardScreen() {
         </View>
         )}
 
-        {/* Garson Satışları - Live Data */}
-        {user?.business_type === 'restoran' && (sourceData?.waiterSales || []).length > 0 && (
+        {/* Garson / Personel Satışları - Live Data (POS + ERP12) */}
+        {(sourceData?.waiterSales || []).length > 0 && (
           <WaiterSalesSection data={sourceData.waiterSales} />
         )}
 

@@ -7,67 +7,164 @@ import { useAuthStore } from '../store/authStore';
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 // === Garson Satışları Bölümü ===
+// Yeni proc: SATIR_TIPI = DETAY / LOKASYON_TOPLAM / GENEL_TOPLAM
+// Her satırda PERAKENDE_FIS_SAYISI + ERP12_FIS_SAYISI + TOPLAM_FIS_SAYISI gelir
 export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
   const { colors } = useThemeStore();
-  
+  const [expanded, setExpanded] = useState<string | null>(null);
+
   if (!data || data.length === 0) return null;
 
-  const totalTutar = data.reduce((s: number, r: any) => s + parseFloat(r.TOPLAM_TUTAR || '0'), 0);
-  const totalAdisyon = data.reduce((s: number, r: any) => s + parseInt(r.ADISYON_SAYISI || '0'), 0);
+  // Split rows by tipi
+  const detayRows = data.filter((r: any) => (r.SATIR_TIPI || 'DETAY') === 'DETAY');
+  const lokasyonToplam = data.filter((r: any) => r.SATIR_TIPI === 'LOKASYON_TOPLAM');
+  const genelToplam = data.find((r: any) => r.SATIR_TIPI === 'GENEL_TOPLAM');
 
-  // Group by location
+  // Fallback for old proc that didn't have SATIR_TIPI
+  const usingTiered = lokasyonToplam.length > 0 || !!genelToplam;
+
+  // Aggregate global totals
+  const totalTutar = genelToplam
+    ? parseFloat(genelToplam.TOPLAM_TUTAR || '0')
+    : detayRows.reduce((s: number, r: any) => s + parseFloat(r.TOPLAM_TUTAR || '0'), 0);
+  const totalAdisyon = genelToplam
+    ? parseInt(genelToplam.ADISYON_SAYISI || '0')
+    : detayRows.reduce((s: number, r: any) => s + parseInt(r.ADISYON_SAYISI || '0'), 0);
+  const totalPerakende = genelToplam
+    ? parseInt(genelToplam.PERAKENDE_FIS_SAYISI || '0')
+    : detayRows.reduce((s: number, r: any) => s + parseInt(r.PERAKENDE_FIS_SAYISI || '0'), 0);
+  const totalErp12 = genelToplam
+    ? parseInt(genelToplam.ERP12_FIS_SAYISI || '0')
+    : detayRows.reduce((s: number, r: any) => s + parseInt(r.ERP12_FIS_SAYISI || '0'), 0);
+  const totalFis = totalPerakende + totalErp12;
+
+  // Group DETAY rows by location
   const byLocation: Record<string, any[]> = {};
-  data.forEach((r: any) => {
+  detayRows.forEach((r: any) => {
     const loc = r.LOKASYON_AD || 'Bilinmeyen';
     if (!byLocation[loc]) byLocation[loc] = [];
     byLocation[loc].push(r);
   });
 
-  const [expanded, setExpanded] = useState<string | null>(null);
+  // Lookup per-location totals (from LOKASYON_TOPLAM rows)
+  const locationTotals: Record<string, any> = {};
+  lokasyonToplam.forEach((r: any) => {
+    locationTotals[r.LOKASYON_AD || 'Bilinmeyen'] = r;
+  });
 
   return (
     <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
       <View style={styles.sectionHeader}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Garson Satışları</Text>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Garson / Personel Satışları</Text>
         <View style={[styles.badge, { backgroundColor: colors.primary + '15' }]}>
-          <Text style={[styles.badgeText, { color: colors.primary }]}>{data.length} garson · ₺{totalTutar.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</Text>
+          <Text style={[styles.badgeText, { color: colors.primary }]}>
+            {detayRows.length} kişi · ₺{totalTutar.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+          </Text>
         </View>
       </View>
-      
-      {Object.entries(byLocation).map(([loc, garsonlar]) => (
+
+      {/* GENEL TOPLAM kart (yeni proc) */}
+      {usingTiered && totalFis > 0 && (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: colors.primary + '15' }}>
+            <Ionicons name="receipt-outline" size={11} color={colors.primary} />
+            <Text style={{ fontSize: 11, fontWeight: '700', color: colors.primary }}>{totalFis} fiş</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: '#10B98115' }}>
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#10B981' }}>P: {totalPerakende}</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: '#8B5CF615' }}>
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6' }}>E: {totalErp12}</Text>
+          </View>
+          {totalAdisyon > 0 && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: colors.warning + '15' }}>
+              <Ionicons name="restaurant-outline" size={11} color={colors.warning} />
+              <Text style={{ fontSize: 11, fontWeight: '700', color: colors.warning }}>{totalAdisyon} adisyon</Text>
+            </View>
+          )}
+        </View>
+      )}
+
+      {Object.entries(byLocation).map(([loc, garsonlar]) => {
+        const locTot = locationTotals[loc];
+        const locTutar = locTot
+          ? parseFloat(locTot.TOPLAM_TUTAR || '0')
+          : garsonlar.reduce((s: number, r: any) => s + parseFloat(r.TOPLAM_TUTAR || '0'), 0);
+        const locPerakende = locTot ? parseInt(locTot.PERAKENDE_FIS_SAYISI || '0')
+          : garsonlar.reduce((s: number, r: any) => s + parseInt(r.PERAKENDE_FIS_SAYISI || '0'), 0);
+        const locErp12 = locTot ? parseInt(locTot.ERP12_FIS_SAYISI || '0')
+          : garsonlar.reduce((s: number, r: any) => s + parseInt(r.ERP12_FIS_SAYISI || '0'), 0);
+        return (
         <View key={loc}>
           <TouchableOpacity
             style={[styles.groupHeader, { backgroundColor: colors.background, borderColor: colors.border }]}
             onPress={() => setExpanded(expanded === loc ? null : loc)}
           >
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
               <Ionicons name="people-outline" size={18} color={colors.primary} />
-              <Text style={[styles.groupName, { color: colors.text }]}>{loc}</Text>
+              <Text style={[styles.groupName, { color: colors.text }]} numberOfLines={1}>{loc}</Text>
               <View style={[styles.countBadge, { backgroundColor: colors.primary + '15' }]}>
                 <Text style={[styles.countText, { color: colors.primary }]}>{garsonlar.length}</Text>
               </View>
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={[styles.groupTotal, { color: colors.textSecondary }]}>
-                ₺{garsonlar.reduce((s: number, r: any) => s + parseFloat(r.TOPLAM_TUTAR || '0'), 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              {(locPerakende + locErp12) > 0 && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                  {locPerakende > 0 && (
+                    <View style={{ paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5, backgroundColor: '#10B98115' }}>
+                      <Text style={{ fontSize: 9, fontWeight: '700', color: '#10B981' }}>P:{locPerakende}</Text>
+                    </View>
+                  )}
+                  {locErp12 > 0 && (
+                    <View style={{ paddingHorizontal: 5, paddingVertical: 2, borderRadius: 5, backgroundColor: '#8B5CF615' }}>
+                      <Text style={{ fontSize: 9, fontWeight: '700', color: '#8B5CF6' }}>E:{locErp12}</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+              <Text style={[styles.groupTotal, { color: colors.text, fontWeight: '700' }]} numberOfLines={1} adjustsFontSizeToFit>
+                ₺{locTutar.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
               </Text>
               <Ionicons name={expanded === loc ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
             </View>
           </TouchableOpacity>
 
-          {expanded === loc && garsonlar.map((g: any, idx: number) => (
-            <View key={idx} style={[styles.itemCard, { backgroundColor: colors.background, borderColor: colors.border, marginLeft: 12 }]}>
-              <View style={styles.itemRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.itemName, { color: colors.text }]}>{g.GARSON_AD || 'Garson'}</Text>
-                  <Text style={[styles.itemSub, { color: colors.textSecondary }]}>{g.ADISYON_SAYISI || 0} adisyon · {g.SATIR_SAYISI || 0} satır</Text>
+          {expanded === loc && garsonlar.map((g: any, idx: number) => {
+            const gPerakende = parseInt(g.PERAKENDE_FIS_SAYISI || '0');
+            const gErp12 = parseInt(g.ERP12_FIS_SAYISI || '0');
+            const gAdisyon = parseInt(g.ADISYON_SAYISI || '0');
+            return (
+              <View key={idx} style={[styles.itemCard, { backgroundColor: colors.background, borderColor: colors.border, marginLeft: 12 }]}>
+                <View style={styles.itemRow}>
+                  <View style={{ flex: 1, paddingRight: 8 }}>
+                    <Text style={[styles.itemName, { color: colors.text }]} numberOfLines={1}>{g.GARSON_AD || 'Personel'}</Text>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                      {gPerakende > 0 && (
+                        <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: '#10B98115' }}>
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: '#10B981' }}>P: {gPerakende} fiş</Text>
+                        </View>
+                      )}
+                      {gErp12 > 0 && (
+                        <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: '#8B5CF615' }}>
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: '#8B5CF6' }}>E: {gErp12} fiş</Text>
+                        </View>
+                      )}
+                      {gAdisyon > 0 && (
+                        <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: colors.warning + '15' }}>
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: colors.warning }}>{gAdisyon} adisyon</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                  <Text style={[styles.itemAmount, { color: colors.primary }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                    ₺{parseFloat(g.TOPLAM_TUTAR || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                  </Text>
                 </View>
-                <Text style={[styles.itemAmount, { color: colors.primary }]}>₺{parseFloat(g.TOPLAM_TUTAR || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2 })}</Text>
               </View>
-            </View>
-          ))}
+            );
+          })}
         </View>
-      ))}
+      );})}
     </View>
   );
 };
