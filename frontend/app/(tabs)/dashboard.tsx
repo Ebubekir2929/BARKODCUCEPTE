@@ -744,7 +744,7 @@ export default function DashboardScreen() {
                 </Text>
               </View>
               <Text style={[styles.productRevenue, { color: colors.success }]}>
-                ₺{product.revenue.toLocaleString('tr-TR')}
+                ₺{product.revenue.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </Text>
             </View>
           ))}
@@ -767,7 +767,7 @@ export default function DashboardScreen() {
                 </Text>
               </View>
               <Text style={[styles.productRevenue, { color: colors.error }]}>
-                ₺{product.revenue.toLocaleString('tr-TR')}
+                ₺{product.revenue.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </Text>
             </View>
           ))}
@@ -858,14 +858,14 @@ export default function DashboardScreen() {
                     <Ionicons name="cash-outline" size={14} color={colors.cash} />
                     <Text style={[styles.locationLabel, { color: colors.textSecondary }]}>{t('cash_short')}</Text>
                     <Text style={[styles.locationValue, { color: colors.text }]}>
-                      ₺{branch.sales.cash.toLocaleString('tr-TR')}
+                      ₺{branch.sales.cash.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </Text>
                   </View>
                   <View style={styles.locationStat}>
                     <Ionicons name="card-outline" size={14} color={colors.primary} />
                     <Text style={[styles.locationLabel, { color: colors.textSecondary }]}>{t('card_short')}</Text>
                     <Text style={[styles.locationValue, { color: colors.text }]}>
-                      ₺{branch.sales.card.toLocaleString('tr-TR')}
+                      ₺{branch.sales.card.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </Text>
                   </View>
                 </View>
@@ -874,14 +874,14 @@ export default function DashboardScreen() {
                     <Ionicons name="wallet-outline" size={14} color={colors.openAccount} />
                     <Text style={[styles.locationLabel, { color: colors.textSecondary }]}>{t('open_short')}</Text>
                     <Text style={[styles.locationValue, { color: colors.text }]}>
-                      ₺{branch.sales.openAccount.toLocaleString('tr-TR')}
+                      ₺{branch.sales.openAccount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </Text>
                   </View>
                   <View style={styles.locationStat}>
                     <Ionicons name="stats-chart" size={14} color={colors.total} />
                     <Text style={[styles.locationLabel, { color: colors.textSecondary }]}>{t('total_short')}</Text>
                     <Text style={[styles.locationValue, { color: colors.text }]}>
-                      ₺{branch.sales.total.toLocaleString('tr-TR')}
+                      ₺{branch.sales.total.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </Text>
                   </View>
                 </View>

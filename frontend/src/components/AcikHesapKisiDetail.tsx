@@ -59,10 +59,11 @@ export const AcikHesapKisiDetail: React.FC<{
     let cancelled = false;
     setLoading(true);
     setError(null);
-    (async () => {
+
+    const attempt = async (tryNum: number, maxTries: number): Promise<any> => {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 100000);
       try {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 100000);
         const resp = await fetch(`${API_URL}/api/data/acik-hesap-kisi`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -74,8 +75,29 @@ export const AcikHesapKisiDetail: React.FC<{
           }),
         });
         clearTimeout(timer);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const j = await resp.json();
+        if (!resp.ok) {
+          // 502/504 = upstream POS hiccup; retry transparently
+          if ((resp.status === 502 || resp.status === 504) && tryNum < maxTries) {
+            await new Promise((r) => setTimeout(r, 1500 * tryNum)); // backoff
+            return attempt(tryNum + 1, maxTries);
+          }
+          throw new Error(`HTTP ${resp.status}`);
+        }
+        return await resp.json();
+      } catch (e: any) {
+        clearTimeout(timer);
+        // Network/timeout retry
+        if (tryNum < maxTries && !cancelled) {
+          await new Promise((r) => setTimeout(r, 1500 * tryNum));
+          return attempt(tryNum + 1, maxTries);
+        }
+        throw e;
+      }
+    };
+
+    (async () => {
+      try {
+        const j = await attempt(1, 3); // up to 3 attempts
         if (cancelled) return;
 
         // Normalize numeric fields (POS may return strings)

@@ -94,15 +94,15 @@ export const TenantDetailModal: React.FC<{
     [hourlyFis]
   );
 
-  // ─── Per-product × per-hour qty/amount via on-demand hourly-detail ───
-  // productHourMap[branch][productName][hour] = { qty, amount }
-  const [productHourMap, setProductHourMap] = useState<Record<string, Record<string, Record<string, { qty: number; amount: number }>>>>({});
+  // ─── Per-product × per-hour all fields via on-demand hourly-detail-full ───
+  // productHourMap[branch][productName][hour] = { qty, amount, iskonto, brut, kdv }
+  type Cell = { qty: number; amount: number; iskonto: number; brut: number; kdv: number };
+  const [productHourMap, setProductHourMap] = useState<Record<string, Record<string, Record<string, Cell>>>>({});
   const [phLoading, setPhLoading] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
     if (!token) return;
-    if (allHours.length === 0) return;
     let cancelled = false;
     setPhLoading(true);
     setProductHourMap({});
@@ -110,9 +110,12 @@ export const TenantDetailModal: React.FC<{
     (async () => {
       // Single full-day call (1 request instead of N per hour)
       try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 45000);
         const resp = await fetch(`${API_URL}/api/data/hourly-detail-full`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          signal: ctrl.signal,
           body: JSON.stringify({
             tenant_id: snapshot.tenant.tenant_id,
             date: filterDate,
@@ -120,23 +123,31 @@ export const TenantDetailModal: React.FC<{
             lokasyon_id: null,
           }),
         });
+        clearTimeout(timer);
         const j = await resp.json();
         const byHour: Record<string, any[]> = j?.by_hour || {};
 
         if (cancelled) return;
 
-        const map: Record<string, Record<string, Record<string, { qty: number; amount: number }>>> = {};
+        const map: Record<string, Record<string, Record<string, Cell>>> = {};
         Object.entries(byHour).forEach(([hour, rows]) => {
           rows.forEach((r: any) => {
             const name = r?.STOK_ADI || r?.STOK_AD || r?.URUN_ADI || '-';
             const loc = r?.LOKASYON || r?.LOKASYON_ADI || '-';
             const qty = parseFloat(r?.TOPLAM_MIKTAR || r?.MIKTAR || '0');
             const amount = parseFloat(r?.KDV_DAHIL_TOPLAM_TUTAR || r?.TOPLAM_TUTAR || '0');
+            const iskonto = parseFloat(r?.GENEL_ISKONTO_TUTARI || r?.ISKONTO_TUTARI || '0');
+            const brut = parseFloat(r?.BRUT_KDV_DAHIL_TOPLAM_TUTAR || r?.BRUT_TUTAR || '0') || (amount + iskonto);
+            const kdv = parseFloat(r?.KDV_TUTARI || r?.TOPLAM_KDV || '0');
             if (!map[loc]) map[loc] = {};
             if (!map[loc][name]) map[loc][name] = {};
-            if (!map[loc][name][hour]) map[loc][name][hour] = { qty: 0, amount: 0 };
-            map[loc][name][hour].qty += qty;
-            map[loc][name][hour].amount += amount;
+            if (!map[loc][name][hour]) map[loc][name][hour] = { qty: 0, amount: 0, iskonto: 0, brut: 0, kdv: 0 };
+            const c = map[loc][name][hour];
+            c.qty += qty;
+            c.amount += amount;
+            c.iskonto += iskonto;
+            c.brut += brut;
+            c.kdv += kdv;
           });
         });
         setProductHourMap(map);
@@ -149,7 +160,24 @@ export const TenantDetailModal: React.FC<{
 
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, snapshot.tenant.tenant_id, filterDate]);
+  }, [visible, snapshot.tenant.tenant_id, filterDate, filterEndDate]);
+
+  // Build product list per branch FROM the procedure data (full coverage),
+  // falling back to topProducts when procedure hasn't loaded yet.
+  const productsByBranchFromProc = useMemo(() => {
+    const m: Record<string, { name: string; qty: number; amount: number; iskonto: number }[]> = {};
+    Object.entries(productHourMap).forEach(([branch, products]) => {
+      const list: { name: string; qty: number; amount: number; iskonto: number }[] = [];
+      Object.entries(products).forEach(([name, hours]) => {
+        let qty = 0, amount = 0, iskonto = 0;
+        Object.values(hours).forEach((c) => { qty += c.qty; amount += c.amount; iskonto += c.iskonto; });
+        if (amount > 0 || qty > 0) list.push({ name, qty, amount, iskonto });
+      });
+      list.sort((a, b) => b.amount - a.amount);
+      m[branch] = list;
+    });
+    return m;
+  }, [productHourMap]);
 
   return (
     <Modal
@@ -267,7 +295,11 @@ export const TenantDetailModal: React.FC<{
                 En çoktan en aza sıralı · her ürünün saatlik dağılımı
               </Text>
 
-              {Object.entries(productsByBranch).map(([branch, products]) => {
+              {Object.entries(
+                Object.keys(productsByBranchFromProc).length > 0
+                  ? productsByBranchFromProc
+                  : (productsByBranch as Record<string, { name: string; qty: number; amount: number; iskonto?: number }[]>)
+              ).map(([branch, products]) => {
                 const bColor = hashBranch(branch);
                 const branchTotal = products.reduce((s, p) => s + p.amount, 0);
                 const branchPH = productHourMap[branch] || {};
@@ -315,6 +347,7 @@ export const TenantDetailModal: React.FC<{
                         {products.map((p, i) => {
                           const phEntry = branchPH[p.name] || {};
                           const hasAnyHour = Object.keys(phEntry).length > 0;
+                          const productIskonto = (p as any).iskonto || 0;
                           return (
                             <View key={p.name + i} style={{ flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border }}>
                               <View style={{ width: 40, paddingVertical: 8, alignItems: 'center' }}>
@@ -341,6 +374,7 @@ export const TenantDetailModal: React.FC<{
                                 const cell = phEntry[h];
                                 const qty = cell?.qty || 0;
                                 const amount = cell?.amount || 0;
+                                const isk = cell?.iskonto || 0;
                                 return (
                                   <View key={h} style={{ width: 64, alignItems: 'center', justifyContent: 'center', paddingVertical: 6, paddingHorizontal: 2 }}>
                                     {qty > 0 ? (
@@ -351,6 +385,11 @@ export const TenantDetailModal: React.FC<{
                                         <Text style={{ color: colors.text, fontSize: 9, fontWeight: '700', marginTop: 1 }}>
                                           {qty.toFixed(0)} ad
                                         </Text>
+                                        {isk > 0 && (
+                                          <Text style={{ color: '#F59E0B', fontSize: 8, fontWeight: '700' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+                                            -₺{fmtTL(isk)}
+                                          </Text>
+                                        )}
                                       </>
                                     ) : (
                                       <Text style={{ color: colors.border, fontSize: 11 }}>
@@ -364,6 +403,11 @@ export const TenantDetailModal: React.FC<{
                                 <Text style={{ color: bColor, fontSize: 11, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
                                   ₺{fmtTL(p.amount)}
                                 </Text>
+                                {productIskonto > 0 && (
+                                  <Text style={{ color: '#F59E0B', fontSize: 8, fontWeight: '700' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+                                    -₺{fmtTL(productIskonto)}
+                                  </Text>
+                                )}
                               </View>
                             </View>
                           );

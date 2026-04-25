@@ -116,7 +116,8 @@ function transformApiData(apiData: any): DashboardData {
         cash: parseFloat(loc.NAKIT || '0'),
         card: parseFloat(loc.KREDI_KARTI || '0'),
         openAccount: parseFloat(loc.VERESIYE || '0'),
-        total: parseFloat(loc.TOPLAM || loc.GENELTOPLAM || '0'),
+        // Use GENELTOPLAM (Perakende + ERP12 combined) to ensure ERP12 sales are included
+        total: parseFloat(loc.GENELTOPLAM || loc.TOPLAM || '0'),
       },
       cancellations: [],
     });

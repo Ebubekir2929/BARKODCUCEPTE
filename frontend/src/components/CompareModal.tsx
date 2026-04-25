@@ -345,7 +345,7 @@ export const CompareModal: React.FC<{
     setPhLoading(true);
 
     (async () => {
-      const CHUNK = 5; // tenants in parallel (more aggressive)
+      const CHUNK = 8; // tenants in parallel (faster aggregation across many tenants)
       const fresh: Record<string, Record<string, Record<string, Record<string, { qty: number; amount: number; iskonto: number; brut: number; kdv: number }>>>> = {};
 
       // Skip tenants that errored out in the snapshot fetch (they have no backend / aborted)
