@@ -344,34 +344,93 @@ export const CancellationSection: React.FC<{ ozet: any[]; detay: any[]; tenantId
 };
 
 // === Lokasyon Bazlı Saatlik Satış Grafiği (Dikey Bar Chart) ===
+// Yeni: GET_HOURLY_STOCK_DETAIL proc'undan veri alır (post-discount KDV_DAHIL_TOPLAM_TUTAR)
+// böylece 'Lokasyon Özeti' ile tutarlı totaller olur ve ERP12 + iskonto da dahil edilir.
 export const HourlyLocationSection: React.FC<{
   data: any[];
   tenantId: string;
   filterDate?: string;
-  /** Optional map of { [locationName]: authoritativeTotalTL }. When provided,
-   *  these values are used for the section badge and per-location header so
-   *  they stay consistent with 'Lokasyon Özeti' (which comes from
-   *  financial_data_location). Otherwise falls back to summing the hourly
-   *  rows. */
+  filterEndDate?: string;
   branchTotalsByName?: Record<string, number>;
-}> = ({ data, tenantId, filterDate, branchTotalsByName }) => {
+}> = ({ data, tenantId, filterDate, filterEndDate, branchTotalsByName }) => {
   const { colors } = useThemeStore();
   const [detailData, setDetailData] = useState<any[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any | null>(null);
   const [expandedLoc, setExpandedLoc] = useState<string | null>(null);
+  // Derived data from /hourly-detail-full (preferred over `data` prop)
+  const [derivedData, setDerivedData] = useState<any[] | null>(null);
 
-  if (!data || data.length === 0) return null;
+  // Fetch full hourly stock detail and aggregate by (LOKASYON, SAAT_ADI)
+  useEffect(() => {
+    if (!tenantId || !filterDate) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { token } = useAuthStore.getState();
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 60000);
+        const resp = await fetch(`${API_URL}/api/data/hourly-detail-full`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          signal: ctrl.signal,
+          body: JSON.stringify({
+            tenant_id: tenantId,
+            date: filterDate,
+            edate: filterEndDate || filterDate,
+            lokasyon_id: null,
+          }),
+        });
+        clearTimeout(timer);
+        if (!resp.ok) return;
+        const j = await resp.json();
+        const byHour: Record<string, any[]> = j?.by_hour || {};
+        const aggMap: Record<string, any> = {};
+        Object.entries(byHour).forEach(([hour, rows]) => {
+          rows.forEach((r: any) => {
+            const loc = r.LOKASYON || 'Bilinmeyen';
+            const locId = r.LOKASYON_ID || null;
+            const key = `${loc}__${hour}`;
+            if (!aggMap[key]) {
+              aggMap[key] = {
+                LOKASYON: loc,
+                LOKASYON_ID: locId,
+                SAAT_ADI: hour,
+                TOPLAM: 0,
+                BRUT_TOPLAM: 0,
+                ISKONTO: 0,
+                PERAKENDE_TOPLAM: 0,
+                ERP12_TOPLAM: 0,
+                SATIR_SAYISI: 0,
+              };
+            }
+            aggMap[key].TOPLAM += parseFloat(r.KDV_DAHIL_TOPLAM_TUTAR || '0');
+            aggMap[key].BRUT_TOPLAM += parseFloat(r.BRUT_KDV_DAHIL_TOPLAM_TUTAR || '0');
+            aggMap[key].ISKONTO += parseFloat(r.GENEL_ISKONTO_TUTARI || '0');
+            aggMap[key].PERAKENDE_TOPLAM += parseFloat(r.PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR || '0');
+            aggMap[key].ERP12_TOPLAM += parseFloat(r.ERP12_KDV_DAHIL_TOPLAM_TUTAR || '0');
+            aggMap[key].SATIR_SAYISI += parseInt(r.SATIR_SAYISI || '0');
+          });
+        });
+        if (!cancelled) setDerivedData(Object.values(aggMap));
+      } catch {
+        // silently fall back to prop data
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [tenantId, filterDate, filterEndDate]);
 
-  // Group by LOKASYON (needed for both totals and render)
+  const effectiveData = derivedData ?? data;
+  if (!effectiveData || effectiveData.length === 0) return null;
+
+  // Group by LOKASYON
   const byLocation: Record<string, any[]> = {};
-  data.forEach((r: any) => {
+  effectiveData.forEach((r: any) => {
     const loc = r.LOKASYON || 'Bilinmeyen';
     if (!byLocation[loc]) byLocation[loc] = [];
     byLocation[loc].push(r);
   });
 
-  // Prefer authoritative branch totals from Lokasyon Özeti; else sum rows.
   const getLocTotal = (loc: string, rows: any[]): number => {
     if (branchTotalsByName && branchTotalsByName[loc] != null) {
       return branchTotalsByName[loc];

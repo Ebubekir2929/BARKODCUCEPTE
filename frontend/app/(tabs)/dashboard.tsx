@@ -849,6 +849,7 @@ export default function DashboardScreen() {
             data={sourceData.hourlyLocationSales}
             tenantId={activeTenantId}
             filterDate={filters?.startDate ? filters.startDate.toISOString().slice(0, 10) : undefined}
+            filterEndDate={filters?.endDate ? filters.endDate.toISOString().slice(0, 10) : undefined}
             branchTotalsByName={(sourceData?.branchSales || []).reduce((acc: Record<string, number>, b: any) => {
               if (b?.branchName) acc[b.branchName] = (b?.sales?.total ?? 0);
               return acc;
@@ -1099,15 +1100,19 @@ export default function DashboardScreen() {
 
                 {/* İskonto Bilgisi */}
                 {(() => {
-                  const totalIskonto = hourDetailProducts.reduce((s: number, p: any) => s + parseFloat(p.ISKONTO_TUTARI || '0'), 0);
-                  const grossTotal = hourDetailProducts.reduce((s: number, p: any) => s + parseFloat(p.KDV_DAHIL_TOPLAM_TUTAR || p.TOPLAM_TUTAR || '0'), 0);
+                  const totalIskonto = hourDetailProducts.reduce((s: number, p: any) =>
+                    s + parseFloat(p.GENEL_ISKONTO_TUTARI || p.ISKONTO_TUTARI || '0'), 0);
+                  const grossTotal = hourDetailProducts.reduce((s: number, p: any) =>
+                    s + parseFloat(p.BRUT_KDV_DAHIL_TOPLAM_TUTAR || p.KDV_DAHIL_TOPLAM_TUTAR || p.TOPLAM_TUTAR || '0'), 0);
+                  const netTotal = hourDetailProducts.reduce((s: number, p: any) =>
+                    s + parseFloat(p.KDV_DAHIL_TOPLAM_TUTAR || p.TOPLAM_TUTAR || '0'), 0);
                   if (totalIskonto <= 0 && grossTotal <= 0) return null;
                   return (
                     <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                       <View style={{ flex: 1, padding: 10, borderRadius: 10, backgroundColor: colors.success + '12', borderWidth: 1, borderColor: colors.success + '30' }}>
-                        <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>İskontolu</Text>
+                        <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>İskontolu (Net)</Text>
                         <Text style={{ color: colors.success, fontSize: 14, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                          ₺{grossTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                          ₺{netTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </Text>
                       </View>
                       {totalIskonto > 0 && (
@@ -1117,7 +1122,7 @@ export default function DashboardScreen() {
                             <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>İskonto</Text>
                           </View>
                           <Text style={{ color: colors.warning, fontSize: 14, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                            ₺{totalIskonto.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                            ₺{totalIskonto.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </Text>
                         </View>
                       )}
