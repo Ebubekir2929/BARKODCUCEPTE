@@ -193,7 +193,8 @@ export const CompareModal: React.FC<{
     try {
       const url = `${API_URL}/api/data/dashboard?tenant_id=${encodeURIComponent(tn.tenant_id)}&sdate=${sdate}&edate=${edate}`;
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 60000);
+      // Fail fast (20s) so tenants without backend / aborted ones don't block UI
+      const timer = setTimeout(() => ctrl.abort(), 20000);
       const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal });
       clearTimeout(timer);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -343,17 +344,23 @@ export const CompareModal: React.FC<{
     setPhLoading(true);
 
     (async () => {
-      const CHUNK = 3; // tenants in parallel
+      const CHUNK = 5; // tenants in parallel (more aggressive)
       const fresh: Record<string, Record<string, Record<string, Record<string, { qty: number; amount: number }>>>> = {};
 
-      for (let i = 0; i < snapshots.length; i += CHUNK) {
+      // Skip tenants that errored out in the snapshot fetch (they have no backend / aborted)
+      const validSnapshots = snapshots.filter((s) => !s.error);
+
+      for (let i = 0; i < validSnapshots.length; i += CHUNK) {
         if (cancelled) return;
-        const slice = snapshots.slice(i, i + CHUNK);
+        const slice = validSnapshots.slice(i, i + CHUNK);
         await Promise.all(slice.map(async (s) => {
           try {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 25000); // fail fast
             const resp = await fetch(`${API_URL}/api/data/hourly-detail-full`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+              signal: ctrl.signal,
               body: JSON.stringify({
                 tenant_id: s.tenant.tenant_id,
                 date: sdate,
@@ -361,6 +368,7 @@ export const CompareModal: React.FC<{
                 lokasyon_id: null,
               }),
             });
+            clearTimeout(timer);
             const j = await resp.json();
             const byHour: Record<string, any[]> = j?.by_hour || {};
 
@@ -566,24 +574,38 @@ export const CompareModal: React.FC<{
                 const width: any = n === 1 ? '100%' : n === 2 ? '48%' : n === 3 ? '31.5%' : '48%';
                 const isActive = snap.tenant.tenant_id === activeTenantId;
                 const fisTotal = Object.values(snap.hourlyFis).reduce((a, b) => a + b, 0);
+                const hasError = !!snap.error;
                 return (
                   <TouchableOpacity
                     key={snap.tenant.tenant_id}
                     onPress={() => setDetailTenantIdx(idx)}
                     activeOpacity={0.75}
+                    disabled={hasError}
                     style={{
                       width,
                       borderRadius: 16,
                       padding: 14,
-                      backgroundColor: color + '12',
+                      backgroundColor: hasError ? colors.error + '08' : color + '12',
                       borderWidth: isActive ? 2.5 : 1.5,
-                      borderColor: isActive ? color : color + '40',
+                      borderColor: hasError ? colors.error + '40' : (isActive ? color : color + '40'),
                       minWidth: 130,
                       flexGrow: 1,
                       position: 'relative',
+                      opacity: hasError ? 0.65 : 1,
                     }}
                   >
-                    {isActive && (
+                    {hasError && (
+                      <View style={{
+                        position: 'absolute', top: -10, right: 10,
+                        backgroundColor: colors.error, borderRadius: 10,
+                        paddingHorizontal: 8, paddingVertical: 2,
+                        flexDirection: 'row', alignItems: 'center', gap: 3,
+                      }}>
+                        <Ionicons name="warning" size={11} color="#FFF" />
+                        <Text style={{ color: '#FFF', fontSize: 10, fontWeight: '800' }}>Veri Yok</Text>
+                      </View>
+                    )}
+                    {!hasError && isActive && (
                       <View style={{
                         position: 'absolute', top: -10, right: 10,
                         backgroundColor: color, borderRadius: 10,
@@ -1120,6 +1142,7 @@ export const CompareModal: React.FC<{
           color={getTenantColor(detailTenantIdx)}
           periodLabel={periodLabel}
           filterDate={fmtDate(startDate)}
+          filterEndDate={fmtDate(endDate)}
         />
       )}
     </Modal>

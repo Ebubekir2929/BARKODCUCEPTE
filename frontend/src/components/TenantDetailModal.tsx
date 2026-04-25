@@ -44,7 +44,8 @@ export const TenantDetailModal: React.FC<{
   color: string;
   periodLabel: string;
   filterDate?: string; // YYYY-MM-DD for on-demand product-hour fetch
-}> = ({ visible, onClose, snapshot, color, periodLabel, filterDate }) => {
+  filterEndDate?: string; // YYYY-MM-DD end of range
+}> = ({ visible, onClose, snapshot, color, periodLabel, filterDate, filterEndDate }) => {
   const { colors } = useThemeStore();
   const { token } = useAuthStore();
   const insets = useSafeAreaInsets();
@@ -115,6 +116,7 @@ export const TenantDetailModal: React.FC<{
           body: JSON.stringify({
             tenant_id: snapshot.tenant.tenant_id,
             date: filterDate,
+            edate: filterEndDate || filterDate,
             lokasyon_id: null,
           }),
         });
