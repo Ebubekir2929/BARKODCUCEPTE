@@ -6,10 +6,220 @@ import { useAuthStore } from '../store/authStore';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
-// === Garson Satışları Bölümü ===
-// Yeni proc: SATIR_TIPI = DETAY / LOKASYON_TOPLAM / GENEL_TOPLAM
-// Her satırda PERAKENDE_FIS_SAYISI + ERP12_FIS_SAYISI + TOPLAM_FIS_SAYISI gelir
+// === Garson (POS) + Personel (ERP12) Satışları ===
+// Yeni proc dönüşü: SATIR_TIPI (DETAY/LOKASYON_TOPLAM/GENEL_TOPLAM)
+//   + ACIK_FIS_TUTARI, KAPANAN_SATIS_TUTARI, TOPLAM_TUTAR
+//   + PERAKENDE_FIS_SAYISI, ERP12_FIS_SAYISI, ACIK_FIS_SAYISI, KAPANAN_FIS_SAYISI
+//   + TOPLAM_MIKTAR
+// Garson = POS (PERAKENDE) tarafında satış yapan
+// Personel = ERP12 tarafında fiş kesen
 export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
+  const { colors } = useThemeStore();
+  const [tab, setTab] = useState<'garson' | 'personel'>('garson');
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  if (!data || data.length === 0) return null;
+
+  const fmtTL = (n: number) => n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtMiktar = (n: number) => n.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
+  // Filter rows based on selected tab
+  // - Garson: row has PERAKENDE_FIS_SAYISI > 0 (POS sales)
+  // - Personel: row has ERP12_FIS_SAYISI > 0 (ERP12 sales)
+  const allDetay = data.filter((r: any) => (r.SATIR_TIPI || 'DETAY') === 'DETAY');
+  const garsonRows = allDetay.filter((r: any) => parseInt(r.PERAKENDE_FIS_SAYISI || '0') > 0);
+  const personelRows = allDetay.filter((r: any) => parseInt(r.ERP12_FIS_SAYISI || '0') > 0);
+
+  const detayRows = tab === 'garson' ? garsonRows : personelRows;
+
+  // Group by location
+  const byLocation: Record<string, any[]> = {};
+  detayRows.forEach((r: any) => {
+    const loc = r.LOKASYON_AD || 'Bilinmeyen';
+    if (!byLocation[loc]) byLocation[loc] = [];
+    byLocation[loc].push(r);
+  });
+
+  // Compute totals per tab
+  const totals = detayRows.reduce(
+    (acc, r: any) => {
+      const fisAdet = tab === 'garson' ? parseInt(r.PERAKENDE_FIS_SAYISI || '0') : parseInt(r.ERP12_FIS_SAYISI || '0');
+      const acik = tab === 'garson' ? parseFloat(r.ACIK_FIS_TUTARI || '0') : 0;
+      const kapanan = parseFloat(r.KAPANAN_SATIS_TUTARI || '0');
+      const acikSay = tab === 'garson' ? parseInt(r.ACIK_FIS_SAYISI || '0') : 0;
+      const kapananSay = tab === 'garson' ? parseInt(r.KAPANAN_FIS_SAYISI || '0') : fisAdet;
+      const miktar = parseFloat(r.TOPLAM_MIKTAR || '0');
+      acc.fis += fisAdet;
+      acik && (acc.acik += acik);
+      acc.kapanan += kapanan;
+      acc.acikSay += acikSay;
+      acc.kapananSay += kapananSay;
+      acc.miktar += miktar;
+      return acc;
+    },
+    { fis: 0, acik: 0, kapanan: 0, acikSay: 0, kapananSay: 0, miktar: 0 }
+  );
+  const totalTutar = totals.acik + totals.kapanan;
+
+  const tabColor = tab === 'garson' ? '#10B981' : '#8B5CF6';
+
+  return (
+    <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <View style={styles.sectionHeader}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Garson / Personel Satışları</Text>
+        <View style={[styles.badge, { backgroundColor: tabColor + '15' }]}>
+          <Text style={[styles.badgeText, { color: tabColor }]}>
+            {detayRows.length} kişi · ₺{fmtTL(totalTutar)}
+          </Text>
+        </View>
+      </View>
+
+      {/* Tab Switcher */}
+      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+        <TouchableOpacity
+          onPress={() => { setTab('garson'); setExpanded(null); }}
+          style={{
+            flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center',
+            backgroundColor: tab === 'garson' ? '#10B981' : colors.background,
+            borderWidth: 1, borderColor: tab === 'garson' ? '#10B981' : colors.border,
+          }}
+        >
+          <Text style={{ color: tab === 'garson' ? '#FFF' : colors.text, fontWeight: '700', fontSize: 12 }}>
+            🍽️ Garson (POS) · {garsonRows.length}
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => { setTab('personel'); setExpanded(null); }}
+          style={{
+            flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center',
+            backgroundColor: tab === 'personel' ? '#8B5CF6' : colors.background,
+            borderWidth: 1, borderColor: tab === 'personel' ? '#8B5CF6' : colors.border,
+          }}
+        >
+          <Text style={{ color: tab === 'personel' ? '#FFF' : colors.text, fontWeight: '700', fontSize: 12 }}>
+            👔 Personel (ERP12) · {personelRows.length}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {detayRows.length === 0 ? (
+        <View style={{ padding: 16, alignItems: 'center' }}>
+          <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+            {tab === 'garson' ? 'POS garson satışı yok' : 'ERP12 personel satışı yok'}
+          </Text>
+        </View>
+      ) : (
+        <>
+          {/* Tab özet */}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: tabColor + '15' }}>
+              <Ionicons name="receipt-outline" size={11} color={tabColor} />
+              <Text style={{ fontSize: 11, fontWeight: '700', color: tabColor }}>{totals.fis} fiş</Text>
+            </View>
+            {tab === 'garson' && totals.acikSay > 0 && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: '#F59E0B15' }}>
+                <Ionicons name="time-outline" size={11} color="#F59E0B" />
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#F59E0B' }}>{totals.acikSay} açık · ₺{fmtTL(totals.acik)}</Text>
+              </View>
+            )}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: '#10B98115' }}>
+              <Ionicons name="checkmark-circle-outline" size={11} color="#10B981" />
+              <Text style={{ fontSize: 11, fontWeight: '700', color: '#10B981' }}>{totals.kapananSay} kapanan · ₺{fmtTL(totals.kapanan)}</Text>
+            </View>
+            {totals.miktar > 0 && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: colors.primary + '15' }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: colors.primary }}>{fmtMiktar(totals.miktar)} ürün</Text>
+              </View>
+            )}
+          </View>
+
+          {Object.entries(byLocation).map(([loc, kisiler]) => {
+            const locTutar = kisiler.reduce((s: number, r: any) => {
+              const a = tab === 'garson' ? parseFloat(r.ACIK_FIS_TUTARI || '0') : 0;
+              const k = parseFloat(r.KAPANAN_SATIS_TUTARI || '0');
+              return s + a + k;
+            }, 0);
+            const locFis = kisiler.reduce((s: number, r: any) =>
+              s + (tab === 'garson' ? parseInt(r.PERAKENDE_FIS_SAYISI || '0') : parseInt(r.ERP12_FIS_SAYISI || '0')), 0);
+            return (
+              <View key={loc}>
+                <TouchableOpacity
+                  style={[styles.groupHeader, { backgroundColor: colors.background, borderColor: colors.border }]}
+                  onPress={() => setExpanded(expanded === loc ? null : loc)}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                    <Ionicons name={tab === 'garson' ? 'restaurant-outline' : 'briefcase-outline'} size={18} color={tabColor} />
+                    <Text style={[styles.groupName, { color: colors.text }]} numberOfLines={1}>{loc}</Text>
+                    <View style={[styles.countBadge, { backgroundColor: tabColor + '15' }]}>
+                      <Text style={[styles.countText, { color: tabColor }]}>{kisiler.length}</Text>
+                    </View>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: tabColor + '15' }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: tabColor }}>{locFis} fiş</Text>
+                    </View>
+                    <Text style={[styles.groupTotal, { color: colors.text, fontWeight: '700' }]} numberOfLines={1} adjustsFontSizeToFit>
+                      ₺{fmtTL(locTutar)}
+                    </Text>
+                    <Ionicons name={expanded === loc ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
+                  </View>
+                </TouchableOpacity>
+
+                {expanded === loc && kisiler.map((g: any, idx: number) => {
+                  const fisAdet = tab === 'garson' ? parseInt(g.PERAKENDE_FIS_SAYISI || '0') : parseInt(g.ERP12_FIS_SAYISI || '0');
+                  const acikTutar = tab === 'garson' ? parseFloat(g.ACIK_FIS_TUTARI || '0') : 0;
+                  const acikAdet = tab === 'garson' ? parseInt(g.ACIK_FIS_SAYISI || '0') : 0;
+                  const kapananTutar = parseFloat(g.KAPANAN_SATIS_TUTARI || '0');
+                  const kapananAdet = tab === 'garson' ? parseInt(g.KAPANAN_FIS_SAYISI || '0') : fisAdet;
+                  const miktar = parseFloat(g.TOPLAM_MIKTAR || '0');
+                  const totalTuar = acikTutar + kapananTutar;
+                  return (
+                    <View key={idx} style={[styles.itemCard, { backgroundColor: colors.background, borderColor: colors.border, marginLeft: 12 }]}>
+                      <View style={styles.itemRow}>
+                        <View style={{ flex: 1, paddingRight: 8 }}>
+                          <Text style={[styles.itemName, { color: colors.text }]} numberOfLines={1}>{g.GARSON_AD || (tab === 'garson' ? 'Garson' : 'Personel')}</Text>
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                            <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: tabColor + '15' }}>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: tabColor }}>{fisAdet} fiş</Text>
+                            </View>
+                            {tab === 'garson' && acikAdet > 0 && (
+                              <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: '#F59E0B15' }}>
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#F59E0B' }}>
+                                  {acikAdet} açık ₺{fmtTL(acikTutar)}
+                                </Text>
+                              </View>
+                            )}
+                            {kapananAdet > 0 && (
+                              <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: '#10B98115' }}>
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#10B981' }}>
+                                  {kapananAdet} kapanan
+                                </Text>
+                              </View>
+                            )}
+                            {miktar > 0 && (
+                              <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: colors.warning + '15' }}>
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: colors.warning }}>
+                                  {fmtMiktar(miktar)} ürün
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                        </View>
+                        <Text style={[styles.itemAmount, { color: tabColor }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                          ₺{fmtTL(totalTuar)}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            );
+          })}
+        </>
+      )}
+    </View>
+  );
+};
   const { colors } = useThemeStore();
   const [expanded, setExpanded] = useState<string | null>(null);
 

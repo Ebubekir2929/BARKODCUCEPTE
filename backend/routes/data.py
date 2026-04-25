@@ -738,7 +738,7 @@ async def get_acik_hesap_kisi(
     }
 
     try:
-        result = await _on_demand_request(tenant_id, "rap_acik_hesap_kisi_ozet_web", params, timeout_sec=45)
+        result = await _on_demand_request(tenant_id, "rap_acik_hesap_kisi_ozet_web", params, timeout_sec=120)
     except HTTPException:
         raise
     except Exception as e:

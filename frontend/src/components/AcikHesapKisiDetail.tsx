@@ -62,7 +62,7 @@ export const AcikHesapKisiDetail: React.FC<{
     (async () => {
       try {
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 30000);
+        const timer = setTimeout(() => ctrl.abort(), 100000);
         const resp = await fetch(`${API_URL}/api/data/acik-hesap-kisi`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
