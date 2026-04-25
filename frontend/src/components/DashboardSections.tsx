@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, ActivityIndicator, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
@@ -583,23 +583,69 @@ export const HourlyLocationSection: React.FC<{
                     <Text style={[{ flex: 0.8, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>Miktar</Text>
                     <Text style={[{ flex: 1.8, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>Tutar</Text>
                   </View>
-                  {detailData.map((item: any, idx: number) => (
-                    <View key={idx} style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border, alignItems: 'center' }]}>
-                      <View style={{ flex: 2.4, paddingRight: 6 }}>
-                        <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]} numberOfLines={1}>{item.STOK_ADI || 'Ürün'}</Text>
-                        <Text style={[{ fontSize: 11, color: colors.textSecondary }]} numberOfLines={1}>{item.LOKASYON || ''}</Text>
+                  {detailData.map((item: any, idx: number) => {
+                    const tutar = parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0');
+                    const brut = parseFloat(item.BRUT_KDV_DAHIL_TOPLAM_TUTAR || '0');
+                    const iskonto = parseFloat(item.GENEL_ISKONTO_TUTARI || item.ISKONTO_TUTARI || '0');
+                    const kdv = parseFloat(item.KDV_TUTARI || item.TOPLAM_KDV || '0');
+                    const perakende = parseFloat(item.PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR || '0');
+                    const erp12 = parseFloat(item.ERP12_KDV_DAHIL_TOPLAM_TUTAR || '0');
+                    const birimFiyat = parseFloat(item.BIRIM_FIYAT || item.ORTALAMA_FIYAT || '0');
+                    const fmtTL = (v: number) => v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    return (
+                      <View key={idx} style={[{ paddingVertical: 10, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <View style={{ flex: 2.4, paddingRight: 6 }}>
+                            <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]} numberOfLines={1}>{item.STOK_ADI || 'Ürün'}</Text>
+                            <Text style={[{ fontSize: 11, color: colors.textSecondary }]} numberOfLines={1}>{item.LOKASYON || ''}</Text>
+                          </View>
+                          <Text style={[{ flex: 0.8, fontSize: 14, color: colors.text, textAlign: 'center' }]}>{parseFloat(item.TOPLAM_MIKTAR || '0').toFixed(0)}</Text>
+                          <Text
+                            style={[{ flex: 1.8, fontSize: 13, fontWeight: '700', color: colors.primary, textAlign: 'right' }]}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.7}
+                          >
+                            ₺{fmtTL(tutar)}
+                          </Text>
+                        </View>
+                        {(brut > 0 || iskonto > 0 || kdv > 0 || perakende > 0 || erp12 > 0 || birimFiyat > 0) && (
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                            {birimFiyat > 0 && (
+                              <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }}>
+                                <Text style={{ fontSize: 10, color: colors.textSecondary, fontWeight: '600' }}>BF: ₺{fmtTL(birimFiyat)}</Text>
+                              </View>
+                            )}
+                            {brut > 0 && brut !== tutar && (
+                              <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: colors.textSecondary + '15' }}>
+                                <Text style={{ fontSize: 10, color: colors.textSecondary, fontWeight: '700' }}>Brüt: ₺{fmtTL(brut)}</Text>
+                              </View>
+                            )}
+                            {iskonto > 0 && (
+                              <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: '#F59E0B20' }}>
+                                <Text style={{ fontSize: 10, color: '#F59E0B', fontWeight: '700' }}>İsk: -₺{fmtTL(iskonto)}</Text>
+                              </View>
+                            )}
+                            {kdv > 0 && (
+                              <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: colors.primary + '15' }}>
+                                <Text style={{ fontSize: 10, color: colors.primary, fontWeight: '700' }}>KDV: ₺{fmtTL(kdv)}</Text>
+                              </View>
+                            )}
+                            {perakende > 0 && (
+                              <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: '#10B98120' }}>
+                                <Text style={{ fontSize: 10, color: '#10B981', fontWeight: '700' }}>P: ₺{fmtTL(perakende)}</Text>
+                              </View>
+                            )}
+                            {erp12 > 0 && (
+                              <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: '#8B5CF620' }}>
+                                <Text style={{ fontSize: 10, color: '#8B5CF6', fontWeight: '700' }}>E12: ₺{fmtTL(erp12)}</Text>
+                              </View>
+                            )}
+                          </View>
+                        )}
                       </View>
-                      <Text style={[{ flex: 0.8, fontSize: 14, color: colors.text, textAlign: 'center' }]}>{parseFloat(item.TOPLAM_MIKTAR || '0').toFixed(0)}</Text>
-                      <Text
-                        style={[{ flex: 1.8, fontSize: 13, fontWeight: '700', color: colors.primary, textAlign: 'right' }]}
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.7}
-                      >
-                        ₺{parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </Text>
-                    </View>
-                  ))}
+                    );
+                  })}
                   {/* Total row */}
                   <View style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 2, borderTopColor: colors.border, backgroundColor: colors.background, alignItems: 'center' }]}>
                     <Text style={[{ flex: 3.2, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>Toplam</Text>

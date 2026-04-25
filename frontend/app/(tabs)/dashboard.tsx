@@ -26,6 +26,8 @@ import { useLiveData } from '../../src/hooks/useLiveData';
 import { WaiterSalesSection, HourlyLocationSection } from '../../src/components/DashboardSections';
 import { BranchSales, HourlySales, OpenTable } from '../../src/types';
 
+const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+
 const screenWidth = Dimensions.get('window').width;
 const screenHeight = Dimensions.get('window').height;
 
@@ -85,6 +87,9 @@ export default function DashboardScreen() {
   const [tableDetailItems, setTableDetailItems] = useState<any[]>([]);
   const [tableDetailLoading, setTableDetailLoading] = useState(false);
 
+  // Fresh hourly sales (post-discount KDV_DAHIL_TOPLAM_TUTAR) from new procedure GET_HOURLY_STOCK_DETAIL
+  const [freshHourlySales, setFreshHourlySales] = useState<HourlySales[] | null>(null);
+
   // Check if filter is active (from live data hook)
   const isFilterActive = isDataFiltered;
 
@@ -115,6 +120,62 @@ export default function DashboardScreen() {
     });
     return grouped;
   }, [sourceData?.openTables]);
+
+  // Fetch fresh hourly sales from /hourly-detail-full (post-discount KDV_DAHIL_TOPLAM_TUTAR
+  // from new SQL procedure GET_HOURLY_STOCK_DETAIL). Aggregates across ALL locations.
+  useEffect(() => {
+    if (!activeTenantId) {
+      setFreshHourlySales(null);
+      return;
+    }
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const sdate = fmt(filters.startDate);
+    const edate = fmt(filters.endDate);
+    let cancelled = false;
+    (async () => {
+      try {
+        const { token } = useAuthStore.getState();
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 60000);
+        const resp = await fetch(`${API_URL}/api/data/hourly-detail-full`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          signal: ctrl.signal,
+          body: JSON.stringify({
+            tenant_id: activeTenantId,
+            date: sdate,
+            edate: edate,
+            lokasyon_id: null,
+          }),
+        });
+        clearTimeout(timer);
+        if (!resp.ok) return;
+        const j = await resp.json();
+        const byHour: Record<string, any[]> = j?.by_hour || {};
+        const hourMap: Record<string, number> = {};
+        Object.entries(byHour).forEach(([hour, rows]) => {
+          let amount = 0;
+          rows.forEach((r: any) => {
+            amount += parseFloat(r?.KDV_DAHIL_TOPLAM_TUTAR || r?.TOPLAM_TUTAR || '0');
+          });
+          hourMap[hour] = (hourMap[hour] || 0) + amount;
+        });
+        const arr: HourlySales[] = Object.entries(hourMap)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([hour, amount]) => ({ hour, amount, transactions: 0, products: [] }));
+        if (!cancelled) setFreshHourlySales(arr.length > 0 ? arr : null);
+      } catch {
+        // silently fall back to legacy hourly_data
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeTenantId, filters.startDate.getTime(), filters.endDate.getTime()]);
+
+  // Effective hourly sales: prefer fresh procedure data; fall back to legacy hourly_data
+  const effectiveHourlySales = useMemo<HourlySales[]>(() => {
+    if (freshHourlySales && freshHourlySales.length > 0) return freshHourlySales;
+    return sourceData?.hourlySales || [];
+  }, [freshHourlySales, sourceData?.hourlySales]);
 
   // Fetch table detail from POS via sync
   const fetchTableDetail = useCallback(async (table: OpenTable) => {
@@ -170,10 +231,10 @@ export default function DashboardScreen() {
 
   // Best selling hour
   const bestSellingHour = useMemo(() => {
-    const hours = sourceData?.hourlySales || [];
+    const hours = effectiveHourlySales;
     if (hours.length === 0) return { hour: '-', amount: 0, transactions: 0 };
     return hours.reduce((max, hour) => hour.amount > max.amount ? hour : max, hours[0]);
-  }, [sourceData]);
+  }, [effectiveHourlySales]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -195,10 +256,10 @@ export default function DashboardScreen() {
   }, [totals, sourceData]);
 
   const maxHourAmount = useMemo(() => {
-    const hours = sourceData?.hourlySales || [];
+    const hours = effectiveHourlySales;
     if (hours.length === 0) return 1;
     return Math.max(...hours.map(h => h.amount));
-  }, [sourceData]);
+  }, [effectiveHourlySales]);
 
   // Open Tables computed values
   const openTableTotals = useMemo(() => {
@@ -1147,23 +1208,66 @@ export default function DashboardScreen() {
                     </View>
                     {hourDetailProducts.map((item: any, idx: number) => {
                       const tutar = parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0');
+                      const brut = parseFloat(item.BRUT_KDV_DAHIL_TOPLAM_TUTAR || '0');
+                      const iskonto = parseFloat(item.GENEL_ISKONTO_TUTARI || item.ISKONTO_TUTARI || '0');
+                      const kdv = parseFloat(item.KDV_TUTARI || item.TOPLAM_KDV || '0');
+                      const perakende = parseFloat(item.PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR || '0');
+                      const erp12 = parseFloat(item.ERP12_KDV_DAHIL_TOPLAM_TUTAR || '0');
+                      const birimFiyat = parseFloat(item.BIRIM_FIYAT || item.ORTALAMA_FIYAT || '0');
+                      const fmtTL = (v: number) => v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                       return (
-                        <View key={idx} style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border, alignItems: 'center' }]}>
-                          <View style={{ flex: 2.4, paddingRight: 6 }}>
-                            <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]} numberOfLines={1}>{item.STOK_ADI || t('product')}</Text>
-                            <Text style={[{ fontSize: 11, color: colors.textSecondary }]} numberOfLines={1}>{item.LOKASYON || ''}</Text>
+                        <View key={idx} style={[{ paddingVertical: 10, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border }]}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <View style={{ flex: 2.4, paddingRight: 6 }}>
+                              <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]} numberOfLines={1}>{item.STOK_ADI || t('product')}</Text>
+                              <Text style={[{ fontSize: 11, color: colors.textSecondary }]} numberOfLines={1}>{item.LOKASYON || ''}</Text>
+                            </View>
+                            <Text style={[{ flex: 0.8, fontSize: 14, fontWeight: '600', color: colors.text, textAlign: 'center' }]}>
+                              {parseFloat(item.TOPLAM_MIKTAR || '0').toFixed(0)}
+                            </Text>
+                            <Text
+                              style={[{ flex: 1.8, fontSize: 13, fontWeight: '700', color: colors.primary, textAlign: 'right' }]}
+                              numberOfLines={1}
+                              adjustsFontSizeToFit
+                              minimumFontScale={0.7}
+                            >
+                              ₺{fmtTL(tutar)}
+                            </Text>
                           </View>
-                          <Text style={[{ flex: 0.8, fontSize: 14, fontWeight: '600', color: colors.text, textAlign: 'center' }]}>
-                            {parseFloat(item.TOPLAM_MIKTAR || '0').toFixed(0)}
-                          </Text>
-                          <Text
-                            style={[{ flex: 1.8, fontSize: 13, fontWeight: '700', color: colors.primary, textAlign: 'right' }]}
-                            numberOfLines={1}
-                            adjustsFontSizeToFit
-                            minimumFontScale={0.7}
-                          >
-                            ₺{tutar.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </Text>
+                          {(brut > 0 || iskonto > 0 || kdv > 0 || perakende > 0 || erp12 > 0 || birimFiyat > 0) && (
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                              {birimFiyat > 0 && (
+                                <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }}>
+                                  <Text style={{ fontSize: 10, color: colors.textSecondary, fontWeight: '600' }}>BF: ₺{fmtTL(birimFiyat)}</Text>
+                                </View>
+                              )}
+                              {brut > 0 && brut !== tutar && (
+                                <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: colors.textSecondary + '15' }}>
+                                  <Text style={{ fontSize: 10, color: colors.textSecondary, fontWeight: '700' }}>Brüt: ₺{fmtTL(brut)}</Text>
+                                </View>
+                              )}
+                              {iskonto > 0 && (
+                                <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: colors.warning + '20' }}>
+                                  <Text style={{ fontSize: 10, color: colors.warning, fontWeight: '700' }}>İsk: -₺{fmtTL(iskonto)}</Text>
+                                </View>
+                              )}
+                              {kdv > 0 && (
+                                <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: colors.primary + '15' }}>
+                                  <Text style={{ fontSize: 10, color: colors.primary, fontWeight: '700' }}>KDV: ₺{fmtTL(kdv)}</Text>
+                                </View>
+                              )}
+                              {perakende > 0 && (
+                                <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: '#10B98120' }}>
+                                  <Text style={{ fontSize: 10, color: '#10B981', fontWeight: '700' }}>P: ₺{fmtTL(perakende)}</Text>
+                                </View>
+                              )}
+                              {erp12 > 0 && (
+                                <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: '#8B5CF620' }}>
+                                  <Text style={{ fontSize: 10, color: '#8B5CF6', fontWeight: '700' }}>E12: ₺{fmtTL(erp12)}</Text>
+                                </View>
+                              )}
+                            </View>
+                          )}
                         </View>
                       );
                     })}

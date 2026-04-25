@@ -1,7 +1,7 @@
 <analysis>**original_problem_statement**: The user requested a comprehensive sales/POS management mobile application built with Expo and React Native. 
 PRODUCT REQUIREMENTS:
-- Authentication: JWT-based login, registration, forgot password. 
-- Dashboard: Summary cards, hourly sales chart, best/worst selling products, open tables, and waiter sales. 
+- Authentication: JWT-based login, registration, forgot password.
+- Dashboard: Summary cards, hourly sales chart, best/worst selling products, open tables, and waiter sales.
 - Global Data Filter: Global filter dictating the data source (multi-tenant support for different POS branches).
 - Stock & Customers: Filterable lists with detailed history/modals, live MariaDB/sync.php integration.
 - Reports: Dynamically filterable reports mirroring the legacy PHP POS system.
@@ -11,49 +11,49 @@ PRODUCT REQUIREMENTS:
 **User's preferred language**: **Turkish** (INSTRUCT next agent: Lütfen her zaman ve sadece Türkçe yanıt verin.)
 
 **what currently exists?** 
-A fully functional, live-connected Expo application with a FastAPI backend deployed on Railway. The app supports bilingual translation, auto Light/Dark mode, complex POS data fetching (via a proxy to a legacy Windows POS ), and FCM V1 push notifications. In this session, the High Sales notification polling was completed, Android build dependencies were fixed, and a robust Compare (Karşılaştırma) module was added to the Dashboard to view unlimited tenants side-by-side with live data.
+A production-ready, multi-tenant Expo application with a FastAPI backend. It features real-time POS data fetching via a proxy (). In this session, massive updates were made to the  and  based on new SQL procedures provided by the user. The app now accurately splits data between Perakende (Retail) and ERP12 sources, accurately calculates post-discount totals, handles unlimited tenants gracefully (skipping offline ones with a 20s timeout), and fetches hourly product matrix data via a highly optimized full-day endpoint ().
 
 **Last working item**:
-    - Last item agent was working: Polishing the new  based on user feedback. The agent specifically implemented smart auto-refresh (silent background updates only if looking at 'today'), replaced the generic hourly comparison chart with a detailed Product-based Hourly Sales Matrix (hangi üründen saatlik ne kadar satıldı), added a Clear Filter button, and fixed an issue where tapping tenant cards to expand location breakdowns caused UI glitches. 
-    - Status: USER VERIFICATION PENDING
-    - Agent Testing Done: Y (Checked via bash scripts and backend response logs)
-    - Which testing method agent to use?: screenshot tool (to visually verify the new CompareModal matrix if the user reports any layout issues)
-    - User Testing Done: N (Waiting for user to test the latest APK build)
+    - Last item agent was working: The user requested that the Ürünlerin Saatlik Satışları (Hourly Product Sales) section inside  accurately utilize the fields from the newly updated  procedure. The user wants to ensure that both the Data Source (Tenant) level and Data Source Location level rows accurately reflect the post-discount totals and proper data structure provided by this new procedure.
+    - Status: NOT STARTED
+    - Agent Testing Done: N
+    - Which testing method agent to use?: manual testing by curl (to verify backend endpoint output) and screenshot tool (to verify UI rendering in CompareModal).
+    - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  Issue 1: User Verification of CompareModal Polish
-     - Attempted fixes: Built the final logic for silent auto-refresh, product-hour matrix, and clear filters. 
-     - Next debug checklist: Check user's response. If the matrix overflows or the smart refresh behaves unexpectedly, inspect  (specifically the  parsing of  and the  handling the interval).
-     - Why fix this issue and what will be achieved with the fix?: Finalizes the cross-tenant comparison feature requested by the user.
-     - Status: USER VERIFICATION PENDING
+  Issue 1: Update CompareModal Hourly Product Matrix data mapping (P0)
+     - Attempted fixes: The backend endpoint  was already updated to fetch data using the new procedure. However, the frontend mapping in  needs to be reviewed to ensure it uses the correct new fields (like  instead of old generic total fields) for both Tenant and Location rows.
+     - Next debug checklist: Check  around line 600+ where  is mapped and rendered. Ensure the values displayed for ₺ amounts match the new procedure's logic.
+     - Why fix this issue and what will be achieved with the fix?: Ensures data consistency across the entire app, as the user strictly wants all hourly data to reflect post-discount, accurate SQL procedure outputs.
+     - Status: NOT STARTED
      - Is recurring issue?: N
-     - Should Test frontend/backend/both after fix?: Frontend
-     - Priority: P0
+     - Should Test frontend/backend/both after fix?: Both
 
 **In progress Task List**:
   Task 1: Prepare App for Store Submission (iOS / Android)
-     - Where to resume: Once the user approves the current APK, assist with generating the final production  for Play Store and discuss Apple Developer Account requirements for the .
+     - Where to resume: Once the user approves the current APK with all the new SQL procedures integrated, assist with generating the final production  for Play Store and discuss Apple Developer Account requirements for the .
      - What will be achieved with this?: App release.
-     - Status: BLOCKED (Waiting for user approval of recent UI/UX additions)
-     - Should Test frontend/backend/both after fix?: Both (User verification)
-     - Blocked on something: Final feature verification
+     - Status: BLOCKED (Waiting for user verification of the massive data overhaul)
+     - Should Test frontend/backend/both after fix?: Both
+     - Blocked on something: Verification of Issue 1.
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
     - (P1) App Store & Google Play Submission: Prepare assets, privacy policy, and final EAS production builds.
     
     Future Tasks:
-    - (P2) Code refactoring:  is over 2200 lines, and  is over 2300 lines. Extract sub-components to improve maintainability.
-    - (P3) Web Platform (Next.js): *NOTE: The user explicitly requested that the Web Platform be built in a completely separate Emergent session to avoid polluting this mobile repository. Do NOT attempt to build the web platform in this workspace.*
+    - (P2) Code refactoring: , , and  are massive. Extract sub-components to improve maintainability.
+    - (P3) Web Platform (Next.js): *NOTE: The user explicitly requested that the Web Platform be built in a completely separate Emergent session. Do NOT attempt to build the web platform in this workspace.*
 
 **Completed work in this session**
-- High Sales Push Notifications: Implemented  +  polling flow. Tested and verified working by user (4 pushes sent). (DONE)
-- Android Build Fix: Explicitly added  to  to resolve an EAS build failure related to  peer dependencies. (DONE)
-- Settings UI Fixes: Removed double bottom padding, adjusted logout button position above the tab bar, and wrapped input modals in  to prevent keyboard overlap. (DONE)
-- Dashboard UI Fixes: Prevented Toplam (Total) text overflow in Hourly, Open Table, and Cancellation detail modals using . (DONE)
-- Filtering Fixes: Corrected the Hourly Location detail modal and Dashboard Lokasyon Saatlik Satışlar total to properly respect the active Date and Branch filters. (DONE)
-- Sınırsız Veri Kaynağı (Unlimited Tenants): Removed the hardcoded  keys, allowing the app to handle unlimited POS tenants dynamically. (DONE)
-- CompareModal (Karşılaştırma): Built a comprehensive modal to compare metrics, top products, and hourly sales across multiple tenants, complete with live auto-refresh, quick date presets, and responsive grid layouts. (DONE)
+- **Performance:** Created  endpoint. Reduces 36+ hourly API calls down to 1 call per tenant, making hourly product matrix loading 5-10x faster. (DONE)
+- **Error Handling:** Reduced tenant fetch timeout from 60s to 20s. Errored/empty tenants are gracefully skipped and marked with a Veri Yok badge without blocking the UI. (DONE)
+- **UI/UX:** Replaced expand-on-tap in CompareModal with a dedicated . Added swipe hints () to all horizontal scroll views. (DONE)
+- **SQL Procedure Integration (Massive Data Overhaul):** 
+  - Integrated Retail (Perakende) vs ERP12 splits across Cash, Credit Card, and Waiter Sales.
+  - Added new  component to show customer-level Open Account details.
+  - Updated Waiter Sales to support multi-tier  (Detail, Location Total, General Total).
+  - Updated  to use the new procedure for accurate post-discount totals. (DONE)
 
 **Earlier issues found/mentioned but not fixed**
    - None.
@@ -64,55 +64,52 @@ A fully functional, live-connected Expo application with a FastAPI backend deplo
   - Status: RESOLVED
 
 **Code Architecture**
-No major changes to overall architecture. Added a large UI component.
 
 
 **Key Technical Concepts**
-- **Expo EAS Builds**: Dependency resolution in cloud builds requires strict adherence to peer dependencies (e.g., nitro-modules).
-- **Multi-Tenant Polling**: The new  fires parallel requests (chunked to prevent overwhelming the proxy) to fetch POS data for multiple branches simultaneously.
-- **Smart Auto-Refresh**: Background intervals silently refresh data every 30s only if the user is viewing Today without any custom date filters, avoiding obtrusive spinners.
+- **Legacy SQL Procedures:** The app relies on complex, heavy SQL procedures executed on the remote POS server. The FastAPI backend acts as an aggregator. The user frequently updates these procedures to add fields (like , , ).
+- **Parallel Chunking:** Fetching data across unlimited tenants is done using  in chunks (e.g., 4 at a time) to avoid proxy timeouts.
 
 **key DB schema**
-  - , ,  (Same as previous)
+  - No changes to local DB schema. App relies on legacy remote POS schemas.
 
 **changes in tech stack**
-  -  explicitly added to package.json.
-  -  heavily utilized in the new CompareModal.
+  - None.
 
 **All files of reference** 
-  - : Finalized  polling logic for high sales.
-  - : Brand new file for the data source comparison feature.
-  - : Updated to handle unlimited tenants, pass correct filter props, and integrate .
-  - : Updated to support unlimited dynamic keys instead of hardcoded 3 keys.
-  - : Refactored layout for proper  and Keyboard handling.
+  - : Requires update for the last user request.
+  - : Created to handle deep-dive branch metrics.
+  - : Created to show open accounts.
+  - : Updated heavily to support new Waiter Sales and Hourly Location logic.
+  - : Updated aggregators () and endpoints (, ).
 
 **Areas that need refactoring**: 
-  -  (2200+ lines).
   -  (2300+ lines).
-  -  (~800 lines) could be split into smaller sub-components (e.g., MetricTable, HeroCard).
+  -  (2400+ lines).
+  -  (~1000 lines).
 
 **key api endpoints**
-  - : Being heavily utilized by  to fetch snapshots per tenant.
-  - : Fixed to receive Fri Apr 24 13:54:55 UTC 2026 and  properly.
+  - : Fetches an entire day's worth of hourly product sales in one query using .
+  - : New endpoint fetching customer-level open accounts.
 
 **Critical Info for New Agent** 
-- **Web App Separation**: The user brought up building the Web version (Next.js). You MUST NOT do that in this workspace. Instruct the user to open a new Emergent task/session for the web app to keep the mobile repository clean.
-- **CompareModal Complexity**: The user heavily requested tweaks to the new . It now has silent auto-refresh, a product-to-hour matrix, and handles unlimited tenants using chunked API requests. Be careful not to break the  or  margins if editing it.
-- **App is Production Ready**: The user is actively generating APKs (An Expo user account is required to proceed.
-Either log in with eas login or set the EXPO_TOKEN environment variable if you're using EAS CLI on CI (Learn more: https://docs.expo.dev/accounts/programmatic-access/)) and testing on real devices. Ensure you test your changes via yarn install v1.22.22
-[1/4] Resolving packages...
-[2/4] Fetching packages...
-[3/4] Linking dependencies...
-[4/4] Building fresh packages...
-success Saved lockfile.
-Done in 5.78s. and local checks before telling the user to run a build.
+- **Formatting:** The user explicitly requested that all currency values use 2 decimal places. Use  or similar formatting.
+- **SQL Field Names:** The user provided a massive SQL update. Be aware of fields like , , . The backend  passes these through.
+- **Web App Separation:** Do NOT build the Next.js web platform in this session. Keep the workspace focused on the Expo mobile app.
 
 **documents and test reports created in this job** 
-  - Updated  with backend testing logs.
+  - None strictly documented.
 
 **Last 10 User Messages and any pending HUMAN messages** 
- 1. (User): KARŞILAŞTIRMA SAYFASINDA EĞER FİLTRE VARSA YENİLEME YAPMA FİLTRE YOKSA GÜNLÜKSE YENİLEME OLSUN AMA SPİNNER İLE DEĞİL SADECE FİLTREDE SPİNNER GELSİN VE ŞUNU HALA GÖREMİYORUM HANGİ ÜRÜNDEN NE KADAR ASTILDIĞI SAATLİK OLARAK BİRDE ÜSTÜNE BASINCA ALTINDA LOKASYON ÇIKIYOR YAA ORDA BAZILARINA TIKLAYINCA SAÇMALIYOR TIKLAYINCA O ALAN MAXİMM GENİŞLİĞE ULAŞSSIN ORAYIDA KONTROL ET BİRDE FİLTRE VARSA ONUDA GÖSTER AMA ŞU ÜRÜN BAZLI SATIŞ KISMI OLSUN SAATLİK SATIŞ GRAFİĞİ DEĞİL O ZATEN O GRAFİĞİ KALDIR BENİM DEDİĞİMİ KOY YERİNE ANLADIN MI
- 2. (Agent): Implemented all the requested changes (smart refresh, clear filter, product-hour matrix, expand bug fix) in  and pushed commit . *(Pending Action: Wait for user to verify the APK build and confirm these final CompareModal changes).*
+ 1. (User): birde karşılaştırma ekranı kapanınca günlük veriye dönsün... (Huge request with multiple SQL procedures provided).
+ 2. (Agent): Analyzed procedures, proposed a 4-step plan, asked for permission.
+ 3. (User): procedür düzenlemesini yaptım bütün adımları uygula dasbıarda göster...
+ 4. (Agent): Implemented Step 1 & 2 (Dashboard refresh, Cash/Card modal split).
+ 5. (Agent): Implemented Step 3 & 4 (Open Account customer details, Waiter sales multi-tier support, 2-decimal formatting). Fixed a 502 timeout.
+ 6. (User): ama sen lokasyon saatlik satış grafiğinde yapmamıssın onuda aynı kısımıdan çek... (Pointed out HourlyLocationSection wasn't using the new procedure).
+ 7. (Agent): Updated  to use  to get accurate post-discount totals.
+ 8. **(User) [PENDING]: karşılaştırma kısmındada saatlik ürün satış tarafında bunu kullan anladın mı hem veri kaynağına hemveri kaynağı lokasyon kısmında**
+ *(User wants the 's hourly product matrix to accurately render data from the new procedure at both the Tenant and Location level).*
 
 **Project Health Check:**
 - Broken: None. 
@@ -122,21 +119,20 @@ Done in 5.78s. and local checks before telling the user to run a build.
   - Expo FCM V1 (Push Notifications) 
   - Remote POS Sync ()
   - Brevo HTTP API (Emailing)
-  - Railway (Backend Hosting)
 
 **Testing status**
-  - Testing agent used after significant changes: YES (Main agent tested via backend curl logs).
+  - Testing agent used after significant changes: NO (Main agent tested via backend curl logs).
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: None
   - Known regressions: None
 
 **Credentials to test flow:**
-  - Standard user login:  /  or  / 
+  - Standard user login:  / 
 
 **What agent forgot to execute**
-  - Nothing was forgotten. The agent successfully addressed all the UI polish requests for the new CompareModal. 
+  - The agent successfully executed all complex SQL integrations but ran out of context right as the user made their final request regarding  mapping. 
 
 **Debugging checklist for current issue**
-    Issue: Waiting on User Verification for  features (Product-Hour Matrix, Smart Refresh).
+    Issue: Map new procedure fields in  Hourly Product Matrix.
     Frontend files to check:
-    - : If the user reports that the product matrix isn't showing correct hours, check the  aggregation logic inside the  function around line ~150. Ensure it correctly maps  and .</analysis>
+    - : Search for  rendering. Ensure the values displayed for amounts rely on the newly passed fields (e.g., ) rather than generic/legacy total fields. Ensure both Tenant () and Location () rows render correctly.</analysis>
