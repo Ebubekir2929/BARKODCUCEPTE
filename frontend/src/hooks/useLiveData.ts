@@ -14,6 +14,12 @@ export interface DashboardFilter {
   endDate: Date;
 }
 
+export interface FinancialBreakdown {
+  total: number;
+  perakende: number;
+  erp12: number;
+}
+
 export interface DashboardData {
   branchSales: BranchSales[];
   hourlySales: HourlySales[];
@@ -33,6 +39,28 @@ export interface DashboardData {
   iptalOzet: any[];
   iptalDetay: any[];
   allLocations: string[];
+  // NEW: ERP12/Perakende breakdowns + iskonto + fiş sayıları
+  financialBreakdown: {
+    nakit: FinancialBreakdown;
+    krediKarti: FinancialBreakdown;
+    geneltoplam: FinancialBreakdown;
+    iskonto: FinancialBreakdown;
+    fisSayisi: { total: number; perakende: number; erp12: number };
+  };
+  // Per-location breakdown (for branch detail in modal)
+  branchBreakdowns: Array<{
+    branchName: string;
+    perakende_nakit: number;
+    erp12_nakit: number;
+    perakende_kart: number;
+    erp12_kart: number;
+    perakende_iskonto: number;
+    erp12_iskonto: number;
+    toplam_iskonto: number;
+    perakende_fis: number;
+    erp12_fis: number;
+    toplam_fis: number;
+  }>;
 }
 
 const EMPTY_DATA: DashboardData = {
@@ -54,6 +82,14 @@ const EMPTY_DATA: DashboardData = {
   iptalOzet: [],
   iptalDetay: [],
   allLocations: [],
+  financialBreakdown: {
+    nakit: { total: 0, perakende: 0, erp12: 0 },
+    krediKarti: { total: 0, perakende: 0, erp12: 0 },
+    geneltoplam: { total: 0, perakende: 0, erp12: 0 },
+    iskonto: { total: 0, perakende: 0, erp12: 0 },
+    fisSayisi: { total: 0, perakende: 0, erp12: 0 },
+  },
+  branchBreakdowns: [],
 };
 
 function formatDateParam(d: Date): string {
@@ -70,6 +106,7 @@ function isToday(d: Date): boolean {
 
 function transformApiData(apiData: any): DashboardData {
   const branchSales: BranchSales[] = [];
+  const branchBreakdowns: DashboardData['branchBreakdowns'] = [];
   const locationData = apiData?.financial_data_location?.data || [];
   locationData.forEach((loc: any, idx: number) => {
     branchSales.push({
@@ -83,6 +120,19 @@ function transformApiData(apiData: any): DashboardData {
       },
       cancellations: [],
     });
+    branchBreakdowns.push({
+      branchName: loc.LOKASYON || 'Bilinmeyen',
+      perakende_nakit: parseFloat(loc.PERAKENDE_NAKIT || '0'),
+      erp12_nakit: parseFloat(loc.ERP12_NAKIT || '0'),
+      perakende_kart: parseFloat(loc.PERAKENDE_KREDI_KARTI || '0'),
+      erp12_kart: parseFloat(loc.ERP12_KREDI_KARTI || '0'),
+      perakende_iskonto: parseFloat(loc.PERAKENDE_TOPLAM_ISKONTO || '0'),
+      erp12_iskonto: parseFloat(loc.ERP12_TOPLAM_ISKONTO || '0'),
+      toplam_iskonto: parseFloat(loc.TOPLAM_ISKONTO || '0'),
+      perakende_fis: parseInt(loc.PERAKENDE_FIS_SAYISI || '0'),
+      erp12_fis: parseInt(loc.ERP12_FIS_SAYISI || '0'),
+      toplam_fis: parseInt(loc.TOPLAM_FIS_SAYISI || '0'),
+    });
   });
 
   const financialData = apiData?.financial_data?.data?.[0] || {};
@@ -91,6 +141,35 @@ function transformApiData(apiData: any): DashboardData {
     card: parseFloat(financialData.KREDI_KARTI || '0'),
     openAccount: 0,
     total: parseFloat(financialData.GENELTOPLAM || '0'),
+  };
+
+  // NEW: Financial breakdown — ERP12/Perakende splits + iskonto + fiş
+  const financialBreakdown = {
+    nakit: {
+      total: parseFloat(financialData.NAKIT || '0'),
+      perakende: parseFloat(financialData.PERAKENDE_NAKIT || '0'),
+      erp12: parseFloat(financialData.ERP12_NAKIT || '0'),
+    },
+    krediKarti: {
+      total: parseFloat(financialData.KREDI_KARTI || '0'),
+      perakende: parseFloat(financialData.PERAKENDE_KREDI_KARTI || '0'),
+      erp12: parseFloat(financialData.ERP12_KREDI_KARTI || '0'),
+    },
+    geneltoplam: {
+      total: parseFloat(financialData.GENELTOPLAM || '0'),
+      perakende: parseFloat(financialData.PERAKENDE_GENELTOPLAM || '0'),
+      erp12: parseFloat(financialData.ERP12_GENELTOPLAM || '0'),
+    },
+    iskonto: {
+      total: parseFloat(financialData.TOPLAM_ISKONTO || '0'),
+      perakende: parseFloat(financialData.PERAKENDE_TOPLAM_ISKONTO || '0'),
+      erp12: parseFloat(financialData.ERP12_TOPLAM_ISKONTO || '0'),
+    },
+    fisSayisi: {
+      total: parseInt(financialData.TOPLAM_FIS_SAYISI || '0'),
+      perakende: parseInt(financialData.PERAKENDE_FIS_SAYISI || '0'),
+      erp12: parseInt(financialData.ERP12_FIS_SAYISI || '0'),
+    },
   };
 
   const hourlyRaw = apiData?.hourly_data?.data || [];
@@ -165,6 +244,8 @@ function transformApiData(apiData: any): DashboardData {
     iptalOzet: apiData?.iptal_ozet?.data || [],
     iptalDetay: apiData?.iptal_detay?.data || [],
     allLocations: apiData?.all_locations || [],
+    financialBreakdown,
+    branchBreakdowns,
   };
 }
 

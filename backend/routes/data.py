@@ -54,7 +54,22 @@ def aggregate_dataset(key: str, raw_items: list) -> list:
     elif key == 'financial_data_location':
         # Group by LOKASYON, sum numeric fields
         loc_map = {}
-        numeric_fields = ['GENELTOPLAM', 'NAKIT', 'KREDI_KARTI', 'VERESIYE', 'TOPLAM', 'KDV', 'FISTOPLAM', 'NETCIRO']
+        numeric_fields = [
+            'GENELTOPLAM', 'NAKIT', 'KREDI_KARTI', 'VERESIYE', 'TOPLAM', 'KDV', 'FISTOPLAM', 'NETCIRO',
+            # New ERP12/Perakende breakdown
+            'PERAKENDE_GENELTOPLAM', 'ERP12_GENELTOPLAM',
+            'PERAKENDE_NAKIT', 'ERP12_NAKIT',
+            'PERAKENDE_KREDI_KARTI', 'ERP12_KREDI_KARTI',
+            # Iskonto
+            'TOPLAM_FIS_ISKONTO', 'TOPLAM_SATIR_ISKONTO', 'TOPLAM_ISKONTO',
+            'PERAKENDE_TOPLAM_ISKONTO', 'ERP12_TOPLAM_ISKONTO',
+            # Fiş sayıları
+            'TOPLAM_FIS_SAYISI', 'PERAKENDE_FIS_SAYISI', 'ERP12_FIS_SAYISI',
+            # Matrah/KDV
+            'MATRAH_1', 'MATRAH_0', 'MATRAH_10', 'MATRAH_20',
+            'KDV_1', 'KDV_10', 'KDV_20',
+            'TOPLAM_MATRAH', 'TOPLAM_KDV',
+        ]
         for item in raw_items:
             loc = item.get('LOKASYON', 'Bilinmeyen')
             if loc not in loc_map:
@@ -686,6 +701,69 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
         await asyncio.sleep(0.7)
     
     raise HTTPException(status_code=504, detail="Detay zamanında gelmedi. Lütfen tekrar deneyin.")
+
+
+@router.post("/acik-hesap-kisi")
+async def get_acik_hesap_kisi(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """On-demand: Müşteri bazlı açık hesap detayı.
+    Uses RAP_ACIK_HESAP_KISI_OZET_WEB procedure.
+
+    Body: { tenant_id, sdate, edate, page?, pageSize? }
+    Returns: list of customers with open balances + perakende/erp12 split.
+    """
+    tenant_id = body.get("tenant_id", "")
+    sdate = body.get("sdate") or body.get("date", "")
+    edate = body.get("edate") or sdate
+
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id gerekli")
+
+    if not sdate:
+        from datetime import date as date_cls
+        sdate = date_cls.today().strftime("%Y-%m-%d")
+    if not edate:
+        edate = sdate
+
+    page = int(body.get("page", 1))
+    page_size = int(body.get("pageSize", 200))
+
+    params = {
+        "sdate": f"{sdate} 00:00:00",
+        "edate": f"{edate} 23:59:59",
+        "Page": page,
+        "PageSize": page_size,
+    }
+
+    try:
+        result = await _on_demand_request(tenant_id, "rap_acik_hesap_kisi_ozet_web", params, timeout_sec=45)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Acik hesap kisi error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    rows = result.get("data", []) if isinstance(result, dict) else []
+
+    # Extract grand totals from first row (proc returns same TOPLAM_KAYIT etc. per row)
+    totals = {
+        "toplam_kayit": 0,
+        "genel_toplam": 0.0,
+        "genel_perakende": 0.0,
+        "genel_erp12": 0.0,
+    }
+    if rows:
+        first = rows[0]
+        totals = {
+            "toplam_kayit": int(first.get("TOPLAM_KAYIT", 0) or 0),
+            "genel_toplam": float(first.get("GENEL_TOPLAM_ACIK_HESAP", 0) or 0),
+            "genel_perakende": float(first.get("GENEL_PERAKENDE_ACIK_HESAP", 0) or 0),
+            "genel_erp12": float(first.get("GENEL_ERP12_ACIK_HESAP", 0) or 0),
+        }
+
+    return {"ok": True, "data": rows, "totals": totals, "page": page, "page_size": page_size}
 
 
 @router.post("/hourly-detail-full")

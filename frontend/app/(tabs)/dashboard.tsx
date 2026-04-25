@@ -21,6 +21,7 @@ import { DataSourceSelector } from '../../src/components/DataSourceSelector';
 import { SummaryCard } from '../../src/components/SummaryCard';
 import { FilterModal } from '../../src/components/FilterModal';
 import { CompareModal } from '../../src/components/CompareModal';
+import { AcikHesapKisiDetail } from '../../src/components/AcikHesapKisiDetail';
 import { useLiveData } from '../../src/hooks/useLiveData';
 import { WaiterSalesSection, HourlyLocationSection } from '../../src/components/DashboardSections';
 import { BranchSales, HourlySales, OpenTable } from '../../src/types';
@@ -878,7 +879,11 @@ export default function DashboardScreen() {
       {/* Compare Modal - tenant (data source) comparison */}
       <CompareModal
         visible={showCompareModal}
-        onClose={() => setShowCompareModal(false)}
+        onClose={() => {
+          setShowCompareModal(false);
+          // Refresh dashboard to live data when compare modal closes
+          refreshData();
+        }}
         activeTenantId={activeTenantId}
       />
 
@@ -926,6 +931,100 @@ export default function DashboardScreen() {
                   ₺{totals[selectedCardType || 'total'].toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                 </Text>
               </View>
+
+              {/* NEW: ERP12 vs Perakende Breakdown for cash/card */}
+              {(selectedCardType === 'cash' || selectedCardType === 'card') && sourceData?.financialBreakdown && (() => {
+                const fb = sourceData.financialBreakdown;
+                const breakdown = selectedCardType === 'cash' ? fb.nakit : fb.krediKarti;
+                const ckColor = getCardTypeColor(selectedCardType);
+                if (breakdown.total === 0) return null;
+                const perakendePct = breakdown.total > 0 ? (breakdown.perakende / breakdown.total) * 100 : 0;
+                const erp12Pct = breakdown.total > 0 ? (breakdown.erp12 / breakdown.total) * 100 : 0;
+                return (
+                  <View style={{ marginTop: 12, padding: 12, borderRadius: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 10 }}>
+                      Satış Türü Kırılımı
+                    </Text>
+                    {/* Perakende */}
+                    <View style={{ marginBottom: 8 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981' }} />
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>Perakende</Text>
+                          <Text style={{ fontSize: 11, color: colors.textSecondary }}>%{perakendePct.toFixed(1)}</Text>
+                        </View>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: '#10B981' }}>
+                          ₺{breakdown.perakende.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                        </Text>
+                      </View>
+                      <View style={{ height: 4, backgroundColor: '#10B98122', borderRadius: 2 }}>
+                        <View style={{ width: `${Math.max(perakendePct, 1)}%`, height: '100%', backgroundColor: '#10B981', borderRadius: 2 }} />
+                      </View>
+                    </View>
+                    {/* ERP12 */}
+                    <View>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#8B5CF6' }} />
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>ERP12</Text>
+                          <Text style={{ fontSize: 11, color: colors.textSecondary }}>%{erp12Pct.toFixed(1)}</Text>
+                        </View>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: '#8B5CF6' }}>
+                          ₺{breakdown.erp12.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                        </Text>
+                      </View>
+                      <View style={{ height: 4, backgroundColor: '#8B5CF622', borderRadius: 2 }}>
+                        <View style={{ width: `${Math.max(erp12Pct, 1)}%`, height: '100%', backgroundColor: '#8B5CF6', borderRadius: 2 }} />
+                      </View>
+                    </View>
+
+                    {/* Fiş Sayısı + İskonto özet chips */}
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 12, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: ckColor + '15' }}>
+                        <Ionicons name="receipt-outline" size={11} color={ckColor} />
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: ckColor }}>{fb.fisSayisi.total} fiş</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: '#10B98115' }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#10B981' }}>P: {fb.fisSayisi.perakende}</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: '#8B5CF615' }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6' }}>E: {fb.fisSayisi.erp12}</Text>
+                      </View>
+                    </View>
+                    {fb.iskonto.total > 0 && (
+                      <View style={{ marginTop: 10, padding: 10, borderRadius: 10, backgroundColor: colors.warning + '12', borderWidth: 1, borderColor: colors.warning + '30' }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                            <Ionicons name="pricetag-outline" size={13} color={colors.warning} />
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: colors.warning }}>Toplam İskonto</Text>
+                          </View>
+                          <Text style={{ fontSize: 13, fontWeight: '800', color: colors.warning }}>
+                            ₺{fb.iskonto.total.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                          <Text style={{ fontSize: 11, color: '#10B981' }}>
+                            P: ₺{fb.iskonto.perakende.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                          </Text>
+                          <Text style={{ fontSize: 11, color: '#8B5CF6' }}>
+                            E: ₺{fb.iskonto.erp12.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                          </Text>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                );
+              })()}
+              {/* Açık Hesap için müşteri detayı */}
+              {selectedCardType === 'openAccount' && activeTenantId && (
+                <AcikHesapKisiDetail
+                  visible
+                  tenantId={activeTenantId}
+                  sdate={`${filters.startDate.getFullYear()}-${String(filters.startDate.getMonth() + 1).padStart(2, '0')}-${String(filters.startDate.getDate()).padStart(2, '0')}`}
+                  edate={`${filters.endDate.getFullYear()}-${String(filters.endDate.getMonth() + 1).padStart(2, '0')}-${String(filters.endDate.getDate()).padStart(2, '0')}`}
+                />
+              )}
+
               {/* Geçen hafta karşılaştırma */}
               {(() => {
                 const lw = sourceData?.weeklyComparison?.lastWeek;
@@ -997,6 +1096,34 @@ export default function DashboardScreen() {
                     ₺{selectedHour.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                   </Text>
                 </View>
+
+                {/* İskonto Bilgisi */}
+                {(() => {
+                  const totalIskonto = hourDetailProducts.reduce((s: number, p: any) => s + parseFloat(p.ISKONTO_TUTARI || '0'), 0);
+                  const grossTotal = hourDetailProducts.reduce((s: number, p: any) => s + parseFloat(p.KDV_DAHIL_TOPLAM_TUTAR || p.TOPLAM_TUTAR || '0'), 0);
+                  if (totalIskonto <= 0 && grossTotal <= 0) return null;
+                  return (
+                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                      <View style={{ flex: 1, padding: 10, borderRadius: 10, backgroundColor: colors.success + '12', borderWidth: 1, borderColor: colors.success + '30' }}>
+                        <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>İskontolu</Text>
+                        <Text style={{ color: colors.success, fontSize: 14, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                          ₺{grossTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                        </Text>
+                      </View>
+                      {totalIskonto > 0 && (
+                        <View style={{ flex: 1, padding: 10, borderRadius: 10, backgroundColor: colors.warning + '12', borderWidth: 1, borderColor: colors.warning + '30' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Ionicons name="pricetag-outline" size={11} color={colors.warning} />
+                            <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>İskonto</Text>
+                          </View>
+                          <Text style={{ color: colors.warning, fontSize: 14, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                            ₺{totalIskonto.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })()}
 
                 {/* POS Product Detail */}
                 <Text style={[{ fontSize: 15, fontWeight: '700', color: colors.text, marginTop: 16, marginBottom: 8 }]}>{t('product_detail')}</Text>
