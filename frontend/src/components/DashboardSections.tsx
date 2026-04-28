@@ -68,19 +68,6 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
       <View style={[styles.sectionHeader, { paddingBottom: 8 }]}>
         <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]} numberOfLines={1}>Garson / Personel Satışları</Text>
       </View>
-      {/* Badge on its own row to avoid overflow with large amounts */}
-      <View style={{ paddingHorizontal: 16, paddingBottom: 10, flexDirection: 'row' }}>
-        <View style={[styles.badge, { backgroundColor: tabColor + '15', alignSelf: 'flex-start', maxWidth: '100%' }]}>
-          <Text
-            style={[styles.badgeText, { color: tabColor }]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.7}
-          >
-            {detayRows.length} kişi · ₺{fmtTL(totalTutar)}
-          </Text>
-        </View>
-      </View>
 
       {/* Tab Switcher */}
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
@@ -118,8 +105,14 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
         </View>
       ) : (
         <>
-          {/* Tab özet */}
+          {/* Tab özet — kişi+toplam buraya inline geldi (üstte yer kazanma) */}
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: tabColor + '22', borderWidth: 1, borderColor: tabColor + '55' }}>
+              <Ionicons name="people-outline" size={11} color={tabColor} />
+              <Text style={{ fontSize: 11, fontWeight: '800', color: tabColor }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                {detayRows.length} kişi · ₺{fmtTL(totalTutar)}
+              </Text>
+            </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: tabColor + '15' }}>
               <Ionicons name="receipt-outline" size={11} color={tabColor} />
               <Text style={{ fontSize: 11, fontWeight: '700', color: tabColor }}>{totals.fis} fiş</Text>
@@ -607,7 +600,16 @@ export const HourlyLocationSection: React.FC<{
                             <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]} numberOfLines={1}>{item.STOK_ADI || 'Ürün'}</Text>
                             <Text style={[{ fontSize: 11, color: colors.textSecondary }]} numberOfLines={1}>{item.LOKASYON || ''}</Text>
                           </View>
-                          <Text style={[{ flex: 0.8, fontSize: 14, color: colors.text, textAlign: 'center' }]}>{parseFloat(item.TOPLAM_MIKTAR || '0').toFixed(0)}</Text>
+                          <View style={{ flex: 0.8, alignItems: 'center' }}>
+                            <Text style={[{ fontSize: 14, color: colors.text }]}>
+                              {parseFloat(item.TOPLAM_MIKTAR || '0').toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}
+                            </Text>
+                            {!!(item.BIRIM_ADI || '').trim() && (
+                              <Text style={{ fontSize: 9, color: colors.textSecondary, fontWeight: '700' }} numberOfLines={1}>
+                                {item.BIRIM_ADI}
+                              </Text>
+                            )}
+                          </View>
                           <Text
                             style={[{ flex: 1.8, fontSize: 13, fontWeight: '700', color: colors.primary, textAlign: 'right' }]}
                             numberOfLines={1}

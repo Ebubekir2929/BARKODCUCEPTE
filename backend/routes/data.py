@@ -703,6 +703,14 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
         
         if status == "error":
             error_text = status_resp.get("error_text", "Bilinmeyen hata")
+            # Detect upstream MySQL "max_allowed_packet" — too much data for one query.
+            # Return clean 502 with a friendly Turkish message instead of cryptic stacktrace,
+            # so the client can show "Veri çok büyük, daraltın" or fall back gracefully.
+            if "max_allowed_packet" in str(error_text).lower():
+                raise HTTPException(
+                    status_code=502,
+                    detail="POS sunucusu cevap çok büyük olduğu için döndüremedi. Lütfen tarih aralığını kısaltın veya sayfa boyutunu küçültün.",
+                )
             raise HTTPException(status_code=502, detail=f"POS hatası: {error_text}")
         
         await asyncio.sleep(0.7)
@@ -1359,20 +1367,51 @@ async def get_report_filter_options(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Fetch filter dropdown options via rap_filtre_lookup"""
+    """Fetch filter dropdown options via rap_filtre_lookup.
+    Aggressive caching: filter options change rarely; serve from memory for 30 minutes."""
     tenant_id = body.get("tenant_id", "")
     source = body.get("source", "")
-    
+
     if not tenant_id or not source:
         raise HTTPException(status_code=400, detail="tenant_id ve source gerekli")
-    
-    try:
-        return await _on_demand_request(tenant_id, "rap_filtre_lookup", {
+
+    cache_key = f"filter_options::{tenant_id}::{source}"
+    now = time.time()
+    TTL_FRESH = 1800   # 30 min — filter sources very rarely change
+    TTL_STALE = 7200   # 2 hours
+
+    cached = _GLOBAL_CACHE.get(cache_key)
+    age = now - cached["ts"] if cached else None
+
+    if cached and age is not None and age < TTL_FRESH:
+        return {**cached["payload"], "_cache": "fresh", "_age": int(age)}
+
+    async def _refresh():
+        result = await _on_demand_request(tenant_id, "rap_filtre_lookup", {
             "Kaynak": source,
             "Q": "",
         }, timeout_sec=30)
-    except HTTPException:
+        _GLOBAL_CACHE[cache_key] = {"ts": time.time(), "payload": result}
+        return result
+
+    if cached and age is not None and age < TTL_STALE:
+        async def _bg():
+            try:
+                await _refresh()
+            except Exception as e:
+                logger.warning(f"Filter options bg refresh failed: {e}")
+        asyncio.create_task(_bg())
+        return {**cached["payload"], "_cache": "stale", "_age": int(age)}
+
+    try:
+        fresh = await _refresh()
+        return {**fresh, "_cache": "live", "_age": 0}
+    except HTTPException as e:
+        if cached:
+            return {**cached["payload"], "_cache": "fallback_stale", "_age": int(age) if age is not None else 0, "_stale_reason": str(e.detail)}
         raise
     except Exception as e:
         logger.error(f"Report filter options error: {e}")
+        if cached:
+            return {**cached["payload"], "_cache": "fallback_stale", "_age": int(age) if age is not None else 0, "_stale_reason": str(e)}
         raise HTTPException(status_code=500, detail=str(e))

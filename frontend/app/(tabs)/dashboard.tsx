@@ -51,7 +51,7 @@ export default function DashboardScreen() {
   // Cache totals per data source - reset when source changes, update only with fresh data
   const [sourceTotals, setSourceTotals] = useState<Record<string, number>>({});
   const prevSourceRef = React.useRef(activeSource);
-  
+
   useEffect(() => {
     // When source changes, clear the new source's cached total first
     if (prevSourceRef.current !== activeSource) {
@@ -61,6 +61,60 @@ export default function DashboardScreen() {
     const total = sourceData?.weeklyComparison?.thisWeek?.total ?? 0;
     setSourceTotals(prev => ({ ...prev, [activeSource]: total }));
   }, [activeSource, sourceData?.weeklyComparison?.thisWeek?.total]);
+
+  // BACKGROUND FETCHER for ALL tenants' totals so the upper banner shows
+  // accurate amounts even when the user hasn't switched to those tenants yet.
+  // Refreshes on app open + every 60s.
+  useEffect(() => {
+    if (!user?.tenants || user.tenants.length === 0) return;
+    const { token } = useAuthStore.getState();
+    if (!token) return;
+
+    const fetchAllTotals = async () => {
+      const fmtDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const sdate = fmtDate(filters.startDate);
+      const edate = fmtDate(filters.endDate);
+
+      // Fetch all tenants in parallel (chunked to 5 to avoid backend overload)
+      const tenants = user.tenants || [];
+      const CHUNK = 5;
+      const updates: Record<string, number> = {};
+
+      for (let i = 0; i < tenants.length; i += CHUNK) {
+        const batch = tenants.slice(i, i + CHUNK).map(async (t, idx) => {
+          const sourceKey = `data${i + idx + 1}`;
+          try {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 25000);
+            const resp = await fetch(
+              `${API_URL}/api/data/dashboard?tenant_id=${encodeURIComponent(t.tenant_id)}&sdate=${sdate}&edate=${edate}`,
+              { headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal }
+            );
+            clearTimeout(timer);
+            if (!resp.ok) return;
+            const j = await resp.json();
+            const locs: any[] = j?.financial_data_location?.data || [];
+            const total = locs.reduce(
+              (s, l) => s + parseFloat(l?.GENELTOPLAM || l?.TOPLAM || '0'),
+              0
+            );
+            updates[sourceKey] = total;
+          } catch {
+            // skip
+          }
+        });
+        await Promise.all(batch);
+      }
+
+      if (Object.keys(updates).length > 0) {
+        setSourceTotals(prev => ({ ...prev, ...updates }));
+      }
+    };
+
+    fetchAllTotals();
+    const interval = setInterval(fetchAllTotals, 60000);
+    return () => clearInterval(interval);
+  }, [user?.tenants?.length, filters.startDate.getTime(), filters.endDate.getTime()]);
 
   const [refreshing, setRefreshing] = useState(false);
   const [selectedCardType, setSelectedCardType] = useState<'cash' | 'card' | 'openAccount' | 'total' | null>(null);
@@ -1164,39 +1218,44 @@ export default function DashboardScreen() {
                   // Sum from procedure fields (GENEL_ISKONTO_TUTARI is post-aggregated discount per row)
                   const totalIskonto = hourDetailProducts.reduce((s: number, p: any) =>
                     s + parseFloat(p.GENEL_ISKONTO_TUTARI || p.ISKONTO_TUTARI || p.TOPLAM_ISKONTO || '0'), 0);
-                  const grossTotal = hourDetailProducts.reduce((s: number, p: any) =>
-                    s + parseFloat(p.BRUT_KDV_DAHIL_TOPLAM_TUTAR || '0'), 0);
-                  const netTotal = hourDetailProducts.reduce((s: number, p: any) =>
-                    s + parseFloat(p.KDV_DAHIL_TOPLAM_TUTAR || p.TOPLAM_TUTAR || '0'), 0);
-                  // Total KDV (sum of KDV per row)
+                  const perakendeIskonto = hourDetailProducts.reduce((s: number, p: any) =>
+                    s + parseFloat(p.PERAKENDE_GENEL_ISKONTO_TUTARI || p.PERAKENDE_ISKONTO_TUTARI || p.PERAKENDE_ISKONTO || '0'), 0);
+                  const erp12Iskonto = hourDetailProducts.reduce((s: number, p: any) =>
+                    s + parseFloat(p.ERP12_GENEL_ISKONTO_TUTARI || p.ERP12_ISKONTO_TUTARI || p.ERP12_ISKONTO || '0'), 0);
+                  // Total KDV
                   const totalKdv = hourDetailProducts.reduce((s: number, p: any) =>
                     s + parseFloat(p.KDV_TUTARI || p.TOPLAM_KDV || '0'), 0);
-                  if (totalIskonto <= 0 && grossTotal <= 0 && totalKdv <= 0) return null;
+                  const perakendeKdv = hourDetailProducts.reduce((s: number, p: any) =>
+                    s + parseFloat(p.PERAKENDE_KDV_TUTARI || p.PERAKENDE_KDV || '0'), 0);
+                  const erp12Kdv = hourDetailProducts.reduce((s: number, p: any) =>
+                    s + parseFloat(p.ERP12_KDV_TUTARI || p.ERP12_KDV || '0'), 0);
+                  if (totalIskonto <= 0 && totalKdv <= 0) return null;
+                  const fmt = (v: number) => v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                   return (
                     <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-                      <View style={{ flexBasis: '48%', flexGrow: 1, padding: 10, borderRadius: 10, backgroundColor: colors.success + '12', borderWidth: 1, borderColor: colors.success + '30' }}>
-                        <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>İskontolu (Net)</Text>
-                        <Text style={{ color: colors.success, fontSize: 14, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                          ₺{netTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </Text>
-                      </View>
                       {totalIskonto > 0 && (
                         <View style={{ flexBasis: '48%', flexGrow: 1, padding: 10, borderRadius: 10, backgroundColor: colors.warning + '12', borderWidth: 1, borderColor: colors.warning + '30' }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                             <Ionicons name="pricetag-outline" size={11} color={colors.warning} />
-                            <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>İskonto</Text>
+                            <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>Toplam İskonto</Text>
                           </View>
                           <Text style={{ color: colors.warning, fontSize: 14, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                            -₺{totalIskonto.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            -₺{fmt(totalIskonto)}
                           </Text>
-                        </View>
-                      )}
-                      {grossTotal > 0 && grossTotal !== netTotal && (
-                        <View style={{ flexBasis: '48%', flexGrow: 1, padding: 10, borderRadius: 10, backgroundColor: colors.textSecondary + '15', borderWidth: 1, borderColor: colors.textSecondary + '30' }}>
-                          <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>Brüt (KDV Dahil)</Text>
-                          <Text style={{ color: colors.text, fontSize: 14, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                            ₺{grossTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </Text>
+                          {(perakendeIskonto > 0 || erp12Iskonto > 0) && (
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                              {perakendeIskonto > 0 && (
+                                <View style={{ paddingHorizontal: 5, paddingVertical: 1, borderRadius: 5, backgroundColor: '#10B98120' }}>
+                                  <Text style={{ fontSize: 9, color: '#10B981', fontWeight: '700' }}>P: ₺{fmt(perakendeIskonto)}</Text>
+                                </View>
+                              )}
+                              {erp12Iskonto > 0 && (
+                                <View style={{ paddingHorizontal: 5, paddingVertical: 1, borderRadius: 5, backgroundColor: '#8B5CF620' }}>
+                                  <Text style={{ fontSize: 9, color: '#8B5CF6', fontWeight: '700' }}>E12: ₺{fmt(erp12Iskonto)}</Text>
+                                </View>
+                              )}
+                            </View>
+                          )}
                         </View>
                       )}
                       {totalKdv > 0 && (
@@ -1206,8 +1265,22 @@ export default function DashboardScreen() {
                             <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>Toplam KDV</Text>
                           </View>
                           <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                            ₺{totalKdv.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            ₺{fmt(totalKdv)}
                           </Text>
+                          {(perakendeKdv > 0 || erp12Kdv > 0) && (
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                              {perakendeKdv > 0 && (
+                                <View style={{ paddingHorizontal: 5, paddingVertical: 1, borderRadius: 5, backgroundColor: '#10B98120' }}>
+                                  <Text style={{ fontSize: 9, color: '#10B981', fontWeight: '700' }}>P: ₺{fmt(perakendeKdv)}</Text>
+                                </View>
+                              )}
+                              {erp12Kdv > 0 && (
+                                <View style={{ paddingHorizontal: 5, paddingVertical: 1, borderRadius: 5, backgroundColor: '#8B5CF620' }}>
+                                  <Text style={{ fontSize: 9, color: '#8B5CF6', fontWeight: '700' }}>E12: ₺{fmt(erp12Kdv)}</Text>
+                                </View>
+                              )}
+                            </View>
+                          )}
                         </View>
                       )}
                     </View>
@@ -1245,9 +1318,16 @@ export default function DashboardScreen() {
                               <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]} numberOfLines={1}>{item.STOK_ADI || t('product')}</Text>
                               <Text style={[{ fontSize: 11, color: colors.textSecondary }]} numberOfLines={1}>{item.LOKASYON || ''}</Text>
                             </View>
-                            <Text style={[{ flex: 0.8, fontSize: 14, fontWeight: '600', color: colors.text, textAlign: 'center' }]}>
-                              {parseFloat(item.TOPLAM_MIKTAR || '0').toFixed(0)}
-                            </Text>
+                            <View style={{ flex: 0.8, alignItems: 'center' }}>
+                              <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]}>
+                                {parseFloat(item.TOPLAM_MIKTAR || '0').toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 3 })}
+                              </Text>
+                              {!!(item.BIRIM_ADI || '').trim() && (
+                                <Text style={{ fontSize: 9, color: colors.textSecondary, fontWeight: '700' }} numberOfLines={1}>
+                                  {item.BIRIM_ADI}
+                                </Text>
+                              )}
+                            </View>
                             <Text
                               style={[{ flex: 1.8, fontSize: 13, fontWeight: '700', color: colors.primary, textAlign: 'right' }]}
                               numberOfLines={1}

@@ -1190,7 +1190,7 @@ export default function ReportsScreen() {
       let page = 2;
       let collected = firstRows;
       const maxPages = 50;
-      const batchSize = 4;
+      const batchSize = 6; // increased parallel page fetches for faster aggregation
       let done = false;
       while (!done && page <= maxPages) {
         if (runTokenRef.current !== token_id || controller.signal.aborted) return;
