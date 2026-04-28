@@ -65,10 +65,18 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
 
   return (
     <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-      <View style={styles.sectionHeader}>
-        <Text style={[styles.sectionTitle, { color: colors.text }]}>Garson / Personel Satışları</Text>
-        <View style={[styles.badge, { backgroundColor: tabColor + '15' }]}>
-          <Text style={[styles.badgeText, { color: tabColor }]}>
+      <View style={[styles.sectionHeader, { paddingBottom: 8 }]}>
+        <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]} numberOfLines={1}>Garson / Personel Satışları</Text>
+      </View>
+      {/* Badge on its own row to avoid overflow with large amounts */}
+      <View style={{ paddingHorizontal: 16, paddingBottom: 10, flexDirection: 'row' }}>
+        <View style={[styles.badge, { backgroundColor: tabColor + '15', alignSelf: 'flex-start', maxWidth: '100%' }]}>
+          <Text
+            style={[styles.badgeText, { color: tabColor }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.7}
+          >
             {detayRows.length} kişi · ₺{fmtTL(totalTutar)}
           </Text>
         </View>
@@ -147,18 +155,18 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
                   style={[styles.groupHeader, { backgroundColor: colors.background, borderColor: colors.border }]}
                   onPress={() => setExpanded(expanded === loc ? null : loc)}
                 >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, paddingRight: 8 }}>
                     <Ionicons name={tab === 'garson' ? 'restaurant-outline' : 'briefcase-outline'} size={18} color={tabColor} />
-                    <Text style={[styles.groupName, { color: colors.text }]} numberOfLines={1}>{loc}</Text>
+                    <Text style={[styles.groupName, { color: colors.text, flexShrink: 1 }]} numberOfLines={1}>{loc}</Text>
                     <View style={[styles.countBadge, { backgroundColor: tabColor + '15' }]}>
                       <Text style={[styles.countText, { color: tabColor }]}>{kisiler.length}</Text>
                     </View>
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: tabColor + '15' }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: tabColor }}>{locFis} fiş</Text>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: tabColor }} numberOfLines={1}>{locFis} fiş</Text>
                     </View>
-                    <Text style={[styles.groupTotal, { color: colors.text, fontWeight: '700' }]} numberOfLines={1} adjustsFontSizeToFit>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 140 }}>
+                    <Text style={[styles.groupTotal, { color: colors.text, fontWeight: '700' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
                       ₺{fmtTL(locTutar)}
                     </Text>
                     <Ionicons name={expanded === loc ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
@@ -205,7 +213,7 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
                             )}
                           </View>
                         </View>
-                        <Text style={[styles.itemAmount, { color: tabColor }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                        <Text style={[styles.itemAmount, { color: tabColor, maxWidth: 120 }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
                           ₺{fmtTL(totalTuar)}
                         </Text>
                       </View>

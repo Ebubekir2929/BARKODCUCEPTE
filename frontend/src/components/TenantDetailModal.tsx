@@ -301,22 +301,28 @@ export const TenantDetailModal: React.FC<{
                   : (productsByBranch as Record<string, { name: string; qty: number; amount: number; iskonto?: number }[]>)
               ).map(([branch, products]) => {
                 const bColor = hashBranch(branch);
-                const branchTotal = products.reduce((s, p) => s + p.amount, 0);
+                // ALWAYS prefer the post-discount KDV_DAHIL_TOPLAM_TUTAR sum from the procedure
+                // when available; this is the accurate "Şube Toplamı" the user expects.
                 const branchPH = productHourMap[branch] || {};
+                const procTotal = Object.values(branchPH).reduce(
+                  (s, hours) => s + Object.values(hours).reduce((sub, c) => sub + (c.amount || 0), 0),
+                  0
+                );
+                const branchTotal = procTotal > 0 ? procTotal : products.reduce((s, p) => s + p.amount, 0);
                 return (
                   <View key={branch} style={{ marginBottom: 6 }}>
                     {/* Branch header */}
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 10, backgroundColor: bColor + '08', borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.border }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
                         <Ionicons name="location" size={13} color={bColor} />
-                        <Text style={{ color: colors.text, fontSize: 13, fontWeight: '800' }} numberOfLines={1}>
+                        <Text style={{ color: colors.text, fontSize: 13, fontWeight: '800', flexShrink: 1 }} numberOfLines={1}>
                           {branch}
                         </Text>
                         <View style={{ backgroundColor: bColor + '20', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6 }}>
                           <Text style={{ color: bColor, fontSize: 10, fontWeight: '700' }}>{products.length} ürün</Text>
                         </View>
                       </View>
-                      <Text style={{ color: bColor, fontSize: 13, fontWeight: '800' }}>
+                      <Text style={{ color: bColor, fontSize: 13, fontWeight: '800', maxWidth: 130 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
                         ₺{fmtTL(branchTotal)}
                       </Text>
                     </View>

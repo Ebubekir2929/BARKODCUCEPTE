@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, Modal,
-  ScrollView, ActivityIndicator, FlatList, Alert,
+  ScrollView, ActivityIndicator, FlatList, Alert, RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -92,25 +92,34 @@ export default function StockScreen() {
     fetchPN();
   }, [activeTenantId]);
 
-  // Fetch stock list
-  useEffect(() => {
+  // Fetch stock list (extracted so pull-to-refresh can re-call with force)
+  const fetchStockList = useCallback(async (force: boolean = false) => {
     if (!activeTenantId || !selectedPriceName) return;
-    setStockLoading(true); setStockList([]);
-    const fetchList = async () => {
-      try {
-        const { token } = useAuthStore.getState();
-        const resp = await fetch(`${API_URL}/api/data/stock-list`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ tenant_id: activeTenantId, fiyat_ad: selectedPriceName }),
-        });
-        const data = await resp.json();
-        if (data.ok && data.data) setStockList(data.data);
-      } catch (err) { console.error(err); }
-      finally { setStockLoading(false); }
-    };
-    fetchList();
+    setStockLoading(true);
+    try {
+      const { token } = useAuthStore.getState();
+      const resp = await fetch(`${API_URL}/api/data/stock-list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ tenant_id: activeTenantId, fiyat_ad: selectedPriceName, force_refresh: force }),
+      });
+      const data = await resp.json();
+      if (data.ok && data.data) setStockList(data.data);
+    } catch (err) { console.error(err); }
+    finally { setStockLoading(false); }
   }, [activeTenantId, selectedPriceName]);
+
+  useEffect(() => {
+    setStockList([]);
+    fetchStockList(false);
+  }, [activeTenantId, selectedPriceName, fetchStockList]);
+
+  const [refreshing, setRefreshing] = useState(false);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await fetchStockList(true); // force_refresh: bypass cache
+    setRefreshing(false);
+  }, [fetchStockList]);
 
   // Groups and KDV values for filter
   const groups = useMemo(() => {
@@ -349,6 +358,7 @@ export default function StockScreen() {
         </View>
       ) : (
         <FlatList data={filteredStocks} renderItem={renderStockItem} keyExtractor={(_, idx) => String(idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false} initialNumToRender={15}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} tintColor={colors.primary} />}
           ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="cube-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_stock_found')}</Text></View>}
         />
       )}

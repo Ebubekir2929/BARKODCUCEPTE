@@ -255,6 +255,7 @@ const SATIS_ADET_KAR: ReportDef = {
         { value: 1, label: 'Hariç' },
       ] },
     { name: 'Pc_Ad', label: 'Bilgisayar Adı (Pc_Ad)', type: 'text', group: 'Filtreler', placeholder: 'Örn: KASA1' },
+    { name: 'Lokasyon', label: 'Lokasyon', type: 'multiselect', source: 'LOKASYON', group: 'Filtreler', required: true },
     ...STOK_FILTERS_UI,
     { name: 'StokOzelKod1', label: 'Özel Kod 1', type: 'multiselect', source: 'STOK_OZEL_KOD_1', group: 'Özel Kodlar' },
     { name: 'StokOzelKod2', label: 'Özel Kod 2', type: 'multiselect', source: 'STOK_OZEL_KOD_2', group: 'Özel Kodlar' },
