@@ -1161,29 +1161,52 @@ export default function DashboardScreen() {
 
                 {/* İskonto Bilgisi */}
                 {(() => {
+                  // Sum from procedure fields (GENEL_ISKONTO_TUTARI is post-aggregated discount per row)
                   const totalIskonto = hourDetailProducts.reduce((s: number, p: any) =>
-                    s + parseFloat(p.GENEL_ISKONTO_TUTARI || p.ISKONTO_TUTARI || '0'), 0);
+                    s + parseFloat(p.GENEL_ISKONTO_TUTARI || p.ISKONTO_TUTARI || p.TOPLAM_ISKONTO || '0'), 0);
                   const grossTotal = hourDetailProducts.reduce((s: number, p: any) =>
-                    s + parseFloat(p.BRUT_KDV_DAHIL_TOPLAM_TUTAR || p.KDV_DAHIL_TOPLAM_TUTAR || p.TOPLAM_TUTAR || '0'), 0);
+                    s + parseFloat(p.BRUT_KDV_DAHIL_TOPLAM_TUTAR || '0'), 0);
                   const netTotal = hourDetailProducts.reduce((s: number, p: any) =>
                     s + parseFloat(p.KDV_DAHIL_TOPLAM_TUTAR || p.TOPLAM_TUTAR || '0'), 0);
-                  if (totalIskonto <= 0 && grossTotal <= 0) return null;
+                  // Total KDV (sum of KDV per row)
+                  const totalKdv = hourDetailProducts.reduce((s: number, p: any) =>
+                    s + parseFloat(p.KDV_TUTARI || p.TOPLAM_KDV || '0'), 0);
+                  if (totalIskonto <= 0 && grossTotal <= 0 && totalKdv <= 0) return null;
                   return (
-                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                      <View style={{ flex: 1, padding: 10, borderRadius: 10, backgroundColor: colors.success + '12', borderWidth: 1, borderColor: colors.success + '30' }}>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                      <View style={{ flexBasis: '48%', flexGrow: 1, padding: 10, borderRadius: 10, backgroundColor: colors.success + '12', borderWidth: 1, borderColor: colors.success + '30' }}>
                         <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>İskontolu (Net)</Text>
                         <Text style={{ color: colors.success, fontSize: 14, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
                           ₺{netTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </Text>
                       </View>
                       {totalIskonto > 0 && (
-                        <View style={{ flex: 1, padding: 10, borderRadius: 10, backgroundColor: colors.warning + '12', borderWidth: 1, borderColor: colors.warning + '30' }}>
+                        <View style={{ flexBasis: '48%', flexGrow: 1, padding: 10, borderRadius: 10, backgroundColor: colors.warning + '12', borderWidth: 1, borderColor: colors.warning + '30' }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                             <Ionicons name="pricetag-outline" size={11} color={colors.warning} />
                             <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>İskonto</Text>
                           </View>
                           <Text style={{ color: colors.warning, fontSize: 14, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                            ₺{totalIskonto.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            -₺{totalIskonto.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </Text>
+                        </View>
+                      )}
+                      {grossTotal > 0 && grossTotal !== netTotal && (
+                        <View style={{ flexBasis: '48%', flexGrow: 1, padding: 10, borderRadius: 10, backgroundColor: colors.textSecondary + '15', borderWidth: 1, borderColor: colors.textSecondary + '30' }}>
+                          <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>Brüt (KDV Dahil)</Text>
+                          <Text style={{ color: colors.text, fontSize: 14, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                            ₺{grossTotal.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </Text>
+                        </View>
+                      )}
+                      {totalKdv > 0 && (
+                        <View style={{ flexBasis: '48%', flexGrow: 1, padding: 10, borderRadius: 10, backgroundColor: colors.primary + '12', borderWidth: 1, borderColor: colors.primary + '30' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                            <Ionicons name="receipt-outline" size={11} color={colors.primary} />
+                            <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600' }}>Toplam KDV</Text>
+                          </View>
+                          <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                            ₺{totalKdv.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </Text>
                         </View>
                       )}

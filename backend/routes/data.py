@@ -4,11 +4,18 @@ from routes.auth import get_current_user
 from typing import Optional, Dict, List, Any
 import json
 import logging
+import time
+import asyncio
 from datetime import date, datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/data", tags=["data"])
+
+# Global in-memory cache for heavy POS endpoints with stale-while-revalidate.
+# Key format: "<endpoint>::<tenant_id>::<param_hash>"
+# Value: { ts: float (epoch), payload: dict }
+_GLOBAL_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 def _sum_float(val):
@@ -1015,19 +1022,54 @@ async def get_stock_list_sync(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Fetch stock_list via sync.php request_create (on-demand with FIYAT_AD)"""
+    """Fetch stock_list via sync.php request_create (on-demand with FIYAT_AD).
+    With in-memory cache (TTL 300s) + stale-while-revalidate pattern to mitigate POS 502."""
     tenant_id = body.get("tenant_id", "")
     fiyat_ad = body.get("fiyat_ad", "")
-    
+    force_refresh = bool(body.get("force_refresh", False))
+
     if not tenant_id:
         raise HTTPException(status_code=400, detail="tenant_id gerekli")
-    
+
+    cache_key = f"stock_list::{tenant_id}::{fiyat_ad}"
+    now = time.time()
+    TTL_FRESH = 300        # 5 min: serve directly
+    TTL_STALE = 1800       # 30 min: serve stale while refreshing in background
+
+    cached = _GLOBAL_CACHE.get(cache_key)
+    age = now - cached["ts"] if cached else None
+
+    # 1) Fresh cache hit → return immediately
+    if cached and age is not None and age < TTL_FRESH and not force_refresh:
+        return {**cached["payload"], "_cache": "fresh", "_age": int(age)}
+
+    async def _refresh_and_cache() -> dict:
+        result = await _on_demand_request(tenant_id, "stock_list", {"FIYAT_AD": fiyat_ad}, timeout_sec=60)
+        _GLOBAL_CACHE[cache_key] = {"ts": time.time(), "payload": result}
+        return result
+
+    # 2) Stale cache hit → kick off background refresh, return stale
+    if cached and age is not None and age < TTL_STALE and not force_refresh:
+        async def _bg():
+            try:
+                await _refresh_and_cache()
+            except Exception as e:
+                logger.warning(f"Stock list bg refresh failed: {e}")
+        asyncio.create_task(_bg())
+        return {**cached["payload"], "_cache": "stale", "_age": int(age)}
+
+    # 3) No cache or expired → live fetch (try, on failure return any cached)
     try:
-        return await _on_demand_request(tenant_id, "stock_list", {"FIYAT_AD": fiyat_ad}, timeout_sec=60)
-    except HTTPException:
+        fresh = await _refresh_and_cache()
+        return {**fresh, "_cache": "live", "_age": 0}
+    except HTTPException as e:
+        if cached:
+            return {**cached["payload"], "_cache": "fallback_stale", "_age": int(age) if age is not None else 0, "_stale_reason": str(e.detail)}
         raise
     except Exception as e:
         logger.error(f"Stock list error: {e}")
+        if cached:
+            return {**cached["payload"], "_cache": "fallback_stale", "_age": int(age) if age is not None else 0, "_stale_reason": str(e)}
         raise HTTPException(status_code=500, detail=str(e))
 
 
