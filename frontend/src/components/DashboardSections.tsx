@@ -40,26 +40,30 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
     byLocation[loc].push(r);
   });
 
-  // Compute totals per tab
+  // Compute totals per tab — prefer procedure's TOPLAM_TUTAR (= ACIK + KAPANAN)
+  // when available; fallback to manual sum.
   const totals = detayRows.reduce(
     (acc, r: any) => {
       const fisAdet = tab === 'garson' ? parseInt(r.PERAKENDE_FIS_SAYISI || '0') : parseInt(r.ERP12_FIS_SAYISI || '0');
       const acik = tab === 'garson' ? parseFloat(r.ACIK_FIS_TUTARI || '0') : 0;
       const kapanan = parseFloat(r.KAPANAN_SATIS_TUTARI || '0');
+      const rowToplam = parseFloat(r.TOPLAM_TUTAR || String(acik + kapanan));
       const acikSay = tab === 'garson' ? parseInt(r.ACIK_FIS_SAYISI || '0') : 0;
       const kapananSay = tab === 'garson' ? parseInt(r.KAPANAN_FIS_SAYISI || '0') : fisAdet;
       const miktar = parseFloat(r.TOPLAM_MIKTAR || '0');
       acc.fis += fisAdet;
       acik && (acc.acik += acik);
       acc.kapanan += kapanan;
+      acc.toplam += rowToplam;
       acc.acikSay += acikSay;
       acc.kapananSay += kapananSay;
       acc.miktar += miktar;
       return acc;
     },
-    { fis: 0, acik: 0, kapanan: 0, acikSay: 0, kapananSay: 0, miktar: 0 }
+    { fis: 0, acik: 0, kapanan: 0, toplam: 0, acikSay: 0, kapananSay: 0, miktar: 0 }
   );
-  const totalTutar = totals.acik + totals.kapanan;
+  // Use procedure's TOPLAM_TUTAR sum if available; falls back to acik+kapanan
+  const totalTutar = totals.toplam || (totals.acik + totals.kapanan);
 
   const tabColor = tab === 'garson' ? '#10B981' : '#8B5CF6';
 

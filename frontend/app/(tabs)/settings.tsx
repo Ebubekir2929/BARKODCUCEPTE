@@ -729,35 +729,52 @@ export default function SettingsScreen() {
                 <View style={{ flexShrink: 1 }}>
                   <Text style={[styles.menuItemLabel, { color: colors.text }]}>Veri Yenileme Sıklığı</Text>
                   <Text style={[styles.menuItemSub, { color: colors.textSecondary, fontSize: 10 }]}>
-                    Dashboard verisi otomatik yenilenir
+                    Saniye cinsinden (0 = manuel, min 5sn)
                   </Text>
                 </View>
               </View>
             </View>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 16, paddingBottom: 14, paddingTop: 4 }}>
-              {([
-                { v: 0, label: 'Manuel' },
-                { v: 15, label: '15 sn' },
-                { v: 30, label: '30 sn' },
-                { v: 60, label: '1 dk' },
-                { v: 300, label: '5 dk' },
-              ] as const).map((opt) => (
-                <TouchableOpacity
-                  key={opt.v}
-                  onPress={() => setRefreshInterval(opt.v as any)}
-                  style={{
-                    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8,
-                    borderWidth: 1.5,
-                    borderColor: refreshInterval === opt.v ? colors.primary : colors.border,
-                    backgroundColor: refreshInterval === opt.v ? colors.primary + '15' : 'transparent',
-                  }}
-                >
-                  <Text style={{
-                    fontSize: 12, fontWeight: '700',
-                    color: refreshInterval === opt.v ? colors.primary : colors.textSecondary,
-                  }}>{opt.label}</Text>
-                </TouchableOpacity>
-              ))}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 14, paddingTop: 4 }}>
+              <TextInput
+                style={{
+                  flex: 1,
+                  paddingHorizontal: 14, paddingVertical: 10,
+                  borderRadius: 10, borderWidth: 1.5,
+                  borderColor: colors.border,
+                  backgroundColor: colors.background,
+                  color: colors.text,
+                  fontSize: 14, fontWeight: '700',
+                }}
+                value={String(refreshInterval)}
+                onChangeText={(txt) => {
+                  const n = parseInt(txt.replace(/[^0-9]/g, '') || '0', 10);
+                  // Clamp: 0 (manual) or 5..3600 (5sn..1hr)
+                  const clamped = n === 0 ? 0 : Math.max(5, Math.min(3600, n));
+                  setRefreshInterval(clamped as any);
+                }}
+                keyboardType="numeric"
+                placeholder="60"
+                placeholderTextColor={colors.textSecondary}
+              />
+              <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '700' }}>saniye</Text>
+              {/* Quick-select shortcuts */}
+              <View style={{ flexDirection: 'row', gap: 4 }}>
+                {[0, 30, 60, 300].map((v) => (
+                  <TouchableOpacity
+                    key={v}
+                    onPress={() => setRefreshInterval(v as any)}
+                    style={{
+                      paddingHorizontal: 8, paddingVertical: 6, borderRadius: 6,
+                      backgroundColor: refreshInterval === v ? colors.primary + '20' : 'transparent',
+                      borderWidth: 1, borderColor: refreshInterval === v ? colors.primary : colors.border,
+                    }}
+                  >
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: refreshInterval === v ? colors.primary : colors.textSecondary }}>
+                      {v === 0 ? 'Off' : v < 60 ? `${v}s` : `${v / 60}d`}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
             </View>
 
             <TouchableOpacity
