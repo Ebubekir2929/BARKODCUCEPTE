@@ -104,7 +104,19 @@ class NotificationService {
 
       // Send token to backend so it can push notifications via Expo Push API
       if (this.expoPushToken) {
-        await this.saveTokenToBackend(this.expoPushToken);
+        // Robust register: retry up to 3 times with backoff (covers transient
+        // network/auth issues right after login — fixes "no_active_tokens" bug)
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            await this.saveTokenToBackend(this.expoPushToken);
+            break;
+          } catch (e) {
+            console.warn(`Token register attempt ${attempt}/3 failed:`, e);
+            if (attempt < 3) {
+              await new Promise((r) => setTimeout(r, 1500 * attempt));
+            }
+          }
+        }
       }
 
       return this.expoPushToken;

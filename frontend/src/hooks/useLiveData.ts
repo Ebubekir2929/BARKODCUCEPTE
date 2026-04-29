@@ -277,6 +277,10 @@ export function useLiveData(filter?: DashboardFilter) {
     return user.tenants[0]?.tenant_id || null;
   }, [user?.tenants, activeSource]);
 
+  // AbortController to cancel in-flight fetch when tenant/filter changes — prevents
+  // stale data from a previous tenant bleeding into the new tenant's view.
+  const abortRef = useRef<AbortController | null>(null);
+
   const fetchDashboard = useCallback(async () => {
     const tenantId = activeTenantId();
     if (!tenantId || !token) {
@@ -285,8 +289,20 @@ export function useLiveData(filter?: DashboardFilter) {
       return;
     }
 
-    // Only show refreshing spinner when filter/source changes, not auto-refresh
-    const currentFilterKey = JSON.stringify(filter || {}) + '|' + activeTenantId();
+    // Abort previous in-flight request (tenant changed, or rapid switching)
+    if (abortRef.current) {
+      abortRef.current.abort();
+    }
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    // If switching to a different tenant, immediately clear stale data so
+    // the user doesn't see the previous tenant's numbers while fresh data loads.
+    const currentFilterKey = JSON.stringify(filter || {}) + '|' + tenantId;
+    const tenantChanged = lastFilterRef.current && !lastFilterRef.current.endsWith('|' + tenantId);
+    if (tenantChanged) {
+      setData(EMPTY_DATA);
+    }
     if (hasLoadedOnce.current && currentFilterKey !== lastFilterRef.current) {
       setIsRefreshing(true);
     }
@@ -304,11 +320,14 @@ export function useLiveData(filter?: DashboardFilter) {
 
       const response = await fetch(url, {
         headers: { 'Authorization': `Bearer ${token}` },
+        signal: ctrl.signal,
       });
 
       if (!response.ok) throw new Error(`API Error: ${response.status}`);
 
       const apiData = await response.json();
+      // If our controller was aborted while parsing, abandon results
+      if (ctrl.signal.aborted) return;
       let transformed = transformApiData(apiData);
       
       if (filter?.branchId) {
@@ -341,11 +360,15 @@ export function useLiveData(filter?: DashboardFilter) {
         .reverse();
       if (syncTimes.length > 0) setLastSynced(syncTimes[0] as string);
     } catch (err: any) {
+      // AbortError is expected when tenant switches — silently ignore
+      if (err?.name === 'AbortError' || ctrl.signal.aborted) return;
       console.error('Dashboard fetch error:', err);
       setError(err.message || 'Veri çekilemedi');
     } finally {
-      setIsFirstLoad(false);
-      setIsRefreshing(false);
+      if (!ctrl.signal.aborted) {
+        setIsFirstLoad(false);
+        setIsRefreshing(false);
+      }
     }
   }, [activeTenantId, token, activeSource, isFilterActive, filter?.branchId, filter?.startDate, filter?.endDate]);
 

@@ -828,36 +828,67 @@ async def get_hourly_stock_detail_full(
         "lokasyonID": int(lokasyon_id) if lokasyon_id else None,
     }
 
+    # Memory cache (stale-while-revalidate) — same params hit returns instantly
+    cache_key = f"hourly_full::{tenant_id}::{filter_date}::{edate_in}::{lokasyon_id or 'all'}"
+    now = time.time()
+    TTL_FRESH = 60       # 1 min: serve immediately
+    TTL_STALE = 600      # 10 min: serve stale + bg refresh
+    cached = _GLOBAL_CACHE.get(cache_key)
+    age = now - cached["ts"] if cached else None
+    force_refresh = bool(body.get("force_refresh", False))
+
+    if cached and age is not None and age < TTL_FRESH and not force_refresh:
+        return {**cached["payload"], "_cache": "fresh", "_age": int(age)}
+
+    async def _do_fetch():
+        result_inner = await _on_demand_request(tenant_id, "hourly_stock_detail", params, timeout_sec=45)
+        rows_inner = result_inner.get("data", []) if isinstance(result_inner, dict) else []
+        import re as _re
+        by_hour_inner: Dict[str, List[Any]] = {}
+        for r in rows_inner:
+            hour_label = r.get("SAAT_ADI") or r.get("SAAT") or ""
+            if not hour_label:
+                ts = r.get("TARIH") or r.get("ISLEM_TARIHI") or r.get("FIS_TARIHI") or ""
+                m = _re.search(r"(\d{1,2}):\d{2}", str(ts))
+                if m:
+                    h = int(m.group(1))
+                    hour_label = f"{h:02d}:00 - {(h + 1) % 24:02d}:00"
+            if not hour_label:
+                hour_label = "Bilinmeyen"
+            if hour_label not in by_hour_inner:
+                by_hour_inner[hour_label] = []
+            by_hour_inner[hour_label].append(r)
+        payload = {"ok": True, "by_hour": by_hour_inner, "row_count": len(rows_inner)}
+        _GLOBAL_CACHE[cache_key] = {"ts": time.time(), "payload": payload}
+        return payload
+
+    if cached and age is not None and age < TTL_STALE and not force_refresh:
+        async def _bg():
+            try:
+                await _do_fetch()
+            except Exception as e:
+                logger.warning(f"Hourly full bg refresh failed: {e}")
+        asyncio.create_task(_bg())
+        return {**cached["payload"], "_cache": "stale", "_age": int(age)}
+
     try:
-        result = await _on_demand_request(tenant_id, "hourly_stock_detail", params, timeout_sec=45)
-    except HTTPException:
+        fresh = await _do_fetch()
+        return {**fresh, "_cache": "live", "_age": 0}
+    except HTTPException as e:
+        if cached:
+            return {**cached["payload"], "_cache": "fallback_stale", "_age": int(age) if age is not None else 0, "_stale_reason": str(e.detail)}
         raise
     except Exception as e:
         logger.error(f"Hourly full detail error: {e}")
+        if cached:
+            return {**cached["payload"], "_cache": "fallback_stale", "_age": int(age) if age is not None else 0, "_stale_reason": str(e)}
         raise HTTPException(status_code=500, detail=str(e))
 
-    rows = result.get("data", []) if isinstance(result, dict) else []
 
-    # Group by SAAT_ADI (already aligned to hour ranges by POS). If SAAT_ADI
-    # isn't present, derive a "HH:00 - HH+1:00" label from the row's timestamp.
-    import re
-    by_hour: Dict[str, List[Any]] = {}
-    for r in rows:
-        hour_label = r.get("SAAT_ADI") or r.get("SAAT") or ""
-        if not hour_label:
-            # Try derive from any timestamp field
-            ts = r.get("TARIH") or r.get("ISLEM_TARIHI") or r.get("FIS_TARIHI") or ""
-            m = re.search(r"(\d{1,2}):\d{2}", str(ts))
-            if m:
-                h = int(m.group(1))
-                hour_label = f"{h:02d}:00 - {(h + 1) % 24:02d}:00"
-        if not hour_label:
-            hour_label = "Bilinmeyen"
-        if hour_label not in by_hour:
-            by_hour[hour_label] = []
-        by_hour[hour_label].append(r)
-
-    return {"ok": True, "by_hour": by_hour, "row_count": len(rows)}
+@router.post("/hourly-detail-full-DEPRECATED")
+async def _deprecated_dummy(body: dict, current_user: dict = Depends(get_current_user)):
+    """Eski yapı - korumak için tutuldu, ama artık kullanılmıyor"""
+    return {"ok": False, "error": "deprecated"}
 
 
 @router.post("/hourly-detail")
@@ -1041,45 +1072,107 @@ async def get_stock_list_sync(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Fetch stock_list via sync.php request_create (on-demand with FIYAT_AD).
-    With in-memory cache (TTL 300s) + stale-while-revalidate pattern to mitigate POS 502."""
+    """Fetch stock_list via sync.php dataset_get with PAGINATION support.
+
+    POS client now writes pages into `dataset_cache_pages` table (≈200 records / 180KB
+    per page). We stream pages on demand for true lazy loading.
+
+    Body: { tenant_id, fiyat_ad?, page?, page_size?, force_refresh? }
+      - page omitted → fetch ALL pages (combined; legacy behaviour)
+      - page provided → fetch ONLY that page
+
+    Response: { ok, data, page, page_size, total_pages, total_count }
+    """
     tenant_id = body.get("tenant_id", "")
     fiyat_ad = body.get("fiyat_ad", "")
     force_refresh = bool(body.get("force_refresh", False))
+    page = body.get("page")
+    page_size = int(body.get("page_size") or 200)
 
     if not tenant_id:
         raise HTTPException(status_code=400, detail="tenant_id gerekli")
 
-    cache_key = f"stock_list::{tenant_id}::{fiyat_ad}"
+    cache_key = f"stock_list::{tenant_id}::{fiyat_ad}::p={page}::ps={page_size}"
     now = time.time()
-    TTL_FRESH = 300        # 5 min: serve directly
-    TTL_STALE = 1800       # 30 min: serve stale while refreshing in background
+    TTL_FRESH = 300
+    TTL_STALE = 1800
 
     cached = _GLOBAL_CACHE.get(cache_key)
     age = now - cached["ts"] if cached else None
 
-    # 1) Fresh cache hit → return immediately
     if cached and age is not None and age < TTL_FRESH and not force_refresh:
         return {**cached["payload"], "_cache": "fresh", "_age": int(age)}
 
-    async def _refresh_and_cache() -> dict:
-        result = await _on_demand_request(tenant_id, "stock_list", {"FIYAT_AD": fiyat_ad}, timeout_sec=60)
-        _GLOBAL_CACHE[cache_key] = {"ts": time.time(), "payload": result}
-        return result
+    async def _fetch_one_page(page_num: int) -> dict:
+        params = {"FIYAT_AD": fiyat_ad} if fiyat_ad else {}
+        return await sync_post({
+            "action": "dataset_get",
+            "dataset_key": "stock_list",
+            "params": params,
+            "page": int(page_num),
+            "page_size": page_size,
+        }, tenant_id)
 
-    # 2) Stale cache hit → kick off background refresh, return stale
+    async def _refresh():
+        if page is not None:
+            # Single page mode
+            resp = await _fetch_one_page(int(page))
+            data = resp.get("data") or []
+            payload = {
+                "ok": True,
+                "data": _fix_large_ints(data) if isinstance(data, list) else [],
+                "page": int(page),
+                "page_size": page_size,
+                "total_pages": int(resp.get("total_pages") or 0),
+                "total_count": int(resp.get("total_count") or 0),
+            }
+        else:
+            # Legacy combined mode — fetch first page, then accumulate remaining
+            first = await _fetch_one_page(1)
+            first_data = first.get("data") or []
+            total_pages = int(first.get("total_pages") or 1)
+            total_count = int(first.get("total_count") or len(first_data))
+            all_rows = list(first_data) if isinstance(first_data, list) else []
+
+            if total_pages > 1:
+                # Parallel fetch the rest in batches of 5
+                remaining = list(range(2, total_pages + 1))
+                batch_size = 5
+                for i in range(0, len(remaining), batch_size):
+                    batch_pages = remaining[i:i + batch_size]
+                    results = await asyncio.gather(
+                        *[_fetch_one_page(p) for p in batch_pages],
+                        return_exceptions=True,
+                    )
+                    for r in results:
+                        if isinstance(r, Exception):
+                            logger.warning(f"Stock page fetch failed: {r}")
+                            continue
+                        d = r.get("data") or []
+                        if isinstance(d, list):
+                            all_rows.extend(d)
+
+            payload = {
+                "ok": True,
+                "data": _fix_large_ints(all_rows),
+                "page_size": page_size,
+                "total_pages": total_pages,
+                "total_count": total_count,
+            }
+        _GLOBAL_CACHE[cache_key] = {"ts": time.time(), "payload": payload}
+        return payload
+
     if cached and age is not None and age < TTL_STALE and not force_refresh:
         async def _bg():
             try:
-                await _refresh_and_cache()
+                await _refresh()
             except Exception as e:
                 logger.warning(f"Stock list bg refresh failed: {e}")
         asyncio.create_task(_bg())
         return {**cached["payload"], "_cache": "stale", "_age": int(age)}
 
-    # 3) No cache or expired → live fetch (try, on failure return any cached)
     try:
-        fresh = await _refresh_and_cache()
+        fresh = await _refresh()
         return {**fresh, "_cache": "live", "_age": 0}
     except HTTPException as e:
         if cached:
@@ -1133,23 +1226,103 @@ async def get_cari_list_sync(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Fetch cari_bakiye_liste via sync.php dataset_get"""
+    """Fetch cari_bakiye_liste via sync.php dataset_get with PAGINATION (≈200 rec/page).
+
+    Body: { tenant_id, page?, page_size?, force_refresh? }
+      - page omitted → ALL pages combined
+      - page provided → SINGLE page
+    """
     tenant_id = body.get("tenant_id", "")
     if not tenant_id:
         raise HTTPException(status_code=400, detail="tenant_id gerekli")
-    
-    try:
-        resp = await sync_post({
+
+    page = body.get("page")
+    page_size = int(body.get("page_size") or 200)
+    force_refresh = bool(body.get("force_refresh", False))
+
+    cache_key = f"cari_list::{tenant_id}::p={page}::ps={page_size}"
+    now = time.time()
+    TTL_FRESH = 300
+    TTL_STALE = 1800
+    cached = _GLOBAL_CACHE.get(cache_key)
+    age = now - cached["ts"] if cached else None
+
+    if cached and age is not None and age < TTL_FRESH and not force_refresh:
+        return {**cached["payload"], "_cache": "fresh", "_age": int(age)}
+
+    async def _fetch_one_page(page_num: int) -> dict:
+        return await sync_post({
             "action": "dataset_get",
             "dataset_key": "cari_bakiye_liste",
             "params": {},
+            "page": int(page_num),
+            "page_size": page_size,
         }, tenant_id)
-        data = resp.get("data", [])
-        return {"ok": True, "data": _fix_large_ints(data) if isinstance(data, list) else []}
-    except HTTPException:
+
+    async def _refresh():
+        if page is not None:
+            resp = await _fetch_one_page(int(page))
+            data = resp.get("data") or []
+            payload = {
+                "ok": True,
+                "data": _fix_large_ints(data) if isinstance(data, list) else [],
+                "page": int(page),
+                "page_size": page_size,
+                "total_pages": int(resp.get("total_pages") or 0),
+                "total_count": int(resp.get("total_count") or 0),
+            }
+        else:
+            first = await _fetch_one_page(1)
+            first_data = first.get("data") or []
+            total_pages = int(first.get("total_pages") or 1)
+            total_count = int(first.get("total_count") or len(first_data))
+            all_rows = list(first_data) if isinstance(first_data, list) else []
+            if total_pages > 1:
+                remaining = list(range(2, total_pages + 1))
+                batch_size = 5
+                for i in range(0, len(remaining), batch_size):
+                    batch_pages = remaining[i:i + batch_size]
+                    results = await asyncio.gather(
+                        *[_fetch_one_page(p) for p in batch_pages],
+                        return_exceptions=True,
+                    )
+                    for r in results:
+                        if isinstance(r, Exception):
+                            logger.warning(f"Cari page fetch failed: {r}")
+                            continue
+                        d = r.get("data") or []
+                        if isinstance(d, list):
+                            all_rows.extend(d)
+            payload = {
+                "ok": True,
+                "data": _fix_large_ints(all_rows),
+                "page_size": page_size,
+                "total_pages": total_pages,
+                "total_count": total_count,
+            }
+        _GLOBAL_CACHE[cache_key] = {"ts": time.time(), "payload": payload}
+        return payload
+
+    if cached and age is not None and age < TTL_STALE and not force_refresh:
+        async def _bg():
+            try:
+                await _refresh()
+            except Exception as e:
+                logger.warning(f"Cari list bg refresh failed: {e}")
+        asyncio.create_task(_bg())
+        return {**cached["payload"], "_cache": "stale", "_age": int(age)}
+
+    try:
+        fresh = await _refresh()
+        return {**fresh, "_cache": "live", "_age": 0}
+    except HTTPException as e:
+        if cached:
+            return {**cached["payload"], "_cache": "fallback_stale", "_age": int(age) if age is not None else 0, "_stale_reason": str(e.detail)}
         raise
     except Exception as e:
         logger.error(f"Cari list error: {e}")
+        if cached:
+            return {**cached["payload"], "_cache": "fallback_stale", "_age": int(age) if age is not None else 0, "_stale_reason": str(e)}
         raise HTTPException(status_code=500, detail=str(e))
 
 
