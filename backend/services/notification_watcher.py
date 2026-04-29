@@ -841,20 +841,26 @@ async def _scan_high_sales_for_tenant(tenant: Dict[str, Any]) -> int:
 
 
 async def _high_sales_loop():
-    """Dedicated fast loop for high-sales detection (~15s cadence)."""
-    logger.info(f"⚡ High-sales fast watcher started ({_HIGH_SALES_INTERVAL}s loop)")
+    """Dedicated fast loop for high-sales detection (~15s cadence).
+
+    Tenants are scanned SEQUENTIALLY to avoid POS worker overload (second
+    tenant getting stuck in 'queued' state when two heavy queries run at once).
+    """
+    logger.info(f"⚡ High-sales fast watcher started ({_HIGH_SALES_INTERVAL}s loop, sequential tenants)")
     iteration = 0
     while True:
         iteration += 1
         try:
             tenants = await _get_tenants_for_high_sales()
             if tenants:
-                # Parallel scan all tenants (one POS call per tenant)
-                results = await asyncio.gather(
-                    *[_scan_high_sales_for_tenant(t) for t in tenants],
-                    return_exceptions=True,
-                )
-                total_pushed = sum(r for r in results if isinstance(r, int))
+                total_pushed = 0
+                for t in tenants:
+                    try:
+                        total_pushed += await _scan_high_sales_for_tenant(t)
+                    except Exception as inner_e:
+                        logger.warning(
+                            f"[high_sales_loop] tenant={t.get('tenant_id')} scan error: {inner_e}"
+                        )
                 if total_pushed:
                     logger.info(
                         f"[high_sales_loop] iter={iteration} tenants={len(tenants)} pushed={total_pushed}"
@@ -979,7 +985,7 @@ async def _scan_cancellations_for_tenant(tenant: Dict[str, Any]) -> int:
                 "sdate": f"{dt_str} 00:00:00",
                 "edate": f"{dt_str} 23:59:59",
                 "IPTAL_ID": None,
-            }, timeout_s=60)
+            }, timeout_s=120)  # was 60 — second tenants sit in POS queue longer
             all_rows.extend(day_rows)
     except Exception as e:
         logger.warning(f"[cancellations_loop] tenant={tenant_id} POS error: {e}")
@@ -1049,19 +1055,27 @@ async def _scan_cancellations_for_tenant(tenant: Dict[str, Any]) -> int:
 
 
 async def _cancellations_loop():
-    """Dedicated fast loop for cancellation detection (~15s cadence)."""
-    logger.info(f"🚫 Cancellations fast watcher started ({_HIGH_SALES_INTERVAL}s loop)")
+    """Dedicated fast loop for cancellation detection (~15s cadence).
+
+    Tenants are scanned SEQUENTIALLY (not parallel) because iptal_detay is a
+    heavy POS query and running two in parallel caused the second tenant's
+    request to stay stuck in 'queued' state and time out.
+    """
+    logger.info(f"🚫 Cancellations fast watcher started ({_HIGH_SALES_INTERVAL}s loop, sequential tenants)")
     iteration = 0
     while True:
         iteration += 1
         try:
             tenants = await _get_tenants_for_cancellations()
             if tenants:
-                results = await asyncio.gather(
-                    *[_scan_cancellations_for_tenant(t) for t in tenants],
-                    return_exceptions=True,
-                )
-                total_pushed = sum(r for r in results if isinstance(r, int))
+                total_pushed = 0
+                for t in tenants:
+                    try:
+                        total_pushed += await _scan_cancellations_for_tenant(t)
+                    except Exception as inner_e:
+                        logger.warning(
+                            f"[cancellations_loop] tenant={t.get('tenant_id')} scan error: {inner_e}"
+                        )
                 if total_pushed:
                     logger.info(
                         f"[cancellations_loop] iter={iteration} tenants={len(tenants)} pushed={total_pushed}"
