@@ -197,10 +197,13 @@ export default function StockScreen() {
   }, [activeTenantId, selectedPriceName]);
 
   const [refreshing, setRefreshing] = useState(false);
+  const [manualToast, setManualToast] = useState(false);
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await fetchStockList(true);
     setRefreshing(false);
+    setManualToast(true);
+    setTimeout(() => setManualToast(false), 2200);
   }, [fetchStockList]);
 
   // Groups and KDV values for filter
@@ -442,6 +445,14 @@ export default function StockScreen() {
               })()
           }
         </Text>
+        {manualToast && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: '#10B981' + '20', borderWidth: 1, borderColor: '#10B981' }}>
+            <Ionicons name="checkmark-circle" size={12} color={'#10B981'} />
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#10B981' }}>
+              Güncellendi · {new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+            </Text>
+          </View>
+        )}
       </View>
 
       {stockLoading ? (

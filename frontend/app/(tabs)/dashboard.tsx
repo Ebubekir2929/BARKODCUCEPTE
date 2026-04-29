@@ -301,10 +301,15 @@ export default function DashboardScreen() {
     return hours.reduce((max, hour) => hour.amount > max.amount ? hour : max, hours[0]);
   }, [effectiveHourlySales]);
 
+  // Manuel refresh toast — short feedback that confirms data was just refreshed
+  const [manualRefreshToast, setManualRefreshToast] = useState(false);
+
   const onRefresh = async () => {
     setRefreshing(true);
     await refreshData();
     setRefreshing(false);
+    setManualRefreshToast(true);
+    setTimeout(() => setManualRefreshToast(false), 2200);
   };
 
   // Calculate percentage changes for each payment type
@@ -536,12 +541,27 @@ export default function DashboardScreen() {
           <View style={styles.liveIndicatorLeft}>
             <View style={[styles.liveDot, { backgroundColor: dataError ? '#EF4444' : '#10B981' }]} />
             <Text style={[styles.liveText, { color: dataError ? '#EF4444' : '#10B981' }]}>
-              {dataLoading ? t('updating') : dataError ? t('connection_error') : t('live_data_30s')}
+              {dataLoading
+                ? t('updating')
+                : dataError
+                  ? t('connection_error')
+                  : refreshInterval === 0
+                    ? 'Manuel · Canlı'
+                    : refreshInterval < 60
+                      ? `Canlı Veri · ${refreshInterval} sn`
+                      : `Canlı Veri · ${refreshInterval / 60} dk`}
             </Text>
           </View>
           {lastSynced && (
             <Text style={[styles.syncText, { color: colors.textSecondary }]}>
-              {t('last_synced')}: {new Date(lastSynced).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+              {(() => {
+                const d = new Date(lastSynced);
+                const today = new Date();
+                const isToday = d.toDateString() === today.toDateString();
+                const dateStr = isToday ? 'Bugün' : d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' });
+                const timeStr = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                return `${dateStr} ${timeStr}`;
+              })()}
             </Text>
           )}
         </View>
@@ -578,6 +598,17 @@ export default function DashboardScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
+        {/* Manuel refresh confirmation toast */}
+        {manualRefreshToast && (
+          <View style={{ paddingHorizontal: 16, paddingTop: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: '#10B981' + '20', borderWidth: 1, borderColor: '#10B981' }}>
+              <Ionicons name="checkmark-circle" size={18} color={'#10B981'} />
+              <Text style={{ flex: 1, fontSize: 13, fontWeight: '700', color: '#10B981' }}>
+                Manuel güncelleme alındı · {new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </Text>
+            </View>
+          </View>
+        )}
         {/* Summary Cards */}
         <View style={styles.cardsContainer}>
           <View style={styles.cardRow}>

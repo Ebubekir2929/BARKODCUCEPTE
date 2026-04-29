@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, ActivityIn
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
 import { useAuthStore } from '../store/authStore';
+import { usePrefsStore } from '../store/prefsStore';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -357,14 +358,21 @@ export const HourlyLocationSection: React.FC<{
   filterDate?: string;
   filterEndDate?: string;
   branchTotalsByName?: Record<string, number>;
-}> = ({ data, tenantId, filterDate, filterEndDate, branchTotalsByName }) => {
+  refreshIntervalSec?: number; // user-configured auto-refresh cadence
+}> = ({ data, tenantId, filterDate, filterEndDate, branchTotalsByName, refreshIntervalSec: refreshIntervalProp }) => {
   const { colors } = useThemeStore();
+  // Read from prefs store as fallback so the section auto-refreshes even when
+  // dashboard hasn't passed the prop down explicitly.
+  const refreshIntervalFromPrefs = usePrefsStore((s) => s.refreshInterval);
+  const refreshIntervalSec = refreshIntervalProp ?? refreshIntervalFromPrefs;
   const [detailData, setDetailData] = useState<any[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any | null>(null);
   const [expandedLoc, setExpandedLoc] = useState<string | null>(null);
   // Derived data from /hourly-detail-full (preferred over `data` prop)
   const [derivedData, setDerivedData] = useState<any[] | null>(null);
+  // Trigger to force re-fetch (auto-refresh tick or manual)
+  const [refreshTick, setRefreshTick] = useState(0);
 
   // Fetch full hourly stock detail and aggregate by (LOKASYON, SAAT_ADI)
   useEffect(() => {
@@ -384,6 +392,8 @@ export const HourlyLocationSection: React.FC<{
             date: filterDate,
             edate: filterEndDate || filterDate,
             lokasyon_id: null,
+            // bypass cache on auto-refresh ticks for genuinely fresh data
+            force_refresh: refreshTick > 0,
           }),
         });
         clearTimeout(timer);
@@ -423,10 +433,22 @@ export const HourlyLocationSection: React.FC<{
       }
     })();
     return () => { cancelled = true; };
-  }, [tenantId, filterDate, filterEndDate]);
+  }, [tenantId, filterDate, filterEndDate, refreshTick]);
+
+  // Auto-refresh tick — uses the same interval as the user's Settings choice
+  useEffect(() => {
+    const sec = refreshIntervalSec || 0;
+    if (sec <= 0) return; // 0 = manual only
+    const id = setInterval(() => setRefreshTick((t) => t + 1), sec * 1000);
+    return () => clearInterval(id);
+  }, [refreshIntervalSec]);
 
   const effectiveData = derivedData ?? data;
+  // Hide entire section when there's no data at all (user request)
   if (!effectiveData || effectiveData.length === 0) return null;
+  // Also hide if all amounts are zero (no actual sales today)
+  const hasAnySales = effectiveData.some((r: any) => parseFloat(r?.TOPLAM || '0') > 0);
+  if (!hasAnySales) return null;
 
   // Group by LOKASYON
   const byLocation: Record<string, any[]> = {};
@@ -598,13 +620,25 @@ export const HourlyLocationSection: React.FC<{
             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
               <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingVertical: 8 }}>
                 {hourList.map((hour) => {
-                  const groupBarWidth = Math.max(8, Math.floor(40 / Math.max(1, locNames.length))); // shrink per loc
+                  const groupBarWidth = Math.max(8, Math.floor(40 / Math.max(1, locNames.length)));
+                  // Hour total across all locations (for the label above bars)
+                  const hourTotal = locNames.reduce((s, l) => s + (matrix[l][hour] || 0), 0);
+                  const fmtTL = (v: number) => v.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
                   return (
-                    <View key={hour} style={{ alignItems: 'center', minWidth: 60 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 1, height: 100 }}>
+                    <View key={hour} style={{ alignItems: 'center', minWidth: 64 }}>
+                      {/* Total amount label above the bars */}
+                      <Text
+                        style={{ fontSize: 9, fontWeight: '800', color: colors.text, marginBottom: 4 }}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.6}
+                      >
+                        ₺{fmtTL(hourTotal)}
+                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 1, height: 90 }}>
                         {locNames.map((loc, i) => {
                           const v = matrix[loc][hour] || 0;
-                          const h = Math.max(2, (v / globalMax) * 95);
+                          const h = Math.max(2, (v / globalMax) * 85);
                           return (
                             <View
                               key={loc}

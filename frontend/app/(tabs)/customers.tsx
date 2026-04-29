@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, Modal,
-  ScrollView, ActivityIndicator, Alert,
+  ScrollView, ActivityIndicator, Alert, RefreshControl,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -44,7 +44,20 @@ export default function CustomersScreen() {
   const [cariList, setCariList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadProgress, setLoadProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [manualToast, setManualToast] = useState(false);
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const cariAbortRef = React.useRef<AbortController | null>(null);
+
+  const onRefresh = React.useCallback(async () => {
+    setRefreshing(true);
+    setRefreshNonce((n) => n + 1); // triggers fetch effect
+    // give effect a tick to start
+    await new Promise((r) => setTimeout(r, 150));
+    setRefreshing(false);
+    setManualToast(true);
+    setTimeout(() => setManualToast(false), 2200);
+  }, []);
 
   // Ekstre
   const [selectedCari, setSelectedCari] = useState<any | null>(null);
@@ -332,6 +345,7 @@ export default function CustomersScreen() {
       ) : (
         <FlashList data={filteredCaris} renderItem={renderCariItem} keyExtractor={(item, idx) => String(item.KART || item.ID || idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
           drawDistance={500}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} tintColor={colors.primary} />}
           ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="people-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_customers')}</Text></View>}
           ListFooterComponent={loadProgress ? (
             <View style={{ paddingVertical: 16, alignItems: 'center' }}>
@@ -342,7 +356,16 @@ export default function CustomersScreen() {
                 </Text>
               </View>
             </View>
-          ) : null}
+          ) : (manualToast ? (
+            <View style={{ paddingVertical: 12, alignItems: 'center' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: '#10B981' + '20', borderWidth: 1, borderColor: '#10B981' }}>
+                <Ionicons name="checkmark-circle" size={14} color={'#10B981'} />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#10B981' }}>
+                  Manuel güncelleme alındı · {new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                </Text>
+              </View>
+            </View>
+          ) : null)}
         />
       )}
 
