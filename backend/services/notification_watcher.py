@@ -32,7 +32,7 @@ async def _pos_request_data(
     tenant_id: str,
     dataset_key: str,
     params: dict,
-    timeout_s: int = 45,
+    timeout_s: int = 90,
 ) -> list:
     """Async request_create + poll request_status until done.
 
@@ -41,7 +41,7 @@ async def _pos_request_data(
     Required for datasets not materialised in `dataset_cache` (e.g.
     `fis_gunluk_bildirim_feed`).
     """
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with httpx.AsyncClient(timeout=120) as client:
         # 1) Create request
         create_body = {
             "tenant_id": tenant_id,

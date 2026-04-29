@@ -544,6 +544,88 @@ export const HourlyLocationSection: React.FC<{
         );
       })}
 
+      {/* TÜM LOKASYONLAR KARŞILAŞTIRMA GRAFİĞİ — alt kısım */}
+      {Object.keys(byLocation).length > 1 && (() => {
+        // Build hour list (union across all locations)
+        const allHours = new Set<string>();
+        Object.values(byLocation).forEach((rows: any) => {
+          rows.forEach((r: any) => allHours.add(r.SAAT_ADI || ''));
+        });
+        const hourList = Array.from(allHours).filter(Boolean).sort();
+        // Build matrix: location → hour → amount
+        const locColors = ['#2563EB', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#EC4899', '#84CC16'];
+        const locNames = Object.keys(byLocation);
+        const matrix: Record<string, Record<string, number>> = {};
+        locNames.forEach((loc) => {
+          matrix[loc] = {};
+          (byLocation[loc] || []).forEach((r: any) => {
+            matrix[loc][r.SAAT_ADI] = parseFloat(r.TOPLAM || '0');
+          });
+        });
+        // Find global max for bar scaling
+        let globalMax = 1;
+        locNames.forEach((loc) => {
+          hourList.forEach((h) => {
+            globalMax = Math.max(globalMax, matrix[loc][h] || 0);
+          });
+        });
+
+        return (
+          <View style={{ marginTop: 12, paddingHorizontal: 14, paddingBottom: 14, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 14 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Text style={{ fontSize: 14, fontWeight: '800', color: colors.text }}>📊 Tüm Lokasyonlar Karşılaştırma</Text>
+              <Text style={{ fontSize: 10, color: colors.textSecondary }}>{locNames.length} lokasyon</Text>
+            </View>
+            {/* Legend */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+              {locNames.map((loc, i) => (
+                <View key={loc} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, backgroundColor: locColors[i % locColors.length] + '15' }}>
+                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: locColors[i % locColors.length] }} />
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: locColors[i % locColors.length] }} numberOfLines={1}>{loc}</Text>
+                </View>
+              ))}
+            </View>
+
+            {/* Grouped bar chart per hour */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingBottom: 4 }}>
+              <Ionicons name="swap-horizontal" size={11} color={colors.textSecondary} />
+              <Text style={{ fontSize: 10, color: colors.textSecondary, fontStyle: 'italic' }}>← Yana kaydırın →</Text>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingVertical: 8 }}>
+                {hourList.map((hour) => {
+                  const groupBarWidth = Math.max(8, Math.floor(40 / Math.max(1, locNames.length))); // shrink per loc
+                  return (
+                    <View key={hour} style={{ alignItems: 'center', minWidth: 60 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 1, height: 100 }}>
+                        {locNames.map((loc, i) => {
+                          const v = matrix[loc][hour] || 0;
+                          const h = Math.max(2, (v / globalMax) * 95);
+                          return (
+                            <View
+                              key={loc}
+                              style={{
+                                width: groupBarWidth,
+                                height: h,
+                                backgroundColor: locColors[i % locColors.length],
+                                borderTopLeftRadius: 3,
+                                borderTopRightRadius: 3,
+                                opacity: v > 0 ? 1 : 0.15,
+                              }}
+                            />
+                          );
+                        })}
+                      </View>
+                      <Text style={{ fontSize: 9, color: colors.textSecondary, marginTop: 4 }}>{hour.slice(0, 5)}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          </View>
+        );
+      })()}
+
       {/* Detail Modal */}
       <Modal visible={!!selectedItem} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>

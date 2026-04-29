@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useThemeStore } from '../src/store/themeStore';
+import { usePrefsStore } from '../src/store/prefsStore';
 import { useAuthStore } from '../src/store/authStore';
 import { useLanguageStore } from '../src/store/languageStore';
 import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
@@ -33,11 +34,13 @@ export default function RootLayout() {
   const { colors, isDark, loadTheme } = useThemeStore();
   const { isLoading, checkAuth, isAuthenticated, token } = useAuthStore();
   const { isReady: langReady, loadLanguage } = useLanguageStore();
+  const hydratePrefs = usePrefsStore((s) => s.hydrate);
 
   useEffect(() => {
     loadTheme();
     loadLanguage();
     checkAuth();
+    hydratePrefs();
   }, []);
 
   // Auto-register push token every time the user becomes authenticated so the

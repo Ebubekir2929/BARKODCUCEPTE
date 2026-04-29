@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAuthStore } from '../../src/store/authStore';
 import { useLanguageStore } from '../../src/store/languageStore';
+import { usePrefsStore } from '../../src/store/prefsStore';
 import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import notificationService from '../../src/services/notificationService';
@@ -28,6 +29,8 @@ export default function SettingsScreen() {
   const router = useRouter();
   const { colors, isDark, mode: themeMode, setMode: setThemeMode } = useThemeStore();
   const { user, logout, addTenant, updateTenantName, removeTenant } = useAuthStore();
+  const refreshInterval = usePrefsStore((s) => s.refreshInterval);
+  const setRefreshInterval = usePrefsStore((s) => s.setRefreshInterval);
   const { language, setLanguage, t, loadLanguage } = useLanguageStore();
   const { showSuccess, showError, showInfo, showWarning, alertProps } = useAlert();
   const insets = useSafeAreaInsets();
@@ -719,6 +722,44 @@ export default function SettingsScreen() {
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('data_management')}</Text>
           <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            {/* Veri Yenileme Sıklığı (Dashboard otomatik refresh cadence) */}
+            <View style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}>
+              <View style={styles.menuItemLeft}>
+                <Ionicons name="refresh-outline" size={22} color={colors.primary} />
+                <View style={{ flexShrink: 1 }}>
+                  <Text style={[styles.menuItemLabel, { color: colors.text }]}>Veri Yenileme Sıklığı</Text>
+                  <Text style={[styles.menuItemSub, { color: colors.textSecondary, fontSize: 10 }]}>
+                    Dashboard verisi otomatik yenilenir
+                  </Text>
+                </View>
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingHorizontal: 16, paddingBottom: 14, paddingTop: 4 }}>
+              {([
+                { v: 0, label: 'Manuel' },
+                { v: 15, label: '15 sn' },
+                { v: 30, label: '30 sn' },
+                { v: 60, label: '1 dk' },
+                { v: 300, label: '5 dk' },
+              ] as const).map((opt) => (
+                <TouchableOpacity
+                  key={opt.v}
+                  onPress={() => setRefreshInterval(opt.v as any)}
+                  style={{
+                    paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8,
+                    borderWidth: 1.5,
+                    borderColor: refreshInterval === opt.v ? colors.primary : colors.border,
+                    backgroundColor: refreshInterval === opt.v ? colors.primary + '15' : 'transparent',
+                  }}
+                >
+                  <Text style={{
+                    fontSize: 12, fontWeight: '700',
+                    color: refreshInterval === opt.v ? colors.primary : colors.textSecondary,
+                  }}>{opt.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
             <TouchableOpacity
               style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}
               onPress={handleClearCache}

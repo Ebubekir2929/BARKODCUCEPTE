@@ -17,6 +17,7 @@ import { useThemeStore } from '../../src/store/themeStore';
 import { useAuthStore } from '../../src/store/authStore';
 import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
+import { usePrefsStore } from '../../src/store/prefsStore';
 import { DataSourceSelector } from '../../src/components/DataSourceSelector';
 import { SummaryCard } from '../../src/components/SummaryCard';
 import { FilterModal } from '../../src/components/FilterModal';
@@ -47,6 +48,16 @@ export default function DashboardScreen() {
 
   // Use live data hook with filter support (must be after filters state)
   const { data: sourceData, isLoading: dataLoading, isRefreshing: dataRefreshing, error: dataError, lastSynced, refresh: refreshData, isLive, isFilterActive: isDataFiltered } = useLiveData(filters);
+
+  // User-configurable auto-refresh cadence (Settings → "Veri Yenileme Sıklığı")
+  const refreshInterval = usePrefsStore((s) => s.refreshInterval);
+  useEffect(() => {
+    if (!refreshInterval || refreshInterval <= 0) return; // 0 = manual only
+    const id = setInterval(() => {
+      refreshData();
+    }, refreshInterval * 1000);
+    return () => clearInterval(id);
+  }, [refreshInterval, refreshData]);
 
   // Cache totals per data source - reset when source changes, update only with fresh data
   const [sourceTotals, setSourceTotals] = useState<Record<string, number>>({});
