@@ -24,8 +24,14 @@ from routes.data import SYNC_URL as POS_API_URL  # shared upstream URL
 logger = logging.getLogger(__name__)
 EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 
-# Global task handle so we can cancel on shutdown
+# Global task handles so we can cancel on shutdown
 _watcher_task: asyncio.Task | None = None
+_high_sales_task: asyncio.Task | None = None
+
+# Tunables (in seconds)
+_MAIN_LOOP_INTERVAL = 30        # Main loop tick (cancellations + low-stock)
+_HIGH_SALES_INTERVAL = 15       # Fast loop tick for high-sales only
+_PARALLEL_TENANT_CONCURRENCY = 5  # max concurrent tenant scans
 
 
 async def _pos_request_data(
@@ -75,7 +81,7 @@ async def _pos_request_data(
         started = datetime.utcnow()
         last_status = "queued"
         while (datetime.utcnow() - started).total_seconds() < timeout_s:
-            await asyncio.sleep(0.7)
+            await asyncio.sleep(0.4)  # was 0.7 — reduced for faster detection
             try:
                 st = await client.post(POS_API_URL, json={
                     "tenant_id": tenant_id,
@@ -313,20 +319,25 @@ async def _update_last_check(user_id: int) -> None:
             await conn.commit()
 
 
-async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
+async def _check_tenant_for_user(user: Dict[str, Any], skip_high_sales: bool = False) -> None:
     """Run the event checks for a single (user, tenant) combo.
 
     Strategy (updated to use the working iptal_detay dataset):
-      1) Fiş/Satır İptali → POS /sync.php dataset_get "iptal_detay" for today & yesterday
-      2) Eksi Stok → rap_stok_envanter_web (unchanged)
+      1) Fiş/Satır İptali → POS /sync.php dataset_get "iptal_detay" for today (and yesterday only between 00:00–01:00 UTC to catch midnight edge cases)
+      2) Yüksek Meblağlı Satışlar → handled by the dedicated `_high_sales_loop` when skip_high_sales=True
+      3) Eksi Stok → rap_stok_envanter_web (unchanged)
     """
     tenant_id = user["tenant_id"]
     tenant_name = user.get("tenant_name") or "Veri"
     tokens = user["tokens"]
-    # For POS date filters, use UTC — iptal_detay scan both today and yesterday
-    # covers the edge of timezone boundaries anyway.
+    # For POS date filters, use UTC. We only scan "yesterday" during the first
+    # hour after midnight to catch events that landed on the wrong calendar
+    # date due to timezone boundary; rest of the day we only scan today to
+    # halve the POS load and reduce notification latency.
     today = datetime.utcnow()
     yesterday = today - timedelta(days=1)
+    include_yesterday = today.hour < 1  # first hour of the day only
+    scan_dates = (today, yesterday) if include_yesterday else (today,)
 
     logger.info(
         f"[scan] START user={user['user_id']} tenant={tenant_id} ({tenant_name}) "
@@ -339,8 +350,8 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
     if user["notify_cancellations"] or user.get("notify_line_cancellations"):
         try:
             all_rows: list = []
-            # Check today + yesterday to catch events near midnight
-            for d in (today, yesterday):
+            # Check today (+ yesterday only during midnight transition)
+            for d in scan_dates:
                 dt_str = d.strftime("%Y-%m-%d")
                 day_rows = await _pos_request_data(tenant_id, "iptal_detay", {
                     "sdate": f"{dt_str} 00:00:00",
@@ -450,14 +461,17 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
             logger.warning(f"[scan] iptal_detay watcher failed (user {user['user_id']}, tenant {tenant_id}): {e}")
 
     # --- 1.5) Yüksek Meblağlı Satışlar (fis_gunluk_bildirim_feed) ---
-    if user["notify_high_sales"]:
+    # When called from the fast loop, skip_high_sales=True and the dedicated
+    # _high_sales_loop handles this section every 15s.
+    if user["notify_high_sales"] and not skip_high_sales:
         try:
             threshold = float(user["high_sales_threshold"] or 5000.0)
             today_str = today.strftime("%Y-%m-%d")
             yesterday_str = yesterday.strftime("%Y-%m-%d")
 
             all_sales: list = []
-            for dt_str in (today_str, yesterday_str):
+            sales_dates = (today_str, yesterday_str) if include_yesterday else (today_str,)
+            for dt_str in sales_dates:
                 day_rows = await _pos_request_data(tenant_id, "fis_gunluk_bildirim_feed", {
                     "TARIH": dt_str,
                     "MinTutar": threshold,
@@ -618,40 +632,247 @@ async def _check_tenant_for_user(user: Dict[str, Any]) -> None:
 
 
 async def _watcher_loop():
-    """Main watcher loop — runs forever until cancelled."""
-    logger.info("🔔 Notification watcher started")
+    """Main watcher loop — runs forever until cancelled.
+
+    Handles cancellations + low-stock; high-sales is delegated to the dedicated
+    fast loop (`_high_sales_loop`) for ~15 sec latency.
+    """
+    logger.info(f"🔔 Notification watcher started ({_MAIN_LOOP_INTERVAL}s loop, parallel={_PARALLEL_TENANT_CONCURRENCY})")
     iteration = 0
+    sem = asyncio.Semaphore(_PARALLEL_TENANT_CONCURRENCY)
+
+    async def _bounded_check(u):
+        async with sem:
+            try:
+                await _check_tenant_for_user(u, skip_high_sales=True)
+            except Exception as inner_e:
+                logger.warning(f"[watcher] check failed for user {u.get('user_id')}: {inner_e}")
+
     while True:
         iteration += 1
         try:
             users = await _get_users_to_check()
             if users:
-                logger.info(f"[watcher] iter={iteration} Checking notifications for {len(users)} user(s)")
-                # Group by tenant to avoid redundant POS calls (simple approach: process sequentially)
-                for user in users:
-                    try:
-                        await _check_tenant_for_user(user)
-                    except Exception as inner_e:
-                        logger.warning(f"[watcher] check failed for user {user.get('user_id')}: {inner_e}")
-            else:
-                # _get_users_to_check already logs the breakdown every iteration;
-                # nothing extra to add here.
-                pass
+                logger.info(f"[watcher] iter={iteration} parallel-checking {len(users)} (user×tenant) entries")
+                await asyncio.gather(*[_bounded_check(u) for u in users])
         except Exception as e:
             logger.error(f"[watcher] loop error: {e}")
-        await asyncio.sleep(60)  # run every 1 minute; per-user interval is enforced via last_check_at
+        await asyncio.sleep(_MAIN_LOOP_INTERVAL)
+
+
+# ============================================================
+# FAST PATH FOR HIGH-SALES (15s loop)
+# ============================================================
+
+async def _get_tenants_for_high_sales() -> List[Dict[str, Any]]:
+    """Return list of {tenant_id, tenant_name, users:[{user_id, threshold, tokens}]}
+    for all tenants where at least one user has notify_high_sales enabled.
+
+    Bypasses the per-user `check_interval` gate — this loop runs at its own
+    fixed 15s cadence and dedup is enforced at the event level.
+    """
+    try:
+        from server import db as mongo_db  # type: ignore
+    except Exception:
+        mongo_db = None
+
+    pool = await get_patron_pool()
+    by_tenant: Dict[str, Dict[str, Any]] = {}
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                SELECT s.user_id, u.tenant_id, s.high_sales_threshold
+                FROM user_notification_settings s
+                JOIN users u ON u.user_id = s.user_id
+                WHERE u.active = 1 AND s.notify_high_sales = 1
+            """)
+            rows = await cur.fetchall()
+
+            for r in rows:
+                user_id = r[0]
+                primary_tid = r[1]
+                threshold = float(r[2] or 5000.0)
+
+                # Active tokens for this user
+                await cur.execute(
+                    "SELECT token FROM user_push_tokens WHERE user_id=%s AND active=1",
+                    (user_id,),
+                )
+                tokens = [t[0] for t in await cur.fetchall()]
+                if not tokens:
+                    continue
+
+                # Resolve all tenant_ids for this user (primary + extras)
+                user_tenants: List[Dict[str, str]] = []
+                if primary_tid:
+                    name = "Ana Veri"
+                    if mongo_db is not None:
+                        try:
+                            doc = await mongo_db.tenant_names.find_one({
+                                "user_id": user_id, "tenant_id": primary_tid,
+                            })
+                            if doc and doc.get("name"):
+                                name = doc["name"]
+                        except Exception:
+                            pass
+                    user_tenants.append({"tenant_id": primary_tid, "name": name})
+
+                if mongo_db is not None:
+                    try:
+                        extras = await mongo_db.user_tenants.find({"user_id": user_id}).to_list(20)
+                        for et in extras or []:
+                            tid = et.get("tenant_id")
+                            if not tid:
+                                continue
+                            if any(t["tenant_id"] == tid for t in user_tenants):
+                                continue
+                            user_tenants.append({
+                                "tenant_id": tid,
+                                "name": et.get("name") or tid,
+                            })
+                    except Exception:
+                        pass
+
+                for ut in user_tenants:
+                    tid = ut["tenant_id"]
+                    if tid not in by_tenant:
+                        by_tenant[tid] = {
+                            "tenant_id": tid,
+                            "tenant_name": ut["name"],
+                            "users": [],
+                        }
+                    by_tenant[tid]["users"].append({
+                        "user_id": user_id,
+                        "threshold": threshold,
+                        "tokens": tokens,
+                    })
+
+    return list(by_tenant.values())
+
+
+async def _scan_high_sales_for_tenant(tenant: Dict[str, Any]) -> int:
+    """Single POS scan for one tenant; dispatches to all matching users."""
+    tenant_id = tenant["tenant_id"]
+    tenant_name = tenant.get("tenant_name") or "Veri"
+    users = tenant["users"]
+    if not users:
+        return 0
+
+    # Use the lowest active threshold so POS returns everything we might need
+    min_threshold = min(float(u["threshold"]) for u in users)
+    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+
+    try:
+        rows = await _pos_request_data(tenant_id, "fis_gunluk_bildirim_feed", {
+            "TARIH": today_str,
+            "MinTutar": min_threshold,
+            "SonFisId": 0,
+            "Lokasyon": "",
+            "Personel": "",
+            "FisTuru": "",
+        }, timeout_s=45)
+    except Exception as e:
+        logger.warning(f"[high_sales_loop] tenant={tenant_id} POS error: {e}")
+        return 0
+
+    if not rows:
+        return 0
+
+    pushed = 0
+    for s in rows:
+        fis_id = s.get("FIS_ID")
+        if fis_id is None:
+            continue
+        bildirimlik = s.get("BILDIRIMLIK")
+        try:
+            tutar = float(s.get("TUTAR") or 0)
+        except (TypeError, ValueError):
+            tutar = 0.0
+        if bildirimlik is not None and str(bildirimlik) not in ("1", "True", "true"):
+            continue
+
+        belgeno = str(s.get("BELGENO") or "").strip()
+        lokasyon = str(s.get("LOKASYON") or "").strip()
+        personel = str(s.get("KESEN_PERSONEL") or "").strip()
+
+        # Per-user dedup so users with different thresholds get fair coverage
+        for u in users:
+            if tutar < float(u["threshold"]):
+                continue
+            key = f"{fis_id}:u{u['user_id']}"
+            if not await _mark_event_seen(tenant_id, "yuksek_satis", key):
+                continue  # already pushed for this user
+
+            title = f"💰 Yüksek Satış · {tenant_name}"
+            body_parts = []
+            if belgeno:
+                body_parts.append(f"#{belgeno}")
+            if personel and personel != "-":
+                body_parts.append(personel)
+            if lokasyon and lokasyon != "-":
+                body_parts.append(lokasyon)
+            prefix = " · ".join(body_parts) if body_parts else "Satış"
+            body_msg = f"{prefix} · ₺{tutar:,.2f}"
+            await _push_many(u["tokens"], title, body_msg, {
+                "type": "high_sale",
+                "fis_id": fis_id,
+                "belgeno": belgeno,
+                "amount": tutar,
+                "tenant": tenant_id,
+                "tenant_name": tenant_name,
+            })
+            pushed += 1
+            logger.info(
+                f"[high_sales_loop] ✅ PUSHED tenant={tenant_id} user={u['user_id']} "
+                f"fis_id={fis_id} tutar={tutar:.2f}"
+            )
+
+    return pushed
+
+
+async def _high_sales_loop():
+    """Dedicated fast loop for high-sales detection (~15s cadence)."""
+    logger.info(f"⚡ High-sales fast watcher started ({_HIGH_SALES_INTERVAL}s loop)")
+    iteration = 0
+    while True:
+        iteration += 1
+        try:
+            tenants = await _get_tenants_for_high_sales()
+            if tenants:
+                # Parallel scan all tenants (one POS call per tenant)
+                results = await asyncio.gather(
+                    *[_scan_high_sales_for_tenant(t) for t in tenants],
+                    return_exceptions=True,
+                )
+                total_pushed = sum(r for r in results if isinstance(r, int))
+                if total_pushed:
+                    logger.info(
+                        f"[high_sales_loop] iter={iteration} tenants={len(tenants)} pushed={total_pushed}"
+                    )
+        except Exception as e:
+            logger.error(f"[high_sales_loop] error: {e}")
+        await asyncio.sleep(_HIGH_SALES_INTERVAL)
 
 
 def start_watcher():
     """Called once at FastAPI startup."""
-    global _watcher_task
+    global _watcher_task, _high_sales_task
+    loop = asyncio.get_event_loop()
     if _watcher_task is None or _watcher_task.done():
-        loop = asyncio.get_event_loop()
         _watcher_task = loop.create_task(_watcher_loop())
+    if _high_sales_task is None or _high_sales_task.done():
+        _high_sales_task = loop.create_task(_high_sales_loop())
 
 
 def stop_watcher():
     """Called at FastAPI shutdown."""
-    global _watcher_task
+    global _watcher_task, _high_sales_task
     if _watcher_task and not _watcher_task.done():
         _watcher_task.cancel()
+    if _high_sales_task and not _high_sales_task.done():
+        _high_sales_task.cancel()
+
+
+# Backward-compat alias for routes/notifications.py /scan-now endpoint
+_pos_dataset_get = _pos_request_data
