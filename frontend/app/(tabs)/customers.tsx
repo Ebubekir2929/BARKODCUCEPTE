@@ -43,6 +43,8 @@ export default function CustomersScreen() {
   const [filterType, setFilterType] = useState<'all' | 'borclu' | 'alacakli'>('all');
   const [cariList, setCariList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadProgress, setLoadProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const cariAbortRef = React.useRef<AbortController | null>(null);
 
   // Ekstre
   const [selectedCari, setSelectedCari] = useState<any | null>(null);
@@ -61,23 +63,81 @@ export default function CustomersScreen() {
   const [toastVisible, setToastVisible] = useState(false);
   const showToast = (msg: string) => { setToastMsg(msg); setToastVisible(true); setTimeout(() => setToastVisible(false), 2000); };
 
-  // Fetch cari list
+  // Fetch cari list with INCREMENTAL pagination — page 1 instant, rest streamed
   useEffect(() => {
     if (!activeTenantId) return;
-    const fetch_ = async () => {
-      setLoading(true);
+
+    if (cariAbortRef.current) cariAbortRef.current.abort();
+    const ctrl = new AbortController();
+    cariAbortRef.current = ctrl;
+
+    setLoading(true);
+    setCariList([]);
+    setLoadProgress(null);
+
+    const PAGE_SIZE = 200;
+    const { token } = useAuthStore.getState();
+
+    const fetchPage = async (page: number) => {
       try {
-        const { token } = useAuthStore.getState();
         const resp = await fetch(`${API_URL}/api/data/cari-list`, {
-          method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ tenant_id: activeTenantId }),
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          signal: ctrl.signal,
+          body: JSON.stringify({ tenant_id: activeTenantId, page, page_size: PAGE_SIZE }),
         });
-        const data = await resp.json();
-        if (data.ok && data.data) setCariList(data.data);
-      } catch (err) { console.error(err); }
-      finally { setLoading(false); }
+        if (!resp.ok) return null;
+        const j = await resp.json();
+        return {
+          data: Array.isArray(j?.data) ? j.data : [],
+          total_pages: parseInt(j?.total_pages || 1),
+          total_count: parseInt(j?.total_count || 0),
+        };
+      } catch (e: any) {
+        if (e?.name === 'AbortError') throw e;
+        return null;
+      }
     };
-    fetch_();
+
+    (async () => {
+      try {
+        const first = await fetchPage(1);
+        if (ctrl.signal.aborted) return;
+        if (!first || first.data.length === 0) {
+          setLoading(false);
+          return;
+        }
+        setCariList(first.data);
+        setLoading(false);
+
+        const totalPages = first.total_pages || 1;
+        const totalCount = first.total_count || first.data.length;
+        if (totalPages <= 1) return;
+        setLoadProgress({ loaded: first.data.length, total: totalCount });
+
+        const remaining = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
+        const BATCH = 5;
+        for (let i = 0; i < remaining.length; i += BATCH) {
+          if (ctrl.signal.aborted) return;
+          const batch = remaining.slice(i, i + BATCH);
+          const results = await Promise.all(batch.map(fetchPage));
+          if (ctrl.signal.aborted) return;
+          const newRows: any[] = [];
+          results.forEach((r) => {
+            if (r && Array.isArray(r.data)) newRows.push(...r.data);
+          });
+          if (newRows.length > 0) {
+            setCariList((prev) => [...prev, ...newRows]);
+            setLoadProgress((prev) => prev ? { ...prev, loaded: prev.loaded + newRows.length } : null);
+          }
+        }
+        setLoadProgress(null);
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') console.error(e);
+      } finally {
+        if (!ctrl.signal.aborted) setLoading(false);
+      }
+    })();
   }, [activeTenantId]);
 
   const filteredCaris = useMemo(() => {
@@ -262,6 +322,16 @@ export default function CustomersScreen() {
         <FlashList data={filteredCaris} renderItem={renderCariItem} keyExtractor={(item, idx) => String(item.KART || item.ID || idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
           drawDistance={500}
           ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="people-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_customers')}</Text></View>}
+          ListFooterComponent={loadProgress ? (
+            <View style={{ paddingVertical: 16, alignItems: 'center' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: colors.primary + '15' }}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.primary }}>
+                  {loadProgress.loaded.toLocaleString('tr-TR')} / {loadProgress.total.toLocaleString('tr-TR')} cari yükleniyor...
+                </Text>
+              </View>
+            </View>
+          ) : null}
         />
       )}
 

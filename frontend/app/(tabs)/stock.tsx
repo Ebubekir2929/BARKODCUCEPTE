@@ -93,32 +93,113 @@ export default function StockScreen() {
     fetchPN();
   }, [activeTenantId]);
 
-  // Fetch stock list (extracted so pull-to-refresh can re-call with force)
+  // Loading progress for incremental fetching
+  const [loadProgress, setLoadProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const fetchAbortRef = React.useRef<AbortController | null>(null);
+
+  // Fetch stock list incrementally — page 1 instantly, rest streamed in background
   const fetchStockList = useCallback(async (force: boolean = false) => {
     if (!activeTenantId || !selectedPriceName) return;
+
+    // Cancel any in-flight stream
+    if (fetchAbortRef.current) {
+      fetchAbortRef.current.abort();
+    }
+    const ctrl = new AbortController();
+    fetchAbortRef.current = ctrl;
+
     setStockLoading(true);
+    setStockList([]);
+    setLoadProgress(null);
+
+    const PAGE_SIZE = 200;
+    const { token } = useAuthStore.getState();
+
+    const fetchPage = async (page: number): Promise<{ data: any[]; total_pages: number; total_count: number } | null> => {
+      try {
+        const resp = await fetch(`${API_URL}/api/data/stock-list`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          signal: ctrl.signal,
+          body: JSON.stringify({
+            tenant_id: activeTenantId,
+            fiyat_ad: selectedPriceName,
+            page,
+            page_size: PAGE_SIZE,
+            force_refresh: force,
+          }),
+        });
+        if (!resp.ok) return null;
+        const j = await resp.json();
+        return {
+          data: Array.isArray(j?.data) ? j.data : [],
+          total_pages: parseInt(j?.total_pages || 1),
+          total_count: parseInt(j?.total_count || 0),
+        };
+      } catch (e: any) {
+        if (e?.name === 'AbortError') throw e;
+        return null;
+      }
+    };
+
     try {
-      const { token } = useAuthStore.getState();
-      const resp = await fetch(`${API_URL}/api/data/stock-list`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ tenant_id: activeTenantId, fiyat_ad: selectedPriceName, force_refresh: force }),
-      });
-      const data = await resp.json();
-      if (data.ok && data.data) setStockList(data.data);
-    } catch (err) { console.error(err); }
-    finally { setStockLoading(false); }
+      // PAGE 1 — instant render
+      const first = await fetchPage(1);
+      if (ctrl.signal.aborted) return;
+      if (!first || first.data.length === 0) {
+        setStockLoading(false);
+        return;
+      }
+      setStockList(first.data);
+      setStockLoading(false); // user can scroll/search the first 200 immediately
+
+      const totalPages = first.total_pages || 1;
+      const totalCount = first.total_count || first.data.length;
+
+      if (totalPages <= 1) {
+        setLoadProgress(null);
+        return;
+      }
+
+      setLoadProgress({ loaded: first.data.length, total: totalCount });
+
+      // PAGES 2..N — stream in parallel batches of 5
+      const remaining = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
+      const BATCH = 5;
+      for (let i = 0; i < remaining.length; i += BATCH) {
+        if (ctrl.signal.aborted) return;
+        const batch = remaining.slice(i, i + BATCH);
+        const results = await Promise.all(batch.map(fetchPage));
+        if (ctrl.signal.aborted) return;
+        const newRows: any[] = [];
+        results.forEach((r) => {
+          if (r && Array.isArray(r.data)) newRows.push(...r.data);
+        });
+        if (newRows.length > 0) {
+          // Functional update so concurrent batches don't stomp each other
+          setStockList((prev) => [...prev, ...newRows]);
+          setLoadProgress((prev) => prev ? { ...prev, loaded: prev.loaded + newRows.length } : null);
+        }
+      }
+      setLoadProgress(null);
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') console.error(e);
+    } finally {
+      if (!ctrl.signal.aborted) {
+        setStockLoading(false);
+      }
+    }
   }, [activeTenantId, selectedPriceName]);
 
   useEffect(() => {
-    setStockList([]);
     fetchStockList(false);
-  }, [activeTenantId, selectedPriceName, fetchStockList]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTenantId, selectedPriceName]);
 
   const [refreshing, setRefreshing] = useState(false);
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await fetchStockList(true); // force_refresh: bypass cache
+    await fetchStockList(true);
     setRefreshing(false);
   }, [fetchStockList]);
 
@@ -362,6 +443,16 @@ export default function StockScreen() {
           drawDistance={500}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} tintColor={colors.primary} />}
           ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="cube-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_stock_found')}</Text></View>}
+          ListFooterComponent={loadProgress ? (
+            <View style={{ paddingVertical: 16, alignItems: 'center' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: colors.primary + '15' }}>
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.primary }}>
+                  {loadProgress.loaded.toLocaleString('tr-TR')} / {loadProgress.total.toLocaleString('tr-TR')} ürün yükleniyor...
+                </Text>
+              </View>
+            </View>
+          ) : null}
         />
       )}
 
