@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, Modal,
-  ScrollView, ActivityIndicator, FlatList, Alert, RefreshControl,
+  ScrollView, ActivityIndicator, Alert, RefreshControl,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
@@ -357,7 +358,9 @@ export default function StockScreen() {
           <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_stock_list')}</Text>
         </View>
       ) : (
-        <FlatList data={filteredStocks} renderItem={renderStockItem} keyExtractor={(_, idx) => String(idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false} initialNumToRender={15}
+        <FlashList data={filteredStocks} renderItem={renderStockItem} keyExtractor={(_, idx) => String(idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
+          estimatedItemSize={92}
+          drawDistance={500}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} tintColor={colors.primary} />}
           ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="cube-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_stock_found')}</Text></View>}
         />

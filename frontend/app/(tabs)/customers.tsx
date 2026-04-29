@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, Modal,
-  ScrollView, FlatList, ActivityIndicator, Alert,
+  ScrollView, ActivityIndicator, Alert,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
@@ -258,7 +259,9 @@ export default function CustomersScreen() {
       {loading ? (
         <View style={styles.loadingContainer}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_customers')}</Text></View>
       ) : (
-        <FlatList data={filteredCaris} renderItem={renderCariItem} keyExtractor={(item, idx) => String(item.KART || item.ID || idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
+        <FlashList data={filteredCaris} renderItem={renderCariItem} keyExtractor={(item, idx) => String(item.KART || item.ID || idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
+          estimatedItemSize={88}
+          drawDistance={500}
           ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="people-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_customers')}</Text></View>}
         />
       )}

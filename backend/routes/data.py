@@ -687,7 +687,18 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
             "request_uid": request_uid,
             "include_data": True,
         }, tenant_id)
-        
+
+        # Detect chunked upload still in progress (sync.php streaming results in N parts)
+        # Continue polling instead of bailing out — this caused notifications/data drops
+        if not status_resp.get("ok", True):
+            err_code = str(status_resp.get("error", "")).lower()
+            if "upload_incomplete" in err_code or "result_upload" in err_code:
+                received = status_resp.get("received_parts", 0)
+                total = status_resp.get("total_parts", 0)
+                logger.info(f"[on_demand] {dataset_key} chunked upload {received}/{total}; retrying...")
+                await asyncio.sleep(1.5)
+                continue
+
         status = status_resp.get("status", "unknown")
         
         if status == "done":

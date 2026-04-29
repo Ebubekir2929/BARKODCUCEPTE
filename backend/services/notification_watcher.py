@@ -89,6 +89,15 @@ async def _pos_request_data(
                 return []
 
             if not sj.get("ok", True):
+                # Detect "result_upload_incomplete" — sync.php is still streaming chunks.
+                # Retry polling instead of bailing out (this caused notifications to drop).
+                err_code = str(sj.get("error", "")).lower()
+                if "upload_incomplete" in err_code or "result_upload" in err_code:
+                    received = sj.get("received_parts", 0)
+                    total = sj.get("total_parts", 0)
+                    logger.info(f"[pos] {dataset_key} chunked upload in progress {received}/{total} parts; retrying...")
+                    await asyncio.sleep(1.5)
+                    continue
                 logger.warning(f"[pos] request_status {dataset_key} not ok: {sj}")
                 return []
 
