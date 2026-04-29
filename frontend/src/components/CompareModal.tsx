@@ -842,7 +842,8 @@ export const CompareModal: React.FC<{
                   }
                 });
               });
-              const allProductsRows = Object.values(productMap).sort((a, b) => b.totalAmount - a.totalAmount);
+              // Limit to top 15 products to avoid clutter (user request)
+              const allProductsRows = Object.values(productMap).sort((a, b) => b.totalAmount - a.totalAmount).slice(0, 15);
               if (allProductsRows.length === 0) return null;
               return (
                 <View style={[styles.sectionBox, { backgroundColor: colors.card, borderColor: colors.border, padding: 0 }]}>

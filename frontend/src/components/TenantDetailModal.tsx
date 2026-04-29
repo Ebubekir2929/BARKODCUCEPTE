@@ -292,10 +292,138 @@ export const TenantDetailModal: React.FC<{
                 {phLoading && <ActivityIndicator size="small" color={color} />}
               </View>
               <Text style={{ color: colors.textSecondary, fontSize: 11, paddingHorizontal: 14, paddingBottom: 6 }}>
-                En çoktan en aza sıralı · her ürünün saatlik dağılımı
+                Tüm şubeler tek matriste · top 15 ürün · saatlik dağılım
               </Text>
 
-              {Object.entries(
+              {(() => {
+                // SINGLE UNIFIED MATRIX (user request: "şubeleri tek matriste göster")
+                // Rows = (branch, product) pairs sorted by amount, Top 15 globally.
+                type Row = { branch: string; bColor: string; product: string; qty: number; amount: number; iskonto: number };
+                const rows: Row[] = [];
+                Object.entries(productsByBranchFromProc).forEach(([branch, products]) => {
+                  const bColor = hashBranch(branch);
+                  products.forEach((p) => {
+                    rows.push({ branch, bColor, product: p.name, qty: p.qty, amount: p.amount, iskonto: (p as any).iskonto || 0 });
+                  });
+                });
+                rows.sort((a, b) => b.amount - a.amount);
+                const topRows = rows.slice(0, 15);
+
+                if (topRows.length === 0) {
+                  return (
+                    <View style={{ paddingVertical: 30, alignItems: 'center' }}>
+                      {phLoading ? (
+                        <ActivityIndicator size="small" color={color} />
+                      ) : (
+                        <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Veri yok</Text>
+                      )}
+                    </View>
+                  );
+                }
+
+                return (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View>
+                      {/* Hour header row */}
+                      <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.background }}>
+                        <View style={{ width: 36, paddingVertical: 6, alignItems: 'center' }}>
+                          <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '700' }}>#</Text>
+                        </View>
+                        <View style={{ width: 90, paddingVertical: 6, paddingHorizontal: 6 }}>
+                          <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '700' }}>Şube</Text>
+                        </View>
+                        <View style={{ width: 130, paddingVertical: 6, paddingHorizontal: 6 }}>
+                          <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '700' }}>Ürün</Text>
+                        </View>
+                        {allHours.map((h) => (
+                          <View key={h} style={{ width: 64, paddingVertical: 6, alignItems: 'center' }}>
+                            <Text style={{ color: colors.textSecondary, fontSize: 9, fontWeight: '700' }}>{String(h).slice(0, 5)}</Text>
+                          </View>
+                        ))}
+                        <View style={{ width: 90, paddingVertical: 6, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                          <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '700' }}>Toplam</Text>
+                        </View>
+                      </View>
+
+                      {/* Top-15 unified rows */}
+                      {topRows.map((row, idx) => {
+                        const bPH = productHourMap[row.branch]?.[row.product] || {};
+                        return (
+                          <View key={row.branch + '|' + row.product + idx} style={{ flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                            <View style={{ width: 36, paddingVertical: 8, alignItems: 'center' }}>
+                              <View style={{
+                                minWidth: 22, height: 20, borderRadius: 10, paddingHorizontal: 5,
+                                backgroundColor: idx < 3 ? row.bColor + '22' : colors.background,
+                                borderWidth: 1, borderColor: idx < 3 ? row.bColor : colors.border,
+                                alignItems: 'center', justifyContent: 'center',
+                              }}>
+                                <Text style={{ color: idx < 3 ? row.bColor : colors.textSecondary, fontSize: 9, fontWeight: '800' }}>
+                                  {idx + 1}
+                                </Text>
+                              </View>
+                            </View>
+                            <View style={{ width: 90, paddingVertical: 6, paddingHorizontal: 6 }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: row.bColor }} />
+                                <Text style={{ color: row.bColor, fontSize: 10, fontWeight: '800' }} numberOfLines={1}>
+                                  {row.branch}
+                                </Text>
+                              </View>
+                            </View>
+                            <View style={{ width: 130, paddingVertical: 6, paddingHorizontal: 6 }}>
+                              <Text style={{ color: colors.text, fontSize: 11, fontWeight: '700' }} numberOfLines={2}>
+                                {row.product}
+                              </Text>
+                              <Text style={{ color: colors.textSecondary, fontSize: 9 }}>
+                                {row.qty.toFixed(0)} adet
+                              </Text>
+                            </View>
+                            {allHours.map((h) => {
+                              const c = bPH[h];
+                              const qty = c?.qty || 0;
+                              const amount = c?.amount || 0;
+                              const isk = c?.iskonto || 0;
+                              return (
+                                <View key={h} style={{ width: 64, alignItems: 'center', justifyContent: 'center', paddingVertical: 6, paddingHorizontal: 2 }}>
+                                  {qty > 0 ? (
+                                    <>
+                                      <Text style={{ color: row.bColor, fontSize: 10, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                                        ₺{fmtTL(amount)}
+                                      </Text>
+                                      <Text style={{ color: colors.text, fontSize: 9, fontWeight: '700', marginTop: 1 }}>
+                                        {qty.toFixed(0)} ad
+                                      </Text>
+                                      {isk > 0 && (
+                                        <Text style={{ color: '#F59E0B', fontSize: 8, fontWeight: '700' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+                                          -₺{fmtTL(isk)}
+                                        </Text>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <Text style={{ color: colors.border, fontSize: 11 }}>·</Text>
+                                  )}
+                                </View>
+                              );
+                            })}
+                            <View style={{ width: 90, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                              <Text style={{ color: row.bColor, fontSize: 11, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                                ₺{fmtTL(row.amount)}
+                              </Text>
+                              {row.iskonto > 0 && (
+                                <Text style={{ color: '#F59E0B', fontSize: 8, fontWeight: '700' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+                                  -₺{fmtTL(row.iskonto)}
+                                </Text>
+                              )}
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                );
+              })()}
+
+              {false && Object.entries(
                 Object.keys(productsByBranchFromProc).length > 0
                   ? productsByBranchFromProc
                   : (productsByBranch as Record<string, { name: string; qty: number; amount: number; iskonto?: number }[]>)
