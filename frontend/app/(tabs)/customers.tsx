@@ -313,7 +313,18 @@ export default function CustomersScreen() {
       </View>
 
       <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}>
-        <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>{loading ? t('loading') : `${filteredCaris.length} ${t('customer_count')}`}</Text>
+        <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>
+          {loading
+            ? t('loading')
+            : (() => {
+                const total = loadProgress?.total || cariList.length;
+                if (searchQuery && filteredCaris.length !== total) {
+                  return `${filteredCaris.length.toLocaleString('tr-TR')} / ${total.toLocaleString('tr-TR')} ${t('customer_count')}`;
+                }
+                return `${total.toLocaleString('tr-TR')} ${t('customer_count')}`;
+              })()
+          }
+        </Text>
       </View>
 
       {loading ? (

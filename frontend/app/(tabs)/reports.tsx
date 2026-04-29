@@ -960,6 +960,54 @@ export default function ReportsScreen() {
     finally { setPickerLoading(false); }
   }, [activeTenantId, lookupCache]);
 
+  // 🚀 Prefetch all picker sources in parallel when a report is selected.
+  // This warms the lookup cache so that opening any dropdown is instant.
+  // Uses 30-min backend cache so repeats are cheap.
+  useEffect(() => {
+    if (!selectedReport || !activeTenantId) return;
+    const sourcesToWarm = (selectedReport.filters || [])
+      .filter((f: any) => f.source && !lookupCache[f.source])
+      .map((f: any) => f.source as string);
+    if (sourcesToWarm.length === 0) return;
+
+    const { token } = useAuthStore.getState();
+    if (!token) return;
+
+    let cancelled = false;
+    (async () => {
+      const results = await Promise.all(
+        sourcesToWarm.map(async (src) => {
+          try {
+            const resp = await fetch(`${API_URL}/api/data/report-filter-options`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              body: JSON.stringify({ tenant_id: activeTenantId, source: src }),
+            });
+            if (!resp.ok) return [src, null] as const;
+            const j = await resp.json();
+            if (!j?.ok || !Array.isArray(j?.data)) return [src, null] as const;
+            const opts = j.data.map((r: any) => ({
+              value: String(r.ID ?? r.AD ?? r.KOD ?? ''),
+              label: String(r.AD || r.KOD || r.ID || ''),
+            }));
+            return [src, opts] as const;
+          } catch {
+            return [src, null] as const;
+          }
+        })
+      );
+      if (cancelled) return;
+      const updates: Record<string, any[]> = {};
+      results.forEach(([src, opts]) => {
+        if (opts) updates[src] = opts;
+      });
+      if (Object.keys(updates).length > 0) {
+        setLookupCache((prev) => ({ ...prev, ...updates }));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedReport?.key, activeTenantId]);
+
   // Toggle selection in multiselect
   const togglePickerValue = (val: string) => {
     if (!pickerFilter) return;

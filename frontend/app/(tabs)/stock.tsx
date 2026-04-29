@@ -430,7 +430,18 @@ export default function StockScreen() {
       )}
 
       <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}>
-        <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>{stockLoading ? t('loading_pos') : `${filteredStocks.length} ${t('product_singular')}`}</Text>
+        <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>
+          {stockLoading
+            ? t('loading_pos')
+            : (() => {
+                const total = loadProgress?.total || stockList.length;
+                if (searchQuery && filteredStocks.length !== total) {
+                  return `${filteredStocks.length.toLocaleString('tr-TR')} / ${total.toLocaleString('tr-TR')} ${t('product_singular')}`;
+                }
+                return `${total.toLocaleString('tr-TR')} ${t('product_singular')}`;
+              })()
+          }
+        </Text>
       </View>
 
       {stockLoading ? (
