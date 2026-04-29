@@ -681,7 +681,8 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
         raise HTTPException(status_code=502, detail="İstek oluşturulamadı")
     
     # Step 2: Poll for result
-    for _ in range(int(timeout_sec / 0.7)):
+    poll_interval = 0.4  # was 0.7 — reduced for snappier reports
+    for _ in range(int(timeout_sec / poll_interval)):
         status_resp = await sync_post({
             "action": "request_status",
             "request_uid": request_uid,
@@ -696,7 +697,7 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
                 received = status_resp.get("received_parts", 0)
                 total = status_resp.get("total_parts", 0)
                 logger.info(f"[on_demand] {dataset_key} chunked upload {received}/{total}; retrying...")
-                await asyncio.sleep(1.5)
+                await asyncio.sleep(0.8)  # was 1.5 — faster chunk retry
                 continue
 
         status = status_resp.get("status", "unknown")
@@ -1488,7 +1489,7 @@ async def run_report(
                 all_rows = list(first_data)
                 page = 2
                 max_pages = 50
-                batch_size = 5
+                batch_size = 8  # was 5 — more parallelism for snappier reports
                 done = False
                 while not done and page <= max_pages:
                     tasks = [

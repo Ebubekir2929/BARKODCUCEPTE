@@ -27,6 +27,7 @@ EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 # Global task handles so we can cancel on shutdown
 _watcher_task: asyncio.Task | None = None
 _high_sales_task: asyncio.Task | None = None
+_cancellations_task: asyncio.Task | None = None
 
 # Tunables (in seconds)
 _MAIN_LOOP_INTERVAL = 30        # Main loop tick (cancellations + low-stock)
@@ -319,13 +320,17 @@ async def _update_last_check(user_id: int) -> None:
             await conn.commit()
 
 
-async def _check_tenant_for_user(user: Dict[str, Any], skip_high_sales: bool = False) -> None:
+async def _check_tenant_for_user(
+    user: Dict[str, Any],
+    skip_high_sales: bool = False,
+    skip_cancellations: bool = False,
+) -> None:
     """Run the event checks for a single (user, tenant) combo.
 
-    Strategy (updated to use the working iptal_detay dataset):
-      1) Fiş/Satır İptali → POS /sync.php dataset_get "iptal_detay" for today (and yesterday only between 00:00–01:00 UTC to catch midnight edge cases)
-      2) Yüksek Meblağlı Satışlar → handled by the dedicated `_high_sales_loop` when skip_high_sales=True
-      3) Eksi Stok → rap_stok_envanter_web (unchanged)
+    Strategy:
+      1) Fiş/Satır İptali → handled by `_cancellations_loop` (15s) when skip_cancellations=True
+      2) Yüksek Meblağlı Satışlar → handled by `_high_sales_loop` (15s) when skip_high_sales=True
+      3) Eksi Stok → rap_stok_envanter_web (always run from main loop)
     """
     tenant_id = user["tenant_id"]
     tenant_name = user.get("tenant_name") or "Veri"
@@ -347,7 +352,9 @@ async def _check_tenant_for_user(user: Dict[str, Any], skip_high_sales: bool = F
     )
 
     # --- 1) Fiş & Satır İptalleri via iptal_detay dataset ---
-    if user["notify_cancellations"] or user.get("notify_line_cancellations"):
+    # When called from the fast loop, skip_cancellations=True and the dedicated
+    # _cancellations_loop handles this section every 15s.
+    if not skip_cancellations and (user["notify_cancellations"] or user.get("notify_line_cancellations")):
         try:
             all_rows: list = []
             # Check today (+ yesterday only during midnight transition)
@@ -634,8 +641,8 @@ async def _check_tenant_for_user(user: Dict[str, Any], skip_high_sales: bool = F
 async def _watcher_loop():
     """Main watcher loop — runs forever until cancelled.
 
-    Handles cancellations + low-stock; high-sales is delegated to the dedicated
-    fast loop (`_high_sales_loop`) for ~15 sec latency.
+    Handles ONLY low-stock now; cancellations and high-sales are delegated to
+    dedicated fast loops (`_cancellations_loop`, `_high_sales_loop`).
     """
     logger.info(f"🔔 Notification watcher started ({_MAIN_LOOP_INTERVAL}s loop, parallel={_PARALLEL_TENANT_CONCURRENCY})")
     iteration = 0
@@ -644,7 +651,9 @@ async def _watcher_loop():
     async def _bounded_check(u):
         async with sem:
             try:
-                await _check_tenant_for_user(u, skip_high_sales=True)
+                await _check_tenant_for_user(
+                    u, skip_high_sales=True, skip_cancellations=True
+                )
             except Exception as inner_e:
                 logger.warning(f"[watcher] check failed for user {u.get('user_id')}: {inner_e}")
 
@@ -771,7 +780,7 @@ async def _scan_high_sales_for_tenant(tenant: Dict[str, Any]) -> int:
             "Lokasyon": "",
             "Personel": "",
             "FisTuru": "",
-        }, timeout_s=45)
+        }, timeout_s=60)
     except Exception as e:
         logger.warning(f"[high_sales_loop] tenant={tenant_id} POS error: {e}")
         return 0
@@ -855,23 +864,234 @@ async def _high_sales_loop():
         await asyncio.sleep(_HIGH_SALES_INTERVAL)
 
 
+# ============================================================
+# FAST PATH FOR CANCELLATIONS (15s loop)
+# ============================================================
+
+async def _get_tenants_for_cancellations() -> List[Dict[str, Any]]:
+    """Return list of {tenant_id, tenant_name, users:[{user_id, notify_cancel,
+    notify_line, tokens}]} for all tenants where at least one user has
+    notify_cancellations or notify_line_cancellations enabled.
+
+    Bypasses the per-user `check_interval` gate.
+    """
+    try:
+        from server import db as mongo_db  # type: ignore
+    except Exception:
+        mongo_db = None
+
+    pool = await get_patron_pool()
+    by_tenant: Dict[str, Dict[str, Any]] = {}
+
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                SELECT s.user_id, u.tenant_id, s.notify_cancellations, s.notify_line_cancellations
+                FROM user_notification_settings s
+                JOIN users u ON u.user_id = s.user_id
+                WHERE u.active = 1
+                  AND (s.notify_cancellations = 1 OR s.notify_line_cancellations = 1)
+            """)
+            rows = await cur.fetchall()
+
+            for r in rows:
+                user_id = r[0]
+                primary_tid = r[1]
+                notify_cancel = bool(r[2])
+                notify_line = bool(r[3]) if r[3] is not None else True
+
+                # Active tokens for this user
+                await cur.execute(
+                    "SELECT token FROM user_push_tokens WHERE user_id=%s AND active=1",
+                    (user_id,),
+                )
+                tokens = [t[0] for t in await cur.fetchall()]
+                if not tokens:
+                    continue
+
+                # Resolve all tenants (primary + extras)
+                user_tenants: List[Dict[str, str]] = []
+                if primary_tid:
+                    name = "Ana Veri"
+                    if mongo_db is not None:
+                        try:
+                            doc = await mongo_db.tenant_names.find_one({
+                                "user_id": user_id, "tenant_id": primary_tid,
+                            })
+                            if doc and doc.get("name"):
+                                name = doc["name"]
+                        except Exception:
+                            pass
+                    user_tenants.append({"tenant_id": primary_tid, "name": name})
+
+                if mongo_db is not None:
+                    try:
+                        extras = await mongo_db.user_tenants.find({"user_id": user_id}).to_list(20)
+                        for et in extras or []:
+                            tid = et.get("tenant_id")
+                            if not tid:
+                                continue
+                            if any(t["tenant_id"] == tid for t in user_tenants):
+                                continue
+                            user_tenants.append({
+                                "tenant_id": tid,
+                                "name": et.get("name") or tid,
+                            })
+                    except Exception:
+                        pass
+
+                for ut in user_tenants:
+                    tid = ut["tenant_id"]
+                    if tid not in by_tenant:
+                        by_tenant[tid] = {
+                            "tenant_id": tid,
+                            "tenant_name": ut["name"],
+                            "users": [],
+                        }
+                    by_tenant[tid]["users"].append({
+                        "user_id": user_id,
+                        "notify_cancel": notify_cancel,
+                        "notify_line": notify_line,
+                        "tokens": tokens,
+                    })
+
+    return list(by_tenant.values())
+
+
+async def _scan_cancellations_for_tenant(tenant: Dict[str, Any]) -> int:
+    """Single POS scan per tenant for cancellations; dispatches to all users."""
+    tenant_id = tenant["tenant_id"]
+    tenant_name = tenant.get("tenant_name") or "Veri"
+    users = tenant["users"]
+    if not users:
+        return 0
+
+    today = datetime.utcnow()
+    yesterday = today - timedelta(days=1)
+    include_yesterday = today.hour < 1
+    scan_dates = (today, yesterday) if include_yesterday else (today,)
+
+    all_rows: list = []
+    try:
+        for d in scan_dates:
+            dt_str = d.strftime("%Y-%m-%d")
+            day_rows = await _pos_request_data(tenant_id, "iptal_detay", {
+                "sdate": f"{dt_str} 00:00:00",
+                "edate": f"{dt_str} 23:59:59",
+                "IPTAL_ID": None,
+            }, timeout_s=60)
+            all_rows.extend(day_rows)
+    except Exception as e:
+        logger.warning(f"[cancellations_loop] tenant={tenant_id} POS error: {e}")
+        return 0
+
+    if not all_rows:
+        return 0
+
+    pushed = 0
+    for row in all_rows:
+        iptal_id = row.get("IPTAL_ID")
+        if iptal_id is None:
+            continue
+        iptal_tipi = str(row.get("IPTAL_TIPI") or "").strip()
+        personel = str(row.get("PERSONEL_AD") or "").strip()
+        lokasyon = str(row.get("LOKASYON") or "").strip()
+        fis_no = str(row.get("FIS_NO") or row.get("BELGE_NO") or row.get("BELGENO") or "").strip()
+        try:
+            tutar = float(row.get("TUTAR") or 0)
+        except (TypeError, ValueError):
+            tutar = 0.0
+        detay_satir = row.get("DETAY_SATIR_SAYISI") or 0
+
+        is_line_cancel = "satır" in iptal_tipi.lower() or "satir" in iptal_tipi.lower()
+        evt_type = "satir_iptal" if is_line_cancel else "iptal"
+
+        # Per-tenant dedup (matches the old global dedup so existing seen records still apply)
+        key = str(iptal_id)
+        if not await _mark_event_seen(tenant_id, evt_type, key):
+            continue
+
+        # Push to ALL users on this tenant who have the relevant flag set
+        for u in users:
+            if is_line_cancel and not u["notify_line"]:
+                continue
+            if not is_line_cancel and not u["notify_cancel"]:
+                continue
+            if is_line_cancel:
+                title = f"❌ Satır İptali · {tenant_name}"
+                body = f"{personel or 'Personel'} · {lokasyon or ''} · {detay_satir} satır · ₺{tutar:,.2f}"
+                await _push_many(u["tokens"], title, body.strip(), {
+                    "type": "line_cancellation", "iptal_id": iptal_id,
+                    "tenant": tenant_id, "tenant_name": tenant_name,
+                })
+            else:
+                title = f"🚫 Fiş İptali · {tenant_name}"
+                parts = []
+                if personel:
+                    parts.append(personel)
+                if lokasyon:
+                    parts.append(lokasyon)
+                if fis_no:
+                    parts.append(f"#{fis_no}")
+                prefix = " · ".join(parts) if parts else (iptal_tipi or "İptal")
+                body = f"{prefix} · ₺{tutar:,.2f}"
+                await _push_many(u["tokens"], title, body, {
+                    "type": "cancellation", "iptal_id": iptal_id,
+                    "tenant": tenant_id, "tenant_name": tenant_name,
+                })
+            pushed += 1
+            logger.info(
+                f"[cancellations_loop] ✅ PUSHED tenant={tenant_id} user={u['user_id']} "
+                f"type={evt_type} iptal_id={iptal_id} tutar={tutar:.2f}"
+            )
+
+    return pushed
+
+
+async def _cancellations_loop():
+    """Dedicated fast loop for cancellation detection (~15s cadence)."""
+    logger.info(f"🚫 Cancellations fast watcher started ({_HIGH_SALES_INTERVAL}s loop)")
+    iteration = 0
+    while True:
+        iteration += 1
+        try:
+            tenants = await _get_tenants_for_cancellations()
+            if tenants:
+                results = await asyncio.gather(
+                    *[_scan_cancellations_for_tenant(t) for t in tenants],
+                    return_exceptions=True,
+                )
+                total_pushed = sum(r for r in results if isinstance(r, int))
+                if total_pushed:
+                    logger.info(
+                        f"[cancellations_loop] iter={iteration} tenants={len(tenants)} pushed={total_pushed}"
+                    )
+        except Exception as e:
+            logger.error(f"[cancellations_loop] error: {e}")
+        await asyncio.sleep(_HIGH_SALES_INTERVAL)
+
+
 def start_watcher():
     """Called once at FastAPI startup."""
-    global _watcher_task, _high_sales_task
+    global _watcher_task, _high_sales_task, _cancellations_task
     loop = asyncio.get_event_loop()
     if _watcher_task is None or _watcher_task.done():
         _watcher_task = loop.create_task(_watcher_loop())
     if _high_sales_task is None or _high_sales_task.done():
         _high_sales_task = loop.create_task(_high_sales_loop())
+    if _cancellations_task is None or _cancellations_task.done():
+        _cancellations_task = loop.create_task(_cancellations_loop())
 
 
 def stop_watcher():
     """Called at FastAPI shutdown."""
-    global _watcher_task, _high_sales_task
+    global _watcher_task, _high_sales_task, _cancellations_task
     if _watcher_task and not _watcher_task.done():
         _watcher_task.cancel()
     if _high_sales_task and not _high_sales_task.done():
         _high_sales_task.cancel()
+    if _cancellations_task and not _cancellations_task.done():
+        _cancellations_task.cancel()
 
 
 # Backward-compat alias for routes/notifications.py /scan-now endpoint

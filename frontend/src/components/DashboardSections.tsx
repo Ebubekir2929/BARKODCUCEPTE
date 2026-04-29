@@ -134,7 +134,7 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
             </View>
             {totals.miktar > 0 && (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: colors.primary + '15' }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: colors.primary }}>{fmtMiktar(totals.miktar)} ürün</Text>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: colors.primary }}>{fmtMiktar(totals.miktar)} ürün adedi</Text>
               </View>
             )}
           </View>

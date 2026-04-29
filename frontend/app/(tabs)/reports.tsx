@@ -899,6 +899,47 @@ export default function ReportsScreen() {
 
   // Lookup cache
   const [lookupCache, setLookupCache] = useState<Record<string, { value: string; label: string }[]>>({});
+  // Track in-flight prefetches so a dropdown click can await an existing request
+  // instead of firing a duplicate to the backend.
+  const inflightLookupRef = useRef<Map<string, Promise<{ value: string; label: string }[] | null>>>(new Map());
+
+  // Helper: fetch a single lookup source (with in-flight dedup + cache write).
+  const fetchLookupSource = useCallback(async (
+    source: string,
+    tenantId: string,
+  ): Promise<{ value: string; label: string }[] | null> => {
+    if (lookupCache[source]) return lookupCache[source];
+    const existing = inflightLookupRef.current.get(source);
+    if (existing) return existing;
+
+    const { token } = useAuthStore.getState();
+    if (!token) return null;
+
+    const promise = (async () => {
+      try {
+        const resp = await fetch(`${API_URL}/api/data/report-filter-options`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ tenant_id: tenantId, source }),
+        });
+        if (!resp.ok) return null;
+        const j = await resp.json();
+        if (!j?.ok || !Array.isArray(j?.data)) return null;
+        const opts = j.data.map((r: any) => ({
+          value: String(r.ID ?? r.AD ?? r.KOD ?? ''),
+          label: String(r.AD || r.KOD || r.ID || ''),
+        }));
+        setLookupCache(prev => ({ ...prev, [source]: opts }));
+        return opts;
+      } catch {
+        return null;
+      } finally {
+        inflightLookupRef.current.delete(source);
+      }
+    })();
+    inflightLookupRef.current.set(source, promise);
+    return promise;
+  }, [lookupCache]);
 
   const getDefDates = () => {
     const now = new Date();
@@ -925,6 +966,15 @@ export default function ReportsScreen() {
     setSelectedReport(report);
     setShowFilterModal(true);
     setReportData([]); setSortKey(''); setSearchFilter('');
+
+    // 🚀 Eagerly start prefetching all dropdown sources for this report so
+    // they're ready by the time the user clicks any filter.
+    if (activeTenantId) {
+      const sources = (report.filters || [])
+        .filter((f: any) => f.source && !lookupCache[f.source])
+        .map((f: any) => f.source as string);
+      sources.forEach((src) => { fetchLookupSource(src, activeTenantId); });
+    }
   };
 
   // Open picker for multiselect filter (on-demand load)
@@ -942,27 +992,17 @@ export default function ReportsScreen() {
     setPickerLoading(true);
     setPickerOptions([]);
     try {
-      const { token } = useAuthStore.getState();
-      const resp = await fetch(`${API_URL}/api/data/report-filter-options`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ tenant_id: activeTenantId, source: filter.source }),
-      });
-      const data = await resp.json();
-      if (data.ok && data.data) {
-        const opts = data.data.map((r: any) => ({
-          value: String(r.ID ?? r.AD ?? r.KOD ?? ''),
-          label: String(r.AD || r.KOD || r.ID || ''),
-        }));
-        setPickerOptions(opts);
-        setLookupCache(prev => ({ ...prev, [filter.source!]: opts }));
-      }
+      // Use the dedup helper — if a prefetch is already in flight for this
+      // source, this awaits it instead of firing a duplicate request.
+      const opts = await fetchLookupSource(filter.source, activeTenantId);
+      if (opts) setPickerOptions(opts);
     } catch (err) { console.error('Lookup error:', err); }
     finally { setPickerLoading(false); }
-  }, [activeTenantId, lookupCache]);
+  }, [activeTenantId, lookupCache, fetchLookupSource]);
 
   // 🚀 Prefetch all picker sources in parallel when a report is selected.
   // This warms the lookup cache so that opening any dropdown is instant.
-  // Uses 30-min backend cache so repeats are cheap.
+  // Uses 30-min backend cache + in-flight dedup so repeats are cheap.
   useEffect(() => {
     if (!selectedReport || !activeTenantId) return;
     const sourcesToWarm = (selectedReport.filters || [])
@@ -970,43 +1010,14 @@ export default function ReportsScreen() {
       .map((f: any) => f.source as string);
     if (sourcesToWarm.length === 0) return;
 
-    const { token } = useAuthStore.getState();
-    if (!token) return;
-
     let cancelled = false;
     (async () => {
-      const results = await Promise.all(
-        sourcesToWarm.map(async (src) => {
-          try {
-            const resp = await fetch(`${API_URL}/api/data/report-filter-options`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-              body: JSON.stringify({ tenant_id: activeTenantId, source: src }),
-            });
-            if (!resp.ok) return [src, null] as const;
-            const j = await resp.json();
-            if (!j?.ok || !Array.isArray(j?.data)) return [src, null] as const;
-            const opts = j.data.map((r: any) => ({
-              value: String(r.ID ?? r.AD ?? r.KOD ?? ''),
-              label: String(r.AD || r.KOD || r.ID || ''),
-            }));
-            return [src, opts] as const;
-          } catch {
-            return [src, null] as const;
-          }
-        })
-      );
+      // fire all prefetches in parallel; helper handles cache + in-flight dedup
+      await Promise.all(sourcesToWarm.map((src) => fetchLookupSource(src, activeTenantId)));
       if (cancelled) return;
-      const updates: Record<string, any[]> = {};
-      results.forEach(([src, opts]) => {
-        if (opts) updates[src] = opts;
-      });
-      if (Object.keys(updates).length > 0) {
-        setLookupCache((prev) => ({ ...prev, ...updates }));
-      }
     })();
     return () => { cancelled = true; };
-  }, [selectedReport?.key, activeTenantId]);
+  }, [selectedReport?.key, activeTenantId, fetchLookupSource]);
 
   // Toggle selection in multiselect
   const togglePickerValue = (val: string) => {
