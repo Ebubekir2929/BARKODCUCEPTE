@@ -55,10 +55,17 @@ export default function StockScreen() {
   };
 
   // Filters
-  const [filterGroup, setFilterGroup] = useState<string>('');
+  const [filterGroups, setFilterGroups] = useState<string[]>([]);   // multi-select
   const [filterProfit, setFilterProfit] = useState<'all' | 'profit' | 'loss'>('all');
   const [filterQty, setFilterQty] = useState<'all' | 'low' | 'mid' | 'high'>('all');
-  const [filterKdv, setFilterKdv] = useState<string>('');
+  const [filterKdvs, setFilterKdvs] = useState<string[]>([]);       // multi-select
+
+  const toggleGroup = (g: string) => {
+    setFilterGroups((prev) => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]);
+  };
+  const toggleKdv = (k: string) => {
+    setFilterKdvs((prev) => prev.includes(k) ? prev.filter(x => x !== k) : [...prev, k]);
+  };
 
   // Detail modal
   const [selectedStock, setSelectedStock] = useState<any | null>(null);
@@ -233,7 +240,7 @@ export default function StockScreen() {
         (s.BARKOD || '').includes(q)
       );
     }
-    if (filterGroup) list = list.filter((s: any) => (s.STOK_GRUP || '') === filterGroup);
+    if (filterGroups.length > 0) list = list.filter((s: any) => filterGroups.includes(s.STOK_GRUP || s.GRUP || ''));
     if (filterProfit === 'profit') list = list.filter((s: any) => {
       const sell = parseFloat(s.FIYAT || '0');
       const buy = parseFloat(s.SON_ALIS_FIYAT || '0');
@@ -247,21 +254,21 @@ export default function StockScreen() {
     if (filterQty === 'low') list = list.filter((s: any) => { const m = parseFloat(s.MIKTAR || '0'); return m > 0 && m < 10; });
     if (filterQty === 'mid') list = list.filter((s: any) => { const m = parseFloat(s.MIKTAR || '0'); return m >= 10 && m < 100; });
     if (filterQty === 'high') list = list.filter((s: any) => parseFloat(s.MIKTAR || '0') >= 100);
-    if (filterKdv) list = list.filter((s: any) => {
+    if (filterKdvs.length > 0) list = list.filter((s: any) => {
       const v = String(s.KDV_PAREKENDE || s.KDV || '').replace('.00', '');
-      return v === filterKdv;
+      return filterKdvs.includes(v);
     });
     return list;
-  }, [stockList, searchQuery, filterGroup, filterProfit, filterQty, filterKdv]);
+  }, [stockList, searchQuery, filterGroups, filterProfit, filterQty, filterKdvs]);
 
   const activeFilterCount = useMemo(() => {
     let c = 0;
-    if (filterGroup) c++;
+    if (filterGroups.length > 0) c++;
     if (filterProfit !== 'all') c++;
     if (filterQty !== 'all') c++;
-    if (filterKdv) c++;
+    if (filterKdvs.length > 0) c++;
     return c;
-  }, [filterGroup, filterProfit, filterQty, filterKdv]);
+  }, [filterGroups, filterProfit, filterQty, filterKdvs]);
 
   const selectedPriceLabel = useMemo(() => {
     const f = priceNames.find((p: any) => String(p.ID) === selectedPriceName || String(p.AD) === selectedPriceName);
@@ -421,12 +428,22 @@ export default function StockScreen() {
       {activeFilterCount > 0 && (
         <View style={{ paddingHorizontal: 16, marginTop: 6 }}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, alignItems: 'center', paddingRight: 60 }}>
-            {filterGroup ? <View style={[styles.chip, { backgroundColor: colors.primary + '15' }]}><Text style={[styles.chipText, { color: colors.primary }]}>{filterGroup}</Text><TouchableOpacity onPress={() => setFilterGroup('')}><Ionicons name="close" size={12} color={colors.primary} /></TouchableOpacity></View> : null}
+            {filterGroups.map((g) => (
+              <View key={`g-${g}`} style={[styles.chip, { backgroundColor: colors.primary + '15' }]}>
+                <Text style={[styles.chipText, { color: colors.primary }]}>{g}</Text>
+                <TouchableOpacity onPress={() => toggleGroup(g)}><Ionicons name="close" size={12} color={colors.primary} /></TouchableOpacity>
+              </View>
+            ))}
             {filterProfit !== 'all' ? <View style={[styles.chip, { backgroundColor: filterProfit === 'profit' ? colors.success + '15' : colors.error + '15' }]}><Text style={[styles.chipText, { color: filterProfit === 'profit' ? colors.success : colors.error }]}>{filterProfit === 'profit' ? t('profitable') : t('unprofitable')}</Text><TouchableOpacity onPress={() => setFilterProfit('all')}><Ionicons name="close" size={12} color={filterProfit === 'profit' ? colors.success : colors.error} /></TouchableOpacity></View> : null}
             {filterQty !== 'all' ? <View style={[styles.chip, { backgroundColor: colors.warning + '15' }]}><Text style={[styles.chipText, { color: colors.warning }]}>{filterQty === 'low' ? t('low_stock_label') : filterQty === 'mid' ? t('mid_stock_label') : t('high_stock_label')}</Text><TouchableOpacity onPress={() => setFilterQty('all')}><Ionicons name="close" size={12} color={colors.warning} /></TouchableOpacity></View> : null}
-            {filterKdv ? <View style={[styles.chip, { backgroundColor: colors.info + '15' }]}><Text style={[styles.chipText, { color: colors.info }]}>KDV %{filterKdv}</Text><TouchableOpacity onPress={() => setFilterKdv('')}><Ionicons name="close" size={12} color={colors.info} /></TouchableOpacity></View> : null}
+            {filterKdvs.map((k) => (
+              <View key={`k-${k}`} style={[styles.chip, { backgroundColor: colors.info + '15' }]}>
+                <Text style={[styles.chipText, { color: colors.info }]}>KDV %{k}</Text>
+                <TouchableOpacity onPress={() => toggleKdv(k)}><Ionicons name="close" size={12} color={colors.info} /></TouchableOpacity>
+              </View>
+            ))}
           </ScrollView>
-          <TouchableOpacity style={{ position: 'absolute', right: 16, top: 4, backgroundColor: colors.error + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }} onPress={() => { setFilterGroup(''); setFilterProfit('all'); setFilterQty('all'); setFilterKdv(''); }}>
+          <TouchableOpacity style={{ position: 'absolute', right: 16, top: 4, backgroundColor: colors.error + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }} onPress={() => { setFilterGroups([]); setFilterProfit('all'); setFilterQty('all'); setFilterKdvs([]); }}>
             <Text style={[{ fontSize: 12, color: colors.error, fontWeight: '700' }]}>{t('clear')}</Text>
           </TouchableOpacity>
         </View>
@@ -487,18 +504,40 @@ export default function StockScreen() {
               <TouchableOpacity onPress={() => setShowFilterModal(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             </View>
             <ScrollView style={{ padding: 16 }} contentContainerStyle={{ paddingBottom: 30 }}>
-              {/* Grup */}
-              <Text style={[styles.filterLabel, { color: colors.text }]}>{t('stock_group')}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }} contentContainerStyle={{ gap: 6 }}>
-                <TouchableOpacity style={[styles.filterChip, filterGroup === '' && { backgroundColor: colors.primary, borderColor: colors.primary }]} onPress={() => setFilterGroup('')}>
-                  <Text style={[{ fontSize: 12, color: filterGroup === '' ? '#fff' : colors.text }]}>{t('all')}</Text>
-                </TouchableOpacity>
-                {groups.map(g => (
-                  <TouchableOpacity key={g} style={[styles.filterChip, filterGroup === g && { backgroundColor: colors.primary, borderColor: colors.primary }, { borderColor: colors.border }]} onPress={() => setFilterGroup(g)}>
-                    <Text style={[{ fontSize: 12, color: filterGroup === g ? '#fff' : colors.text }]}>{g}</Text>
+              {/* Grup — multi-select */}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <Text style={[styles.filterLabel, { color: colors.text, marginBottom: 0 }]}>
+                  {t('stock_group')} {filterGroups.length > 0 ? `(${filterGroups.length})` : ''}
+                </Text>
+                {filterGroups.length > 0 && (
+                  <TouchableOpacity onPress={() => setFilterGroups([])}>
+                    <Text style={{ fontSize: 11, color: colors.error, fontWeight: '700' }}>Temizle</Text>
                   </TouchableOpacity>
-                ))}
-              </ScrollView>
+                )}
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
+                {groups.map(g => {
+                  const on = filterGroups.includes(g);
+                  return (
+                    <TouchableOpacity
+                      key={g}
+                      style={[
+                        styles.filterChip,
+                        on ? { backgroundColor: colors.primary, borderColor: colors.primary } : { borderColor: colors.border },
+                      ]}
+                      onPress={() => toggleGroup(g)}
+                    >
+                      <Ionicons
+                        name={on ? 'checkmark-circle' : 'ellipse-outline'}
+                        size={14}
+                        color={on ? '#fff' : colors.textSecondary}
+                        style={{ marginRight: 4 }}
+                      />
+                      <Text style={[{ fontSize: 12, color: on ? '#fff' : colors.text }]}>{g}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
 
               {/* Kar/Zarar */}
               <Text style={[styles.filterLabel, { color: colors.text }]}>{t('profit_loss')}</Text>
@@ -520,18 +559,40 @@ export default function StockScreen() {
                 ))}
               </View>
 
-              {/* KDV */}
-              <Text style={[styles.filterLabel, { color: colors.text }]}>{t('vat_rate')}</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }} contentContainerStyle={{ gap: 6 }}>
-                <TouchableOpacity style={[styles.filterChip, filterKdv === '' && { backgroundColor: colors.primary, borderColor: colors.primary }]} onPress={() => setFilterKdv('')}>
-                  <Text style={[{ fontSize: 12, color: filterKdv === '' ? '#fff' : colors.text }]}>{t('all')}</Text>
-                </TouchableOpacity>
-                {kdvValues.map(k => (
-                  <TouchableOpacity key={k} style={[styles.filterChip, filterKdv === k && { backgroundColor: colors.primary, borderColor: colors.primary }, { borderColor: colors.border }]} onPress={() => setFilterKdv(k)}>
-                    <Text style={[{ fontSize: 12, color: filterKdv === k ? '#fff' : colors.text }]}>%{k}</Text>
+              {/* KDV — multi-select */}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <Text style={[styles.filterLabel, { color: colors.text, marginBottom: 0 }]}>
+                  {t('vat_rate')} {filterKdvs.length > 0 ? `(${filterKdvs.length})` : ''}
+                </Text>
+                {filterKdvs.length > 0 && (
+                  <TouchableOpacity onPress={() => setFilterKdvs([])}>
+                    <Text style={{ fontSize: 11, color: colors.error, fontWeight: '700' }}>Temizle</Text>
                   </TouchableOpacity>
-                ))}
-              </ScrollView>
+                )}
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
+                {kdvValues.map(k => {
+                  const on = filterKdvs.includes(k);
+                  return (
+                    <TouchableOpacity
+                      key={k}
+                      style={[
+                        styles.filterChip,
+                        on ? { backgroundColor: colors.info, borderColor: colors.info } : { borderColor: colors.border },
+                      ]}
+                      onPress={() => toggleKdv(k)}
+                    >
+                      <Ionicons
+                        name={on ? 'checkmark-circle' : 'ellipse-outline'}
+                        size={14}
+                        color={on ? '#fff' : colors.textSecondary}
+                        style={{ marginRight: 4 }}
+                      />
+                      <Text style={[{ fontSize: 12, color: on ? '#fff' : colors.text }]}>%{k}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
 
               <TouchableOpacity style={[{ backgroundColor: colors.primary, borderRadius: 10, padding: 14, alignItems: 'center' }]} onPress={() => setShowFilterModal(false)}>
                 <Text style={[{ color: '#fff', fontWeight: '700' }]}>{t('apply')}</Text>

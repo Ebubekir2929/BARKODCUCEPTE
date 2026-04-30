@@ -82,7 +82,7 @@ async def _pos_request_data(
         started = datetime.utcnow()
         last_status = "queued"
         while (datetime.utcnow() - started).total_seconds() < timeout_s:
-            await asyncio.sleep(0.4)  # was 0.7 — reduced for faster detection
+            await asyncio.sleep(0.25)  # was 0.4 — faster detection
             try:
                 st = await client.post(POS_API_URL, json={
                     "tenant_id": tenant_id,

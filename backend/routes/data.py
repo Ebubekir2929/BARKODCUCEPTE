@@ -681,7 +681,7 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
         raise HTTPException(status_code=502, detail="İstek oluşturulamadı")
     
     # Step 2: Poll for result
-    poll_interval = 0.4  # was 0.7 — reduced for snappier reports
+    poll_interval = 0.25  # was 0.4 — fastest safe rate for snappier reports/stock
     for _ in range(int(timeout_sec / poll_interval)):
         status_resp = await sync_post({
             "action": "request_status",

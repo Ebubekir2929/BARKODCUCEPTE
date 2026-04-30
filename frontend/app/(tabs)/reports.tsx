@@ -1249,7 +1249,7 @@ export default function ReportsScreen() {
       let page = 2;
       let collected = firstRows;
       const maxPages = 50;
-      const batchSize = 6; // increased parallel page fetches for faster aggregation
+      const batchSize = 8; // increased parallel page fetches for faster aggregation
       let done = false;
       while (!done && page <= maxPages) {
         if (runTokenRef.current !== token_id || controller.signal.aborted) return;
@@ -1945,8 +1945,14 @@ export default function ReportsScreen() {
                 </View>
               );
             })()}
-            <View style={{ paddingHorizontal: 12, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{reportLoading ? 'Çalıştırılıyor...' : `${processedData.length} kayıt${debouncedSearch && processedData.length !== reportData.length ? ` · toplam ${reportData.length}` : ''}`}</Text>
+            <View style={{ paddingHorizontal: 12, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <Text style={[{ fontSize: 13, fontWeight: '700', color: reportLoading ? colors.primary : colors.text }]}>
+                {reportLoading
+                  ? 'Çalıştırılıyor...'
+                  : moreLoading
+                    ? `${processedData.length.toLocaleString('tr-TR')} yüklendi...`
+                    : `${processedData.length.toLocaleString('tr-TR')} kayıt${debouncedSearch && processedData.length !== reportData.length ? ` · toplam ${reportData.length.toLocaleString('tr-TR')}` : ''}`}
+              </Text>
               {isProcessing && !reportLoading && reportData.length > 0 && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                   <ActivityIndicator size="small" color={colors.primary} />
@@ -1956,7 +1962,7 @@ export default function ReportsScreen() {
               {moreLoading && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: colors.primary + '18' }}>
                   <ActivityIndicator size="small" color={colors.primary} />
-                  <Text style={[{ fontSize: 10, color: colors.primary, fontWeight: '700' }]}>Daha fazla yükleniyor (sayfa {loadedPages + 1})...</Text>
+                  <Text style={[{ fontSize: 10, color: colors.primary, fontWeight: '700' }]}>Sayfa {loadedPages + 1}...</Text>
                 </View>
               )}
             </View>
