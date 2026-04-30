@@ -41,15 +41,40 @@ async def _pos_request_data(
     params: dict,
     timeout_s: int = 90,
 ) -> list:
-    """Async request_create + poll request_status until done.
+    """Async cache-first POS data fetch.
 
-    Uses the POS /api/sync.php endpoint with `request_create` and `request_status`
-    actions — the same pattern used by /app/backend/routes/data.py::_on_demand_request.
-    Required for datasets not materialised in `dataset_cache` (e.g.
-    `fis_gunluk_bildirim_feed`).
+    Strategy:
+      1) Try `dataset_get` first — reads from sync.php's dataset_cache table.
+         Many tenants have a POS-side worker that keeps the cache fresh on its
+         own schedule, so this avoids triggering a fresh POS query when not
+         needed AND succeeds on tenants where request_create/status returns 0
+         (e.g. broken POS worker but populated cache).
+      2) If cache miss → fall back to request_create + poll request_status.
     """
     async with httpx.AsyncClient(timeout=120) as client:
-        # 1) Create request
+        # ---------- Step 1: cache read (fast) ----------
+        try:
+            r = await client.post(POS_API_URL, json={
+                "tenant_id": tenant_id,
+                "action": "dataset_get",
+                "dataset_key": dataset_key,
+                "params": params,
+            }, headers={"Content-Type": "application/json; charset=utf-8"})
+            cache_j = r.json()
+            if r.status_code == 200 and cache_j.get("ok") and isinstance(cache_j.get("data"), list):
+                logger.info(
+                    f"[pos] dataset_get HIT {dataset_key} tenant={tenant_id} rows={len(cache_j['data'])}"
+                )
+                return cache_j["data"]
+            # cache_not_found → continue with fresh request below
+            logger.info(
+                f"[pos] dataset_get MISS {dataset_key} tenant={tenant_id} status={r.status_code} ok={cache_j.get('ok')} err={cache_j.get('error')}"
+            )
+        except Exception as e:
+            logger.debug(f"[pos] dataset_get {dataset_key} fallback: {e}")
+
+        # ---------- Step 2: fresh request (slow) ----------
+        # 2a) Create request
         create_body = {
             "tenant_id": tenant_id,
             "action": "request_create",
