@@ -457,17 +457,41 @@ async def update_tenant_name(tenant_id: str, data: TenantUpdate, current_user: d
 async def remove_tenant(tenant_id: str, current_user: dict = Depends(get_current_user)):
     if mongo_db is None:
         raise HTTPException(status_code=500, detail="Tenant yönetimi şu anda kullanılamıyor")
-    
+
     # Can't delete primary tenant
     if tenant_id == current_user.get("tenant_id"):
         raise HTTPException(status_code=400, detail="Ana veri kaynağı silinemez")
-    
+
     result = await mongo_db.user_tenants.delete_one({
         "user_id": current_user["user_id"], "tenant_id": tenant_id
     })
-    
+
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Tenant bulunamadı")
-    
-    logger.info(f"Tenant removed for user {current_user['email']}: {tenant_id}")
+
+    # 🧹 Cleanup related collections so the watcher doesn't keep referencing
+    # this stale tenant_id (would cause empty POS queries forever).
+    try:
+        await mongo_db.tenant_names.delete_many({
+            "user_id": current_user["user_id"], "tenant_id": tenant_id
+        })
+    except Exception as e:
+        logger.warning(f"tenant_names cleanup failed for {tenant_id}: {e}")
+
+    # Clean per-tenant notification dedup state in patron MariaDB so future
+    # re-adds get a clean slate.
+    try:
+        from services import get_patron_pool
+        pool = await get_patron_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "DELETE FROM notification_events_seen WHERE tenant_id = %s",
+                    (tenant_id,),
+                )
+                await conn.commit()
+    except Exception as e:
+        logger.warning(f"notification_events_seen cleanup failed for {tenant_id}: {e}")
+
+    logger.info(f"Tenant removed for user {current_user['email']}: {tenant_id} (with cleanup)")
     return await build_user_response(current_user)
