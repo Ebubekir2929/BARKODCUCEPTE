@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAuthStore } from '../../src/store/authStore';
 import { useLanguageStore } from '../../src/store/languageStore';
@@ -51,13 +52,25 @@ export default function DashboardScreen() {
 
   // User-configurable auto-refresh cadence (Settings → "Veri Yenileme Sıklığı")
   const refreshInterval = usePrefsStore((s) => s.refreshInterval);
+  // Track whether the Dashboard tab is currently focused; background refreshers
+  // must PAUSE when the user navigates to Stok / Cari / Raporlar so their own
+  // fetches aren't slowed down by parallel Dashboard traffic.
+  const [isTabFocused, setIsTabFocused] = useState(true);
+  useFocusEffect(
+    React.useCallback(() => {
+      setIsTabFocused(true);
+      return () => setIsTabFocused(false);
+    }, [])
+  );
+
   useEffect(() => {
     if (!refreshInterval || refreshInterval <= 0) return; // 0 = manual only
+    if (!isTabFocused) return; // pause while on another tab
     const id = setInterval(() => {
       refreshData();
     }, refreshInterval * 1000);
     return () => clearInterval(id);
-  }, [refreshInterval, refreshData]);
+  }, [refreshInterval, refreshData, isTabFocused]);
 
   // Cache totals per data source - reset when source changes, update only with fresh data
   const [sourceTotals, setSourceTotals] = useState<Record<string, number>>({});
@@ -773,6 +786,14 @@ export default function DashboardScreen() {
                 En Çok: {bestSellingHour.hour}
               </Text>
             </View>
+          </View>
+
+          {/* Total amount — prominent sum of all hours */}
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', gap: 6, marginTop: 4, marginBottom: 8 }}>
+            <Text style={{ fontSize: 11, color: colors.textSecondary, fontWeight: '600' }}>TOPLAM</Text>
+            <Text style={{ fontSize: 20, fontWeight: '900', color: colors.primary, letterSpacing: 0.3 }}>
+              ₺{(sourceData?.hourlySales || []).reduce((s: number, h: any) => s + (h?.amount || 0), 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </Text>
           </View>
 
           {/* Bar Chart */}
