@@ -153,12 +153,19 @@ export default function CustomersScreen() {
           const results = await Promise.all(batch.map(fetchPage));
           if (ctrl.signal.aborted) return;
           const newRows: any[] = [];
+          let maxTotalSeen = 0;
           results.forEach((r) => {
             if (r && Array.isArray(r.data)) newRows.push(...r.data);
+            if (r && (r as any).total_count > maxTotalSeen) maxTotalSeen = (r as any).total_count;
           });
           if (newRows.length > 0) {
             setCariList((prev) => [...prev, ...newRows]);
-            setLoadProgress((prev) => prev ? { ...prev, loaded: prev.loaded + newRows.length } : null);
+            setLoadProgress((prev) => {
+              if (!prev) return null;
+              const newLoaded = prev.loaded + newRows.length;
+              const newTotal = Math.max(prev.total, maxTotalSeen, newLoaded);
+              return { loaded: newLoaded, total: newTotal };
+            });
           }
         }
         setLoadProgress(null);
