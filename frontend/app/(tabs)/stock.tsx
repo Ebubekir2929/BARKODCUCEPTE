@@ -524,8 +524,12 @@ export default function StockScreen() {
       ) : (
         <FlashList
           ref={listRef as any}
-          data={filteredStocks} renderItem={renderStockItem} keyExtractor={(_, idx) => String(idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
-          drawDistance={500}
+          data={filteredStocks}
+          renderItem={renderStockItem}
+          keyExtractor={(item: any, idx) => String(item?.KOD || item?.STOK_KODU || item?.ID || idx)}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
+          showsVerticalScrollIndicator={false}
+          drawDistance={800}
           onScroll={(e) => {
             const y = e.nativeEvent.contentOffset.y;
             const layoutH = e.nativeEvent.layoutMeasurement.height;
@@ -535,23 +539,6 @@ export default function StockScreen() {
           scrollEventThrottle={250}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} tintColor={colors.primary} />}
           ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="cube-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_stock_found')}</Text></View>}
-          ListFooterComponent={loadProgress && loadProgress.loaded < loadProgress.total ? (
-            <View style={{ paddingVertical: 12 }}>
-              {/* Subtle linear progress bar — no big pill blocking the screen */}
-              <View style={{ height: 3, backgroundColor: colors.border, borderRadius: 2, overflow: 'hidden' }}>
-                <View
-                  style={{
-                    height: 3,
-                    width: `${Math.min(100, (loadProgress.loaded / Math.max(1, loadProgress.total)) * 100)}%`,
-                    backgroundColor: colors.primary,
-                  }}
-                />
-              </View>
-              <Text style={{ fontSize: 10, color: colors.textSecondary, marginTop: 6, textAlign: 'center' }}>
-                {loadProgress.loaded.toLocaleString('tr-TR')} / {loadProgress.total.toLocaleString('tr-TR')}
-              </Text>
-            </View>
-          ) : null}
         />
       )}
 
