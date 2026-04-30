@@ -965,28 +965,35 @@ async def _get_tenants_for_cancellations() -> List[Dict[str, Any]]:
 
 
 async def _scan_cancellations_for_tenant(tenant: Dict[str, Any]) -> int:
-    """Single POS scan per tenant for cancellations; dispatches to all users."""
+    """Single POS scan per tenant for cancellations; dispatches to all users.
+
+    Performance optimization: scans only the last 30 minutes (not full day) to
+    keep the iptal_detay procedure fast. The 30min window is plenty since the
+    watcher runs every 15s and we keep dedup state across runs.
+    """
     tenant_id = tenant["tenant_id"]
     tenant_name = tenant.get("tenant_name") or "Veri"
     users = tenant["users"]
     if not users:
         return 0
 
-    today = datetime.utcnow()
-    yesterday = today - timedelta(days=1)
-    include_yesterday = today.hour < 1
-    scan_dates = (today, yesterday) if include_yesterday else (today,)
+    now = datetime.utcnow()
+    # Look back 30 minutes — covers any clock skew, watcher restart, or POS hiccups
+    window_start = now - timedelta(minutes=30)
 
     all_rows: list = []
     try:
-        for d in scan_dates:
-            dt_str = d.strftime("%Y-%m-%d")
-            day_rows = await _pos_request_data(tenant_id, "iptal_detay", {
-                "sdate": f"{dt_str} 00:00:00",
-                "edate": f"{dt_str} 23:59:59",
-                "IPTAL_ID": None,
-            }, timeout_s=120)  # was 60 — second tenants sit in POS queue longer
-            all_rows.extend(day_rows)
+        sdate_str = window_start.strftime("%Y-%m-%d %H:%M:%S")
+        edate_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        rows = await _pos_request_data(tenant_id, "iptal_detay", {
+            "sdate": sdate_str,
+            "edate": edate_str,
+            "IPTAL_ID": None,
+        }, timeout_s=60)
+        all_rows.extend(rows)
+        logger.info(
+            f"[cancellations_loop] tenant={tenant_id} window={sdate_str} → {edate_str} rows={len(rows)}"
+        )
     except Exception as e:
         logger.warning(f"[cancellations_loop] tenant={tenant_id} POS error: {e}")
         return 0
