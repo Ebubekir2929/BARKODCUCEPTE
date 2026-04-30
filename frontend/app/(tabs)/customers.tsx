@@ -14,6 +14,8 @@ import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
+import { useFocusEffect } from 'expo-router';
+import { ScrollFab } from '../../src/components/ScrollFab';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -48,6 +50,21 @@ export default function CustomersScreen() {
   const [manualToast, setManualToast] = useState(false);
   const [refreshNonce, setRefreshNonce] = useState(0);
   const cariAbortRef = React.useRef<AbortController | null>(null);
+  const listRef = React.useRef<any>(null);
+  const [showScrollUp, setShowScrollUp] = useState(false);
+  const [showScrollDown, setShowScrollDown] = useState(false);
+
+  // ⏹️ Cancel any in-flight POS request when leaving this screen
+  useFocusEffect(
+    React.useCallback(() => {
+      return () => {
+        if (cariAbortRef.current) {
+          cariAbortRef.current.abort();
+          cariAbortRef.current = null;
+        }
+      };
+    }, [])
+  );
 
   const onRefresh = React.useCallback(async () => {
     setRefreshing(true);
@@ -343,8 +360,15 @@ export default function CustomersScreen() {
       {loading ? (
         <View style={styles.loadingContainer}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_customers')}</Text></View>
       ) : (
-        <FlashList data={filteredCaris} renderItem={renderCariItem} keyExtractor={(item, idx) => String(item.KART || item.ID || idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
+        <FlashList ref={listRef as any} data={filteredCaris} renderItem={renderCariItem} keyExtractor={(item, idx) => String(item.KART || item.ID || idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
           drawDistance={500}
+          onScroll={(e) => {
+            const y = e.nativeEvent.contentOffset.y;
+            const layoutH = e.nativeEvent.layoutMeasurement.height;
+            setShowScrollUp(y > layoutH * 0.8);
+            setShowScrollDown(y < (e.nativeEvent.contentSize.height - layoutH * 1.5));
+          }}
+          scrollEventThrottle={250}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} tintColor={colors.primary} />}
           ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="people-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_customers')}</Text></View>}
           ListFooterComponent={loadProgress ? (
@@ -368,6 +392,16 @@ export default function CustomersScreen() {
           ) : null)}
         />
       )}
+
+      {/* Floating scroll buttons */}
+      <ScrollFab
+        showUp={showScrollUp}
+        showDown={showScrollDown && filteredCaris.length > 20}
+        onUp={() => listRef.current?.scrollToOffset?.({ offset: 0, animated: true })}
+        onDown={() => listRef.current?.scrollToEnd?.({ animated: true })}
+        primaryColor={colors.primary}
+        bottomOffset={100}
+      />
 
       {/* Ekstre Modal */}
       <Modal visible={!!selectedCari} animationType="slide" transparent statusBarTranslucent>

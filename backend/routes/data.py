@@ -1115,6 +1115,19 @@ async def get_stock_list_sync(
         }, tenant_id)
 
     async def _refresh():
+        # When force_refresh requested → ask POS to repopulate dataset_cache.stock_list
+        # before reading. This handles the case where POS-side cache only has a subset.
+        if force_refresh:
+            try:
+                await sync_post({
+                    "action": "dataset_refresh",
+                    "dataset_key": "stock_list",
+                    "params": {"FIYAT_AD": fiyat_ad} if fiyat_ad else {},
+                }, tenant_id)
+                await asyncio.sleep(0.4)
+            except Exception as e:
+                logger.warning(f"dataset_refresh stock_list failed: {e}")
+
         if page is not None:
             # Single page mode
             resp = await _fetch_one_page(int(page))
@@ -1261,6 +1274,18 @@ async def get_cari_list_sync(
         }, tenant_id)
 
     async def _refresh():
+        # Force POS to repopulate dataset_cache.cari_bakiye_liste before reading
+        if force_refresh:
+            try:
+                await sync_post({
+                    "action": "dataset_refresh",
+                    "dataset_key": "cari_bakiye_liste",
+                    "params": {},
+                }, tenant_id)
+                await asyncio.sleep(0.4)
+            except Exception as e:
+                logger.warning(f"dataset_refresh cari_bakiye_liste failed: {e}")
+
         if page is not None:
             resp = await _fetch_one_page(int(page))
             data = resp.get("data") or []

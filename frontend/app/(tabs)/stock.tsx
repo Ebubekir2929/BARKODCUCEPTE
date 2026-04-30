@@ -17,6 +17,8 @@ import * as Clipboard from 'expo-clipboard';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
+import { useFocusEffect } from 'expo-router';
+import { ScrollFab } from '../../src/components/ScrollFab';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -103,6 +105,9 @@ export default function StockScreen() {
   // Loading progress for incremental fetching
   const [loadProgress, setLoadProgress] = useState<{ loaded: number; total: number } | null>(null);
   const fetchAbortRef = React.useRef<AbortController | null>(null);
+  const listRef = React.useRef<any>(null);
+  const [showScrollUp, setShowScrollUp] = useState(false);
+  const [showScrollDown, setShowScrollDown] = useState(false);
 
   // Fetch stock list incrementally — page 1 instantly, rest streamed in background
   const fetchStockList = useCallback(async (force: boolean = false) => {
@@ -202,6 +207,18 @@ export default function StockScreen() {
     fetchStockList(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTenantId, selectedPriceName]);
+
+  // ⏹️ Cancel any in-flight POS request when leaving this screen
+  useFocusEffect(
+    React.useCallback(() => {
+      return () => {
+        if (fetchAbortRef.current) {
+          fetchAbortRef.current.abort();
+          fetchAbortRef.current = null;
+        }
+      };
+    }, [])
+  );
 
   const [refreshing, setRefreshing] = useState(false);
   const [manualToast, setManualToast] = useState(false);
@@ -478,8 +495,17 @@ export default function StockScreen() {
           <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_stock_list')}</Text>
         </View>
       ) : (
-        <FlashList data={filteredStocks} renderItem={renderStockItem} keyExtractor={(_, idx) => String(idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
+        <FlashList
+          ref={listRef as any}
+          data={filteredStocks} renderItem={renderStockItem} keyExtractor={(_, idx) => String(idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
           drawDistance={500}
+          onScroll={(e) => {
+            const y = e.nativeEvent.contentOffset.y;
+            const layoutH = e.nativeEvent.layoutMeasurement.height;
+            setShowScrollUp(y > layoutH * 0.8);
+            setShowScrollDown(y < (e.nativeEvent.contentSize.height - layoutH * 1.5));
+          }}
+          scrollEventThrottle={250}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} tintColor={colors.primary} />}
           ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="cube-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_stock_found')}</Text></View>}
           ListFooterComponent={loadProgress ? (
@@ -495,27 +521,53 @@ export default function StockScreen() {
         />
       )}
 
+      {/* Floating scroll buttons */}
+      <ScrollFab
+        showUp={showScrollUp}
+        showDown={showScrollDown && filteredStocks.length > 20}
+        onUp={() => listRef.current?.scrollToOffset?.({ offset: 0, animated: true })}
+        onDown={() => listRef.current?.scrollToEnd?.({ animated: true })}
+        primaryColor={colors.primary}
+        bottomOffset={100}
+      />
+
       {/* Filter Modal */}
       <Modal visible={showFilterModal} animationType="slide" transparent statusBarTranslucent>
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '70%' }]}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '85%' }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[styles.modalTitle, { color: colors.text }]}>{t('filters')}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                <Ionicons name="options" size={22} color={colors.primary} />
+                <Text style={[styles.modalTitle, { color: colors.text, flex: 0 }]}>{t('filters')}</Text>
+                {activeFilterCount > 0 && (
+                  <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: colors.primary }}>
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: '#fff' }}>{activeFilterCount} aktif</Text>
+                  </View>
+                )}
+              </View>
               <TouchableOpacity onPress={() => setShowFilterModal(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             </View>
-            <ScrollView style={{ padding: 16 }} contentContainerStyle={{ paddingBottom: 30 }}>
+            <ScrollView style={{ paddingHorizontal: 16, paddingTop: 12 }} contentContainerStyle={{ paddingBottom: 100 }}>
               {/* Grup — multi-select */}
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <Text style={[styles.filterLabel, { color: colors.text, marginBottom: 0 }]}>
-                  {t('stock_group')} {filterGroups.length > 0 ? `(${filterGroups.length})` : ''}
-                </Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="folder" size={16} color={colors.primary} />
+                  <Text style={[{ fontSize: 14, fontWeight: '800', color: colors.text }]}>
+                    {t('stock_group')}
+                  </Text>
+                  {filterGroups.length > 0 && (
+                    <View style={{ paddingHorizontal: 7, paddingVertical: 1, borderRadius: 8, backgroundColor: colors.primary + '25' }}>
+                      <Text style={{ fontSize: 10, fontWeight: '800', color: colors.primary }}>{filterGroups.length}</Text>
+                    </View>
+                  )}
+                </View>
                 {filterGroups.length > 0 && (
-                  <TouchableOpacity onPress={() => setFilterGroups([])}>
+                  <TouchableOpacity onPress={() => setFilterGroups([])} style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: colors.error + '15' }}>
                     <Text style={{ fontSize: 11, color: colors.error, fontWeight: '700' }}>Temizle</Text>
                   </TouchableOpacity>
                 )}
               </View>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
                 {groups.map(g => {
                   const on = filterGroups.includes(g);
                   return (
@@ -523,54 +575,74 @@ export default function StockScreen() {
                       key={g}
                       style={[
                         styles.filterChip,
-                        on ? { backgroundColor: colors.primary, borderColor: colors.primary } : { borderColor: colors.border },
+                        on
+                          ? { backgroundColor: colors.primary, borderColor: colors.primary }
+                          : { borderColor: colors.border, backgroundColor: colors.card },
                       ]}
                       onPress={() => toggleGroup(g)}
+                      activeOpacity={0.7}
                     >
-                      <Ionicons
-                        name={on ? 'checkmark-circle' : 'ellipse-outline'}
-                        size={14}
-                        color={on ? '#fff' : colors.textSecondary}
-                        style={{ marginRight: 4 }}
-                      />
-                      <Text style={[{ fontSize: 12, color: on ? '#fff' : colors.text }]}>{g}</Text>
+                      {on && <Ionicons name="checkmark" size={14} color="#fff" style={{ marginRight: 4 }} />}
+                      <Text style={[{ fontSize: 12, color: on ? '#fff' : colors.text, fontWeight: on ? '700' : '500' }]}>{g}</Text>
                     </TouchableOpacity>
                   );
                 })}
               </View>
 
               {/* Kar/Zarar */}
-              <Text style={[styles.filterLabel, { color: colors.text }]}>{t('profit_loss')}</Text>
-              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
-                {[{ k: 'all' as const, l: t('all') }, { k: 'profit' as const, l: t('profitable') }, { k: 'loss' as const, l: t('unprofitable') }].map(o => (
-                  <TouchableOpacity key={o.k} style={[styles.filterChip, filterProfit === o.k && { backgroundColor: colors.primary, borderColor: colors.primary }, { borderColor: colors.border }]} onPress={() => setFilterProfit(o.k)}>
-                    <Text style={[{ fontSize: 12, color: filterProfit === o.k ? '#fff' : colors.text }]}>{o.l}</Text>
-                  </TouchableOpacity>
-                ))}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <Ionicons name="trending-up" size={16} color={colors.success} />
+                <Text style={[{ fontSize: 14, fontWeight: '800', color: colors.text }]}>{t('profit_loss')}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 18 }}>
+                {[{ k: 'all' as const, l: t('all'), c: colors.textSecondary }, { k: 'profit' as const, l: t('profitable'), c: colors.success }, { k: 'loss' as const, l: t('unprofitable'), c: colors.error }].map(o => {
+                  const on = filterProfit === o.k;
+                  return (
+                    <TouchableOpacity key={o.k} style={[styles.filterChip, on ? { backgroundColor: o.c, borderColor: o.c } : { borderColor: colors.border, backgroundColor: colors.card }]} onPress={() => setFilterProfit(o.k)} activeOpacity={0.7}>
+                      {on && <Ionicons name="checkmark" size={14} color="#fff" style={{ marginRight: 4 }} />}
+                      <Text style={[{ fontSize: 12, color: on ? '#fff' : colors.text, fontWeight: on ? '700' : '500' }]}>{o.l}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
 
               {/* Miktar */}
-              <Text style={[styles.filterLabel, { color: colors.text }]}>{t('quantity')}</Text>
-              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
-                {[{ k: 'all' as const, l: t('all') }, { k: 'low' as const, l: '<10' }, { k: 'mid' as const, l: '10-100' }, { k: 'high' as const, l: '100+' }].map(o => (
-                  <TouchableOpacity key={o.k} style={[styles.filterChip, filterQty === o.k && { backgroundColor: colors.primary, borderColor: colors.primary }, { borderColor: colors.border }]} onPress={() => setFilterQty(o.k)}>
-                    <Text style={[{ fontSize: 12, color: filterQty === o.k ? '#fff' : colors.text }]}>{o.l}</Text>
-                  </TouchableOpacity>
-                ))}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <Ionicons name="cube" size={16} color={colors.warning} />
+                <Text style={[{ fontSize: 14, fontWeight: '800', color: colors.text }]}>{t('quantity')}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 18 }}>
+                {[{ k: 'all' as const, l: t('all') }, { k: 'low' as const, l: '<10' }, { k: 'mid' as const, l: '10-100' }, { k: 'high' as const, l: '100+' }].map(o => {
+                  const on = filterQty === o.k;
+                  return (
+                    <TouchableOpacity key={o.k} style={[styles.filterChip, on ? { backgroundColor: colors.warning, borderColor: colors.warning } : { borderColor: colors.border, backgroundColor: colors.card }]} onPress={() => setFilterQty(o.k)} activeOpacity={0.7}>
+                      {on && <Ionicons name="checkmark" size={14} color="#fff" style={{ marginRight: 4 }} />}
+                      <Text style={[{ fontSize: 12, color: on ? '#fff' : colors.text, fontWeight: on ? '700' : '500' }]}>{o.l}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
 
               {/* KDV — multi-select */}
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <Text style={[styles.filterLabel, { color: colors.text, marginBottom: 0 }]}>
-                  {t('vat_rate')} {filterKdvs.length > 0 ? `(${filterKdvs.length})` : ''}
-                </Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="receipt" size={16} color={colors.info} />
+                  <Text style={[{ fontSize: 14, fontWeight: '800', color: colors.text }]}>
+                    {t('vat_rate')}
+                  </Text>
+                  {filterKdvs.length > 0 && (
+                    <View style={{ paddingHorizontal: 7, paddingVertical: 1, borderRadius: 8, backgroundColor: colors.info + '25' }}>
+                      <Text style={{ fontSize: 10, fontWeight: '800', color: colors.info }}>{filterKdvs.length}</Text>
+                    </View>
+                  )}
+                </View>
                 {filterKdvs.length > 0 && (
-                  <TouchableOpacity onPress={() => setFilterKdvs([])}>
+                  <TouchableOpacity onPress={() => setFilterKdvs([])} style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: colors.error + '15' }}>
                     <Text style={{ fontSize: 11, color: colors.error, fontWeight: '700' }}>Temizle</Text>
                   </TouchableOpacity>
                 )}
               </View>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 24 }}>
                 {kdvValues.map(k => {
                   const on = filterKdvs.includes(k);
                   return (
@@ -578,26 +650,35 @@ export default function StockScreen() {
                       key={k}
                       style={[
                         styles.filterChip,
-                        on ? { backgroundColor: colors.info, borderColor: colors.info } : { borderColor: colors.border },
+                        on ? { backgroundColor: colors.info, borderColor: colors.info } : { borderColor: colors.border, backgroundColor: colors.card },
                       ]}
                       onPress={() => toggleKdv(k)}
+                      activeOpacity={0.7}
                     >
-                      <Ionicons
-                        name={on ? 'checkmark-circle' : 'ellipse-outline'}
-                        size={14}
-                        color={on ? '#fff' : colors.textSecondary}
-                        style={{ marginRight: 4 }}
-                      />
-                      <Text style={[{ fontSize: 12, color: on ? '#fff' : colors.text }]}>%{k}</Text>
+                      {on && <Ionicons name="checkmark" size={14} color="#fff" style={{ marginRight: 4 }} />}
+                      <Text style={[{ fontSize: 12, color: on ? '#fff' : colors.text, fontWeight: on ? '700' : '500' }]}>%{k}</Text>
                     </TouchableOpacity>
                   );
                 })}
               </View>
-
-              <TouchableOpacity style={[{ backgroundColor: colors.primary, borderRadius: 10, padding: 14, alignItems: 'center' }]} onPress={() => setShowFilterModal(false)}>
-                <Text style={[{ color: '#fff', fontWeight: '700' }]}>{t('apply')}</Text>
-              </TouchableOpacity>
             </ScrollView>
+            {/* Sticky bottom apply bar */}
+            <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: 12, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface, flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity
+                style={{ flex: 0.4, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: colors.error + '15' }}
+                onPress={() => { setFilterGroups([]); setFilterProfit('all'); setFilterQty('all'); setFilterKdvs([]); }}
+                activeOpacity={0.8}
+              >
+                <Text style={{ color: colors.error, fontWeight: '800' }}>Hepsini Sıfırla</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 0.6, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: colors.primary }}
+                onPress={() => setShowFilterModal(false)}
+                activeOpacity={0.8}
+              >
+                <Text style={{ color: '#fff', fontWeight: '800' }}>{t('apply')} {activeFilterCount > 0 ? `(${activeFilterCount})` : ''}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -768,7 +849,8 @@ const styles = StyleSheet.create({
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderBottomWidth: 1 },
   modalTitle: { fontSize: 17, fontWeight: '700', flex: 1 },
   filterLabel: { fontSize: 14, fontWeight: '700', marginBottom: 8 },
-  filterChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#ddd' },
+  filterChip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: '#ddd' },
+  fabBtn: { position: 'absolute', right: 16, width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', elevation: 6, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 4, shadowOffset: { width: 0, height: 2 } },
   priceOpt: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderRadius: 12, borderWidth: 1, marginBottom: 8 },
   tab: { flex: 1, paddingVertical: 10, alignItems: 'center' },
   miktarCard: { borderRadius: 10, borderWidth: 1, padding: 12, marginBottom: 8 },

@@ -1068,10 +1068,20 @@ async def _cancellations_loop():
         try:
             tenants = await _get_tenants_for_cancellations()
             if tenants:
+                # Debug: log which tenants are being scanned this iteration
+                tenant_summary = ", ".join([
+                    f"{t.get('tenant_name', t.get('tenant_id'))}({len(t.get('users', []))}u)"
+                    for t in tenants
+                ])
+                if iteration % 4 == 1:  # every ~60s log a summary
+                    logger.info(
+                        f"[cancellations_loop] iter={iteration} scanning {len(tenants)} tenant(s): {tenant_summary}"
+                    )
                 total_pushed = 0
                 for t in tenants:
                     try:
-                        total_pushed += await _scan_cancellations_for_tenant(t)
+                        pushed = await _scan_cancellations_for_tenant(t)
+                        total_pushed += pushed
                     except Exception as inner_e:
                         logger.warning(
                             f"[cancellations_loop] tenant={t.get('tenant_id')} scan error: {inner_e}"
