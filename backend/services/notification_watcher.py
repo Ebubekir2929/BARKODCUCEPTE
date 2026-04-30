@@ -770,7 +770,8 @@ async def _scan_high_sales_for_tenant(tenant: Dict[str, Any]) -> int:
 
     # Use the lowest active threshold so POS returns everything we might need
     min_threshold = min(float(u["threshold"]) for u in users)
-    today_str = datetime.utcnow().strftime("%Y-%m-%d")
+    # POS uses Turkey local time (UTC+3) — send in TR timezone
+    today_str = (datetime.utcnow() + timedelta(hours=3)).strftime("%Y-%m-%d")
 
     try:
         rows = await _pos_request_data(tenant_id, "fis_gunluk_bildirim_feed", {
@@ -967,9 +968,12 @@ async def _get_tenants_for_cancellations() -> List[Dict[str, Any]]:
 async def _scan_cancellations_for_tenant(tenant: Dict[str, Any]) -> int:
     """Single POS scan per tenant for cancellations; dispatches to all users.
 
-    Performance optimization: scans only the last 30 minutes (not full day) to
-    keep the iptal_detay procedure fast. The 30min window is plenty since the
-    watcher runs every 15s and we keep dedup state across runs.
+    Approach: Query POS for the FULL day (matches the cached params_hash so it
+    hits the dataset_cache table — fast). Then filter to the last 30 minutes
+    in Python so we only push for fresh events and rely on the dedup table.
+
+    Timezone: POS runs in Turkey local time (UTC+3). We send sdate/edate in TR
+    timezone and parse TARIH back as TR for filtering.
     """
     tenant_id = tenant["tenant_id"]
     tenant_name = tenant.get("tenant_name") or "Veri"
@@ -977,22 +981,22 @@ async def _scan_cancellations_for_tenant(tenant: Dict[str, Any]) -> int:
     if not users:
         return 0
 
-    now = datetime.utcnow()
-    # Look back 30 minutes — covers any clock skew, watcher restart, or POS hiccups
-    window_start = now - timedelta(minutes=30)
+    # Use Turkey local time (UTC+3) — POS runs in this TZ
+    now_tr = datetime.utcnow() + timedelta(hours=3)
+    today_str = now_tr.strftime("%Y-%m-%d")
+    fresh_cutoff = now_tr - timedelta(minutes=30)
 
     all_rows: list = []
     try:
-        sdate_str = window_start.strftime("%Y-%m-%d %H:%M:%S")
-        edate_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        # FULL-DAY query → matches the existing dataset_cache entry → fast
         rows = await _pos_request_data(tenant_id, "iptal_detay", {
-            "sdate": sdate_str,
-            "edate": edate_str,
+            "sdate": f"{today_str} 00:00:00",
+            "edate": f"{today_str} 23:59:59",
             "IPTAL_ID": None,
-        }, timeout_s=60)
+        }, timeout_s=120)
         all_rows.extend(rows)
         logger.info(
-            f"[cancellations_loop] tenant={tenant_id} window={sdate_str} → {edate_str} rows={len(rows)}"
+            f"[cancellations_loop] tenant={tenant_id} full_day rows={len(rows)} (filtering >={fresh_cutoff.strftime('%H:%M:%S')})"
         )
     except Exception as e:
         logger.warning(f"[cancellations_loop] tenant={tenant_id} POS error: {e}")
