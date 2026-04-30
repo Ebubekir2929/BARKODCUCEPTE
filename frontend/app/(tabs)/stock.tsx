@@ -197,6 +197,8 @@ export default function StockScreen() {
             const newLoaded = prev.loaded + newRows.length;
             // total can never be < loaded (handles backend total_count bug)
             const newTotal = Math.max(prev.total, maxTotalSeen, newLoaded);
+            // Auto-clear when fully loaded
+            if (newLoaded >= newTotal) return null;
             return { loaded: newLoaded, total: newTotal };
           });
         }
@@ -207,6 +209,7 @@ export default function StockScreen() {
     } finally {
       if (!ctrl.signal.aborted) {
         setStockLoading(false);
+        setLoadProgress(null);  // belt-and-suspenders: always clear when done
       }
     }
   }, [activeTenantId, selectedPriceName]);
@@ -474,12 +477,15 @@ export default function StockScreen() {
         </View>
       )}
 
-      <View style={{ paddingHorizontal: 16, paddingVertical: 6 }}>
+      <View style={{ paddingHorizontal: 16, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
         <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>
           {stockLoading
             ? t('loading_pos')
             : (() => {
                 const total = loadProgress?.total || stockList.length;
+                if (loadProgress && loadProgress.loaded < loadProgress.total) {
+                  return `${loadProgress.loaded.toLocaleString('tr-TR')} / ${loadProgress.total.toLocaleString('tr-TR')} ${t('product_singular')}`;
+                }
                 if (searchQuery && filteredStocks.length !== total) {
                   return `${filteredStocks.length.toLocaleString('tr-TR')} / ${total.toLocaleString('tr-TR')} ${t('product_singular')}`;
                 }
@@ -496,6 +502,19 @@ export default function StockScreen() {
           </View>
         )}
       </View>
+
+      {/* Top progress bar — visible only while streaming */}
+      {loadProgress && loadProgress.loaded < loadProgress.total && (
+        <View style={{ height: 2, marginHorizontal: 16, backgroundColor: colors.border, borderRadius: 1, overflow: 'hidden' }}>
+          <View
+            style={{
+              height: 2,
+              width: `${Math.min(100, (loadProgress.loaded / Math.max(1, loadProgress.total)) * 100)}%`,
+              backgroundColor: colors.primary,
+            }}
+          />
+        </View>
+      )}
 
       {stockLoading ? (
         <View style={styles.loadingContainer}>
@@ -516,14 +535,21 @@ export default function StockScreen() {
           scrollEventThrottle={250}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} tintColor={colors.primary} />}
           ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="cube-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_stock_found')}</Text></View>}
-          ListFooterComponent={loadProgress ? (
-            <View style={{ paddingVertical: 16, alignItems: 'center' }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: colors.primary + '15' }}>
-                <ActivityIndicator size="small" color={colors.primary} />
-                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.primary }}>
-                  {loadProgress.loaded.toLocaleString('tr-TR')} / {loadProgress.total.toLocaleString('tr-TR')} ürün yükleniyor...
-                </Text>
+          ListFooterComponent={loadProgress && loadProgress.loaded < loadProgress.total ? (
+            <View style={{ paddingVertical: 12 }}>
+              {/* Subtle linear progress bar — no big pill blocking the screen */}
+              <View style={{ height: 3, backgroundColor: colors.border, borderRadius: 2, overflow: 'hidden' }}>
+                <View
+                  style={{
+                    height: 3,
+                    width: `${Math.min(100, (loadProgress.loaded / Math.max(1, loadProgress.total)) * 100)}%`,
+                    backgroundColor: colors.primary,
+                  }}
+                />
               </View>
+              <Text style={{ fontSize: 10, color: colors.textSecondary, marginTop: 6, textAlign: 'center' }}>
+                {loadProgress.loaded.toLocaleString('tr-TR')} / {loadProgress.total.toLocaleString('tr-TR')}
+              </Text>
             </View>
           ) : null}
         />

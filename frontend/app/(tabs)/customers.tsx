@@ -355,6 +355,9 @@ export default function CustomersScreen() {
             ? t('loading')
             : (() => {
                 const total = loadProgress?.total || cariList.length;
+                if (loadProgress && loadProgress.loaded < loadProgress.total) {
+                  return `${loadProgress.loaded.toLocaleString('tr-TR')} / ${loadProgress.total.toLocaleString('tr-TR')} ${t('customer_count')}`;
+                }
                 if (searchQuery && filteredCaris.length !== total) {
                   return `${filteredCaris.length.toLocaleString('tr-TR')} / ${total.toLocaleString('tr-TR')} ${t('customer_count')}`;
                 }
@@ -363,6 +366,19 @@ export default function CustomersScreen() {
           }
         </Text>
       </View>
+
+      {/* Top progress bar — visible only while streaming */}
+      {loadProgress && loadProgress.loaded < loadProgress.total && (
+        <View style={{ height: 2, marginHorizontal: 16, backgroundColor: colors.border, borderRadius: 1, overflow: 'hidden' }}>
+          <View
+            style={{
+              height: 2,
+              width: `${Math.min(100, (loadProgress.loaded / Math.max(1, loadProgress.total)) * 100)}%`,
+              backgroundColor: colors.primary,
+            }}
+          />
+        </View>
+      )}
 
       {loading ? (
         <View style={styles.loadingContainer}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_customers')}</Text></View>
@@ -378,16 +394,7 @@ export default function CustomersScreen() {
           scrollEventThrottle={250}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} tintColor={colors.primary} />}
           ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="people-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_customers')}</Text></View>}
-          ListFooterComponent={loadProgress ? (
-            <View style={{ paddingVertical: 16, alignItems: 'center' }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: colors.primary + '15' }}>
-                <ActivityIndicator size="small" color={colors.primary} />
-                <Text style={{ fontSize: 12, fontWeight: '700', color: colors.primary }}>
-                  {loadProgress.loaded.toLocaleString('tr-TR')} / {loadProgress.total.toLocaleString('tr-TR')} cari yükleniyor...
-                </Text>
-              </View>
-            </View>
-          ) : (manualToast ? (
+          ListFooterComponent={(manualToast ? (
             <View style={{ paddingVertical: 12, alignItems: 'center' }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 14, backgroundColor: '#10B981' + '20', borderWidth: 1, borderColor: '#10B981' }}>
                 <Ionicons name="checkmark-circle" size={14} color={'#10B981'} />
