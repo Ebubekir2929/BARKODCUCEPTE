@@ -290,7 +290,7 @@ export const CompareModal: React.FC<{
     const sdate = fmtDate(startDate);
     const edate = fmtDate(endDate);
 
-    const CHUNK = 2;
+    const CHUNK = 12; // both tenants fetched in parallel (prev: 2 → caused slow sequential load)
     const all: TenantSnapshot[] = new Array(tenants.length);
     for (let i = 0; i < tenants.length; i += CHUNK) {
       const slice = tenants.slice(i, i + CHUNK);
