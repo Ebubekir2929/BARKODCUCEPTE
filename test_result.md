@@ -690,7 +690,34 @@ agent_communication:
 
   - agent: "main"
     message: |
-      🔁 DEDUPE FIX (2026-05-01 20:42 TR) — user reported "chart 27K but detail 24K";
+      🗂 RAPOR FİLTRE TIMEOUT FIX (2026-05-02 00:15 TR) — user sent a screenshot of the
+      Reports screen showing "Seçenekler yükleniyor..." spinner stuck forever. Backend
+      logs confirmed: `POST /api/data/report-filter-options HTTP/1.1 504 Gateway Timeout`.
+      
+      Root cause: `rap_filtre_lookup` matched the `rap_` prefix in
+      `_is_request_create_allowed`, so every dropdown (Fiş Türü, Fiş Alt Tür, Personel,
+      Şehir, Temsilci, …) fell through to sync.php request_create + 30s poll when the
+      rows-table lookup returned empty — even though the blob table (dataset_cache)
+      already had the data cached (37 options for FIS_TURU, 16 for FIS_ALT_TIPI, etc).
+      
+      Fix in routes/data.py: added explicit DENY for `rap_filtre_lookup` in
+      `_is_request_create_allowed`. The dataset is now served strictly from MySQL
+      (rows table → blob fallback) and falls back to an empty list if both miss.
+      
+      Verified after restart:
+        • source=FIS_TURU    → 37 options, 483ms, _source=mysql_direct
+        • source=FIS_ALT_TIPI → 16 options, 484ms
+        • source=PERSONEL     → 3 options,  483ms
+        • source=SEHIR        → 81 options, 550ms
+        • source=TEMSILCI     → 1 option,   483ms
+      No more 504s. The reports-filter spinner now resolves in <1s.
+
+      GARSON VERISI NOT: user questioned "Garson / Personel Satışları ₺-1.205,00".
+      Direct MySQL inspection confirms this is the literal TOPLAM_TUTAR value stored
+      by POS sync for Merkez 01 May 2026 (SATIR_TIPI=DETAY, KAPANAN_FIS_SAYISI=3,
+      TOPLAM_MIKTAR=-14). It's a legitimate negative aggregate — iade/return fişleri
+      total greater than sales — not a display bug on our side. Frontend correctly
+      renders the POS value verbatim.
       "saatlik chart total ≠ detail total"; "garson satışları yanlış görünüyor".
       
       Root cause: dataset_cache_rows for hourly_stock_detail can contain MULTIPLE

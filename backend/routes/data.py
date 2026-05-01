@@ -55,8 +55,19 @@ REQUEST_ALLOWED_DATASETS: set = {
 
 def _is_request_create_allowed(dataset_key: str) -> bool:
     """Return True when we are allowed to fall through to sync.php for this
-    dataset. Covers both the explicit whitelist and the rap_* prefix."""
+    dataset. Covers both the explicit whitelist and the rap_* prefix.
+
+    Explicit DENY list for datasets that live entirely in dataset_cache_rows
+    and should NEVER ask POS at runtime — if MySQL is empty we just return [].
+    """
     if not dataset_key:
+        return False
+    # Hard-denies: filter lookups and other "must be cached" datasets.
+    # Reports filter dropdowns (Fiş Türü, Fiş Alt Tür, Kasiyer, etc.) come
+    # from rap_filtre_lookup which the POS sync keeps refreshed in the rows
+    # table. No request_create is needed or wanted here — user explicitly
+    # complained about "Seçenekler yükleniyor..." spinner (sync.php timeout).
+    if dataset_key == "rap_filtre_lookup":
         return False
     if dataset_key in REQUEST_ALLOWED_DATASETS:
         return True
