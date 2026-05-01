@@ -236,26 +236,35 @@ async def lookup_cached_report(
 
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            # 1) Fast path: exact binary match
+            # 1) Fast path: exact binary match.
+            # When multiple rows share the exact same params_json (e.g. POS
+            # writes a 1-row delta update + we wrote the full 182-row response),
+            # pick the one with the most rows — that's almost always the
+            # complete result. Tiebreak by recency.
             await cur.execute(
                 """
                 SELECT data_json, row_count, synced_at, params_json
                 FROM dataset_cache
                 WHERE tenant_id=%s AND dataset_key=%s AND params_json=%s
-                ORDER BY synced_at DESC LIMIT 1
+                ORDER BY row_count DESC, synced_at DESC LIMIT 1
                 """,
                 (tenant_id, dataset_key, params_str),
             )
             row = await cur.fetchone()
 
-            # 2) Fallback: fuzzy semantic match across recent entries
+            # 2) Fallback: fuzzy semantic match across recent entries.
+            # Order by row_count DESC first because we may have multiple cache
+            # rows for the same logical params (one written by POS sync.php with
+            # its own hash, one written by our write_dataset_cache with our hash).
+            # The row with the most data is almost always the "complete" one;
+            # POS sometimes writes a single-row delta update right after.
             if not row:
                 await cur.execute(
                     """
                     SELECT data_json, row_count, synced_at, params_json
                     FROM dataset_cache
                     WHERE tenant_id=%s AND dataset_key=%s
-                    ORDER BY synced_at DESC LIMIT 20
+                    ORDER BY row_count DESC, synced_at DESC LIMIT 20
                     """,
                     (tenant_id, dataset_key),
                 )
@@ -295,6 +304,75 @@ async def lookup_cached_report(
         "synced_at": synced_at,
         "age_sec": age_sec,
     }
+
+
+async def write_dataset_cache(
+    tenant_id: str,
+    dataset_key: str,
+    params: dict,
+    data: list,
+) -> None:
+    """Write a sync.php result back into kasacepteweb.dataset_cache so subsequent
+    requests with the same params hit the MySQL fast-path instead of going
+    through sync.php again.
+
+    Idempotent: uses INSERT ... ON DUPLICATE KEY UPDATE.
+
+    The schema columns we touch:
+      - tenant_id, dataset_key (composite key)
+      - params_hash: SHA256(params_json)  — we store sha256 of our canonical
+        serialization which is also what `lookup_cached_report` first tries.
+      - params_json: canonical JSON
+      - data_json: the result list as JSON
+      - row_count: len(data)
+      - revision_no: bumped each write
+      - synced_at, updated_at: NOW()
+    """
+    if not isinstance(data, list):
+        return
+    try:
+        params_json = json.dumps(params or {}, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+    except Exception:
+        return
+    import hashlib
+    params_hash = hashlib.sha256(params_json.encode('utf-8')).hexdigest()
+    try:
+        data_json = json.dumps(data, ensure_ascii=False, default=str)
+    except Exception:
+        logger.debug(f"[write_cache] skip {dataset_key}: data not JSON-serialisable")
+        return
+    row_count = len(data)
+
+    pool = await get_data_pool()
+    try:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    INSERT INTO dataset_cache
+                        (tenant_id, dataset_key, params_hash, params_json,
+                         data_json, row_count, revision_no, synced_at, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, 1, NOW(), NOW())
+                    ON DUPLICATE KEY UPDATE
+                        params_json = VALUES(params_json),
+                        data_json   = VALUES(data_json),
+                        row_count   = VALUES(row_count),
+                        revision_no = revision_no + 1,
+                        synced_at   = NOW(),
+                        updated_at  = NOW()
+                    """,
+                    (
+                        tenant_id, dataset_key, params_hash, params_json,
+                        data_json, row_count,
+                    ),
+                )
+            await conn.commit()
+        logger.info(
+            f"[write_cache] wrote {dataset_key} tenant={tenant_id} "
+            f"rows={row_count} hash={params_hash[:10]}"
+        )
+    except Exception as e:
+        logger.warning(f"[write_cache] failed {dataset_key}: {e}")
 
 
 def clear_dataset_cache(tenant_id: Optional[str] = None, dataset_key: Optional[str] = None):

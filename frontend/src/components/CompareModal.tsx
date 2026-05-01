@@ -614,17 +614,6 @@ export const CompareModal: React.FC<{
                         <Text style={{ color: '#FFF', fontSize: 10, fontWeight: '800' }}>Veri Yok</Text>
                       </View>
                     )}
-                    {!hasError && isActive && (
-                      <View style={{
-                        position: 'absolute', top: -10, right: 10,
-                        backgroundColor: color, borderRadius: 10,
-                        paddingHorizontal: 8, paddingVertical: 2,
-                        flexDirection: 'row', alignItems: 'center', gap: 3,
-                      }}>
-                        <Ionicons name="checkmark-circle" size={11} color="#FFF" />
-                        <Text style={{ color: '#FFF', fontSize: 10, fontWeight: '800' }}>Seçili</Text>
-                      </View>
-                    )}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                       <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: color }} />
                       <Text

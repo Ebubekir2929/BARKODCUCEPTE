@@ -7,6 +7,7 @@ from services.dataset_cache import (
     paginate,
     clear_dataset_cache,
     lookup_cached_report,
+    write_dataset_cache,
 )
 from routes.auth import get_current_user
 from typing import Optional, Dict, List, Any
@@ -689,6 +690,11 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
         }, tenant_id)
         if cache_resp.get("ok") and isinstance(cache_resp.get("data"), list):
             data = cache_resp["data"]
+            # Write-through to kasacepteweb.dataset_cache so the next call hits Step 0
+            try:
+                asyncio.create_task(write_dataset_cache(tenant_id, dataset_key, params, data))
+            except Exception:
+                pass
             if raw_cache:
                 return {"ok": True, "cache": cache_resp, "_cache_hit": True, "_source": "sync_cache"}
             return {
@@ -742,6 +748,13 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
         
         if status == "done":
             cache = status_resp.get("cache", {})
+            data_for_cache = cache.get("data", []) if isinstance(cache.get("data"), list) else []
+            # Write-through to kasacepteweb.dataset_cache so the next call hits Step 0
+            try:
+                if data_for_cache:
+                    asyncio.create_task(write_dataset_cache(tenant_id, dataset_key, params, data_for_cache))
+            except Exception:
+                pass
             if raw_cache:
                 return {"ok": True, "request_uid": request_uid, "cache": cache}
             data = cache.get("data", [])

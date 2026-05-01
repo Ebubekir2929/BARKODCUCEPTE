@@ -499,6 +499,7 @@ const OTHER_REPORTS: ReportDef[] = [
       Personel: '', Cariler: '', CariTur: '', CariGrup: '', Adresler: '', Temsilci: '',
       CariOzelKod1: '', CariOzelKod2: '', CariOzelKod3: '', CariOzelKod4: '', CariOzelKod5: '',
       FisOzelKod1: '', FisOzelKod2: '', FisOzelKod3: '', FisOzelKod4: '', FisOzelKod5: '',
+      MinTutar: -99999999, MaxTutar: 99999999,
       Detayli: 0, Page: 1, PageSize: 500,
       ...STOK_FILTER_DEFAULTS,
     },
@@ -562,6 +563,8 @@ const OTHER_REPORTS: ReportDef[] = [
       { name: 'Cariler', label: 'Cari', type: 'multiselect', source: 'CARI', group: 'Cari' },
       { name: 'CariTur', label: 'Cari Tür', type: 'multiselect', source: 'CARI_TUR', group: 'Cari' },
       { name: 'CariGrup', label: 'Cari Grup', type: 'multiselect', source: 'CARI_GRUP', group: 'Cari' },
+      { name: 'MinTutar', label: 'Min Tutar', type: 'text', group: 'Tutar', placeholder: '0', numeric: true },
+      { name: 'MaxTutar', label: 'Max Tutar', type: 'text', group: 'Tutar', placeholder: '99999999', numeric: true },
       ...STOK_FILTERS_UI,
     ],
   },
@@ -1316,6 +1319,26 @@ export default function ReportsScreen() {
     if (deferredSearch) {
       d = d.filter((row: any) => (row.__search || '').includes(deferredSearch));
     }
+    // ─── Tutar filtresi (fis_kalem raporu için client-side ek emniyet) ───
+    // POS MinTutar/MaxTutar parametrelerini destekleyebilir, ama destekle/me
+    // ihtimaline karşı burada da filtreliyoruz. Tek değer için min=max girilir.
+    if (activeReport?.datasetKey === 'rap_fis_kalem_listesi_web') {
+      const minT = parseFloat(String(filterValues?.MinTutar ?? ''));
+      const maxT = parseFloat(String(filterValues?.MaxTutar ?? ''));
+      const hasMin = !isNaN(minT) && minT > -99999999;
+      const hasMax = !isNaN(maxT) && maxT < 99999999;
+      if (hasMin || hasMax) {
+        d = d.filter((row: any) => {
+          if (row.__isDetail || row.__isHeader) return true; // keep detail rows
+          const tut = parseFloat(String(
+            row.SATIR_GENEL_TOPLAM ?? row.DAHIL_NET_TUTAR ?? row.NET_TUTAR ?? '0'
+          )) || 0;
+          if (hasMin && tut < minT) return false;
+          if (hasMax && tut > maxT) return false;
+          return true;
+        });
+      }
+    }
     if (deferredSortKey) {
       // Preserve parent → child grouping when __isDetail rows exist.
       // Split into parent rows + their detail children, sort parents, then rebuild.
@@ -1348,7 +1371,7 @@ export default function ReportsScreen() {
       }
     }
     return d;
-  }, [reportData, deferredSearch, deferredSortKey, deferredSortAsc]);
+  }, [reportData, deferredSearch, deferredSortKey, deferredSortAsc, activeReport?.datasetKey, filterValues?.MinTutar, filterValues?.MaxTutar]);
 
   const toggleSort = (key: string) => { if (sortKey === key) setSortAsc(!sortAsc); else { setSortKey(key); setSortAsc(true); } };
 
