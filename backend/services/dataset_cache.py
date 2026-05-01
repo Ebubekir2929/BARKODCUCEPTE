@@ -555,15 +555,23 @@ async def lookup_rows_dataset(
             pool = await get_data_pool()
             async with pool.acquire() as conn:
                 async with conn.cursor() as cur:
+                    # Use JSON_EXTRACT/JSON_UNQUOTE to correctly parse string-typed
+                    # numeric values like "KDV_DAHIL_TOPLAM_TUTAR":"99.00".
+                    # The previous SUBSTRING_INDEX approach left the surrounding
+                    # quotes in the captured substring, so CAST(... AS DECIMAL)
+                    # silently returned 0 — making the whole hourly chart blank.
                     await cur.execute(
                         """
                         SELECT
-                          SUBSTRING_INDEX(SUBSTRING_INDEX(row_json, '"SAAT_ADI":"', -1), '"', 1) AS saat_adi,
-                          SUBSTRING_INDEX(SUBSTRING_INDEX(row_json, '"LOKASYON":"', -1), '"', 1) AS lokasyon,
-                          SUBSTRING_INDEX(SUBSTRING_INDEX(row_json, '"LOKASYON_ID":', -1), ',', 1) + 0 AS lokasyon_id,
-                          SUM(CAST(NULLIF(SUBSTRING_INDEX(SUBSTRING_INDEX(row_json, '"KDV_DAHIL_TOPLAM_TUTAR":', -1), ',', 1), '') AS DECIMAL(18,4))) AS amount,
-                          SUM(CAST(NULLIF(SUBSTRING_INDEX(SUBSTRING_INDEX(row_json, '"SATIR_SAYISI":', -1), ',', 1), '') AS UNSIGNED)) AS satir,
-                          COUNT(*) AS row_count
+                          JSON_UNQUOTE(JSON_EXTRACT(row_json, '$.SAAT_ADI'))     AS saat_adi,
+                          JSON_UNQUOTE(JSON_EXTRACT(row_json, '$.LOKASYON'))    AS lokasyon,
+                          CAST(JSON_EXTRACT(row_json, '$.LOKASYON_ID') AS UNSIGNED) AS lokasyon_id,
+                          SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(row_json, '$.KDV_DAHIL_TOPLAM_TUTAR')) AS DECIMAL(18,4))) AS amount,
+                          SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(row_json, '$.BRUT_KDV_DAHIL_TOPLAM_TUTAR')) AS DECIMAL(18,4))) AS brut_amount,
+                          SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(row_json, '$.GENEL_ISKONTO_TUTARI')) AS DECIMAL(18,4))) AS iskonto,
+                          SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(row_json, '$.PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR')) AS DECIMAL(18,4))) AS perakende,
+                          SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(row_json, '$.ERP12_KDV_DAHIL_TOPLAM_TUTAR')) AS DECIMAL(18,4))) AS erp12,
+                          COUNT(*) AS satir_sayisi
                         FROM dataset_cache_rows
                         WHERE tenant_id=%s AND dataset_key='hourly_stock_detail' AND deleted_at IS NULL
                         GROUP BY saat_adi, lokasyon, lokasyon_id
@@ -587,13 +595,18 @@ async def lookup_rows_dataset(
                             continue
                     except (TypeError, ValueError):
                         pass
+                amount = float(r[3] or 0)
                 out.append({
                     "SAAT_ADI": (r[0] or "").strip(),
                     "LOKASYON": (r[1] or "").strip(),
                     "LOKASYON_ID": lok_id,
-                    "KDV_DAHIL_TOPLAM_TUTAR": float(r[3] or 0),
-                    "TOPLAM_TUTAR": float(r[3] or 0),
-                    "SATIR_SAYISI": int(r[4] or 0),
+                    "KDV_DAHIL_TOPLAM_TUTAR": amount,
+                    "TOPLAM_TUTAR": amount,
+                    "BRUT_KDV_DAHIL_TOPLAM_TUTAR": float(r[4] or 0),
+                    "GENEL_ISKONTO_TUTARI": float(r[5] or 0),
+                    "PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR": float(r[6] or 0),
+                    "ERP12_KDV_DAHIL_TOPLAM_TUTAR": float(r[7] or 0),
+                    "SATIR_SAYISI": int(r[8] or 0),
                     "_AGGREGATE": True,
                 })
             return out

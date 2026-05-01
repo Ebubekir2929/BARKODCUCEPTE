@@ -670,7 +670,29 @@ agent_communication:
 
   - agent: "main"
     message: |
-      🧠 LIVE MYSQL WIRE-UP (2026-05-01 19:45 TR) — user confirmed every dashboard dataset
+      🐛 SQL JSON-PARSE BUG FIX (2026-05-01 19:55 TR) — user reported "Saatlik satış
+      grafiği veri yok, lokasyon saatlik satış grafiği hiç yok, iptal detayı gelmiyor".
+      
+      Root cause: services/dataset_cache.py lookup_rows_dataset() hourly_stock_detail
+      SQL pushdown used SUBSTRING_INDEX to scrape values out of row_json. The
+      "KDV_DAHIL_TOPLAM_TUTAR" field is stored as a string-with-quotes in the JSON
+      ("KDV_DAHIL_TOPLAM_TUTAR":"99.00"), so the captured substring was `"99.00"`
+      (with leading/trailing quotes). CAST(... AS DECIMAL(18,4)) on that returns 0.
+      → Every hour aggregated to amount=0, frontend's `hasAnySales` filter hid the
+      whole HourlyLocationSection, and the dashboard hourly chart appeared blank.
+      
+      Fix: replaced SUBSTRING_INDEX with JSON_EXTRACT + JSON_UNQUOTE. Also expanded
+      the projection to include BRUT_KDV_DAHIL_TOPLAM_TUTAR, GENEL_ISKONTO_TUTARI,
+      PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR, ERP12_KDV_DAHIL_TOPLAM_TUTAR and use COUNT(*)
+      for SATIR_SAYISI (some rows lacked the field so the previous SUM was 0).
+      
+      Verified after backend restart:
+        • hourly-detail-full Merkez   → 14:00=128 TL, 15:00=314 TL, 17:00=30 TL ✅
+        • hourly-detail-full Gümüşhane → 17 hours, 13:00=117.599 TL, 15:00=93.341 TL ✅
+        • All numeric fields (KDV, BRUT, ISKONTO, PERAKENDE, ERP12) now non-zero where appropriate.
+      
+      No frontend change required. The fix is purely in the SQL aggregation. User
+      should pull from GitHub + EAS build a fresh APK to see the populated charts.
       (saatlik detay, açık masa detay, açık hesap özet, iptal detay, report filters) is
       already stored in kasacepteweb.dataset_cache_rows. Re-enabled `hourly_stock_detail`
       in ROWS_DATASETS so the dashboard chart now reads straight from MySQL rows + the
