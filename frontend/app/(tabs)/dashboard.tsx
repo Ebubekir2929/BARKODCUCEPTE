@@ -244,57 +244,14 @@ export default function DashboardScreen() {
 
   // Fetch fresh hourly sales from /hourly-detail-full (post-discount KDV_DAHIL_TOPLAM_TUTAR
   // from new SQL procedure GET_HOURLY_STOCK_DETAIL). Aggregates across ALL locations.
+  // ─── freshHourlySales fetch DEVRE DIŞI ───
+  // Saatlik grafik artık /api/data/dashboard endpoint'inin `hourly_data`
+  // alanından geliyor (dataset_cache.data_json blob, çok hızlı). /hourly-detail-full
+  // ekstra istek atmaya gerek yok ve büyük tenant'larda telefonu donduruyor.
+  // Eski kullanım için freshHourlySales state'i tutuldu ama hep null kalır.
   useEffect(() => {
-    if (!activeTenantId) {
-      setFreshHourlySales(null);
-      return;
-    }
-    if (!isTabFocused) return; // pause refresh when not on Dashboard tab
-    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const sdate = fmt(filters.startDate);
-    const edate = fmt(filters.endDate);
-    let cancelled = false;
-    const ctrl = new AbortController();
-    (async () => {
-      try {
-        const { token } = useAuthStore.getState();
-        const timer = setTimeout(() => ctrl.abort(), 60000);
-        const resp = await fetch(`${API_URL}/api/data/hourly-detail-full`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          signal: ctrl.signal,
-          body: JSON.stringify({
-            tenant_id: activeTenantId,
-            date: sdate,
-            edate: edate,
-            lokasyon_id: null,
-          }),
-        });
-        clearTimeout(timer);
-        if (!resp.ok) return;
-        const j = await resp.json();
-        const byHour: Record<string, any[]> = j?.by_hour || {};
-        const hourMap: Record<string, number> = {};
-        Object.entries(byHour).forEach(([hour, rows]) => {
-          let amount = 0;
-          rows.forEach((r: any) => {
-            amount += parseFloat(r?.KDV_DAHIL_TOPLAM_TUTAR || r?.TOPLAM_TUTAR || '0');
-          });
-          hourMap[hour] = (hourMap[hour] || 0) + amount;
-        });
-        const arr: HourlySales[] = Object.entries(hourMap)
-          .sort(([a], [b]) => a.localeCompare(b))
-          .map(([hour, amount]) => ({ hour, amount, transactions: 0, products: [] }));
-        if (!cancelled) setFreshHourlySales(arr.length > 0 ? arr : null);
-      } catch {
-        // silently fall back to legacy hourly_data
-      }
-    })();
-    return () => {
-      cancelled = true;
-      try { ctrl.abort(); } catch {}
-    };
-  }, [activeTenantId, filters.startDate.getTime(), filters.endDate.getTime(), isTabFocused]);
+    setFreshHourlySales(null);
+  }, [activeTenantId, filters.startDate.getTime(), filters.endDate.getTime()]);
 
   // Effective hourly sales: prefer fresh procedure data; fall back to legacy hourly_data
   const effectiveHourlySales = useMemo<HourlySales[]>(() => {

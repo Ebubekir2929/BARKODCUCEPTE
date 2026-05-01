@@ -320,7 +320,9 @@ ROWS_DATASETS: set = {
     "iptal_detay",
     "acik_masa_detay",
     "rap_acik_hesap_kisi_ozet_web",
-    "hourly_stock_detail",
+    # NOTE: hourly_stock_detail removed — kullanıcı isteği üzerine eski request
+    # yoluna geri alındı (sync.php → POS query). MySQL rows pushdown çok
+    # büyük JSON parse maliyeti yaratıyordu.
     "rap_filtre_lookup",
 }
 
