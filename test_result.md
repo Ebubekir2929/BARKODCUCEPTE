@@ -690,7 +690,48 @@ agent_communication:
 
   - agent: "main"
     message: |
-      🔍 HOURLY-DETAIL SINGLE-HOUR + IPTAL DRILL-DOWN FIX (2026-05-01 20:05 TR)
+      🔁 DEDUPE FIX (2026-05-01 20:42 TR) — user reported "chart 27K but detail 24K";
+      "saatlik chart total ≠ detail total"; "garson satışları yanlış görünüyor".
+      
+      Root cause: dataset_cache_rows for hourly_stock_detail can contain MULTIPLE
+      copies of the same logical row when POS sync writes the dataset under
+      different params_hash (e.g. one push with params {sdate:00:00,edate:23:59}
+      and another with params {sdate:15:00,edate:15:59}). Both pushes are valid
+      cache snapshots but they OVERLAP, and the SQL aggregation summed both copies.
+      
+      Example (Merkez): 8 raw rows containing SİGARA 99 TL twice for 15:00, KÖME
+      58 TL twice for 15:00 → 15:00 chart bar showed 314 TL instead of 157 TL.
+      Grand-day total reported 472 TL while financial_data.GENELTOPLAM said 315 TL.
+      
+      Fix in services/dataset_cache.py:
+        (A) Full-day SQL pushdown — replaced with a SELECT row_json,updated_at
+            ORDER BY updated_at DESC + Python dedupe by
+            (SAAT_ADI, STOK_ID, LOKASYON_ID), keeping the FIRST row per key
+            (most-recent push wins). After dedupe, aggregate by (hour, location).
+        (B) Single-hour drill-down — direct SQL query with LIKE on SAAT_ADI to
+            pre-filter (5640 → ~500 rows), ORDER BY updated_at DESC, then the
+            same Python dedupe (saat_adi, stok_id, lokasyon_id). Returns raw
+            product rows for the modal — but NO duplicates.
+        (C) filter_hourly_stock_detail_rows: added `seen` set with same dedupe
+            key as a safety net for the mem_cache fallback path.
+      
+      Verified after restart on Merkez:
+        • Full-day chart total = 315.00 TL (= financial_data.GENELTOPLAM) ✅
+        • 14:00 = 128, 15:00 = 157, 17:00 = 30 → sums to 315 ✅
+      
+      Verified on Gümüşhane (5640 raw hourly rows → after dedupe):
+        • 13:00 chart=108470.13  detail=108470.13  match ✅
+        • 14:00 chart=76737.82   detail=76737.82   match ✅
+        • 15:00 chart=91658.27   detail=91658.27   match ✅
+        • 19:00 chart=73376.46   detail=73376.46   match ✅
+        • 20:00 chart=49940.40   detail=49940.40   match ✅
+      The user-reported "chart 27K vs detail 24K" inconsistency is gone.
+      
+      Note: financial_data total (933188.68 for Gümüşhane) ≠ hourly_stock_detail
+      sum (843266.30). This is EXPECTED — financial_data sums all paid receipts
+      including açık masa/açık hesap, while hourly_stock_detail only contains
+      retail line items closed within the day. This is not a bug; it reflects
+      two different POS aggregation views.
       
       Two follow-up bugs after the SQL fix:
       

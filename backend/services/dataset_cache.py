@@ -458,6 +458,12 @@ def filter_hourly_stock_detail_rows(items: List[dict], params: dict) -> List[dic
     The rows do NOT have a TARIH field (only SAAT_ADI/SAAT_NO), so when a
     single-hour request is made (sdate "YYYY-MM-DD HH:00:00", edate same hour),
     we filter by SAAT_NO instead of comparing date strings.
+
+    Dedupe: POS sync may push the same product under different params_hash
+    (full-day vs. single-hour query), causing the rows table to contain
+    duplicate (saat, stok_id, lokasyon) entries. We keep ONE row per unique
+    key. If `items` is already an ordered list (latest-first), the first
+    occurrence wins; otherwise the de-dup is best-effort.
     """
     p = params or {}
     sdate = p.get("sdate") or p.get("SDATE") or p.get("BASTARIH") or ""
@@ -478,6 +484,7 @@ def filter_hourly_stock_detail_rows(items: List[dict], params: dict) -> List[dic
     except (ValueError, TypeError):
         target_hour = None
 
+    seen = set()
     out = []
     for r in items:
         if stok_id not in (None, "", 0):
@@ -507,6 +514,15 @@ def filter_hourly_stock_detail_rows(items: List[dict], params: dict) -> List[dic
                     row_hour = None
             if row_hour != target_hour:
                 continue
+        # Dedupe by (saat_adi, stok_id, lokasyon_id)
+        dedupe_key = (
+            (r.get("SAAT_ADI") or "").strip(),
+            str(r.get("STOK_ID") or ""),
+            str(r.get("LOKASYON_ID") or ""),
+        )
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
         out.append(r)
     return out
 
@@ -606,67 +622,155 @@ async def lookup_rows_dataset(
             and sdate_str[:10] == edate_str[:10]
             and sdate_str[11:13] == edate_str[11:13]
         )
+        if is_single_hour:
+            # Direct DB query ordered by updated_at DESC so the Python dedupe
+            # picks the most recent push per (saat_adi, stok_id, lokasyon_id).
+            # This MUST match the dedupe order used by the full-day SQL agg
+            # below, otherwise the single-hour SUM and the dashboard chart
+            # disagree (user reported "27 bin chart, 24 bin detail").
+            try:
+                from services import get_data_pool
+                pool = await get_data_pool()
+                async with pool.acquire() as conn:
+                    async with conn.cursor() as cur:
+                        target_hour = sdate_str[11:13]
+                        # Pre-filter by SAAT_ADI prefix in SQL to dramatically
+                        # reduce the row count (e.g. Gümüşhane 5640 → ~500).
+                        like_pattern = f"%\"SAAT_ADI\":\"{target_hour}:00 - %"
+                        await cur.execute(
+                            """
+                            SELECT row_json, updated_at
+                            FROM dataset_cache_rows
+                            WHERE tenant_id=%s AND dataset_key='hourly_stock_detail'
+                              AND deleted_at IS NULL
+                              AND row_json LIKE %s
+                            ORDER BY updated_at DESC
+                            """,
+                            (tenant_id, like_pattern),
+                        )
+                        rows = await cur.fetchall()
+                # Dedupe in Python preserving the newest row per
+                # (saat, stok_id, lokasyon_id). Then apply filters.
+                p = params or {}
+                wanted_lok = p.get("lokasyonID") or p.get("LOKASYON_ID") or p.get("lokasyon_id")
+                target_hour_int = int(target_hour)
+                seen: set = set()
+                out: list = []
+                for row_json_raw, _upd in rows or []:
+                    try:
+                        d = json.loads(row_json_raw) if isinstance(row_json_raw, (str, bytes)) else (row_json_raw or {})
+                    except Exception:
+                        continue
+                    # Verify hour (LIKE is approximate)
+                    try:
+                        h = int(d.get("SAAT_NO") if d.get("SAAT_NO") is not None else str(d.get("SAAT_ADI") or "")[:2])
+                    except (TypeError, ValueError):
+                        continue
+                    if h != target_hour_int:
+                        continue
+                    if wanted_lok not in (None, "", 0):
+                        try:
+                            if int(wanted_lok) != int(d.get("LOKASYON_ID") or 0):
+                                continue
+                        except (TypeError, ValueError):
+                            pass
+                    key = (
+                        (d.get("SAAT_ADI") or "").strip(),
+                        str(d.get("STOK_ID") or ""),
+                        str(d.get("LOKASYON_ID") or ""),
+                    )
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    out.append(d)
+                return out
+            except Exception as e:
+                logger.warning(f"[lookup_rows] single-hour direct DB failed: {e}; fallback to mem_cache")
+                # Fall through to mem_cache + filter_hourly_stock_detail_rows below
         if not is_single_hour:
             try:
                 from services import get_data_pool
                 pool = await get_data_pool()
                 async with pool.acquire() as conn:
                     async with conn.cursor() as cur:
-                        # Use JSON_EXTRACT/JSON_UNQUOTE to correctly parse string-typed
-                        # numeric values like "KDV_DAHIL_TOPLAM_TUTAR":"99.00".
-                        # The previous SUBSTRING_INDEX approach left the surrounding
-                        # quotes in the captured substring, so CAST(... AS DECIMAL)
-                        # silently returned 0 — making the whole hourly chart blank.
+                        # Fetch raw rows + updated_at; dedupe in Python by
+                        # (SAAT_ADI, STOK_ID, LOKASYON_ID) — keep the most
+                        # recent push. Same-content rows can exist multiple
+                        # times when POS sync writes the same product under
+                        # different params_hash (e.g., full-day vs. single-hour
+                        # snapshot). Aggregating without dedupe double-counts.
                         await cur.execute(
                             """
-                            SELECT
-                              TRIM(BOTH '"' FROM CAST(JSON_EXTRACT(row_json, '$.SAAT_ADI') AS CHAR))    AS saat_adi,
-                              TRIM(BOTH '"' FROM CAST(JSON_EXTRACT(row_json, '$.LOKASYON') AS CHAR))   AS lokasyon,
-                              CAST(JSON_EXTRACT(row_json, '$.LOKASYON_ID') AS UNSIGNED)                AS lokasyon_id,
-                              SUM(CAST(TRIM(BOTH '"' FROM CAST(JSON_EXTRACT(row_json, '$.KDV_DAHIL_TOPLAM_TUTAR') AS CHAR)) AS DECIMAL(18,4))) AS amount,
-                              SUM(CAST(TRIM(BOTH '"' FROM CAST(JSON_EXTRACT(row_json, '$.BRUT_KDV_DAHIL_TOPLAM_TUTAR') AS CHAR)) AS DECIMAL(18,4))) AS brut_amount,
-                              SUM(CAST(TRIM(BOTH '"' FROM CAST(JSON_EXTRACT(row_json, '$.GENEL_ISKONTO_TUTARI') AS CHAR)) AS DECIMAL(18,4))) AS iskonto,
-                              SUM(CAST(TRIM(BOTH '"' FROM CAST(JSON_EXTRACT(row_json, '$.PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR') AS CHAR)) AS DECIMAL(18,4))) AS perakende,
-                              SUM(CAST(TRIM(BOTH '"' FROM CAST(JSON_EXTRACT(row_json, '$.ERP12_KDV_DAHIL_TOPLAM_TUTAR') AS CHAR)) AS DECIMAL(18,4))) AS erp12,
-                              COUNT(*) AS satir_sayisi
+                            SELECT row_json, updated_at
                             FROM dataset_cache_rows
                             WHERE tenant_id=%s AND dataset_key='hourly_stock_detail' AND deleted_at IS NULL
-                            GROUP BY saat_adi, lokasyon, lokasyon_id
+                            ORDER BY updated_at DESC
                             """,
                             (tenant_id,),
                         )
                         rows = await cur.fetchall()
-                # Build the synthetic "row" list the frontend expects: 1 row per
-                # (hour, location) carrying the aggregated KDV_DAHIL_TOPLAM_TUTAR.
-                # Filter by lokasyon if requested.
+                # ─── Python-side dedupe + aggregation ───
+                # Track the latest row per (saat_adi, stok_id, lokasyon_id).
+                latest: dict = {}
+                for row_json_raw, upd in rows or []:
+                    try:
+                        d = json.loads(row_json_raw) if isinstance(row_json_raw, (str, bytes)) else (row_json_raw or {})
+                    except Exception:
+                        continue
+                    saat = (d.get("SAAT_ADI") or "").strip()
+                    if not saat:
+                        continue
+                    stok_id = d.get("STOK_ID") or 0
+                    lok_id = int(d.get("LOKASYON_ID") or 0)
+                    key = (saat, str(stok_id), lok_id)
+                    if key not in latest:  # first row wins because we ORDER BY updated_at DESC
+                        latest[key] = d
+                # Aggregate the deduped rows by (hour, location)
                 p = params or {}
                 wanted_lok = p.get("lokasyonID") or p.get("LOKASYON_ID") or p.get("lokasyon_id")
-                out = []
-                for r in rows:
-                    if not r:
-                        continue
-                    lok_id = int(r[2] or 0)
+
+                def _f(v):
+                    try:
+                        return float(v) if v is not None else 0.0
+                    except (TypeError, ValueError):
+                        return 0.0
+
+                agg: dict = {}
+                for d in latest.values():
+                    saat = (d.get("SAAT_ADI") or "").strip()
+                    lok = (d.get("LOKASYON") or "").strip()
+                    lok_id = int(d.get("LOKASYON_ID") or 0)
                     if wanted_lok not in (None, "", 0):
                         try:
                             if int(wanted_lok) != lok_id:
                                 continue
                         except (TypeError, ValueError):
                             pass
-                    amount = float(r[3] or 0)
-                    out.append({
-                        "SAAT_ADI": (r[0] or "").strip(),
-                        "LOKASYON": (r[1] or "").strip(),
-                        "LOKASYON_ID": lok_id,
-                        "KDV_DAHIL_TOPLAM_TUTAR": amount,
-                        "TOPLAM_TUTAR": amount,
-                        "BRUT_KDV_DAHIL_TOPLAM_TUTAR": float(r[4] or 0),
-                        "GENEL_ISKONTO_TUTARI": float(r[5] or 0),
-                        "PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR": float(r[6] or 0),
-                        "ERP12_KDV_DAHIL_TOPLAM_TUTAR": float(r[7] or 0),
-                        "SATIR_SAYISI": int(r[8] or 0),
-                        "_AGGREGATE": True,
-                    })
-                return out
+                    bucket = (saat, lok, lok_id)
+                    if bucket not in agg:
+                        agg[bucket] = {
+                            "SAAT_ADI": saat,
+                            "LOKASYON": lok,
+                            "LOKASYON_ID": lok_id,
+                            "KDV_DAHIL_TOPLAM_TUTAR": 0.0,
+                            "TOPLAM_TUTAR": 0.0,
+                            "BRUT_KDV_DAHIL_TOPLAM_TUTAR": 0.0,
+                            "GENEL_ISKONTO_TUTARI": 0.0,
+                            "PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR": 0.0,
+                            "ERP12_KDV_DAHIL_TOPLAM_TUTAR": 0.0,
+                            "SATIR_SAYISI": 0,
+                            "_AGGREGATE": True,
+                        }
+                    a = agg[bucket]
+                    amt = _f(d.get("KDV_DAHIL_TOPLAM_TUTAR"))
+                    a["KDV_DAHIL_TOPLAM_TUTAR"] += amt
+                    a["TOPLAM_TUTAR"] += amt
+                    a["BRUT_KDV_DAHIL_TOPLAM_TUTAR"] += _f(d.get("BRUT_KDV_DAHIL_TOPLAM_TUTAR"))
+                    a["GENEL_ISKONTO_TUTARI"] += _f(d.get("GENEL_ISKONTO_TUTARI"))
+                    a["PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR"] += _f(d.get("PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR"))
+                    a["ERP12_KDV_DAHIL_TOPLAM_TUTAR"] += _f(d.get("ERP12_KDV_DAHIL_TOPLAM_TUTAR"))
+                    a["SATIR_SAYISI"] += 1
+                return list(agg.values())
             except Exception as e:
                 logger.warning(f"[lookup_rows] hourly_stock_detail SQL agg failed: {e}; falling back")
                 # Fall through to the slow Python path below
