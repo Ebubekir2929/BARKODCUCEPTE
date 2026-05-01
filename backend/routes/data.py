@@ -42,8 +42,11 @@ REQUEST_ALLOWED_DATASETS: set = {
     #   • Stok detay ekranında sadece "stok_extre" (hareket listesi) request atar.
     #     "stok_bilgi_miktar" artık request atmıyor — MySQL'de varsa gelir, yoksa boş.
     #   • Cari detay ekranında sadece "kart_extre_cari" request atar.
+    #   • İptal detay drill-down: MySQL'de yalnızca header (SATIR_MI=False) tutuluyor;
+    #     kullanıcı bir iptal'e dokunduğunda satır kalemleri için POS'a gidilir.
     "stok_extre",          # stock ledger (stock_detail drill-down)
     "kart_extre_cari",     # customer ledger (acik_hesap_kisi_detail / cari_detail)
+    "iptal_detay",         # cancellation line items (iptal-detail modal drill-down)
     # Legacy reports screen still needs live data from POS when MySQL
     # cache lacks the specific params combination the user just chose.
     # Prefix "rap_" covers every report dataset_key (rap_fis_kalem_listesi_web,

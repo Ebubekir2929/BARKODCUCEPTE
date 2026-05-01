@@ -681,18 +681,59 @@ agent_communication:
       → Every hour aggregated to amount=0, frontend's `hasAnySales` filter hid the
       whole HourlyLocationSection, and the dashboard hourly chart appeared blank.
       
-      Fix: replaced SUBSTRING_INDEX with JSON_EXTRACT + JSON_UNQUOTE. Also expanded
-      the projection to include BRUT_KDV_DAHIL_TOPLAM_TUTAR, GENEL_ISKONTO_TUTARI,
+      Fix: replaced SUBSTRING_INDEX with JSON_EXTRACT + TRIM(BOTH '"' FROM …) — the
+      MariaDB server in use (kasacepteweb) doesn't expose JSON_UNQUOTE, so we strip
+      surrounding quotes manually after JSON_EXTRACT before CAST. Also expanded the
+      projection to include BRUT_KDV_DAHIL_TOPLAM_TUTAR, GENEL_ISKONTO_TUTARI,
       PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR, ERP12_KDV_DAHIL_TOPLAM_TUTAR and use COUNT(*)
       for SATIR_SAYISI (some rows lacked the field so the previous SUM was 0).
+
+  - agent: "main"
+    message: |
+      🔍 HOURLY-DETAIL SINGLE-HOUR + IPTAL DRILL-DOWN FIX (2026-05-01 20:05 TR)
       
-      Verified after backend restart:
-        • hourly-detail-full Merkez   → 14:00=128 TL, 15:00=314 TL, 17:00=30 TL ✅
-        • hourly-detail-full Gümüşhane → 17 hours, 13:00=117.599 TL, 15:00=93.341 TL ✅
-        • All numeric fields (KDV, BRUT, ISKONTO, PERAKENDE, ERP12) now non-zero where appropriate.
+      Two follow-up bugs after the SQL fix:
       
-      No frontend change required. The fix is purely in the SQL aggregation. User
-      should pull from GitHub + EAS build a fresh APK to see the populated charts.
+      (a) "Saatlik satış detayında o saatteki satışı getirmiyor, tüm satışları getiriyor"
+          → /api/data/hourly-detail (single-hour modal) was running the SQL GROUP BY
+            pushdown intended for /hourly-detail-full. It returned 1 _AGGREGATE row per
+            (hour, location) — i.e. ALL hours instead of just the requested 14:00-15:00.
+          → Also Python filter_hourly_stock_detail_rows() looked at TARIH/FIS_TARIHI
+            fields that don't exist on these rows, so it never filtered anything.
+          
+          Fix in services/dataset_cache.py:
+            • Added is_single_hour detection in lookup_rows_dataset (sdate[:10] +
+              sdate[11:13] == edate[:10] + edate[11:13]) → skip SQL aggregation,
+              fall through to Python.
+            • Updated filter_hourly_stock_detail_rows to derive target_hour from
+              sdate when it's a single-hour query, then compare against r["SAAT_NO"]
+              (or parse SAAT_ADI prefix) instead of the missing TARIH field.
+          
+          Verified: Merkez hour=14:00 → 2 rows (SİGARA 99 TL + KÖME 29 TL),
+          all SAAT_ADI = "14:00 - 15:00", 642ms, _source=rows_table. ✅
+      
+      (b) "İptal detay yine boş geliyor"
+          → iptal_detay rows table only contains HEADER rows (SATIR_MI=False, no
+            STOK_AD/STOK_ID/MIKTAR). When user taps an iptal, frontend calls
+            /api/data/iptal-detail with IPTAL_ID; lookup_rows_dataset returned the
+            header (1 row, no products) and the whitelist gate prevented sync.php
+            fall-through. Modal showed empty.
+          
+          Fix in routes/data.py + services/dataset_cache.py:
+            • Added "iptal_detay" to REQUEST_ALLOWED_DATASETS (drill-down whitelist).
+            • Modified filter_iptal_rows: when IPTAL_ID is specified AND filtered
+              rows contain ONLY headers (no SATIR_MI=True / no STOK_AD/STOK_ID),
+              return None so _on_demand_request falls through to sync.php.
+              The POS query returns the actual product line items.
+            • Result is then written back to dataset_cache via write_dataset_cache
+              (existing write-through), so subsequent taps are instant from MySQL.
+          
+          Verified: iptal-detail Merkez IPTAL_ID=19778444:
+            • 1st call (POS round-trip): 16.1s → 2 product line items
+              (Zıt Kardeşler kitap 1500 TL + PESTİL 1 TL).
+            • 2nd call (MySQL cache hit): 795ms (_source=mysql_direct). ✅
+            • All POS fields preserved: STOK_ADI, STOK_KODU, BARKOD, FIYAT,
+              SATIR_TUTAR, PERSONEL_AD, KDV_PAREKENDE, MIKTAR, IPTAL_TIPI, etc.
       (saatlik detay, açık masa detay, açık hesap özet, iptal detay, report filters) is
       already stored in kasacepteweb.dataset_cache_rows. Re-enabled `hourly_stock_detail`
       in ROWS_DATASETS so the dashboard chart now reads straight from MySQL rows + the

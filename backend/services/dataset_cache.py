@@ -381,11 +381,19 @@ def _between_dates(row: dict, sdate: Optional[str], edate: Optional[str], date_k
 
 
 def filter_iptal_rows(items: List[dict], params: dict) -> List[dict]:
-    """Filter cached iptal_detay / iptal_ozet rows by sdate/edate and IPTAL_ID."""
+    """Filter cached iptal_detay / iptal_ozet rows by sdate/edate and IPTAL_ID.
+
+    Drill-down behaviour (2026-05-01): When IPTAL_ID is specified by the
+    frontend (user tapped an iptal to see line items) AND the cached rows for
+    that IPTAL_ID contain ONLY headers (SATIR_MI=False, no product line items),
+    we return None so the caller (`_on_demand_request`) falls through to
+    sync.php — the POS will then return the actual line items.
+    """
     sdate = (params or {}).get("sdate") or ""
     edate = (params or {}).get("edate") or ""
     iptal_id = (params or {}).get("IPTAL_ID")
     out = []
+    has_satir = False
     for r in items:
         if iptal_id not in (None, "", 0):
             try:
@@ -395,7 +403,14 @@ def filter_iptal_rows(items: List[dict], params: dict) -> List[dict]:
                 continue
         if not _between_dates(r, sdate, edate, ["IPTAL_TARIHI", "TARIH", "FIS_TARIHI", "TARIH_SAAT"]):
             continue
+        # Track whether we have any product-line rows
+        if r.get("SATIR_MI") is True or r.get("STOK_AD") or r.get("STOK_ID"):
+            has_satir = True
         out.append(r)
+    # If user is drilling into a specific iptal but the cache only has headers,
+    # signal a cache miss so sync.php can fetch the line items from POS.
+    if iptal_id not in (None, "", 0) and out and not has_satir:
+        return None  # type: ignore[return-value]
     return out
 
 
@@ -438,13 +453,31 @@ def filter_acik_hesap_rows(items: List[dict], params: dict) -> List[dict]:
 
 
 def filter_hourly_stock_detail_rows(items: List[dict], params: dict) -> List[dict]:
-    """Filter cached hourly_stock_detail rows by sdate/edate + LOKASYON + STOK_ID."""
+    """Filter cached hourly_stock_detail rows by sdate/edate + LOKASYON + STOK_ID.
+
+    The rows do NOT have a TARIH field (only SAAT_ADI/SAAT_NO), so when a
+    single-hour request is made (sdate "YYYY-MM-DD HH:00:00", edate same hour),
+    we filter by SAAT_NO instead of comparing date strings.
+    """
     p = params or {}
     sdate = p.get("sdate") or p.get("SDATE") or p.get("BASTARIH") or ""
     edate = p.get("edate") or p.get("EDATE") or p.get("BITTARIH") or ""
     stok_id = p.get("ID") or p.get("STOK_ID") or 0
-    lokasyon = p.get("LOKASYON")
+    lokasyon = p.get("LOKASYON") or p.get("lokasyonID") or p.get("LOKASYON_ID") or p.get("lokasyon_id")
     saat = p.get("SAAT") or p.get("HOUR")
+
+    # Detect a single-hour request and filter by SAAT_NO
+    target_hour = None
+    try:
+        if (
+            isinstance(sdate, str) and isinstance(edate, str)
+            and len(sdate) >= 13 and len(edate) >= 13
+            and sdate[:10] == edate[:10] and sdate[11:13] == edate[11:13]
+        ):
+            target_hour = int(sdate[11:13])
+    except (ValueError, TypeError):
+        target_hour = None
+
     out = []
     for r in items:
         if stok_id not in (None, "", 0):
@@ -454,14 +487,26 @@ def filter_hourly_stock_detail_rows(items: List[dict], params: dict) -> List[dic
             except (TypeError, ValueError):
                 continue
         if lokasyon not in (None, "", 0):
-            if str(r.get("LOKASYON") or "").strip() != str(lokasyon).strip():
-                if str(r.get("LOKASYON_ID") or "") != str(lokasyon):
-                    continue
-        if saat not in (None, ""):
-            if str(r.get("SAAT") or r.get("HOUR") or "").strip() != str(saat).strip():
+            same_name = str(r.get("LOKASYON") or "").strip() == str(lokasyon).strip()
+            same_id = str(r.get("LOKASYON_ID") or "") == str(lokasyon)
+            if not (same_name or same_id):
                 continue
-        if not _between_dates(r, sdate, edate, ["TARIH", "FIS_TARIHI", "SAAT_TARIH"]):
-            continue
+        if saat not in (None, ""):
+            if str(r.get("SAAT") or r.get("HOUR") or r.get("SAAT_NO") or "").strip() != str(saat).strip():
+                continue
+        if target_hour is not None:
+            try:
+                row_hour = int(r.get("SAAT_NO"))
+            except (TypeError, ValueError):
+                row_hour = None
+            if row_hour is None:
+                # Fallback: parse SAAT_ADI ("14:00 - 15:00") → 14
+                try:
+                    row_hour = int(str(r.get("SAAT_ADI") or "")[:2])
+                except (TypeError, ValueError):
+                    row_hour = None
+            if row_hour != target_hour:
+                continue
         out.append(r)
     return out
 
@@ -550,69 +595,81 @@ async def lookup_rows_dataset(
     # at the DB layer — avoids parsing 5k JSON blobs in Python (which was
     # taking 2.3s and triggering Android ANR).
     if dataset_key == "hourly_stock_detail":
-        try:
-            from services import get_data_pool
-            pool = await get_data_pool()
-            async with pool.acquire() as conn:
-                async with conn.cursor() as cur:
-                    # Use JSON_EXTRACT/JSON_UNQUOTE to correctly parse string-typed
-                    # numeric values like "KDV_DAHIL_TOPLAM_TUTAR":"99.00".
-                    # The previous SUBSTRING_INDEX approach left the surrounding
-                    # quotes in the captured substring, so CAST(... AS DECIMAL)
-                    # silently returned 0 — making the whole hourly chart blank.
-                    await cur.execute(
-                        """
-                        SELECT
-                          JSON_UNQUOTE(JSON_EXTRACT(row_json, '$.SAAT_ADI'))     AS saat_adi,
-                          JSON_UNQUOTE(JSON_EXTRACT(row_json, '$.LOKASYON'))    AS lokasyon,
-                          CAST(JSON_EXTRACT(row_json, '$.LOKASYON_ID') AS UNSIGNED) AS lokasyon_id,
-                          SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(row_json, '$.KDV_DAHIL_TOPLAM_TUTAR')) AS DECIMAL(18,4))) AS amount,
-                          SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(row_json, '$.BRUT_KDV_DAHIL_TOPLAM_TUTAR')) AS DECIMAL(18,4))) AS brut_amount,
-                          SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(row_json, '$.GENEL_ISKONTO_TUTARI')) AS DECIMAL(18,4))) AS iskonto,
-                          SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(row_json, '$.PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR')) AS DECIMAL(18,4))) AS perakende,
-                          SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(row_json, '$.ERP12_KDV_DAHIL_TOPLAM_TUTAR')) AS DECIMAL(18,4))) AS erp12,
-                          COUNT(*) AS satir_sayisi
-                        FROM dataset_cache_rows
-                        WHERE tenant_id=%s AND dataset_key='hourly_stock_detail' AND deleted_at IS NULL
-                        GROUP BY saat_adi, lokasyon, lokasyon_id
-                        """,
-                        (tenant_id,),
-                    )
-                    rows = await cur.fetchall()
-            # Build the synthetic "row" list the frontend expects: 1 row per
-            # (hour, location) carrying the aggregated KDV_DAHIL_TOPLAM_TUTAR.
-            # Filter by lokasyon if requested.
-            p = params or {}
-            wanted_lok = p.get("lokasyonID") or p.get("LOKASYON_ID") or p.get("lokasyon_id")
-            out = []
-            for r in rows:
-                if not r:
-                    continue
-                lok_id = int(r[2] or 0)
-                if wanted_lok not in (None, "", 0):
-                    try:
-                        if int(wanted_lok) != lok_id:
-                            continue
-                    except (TypeError, ValueError):
-                        pass
-                amount = float(r[3] or 0)
-                out.append({
-                    "SAAT_ADI": (r[0] or "").strip(),
-                    "LOKASYON": (r[1] or "").strip(),
-                    "LOKASYON_ID": lok_id,
-                    "KDV_DAHIL_TOPLAM_TUTAR": amount,
-                    "TOPLAM_TUTAR": amount,
-                    "BRUT_KDV_DAHIL_TOPLAM_TUTAR": float(r[4] or 0),
-                    "GENEL_ISKONTO_TUTARI": float(r[5] or 0),
-                    "PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR": float(r[6] or 0),
-                    "ERP12_KDV_DAHIL_TOPLAM_TUTAR": float(r[7] or 0),
-                    "SATIR_SAYISI": int(r[8] or 0),
-                    "_AGGREGATE": True,
-                })
-            return out
-        except Exception as e:
-            logger.warning(f"[lookup_rows] hourly_stock_detail SQL agg failed: {e}; falling back")
-            # Fall through to the slow Python path below
+        # SQL aggregation pushdown is ONLY appropriate when the request spans
+        # the whole day (or multiple hours) — that's the dashboard "hourly chart"
+        # use-case. For single-hour drill-downs we MUST return raw product rows
+        # so the frontend modal can show "products sold in this hour".
+        sdate_str = (params or {}).get("sdate", "") or ""
+        edate_str = (params or {}).get("edate", "") or ""
+        is_single_hour = (
+            len(sdate_str) >= 16 and len(edate_str) >= 16
+            and sdate_str[:10] == edate_str[:10]
+            and sdate_str[11:13] == edate_str[11:13]
+        )
+        if not is_single_hour:
+            try:
+                from services import get_data_pool
+                pool = await get_data_pool()
+                async with pool.acquire() as conn:
+                    async with conn.cursor() as cur:
+                        # Use JSON_EXTRACT/JSON_UNQUOTE to correctly parse string-typed
+                        # numeric values like "KDV_DAHIL_TOPLAM_TUTAR":"99.00".
+                        # The previous SUBSTRING_INDEX approach left the surrounding
+                        # quotes in the captured substring, so CAST(... AS DECIMAL)
+                        # silently returned 0 — making the whole hourly chart blank.
+                        await cur.execute(
+                            """
+                            SELECT
+                              TRIM(BOTH '"' FROM CAST(JSON_EXTRACT(row_json, '$.SAAT_ADI') AS CHAR))    AS saat_adi,
+                              TRIM(BOTH '"' FROM CAST(JSON_EXTRACT(row_json, '$.LOKASYON') AS CHAR))   AS lokasyon,
+                              CAST(JSON_EXTRACT(row_json, '$.LOKASYON_ID') AS UNSIGNED)                AS lokasyon_id,
+                              SUM(CAST(TRIM(BOTH '"' FROM CAST(JSON_EXTRACT(row_json, '$.KDV_DAHIL_TOPLAM_TUTAR') AS CHAR)) AS DECIMAL(18,4))) AS amount,
+                              SUM(CAST(TRIM(BOTH '"' FROM CAST(JSON_EXTRACT(row_json, '$.BRUT_KDV_DAHIL_TOPLAM_TUTAR') AS CHAR)) AS DECIMAL(18,4))) AS brut_amount,
+                              SUM(CAST(TRIM(BOTH '"' FROM CAST(JSON_EXTRACT(row_json, '$.GENEL_ISKONTO_TUTARI') AS CHAR)) AS DECIMAL(18,4))) AS iskonto,
+                              SUM(CAST(TRIM(BOTH '"' FROM CAST(JSON_EXTRACT(row_json, '$.PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR') AS CHAR)) AS DECIMAL(18,4))) AS perakende,
+                              SUM(CAST(TRIM(BOTH '"' FROM CAST(JSON_EXTRACT(row_json, '$.ERP12_KDV_DAHIL_TOPLAM_TUTAR') AS CHAR)) AS DECIMAL(18,4))) AS erp12,
+                              COUNT(*) AS satir_sayisi
+                            FROM dataset_cache_rows
+                            WHERE tenant_id=%s AND dataset_key='hourly_stock_detail' AND deleted_at IS NULL
+                            GROUP BY saat_adi, lokasyon, lokasyon_id
+                            """,
+                            (tenant_id,),
+                        )
+                        rows = await cur.fetchall()
+                # Build the synthetic "row" list the frontend expects: 1 row per
+                # (hour, location) carrying the aggregated KDV_DAHIL_TOPLAM_TUTAR.
+                # Filter by lokasyon if requested.
+                p = params or {}
+                wanted_lok = p.get("lokasyonID") or p.get("LOKASYON_ID") or p.get("lokasyon_id")
+                out = []
+                for r in rows:
+                    if not r:
+                        continue
+                    lok_id = int(r[2] or 0)
+                    if wanted_lok not in (None, "", 0):
+                        try:
+                            if int(wanted_lok) != lok_id:
+                                continue
+                        except (TypeError, ValueError):
+                            pass
+                    amount = float(r[3] or 0)
+                    out.append({
+                        "SAAT_ADI": (r[0] or "").strip(),
+                        "LOKASYON": (r[1] or "").strip(),
+                        "LOKASYON_ID": lok_id,
+                        "KDV_DAHIL_TOPLAM_TUTAR": amount,
+                        "TOPLAM_TUTAR": amount,
+                        "BRUT_KDV_DAHIL_TOPLAM_TUTAR": float(r[4] or 0),
+                        "GENEL_ISKONTO_TUTARI": float(r[5] or 0),
+                        "PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR": float(r[6] or 0),
+                        "ERP12_KDV_DAHIL_TOPLAM_TUTAR": float(r[7] or 0),
+                        "SATIR_SAYISI": int(r[8] or 0),
+                        "_AGGREGATE": True,
+                    })
+                return out
+            except Exception as e:
+                logger.warning(f"[lookup_rows] hourly_stock_detail SQL agg failed: {e}; falling back")
+                # Fall through to the slow Python path below
 
     items = await get_dataset_items(tenant_id, dataset_key)
     if not items:
