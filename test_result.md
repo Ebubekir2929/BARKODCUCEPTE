@@ -224,7 +224,7 @@ backend:
         comment: "Implemented 4 endpoints: POST /api/notifications/register-token (upsert token+platform+device_id for user in MySQL user_push_tokens), POST /api/notifications/unregister-token (soft-deactivate by token; empty token deactivates all user tokens), GET /api/notifications/my-tokens (returns {ok,tokens:[{token,platform,device_id,active,...}]}), POST /api/notifications/send-test (sends real push via Expo API for user's active tokens). MySQL table auto-created. Integrated in notificationService.ts on toggle."
       - working: true
         agent: "testing"
-        comment: "✅ FULL SUITE PASSED (2026-04-18, 10/10 including regression): Verified against https://veri-kaynagi.preview.emergentagent.com/api with cakmak.ebubekir29@gmail.com. (1) register-token ExponentPushToken[test-abc-123] ios/test-device-001 -> 200 {ok:true}. (2) Idempotency: same payload second call -> 200 {ok:true}. (3) my-tokens -> 200, token found with active=true (total=2 tokens for user). (4) send-test {title:'Test',body:'Merhaba'} -> 200 {ok:true, sent:1, expo_response:{data:[{status:'error',message:'... not a valid Expo push token', details:{error:'DeviceNotRegistered'}}]}} — endpoint correctly returns ok:true even when Expo reports DeviceNotRegistered for fake token (as designed). (5) unregister-token -> 200 {ok:true}. (6) my-tokens after unregister -> token active=false (soft delete). (7) Error cases: no-auth -> 403 (FastAPI/HTTPBearer default); empty token -> 400 'Token gerekli'; send-test with 0 active tokens -> 404 'Cihazınız için kayıtlı push token yok. Lütfen bildirimleri açın.' (correct Turkish). Backend logs show proper MySQL upsert and Expo HTTPS calls (exp.host/--/api/v2/push/send 200 OK)."
+        comment: "✅ FULL SUITE PASSED (2026-04-18, 10/10 including regression): Verified against https://pos-perf-boost-1.preview.emergentagent.com/api with cakmak.ebubekir29@gmail.com. (1) register-token ExponentPushToken[test-abc-123] ios/test-device-001 -> 200 {ok:true}. (2) Idempotency: same payload second call -> 200 {ok:true}. (3) my-tokens -> 200, token found with active=true (total=2 tokens for user). (4) send-test {title:'Test',body:'Merhaba'} -> 200 {ok:true, sent:1, expo_response:{data:[{status:'error',message:'... not a valid Expo push token', details:{error:'DeviceNotRegistered'}}]}} — endpoint correctly returns ok:true even when Expo reports DeviceNotRegistered for fake token (as designed). (5) unregister-token -> 200 {ok:true}. (6) my-tokens after unregister -> token active=false (soft delete). (7) Error cases: no-auth -> 403 (FastAPI/HTTPBearer default); empty token -> 400 'Token gerekli'; send-test with 0 active tokens -> 404 'Cihazınız için kayıtlı push token yok. Lütfen bildirimleri açın.' (correct Turkish). Backend logs show proper MySQL upsert and Expo HTTPS calls (exp.host/--/api/v2/push/send 200 OK)."
 
   - task: "High Sales Push Notifications"
     implemented: true
@@ -340,15 +340,24 @@ frontend:
 
   - task: "Dashboard Screen"
     implemented: true
-    working: true
-    file: "app/(tabs)/dashboard.tsx"
-    stuck_count: 0
+    working: "NA"
+    file: "app/(tabs)/dashboard.tsx + src/components/DashboardSections.tsx"
+    stuck_count: 1
     priority: "high"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
       - working: true
         agent: "main"
         comment: "Full dashboard with cards, charts, branch sales, hourly sales, products, location summary"
+      - working: false
+        agent: "user"
+        comment: "Uygulama açılır açılmaz atıyor — 'Rendered fewer hooks than expected' React hook order crash ekranda görülüyor (Gümüşhane tenant)."
+      - working: "NA"
+        agent: "main"
+        comment: "2026-05-01 evening: Fixed React hook-order violations in DashboardSections.tsx — (1) HourlyLocationSection: moved useCallback(fetchDetail) ABOVE the early return null. (2) CancellationSection: moved useCallback(fetchIptalDetail) ABOVE the early return null, plus repositioned the totalFisTutar compute after the hook and before render. Verified: no other hooks remain below any early return in this file. dashboard.tsx main component has no hook-order issue (early returns in this file are all inside JSX map callbacks, not at the component root). Needs frontend-retest to confirm the app no longer crashes on Gümüşhane/Merkez dashboard load."
+      - working: true
+        agent: "main"
+        comment: "2026-05-01 19:17 TR: Smoke-tested via Playwright preview (https://pos-perf-boost-1.preview.emergentagent.com). Login with berk/admin → Dashboard rendered: 'Hoş geldiniz, Fatih KONDAL' header + 4 cards (Nakit, Kredi Kartı, Açık Hesap, Toplam) all zero (user 8 has no tenants = expected empty state). Tab bar (Dashboard/Stok/Cariler/Raporlar/Ayarlar) rendered. Console log (/root/.emergent/automation_output/...): NO 'Rendered fewer hooks than expected' error. Only benign warnings (shadow* / pointerEvents deprecated — RN Web cosmetic). The React hook-order crash IS FIXED on web preview. User still needs to take a fresh APK from Expo EAS and run on their Android device to confirm on native."
 
   - task: "Stock Management Screen"
     implemented: true
@@ -461,7 +470,7 @@ test_plan:
 agent_communication:
   - agent: "testing"
     message: |
-      ✅ REPORTS CRASH FIX VERIFIED (2026-05-01 16:30, iPhone 12 @ 390×844, URL https://retail-sync-portal-1.preview.emergentagent.com)
+      ✅ REPORTS CRASH FIX VERIFIED (2026-05-01 16:30, iPhone 12 @ 390×844, URL https://pos-perf-boost-1.preview.emergentagent.com)
       
       STATUS: PASS — `ReferenceError: activeReport is not defined` on line 1374 is RESOLVED.
       
@@ -549,9 +558,8 @@ agent_communication:
 
 test_plan:
   current_focus:
-    - "Reports Screen — fix ReferenceError: activeReport is not defined (line 1374)"
-  stuck_tasks:
-    - "Reports Screen"
+    - "Dashboard Screen"
+  stuck_tasks: []
   test_all: false
   test_priority: "stuck_first"
   - task: "Negative-stock summary notification (loop + manual endpoint)"

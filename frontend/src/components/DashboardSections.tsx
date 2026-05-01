@@ -234,11 +234,11 @@ export const CancellationSection: React.FC<{ ozet: any[]; detay: any[]; tenantId
   const [iptalItems, setIptalItems] = useState<any[]>([]);
   const [iptalLoading, setIptalLoading] = useState(false);
 
-  if ((!ozet || ozet.length === 0) && (!detay || detay.length === 0)) return null;
-
-  const totalFisTutar = (ozet || []).reduce((s: number, r: any) => s + parseFloat(r.FIS_IPTAL_TUTAR || '0'), 0);
-  const totalSatirTutar = (ozet || []).reduce((s: number, r: any) => s + parseFloat(r.SATIR_IPTAL_TUTAR || '0'), 0);
-
+  // ─── ALL HOOKS BEFORE ANY EARLY RETURN ───
+  // React requires hook count to be stable across renders. Do NOT place
+  // `useCallback`/`useEffect` AFTER an early `return null` — that causes
+  // "Rendered fewer hooks than expected" crashes when the component
+  // transitions between empty and non-empty data.
   const fetchIptalDetail = useCallback(async (iptalId: string, item: any) => {
     setSelectedIptal(item);
     setIptalItems([]);
@@ -259,6 +259,11 @@ export const CancellationSection: React.FC<{ ozet: any[]; detay: any[]; tenantId
       setIptalLoading(false);
     }
   }, [tenantId]);
+
+  // Early returns AFTER all hooks (safe per rules-of-hooks)
+  if ((!ozet || ozet.length === 0) && (!detay || detay.length === 0)) return null;
+
+  const totalFisTutar = (ozet || []).reduce((s: number, r: any) => s + parseFloat(r.FIS_IPTAL_TUTAR || '0'), 0);
 
   return (
     <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -444,6 +449,39 @@ export const HourlyLocationSection: React.FC<{
   }, [refreshIntervalSec]);
 
   const effectiveData = derivedData ?? data;
+
+  // ─── ALL HOOKS BEFORE ANY EARLY RETURN ───
+  // React requires hook count to be stable across renders. Previously
+  // `useCallback` below was placed AFTER the `return null` for empty data,
+  // which violated rules-of-hooks and caused "Rendered fewer hooks than
+  // expected" crashes whenever the data prop transitioned between empty
+  // and non-empty.
+  const fetchDetail = useCallback(async (hourLabel: string, lokasyonId: any, lokasyonName: string, hourAmount: number) => {
+    setSelectedItem({ hourLabel, lokasyonName, hourAmount });
+    setDetailData([]);
+    setDetailLoading(true);
+
+    try {
+      const { token } = useAuthStore.getState();
+      const response = await fetch(`${API_URL}/api/data/hourly-detail`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          hour_label: hourLabel,
+          lokasyon_id: lokasyonId || null,
+          ...(filterDate ? { date: filterDate } : {}),
+        }),
+      });
+      const result = await response.json();
+      if (result.ok && result.data) setDetailData(result.data);
+    } catch (err) {
+      console.error('Hourly detail error:', err);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, [tenantId, filterDate]);
+
   // Hide entire section when there's no data at all (user request)
   if (!effectiveData || effectiveData.length === 0) return null;
   // Also hide if all amounts are zero (no actual sales today)
@@ -468,32 +506,6 @@ export const HourlyLocationSection: React.FC<{
     (s, [loc, rows]) => s + getLocTotal(loc, rows),
     0
   );
-
-  const fetchDetail = useCallback(async (hourLabel: string, lokasyonId: any, lokasyonName: string, hourAmount: number) => {
-    setSelectedItem({ hourLabel, lokasyonName, hourAmount });
-    setDetailData([]);
-    setDetailLoading(true);
-    
-    try {
-      const { token } = useAuthStore.getState();
-      const response = await fetch(`${API_URL}/api/data/hourly-detail`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({
-          tenant_id: tenantId,
-          hour_label: hourLabel,
-          lokasyon_id: lokasyonId || null,
-          ...(filterDate ? { date: filterDate } : {}),
-        }),
-      });
-      const result = await response.json();
-      if (result.ok && result.data) setDetailData(result.data);
-    } catch (err) {
-      console.error('Hourly detail error:', err);
-    } finally {
-      setDetailLoading(false);
-    }
-  }, [tenantId, filterDate]);
 
   return (
     <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>

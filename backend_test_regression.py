@@ -12,7 +12,7 @@ import time
 import json
 import requests
 
-BACKEND_URL = "https://retail-sync-portal-1.preview.emergentagent.com"
+BACKEND_URL = "https://pos-perf-boost-1.preview.emergentagent.com"
 API = f"{BACKEND_URL}/api"
 
 TENANT_MERKEZ = "d5587c87a7f9476fa82b83f40accd6c7"

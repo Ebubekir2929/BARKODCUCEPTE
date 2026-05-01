@@ -1,62 +1,59 @@
-<analysis>**original_problem_statement**: The user requested a comprehensive sales/POS management mobile application built with Expo and React Native. 
+<analysis>**original_problem_statement**: The user requested a comprehensive sales/POS management mobile application built with Expo and React Native, utilizing multi-tenant POS branches. Recent focus is heavily on performance optimization (abandoning the slow PHP POS proxy  in favor of direct MySQL reads from ), resolving App Not Responding (ANR)/OOM crashes, and adding negative-stock push notifications. 
 PRODUCT REQUIREMENTS:
-- Authentication: JWT-based login, registration, forgot password.
-- Dashboard: Summary cards, hourly sales chart, best/worst selling products, open tables, and waiter sales.
-- Global Data Filter: Global filter dictating the data source (multi-tenant support for different POS branches).
-- Stock & Customers: Filterable lists with detailed history/modals, live MariaDB/sync.php integration.
+- Authentication: JWT-based login, registration.
+- Dashboard: Summary cards, hourly sales chart, best/worst selling products.
+- Stock & Customers: Filterable lists with detailed history/modals.
 - Reports: Dynamically filterable reports mirroring the legacy PHP POS system.
-- Push Notifications: Push notifications for cancellations, high sales, and low stock alerts.
-- Cross-Tenant Comparison: A comparison modal to evaluate sales, cancellations, and product matrices across multiple POS data sources simultaneously.
+- Push Notifications: Cancellations, high sales, and negative stock warnings.
+- Cross-Tenant Comparison: Evaluate sales across multiple POS data sources simultaneously.
 
-**User's preferred language**: **Turkish** (INSTRUCT next agent: Lütfen her zaman ve sadece Türkçe yanıt verin.)
+**User's preferred language**: **Turkish** (INSTRUCT next agent: Lütfen her zaman ve sadece Türkçe yanıt verin. Her açıklama ve iletişimi Türkçe yapın.)
 
 **what currently exists?** 
-A production-ready, multi-tenant Expo application with a FastAPI backend. It features real-time POS data fetching via a proxy (). In this session, massive updates were made to the  and  based on new SQL procedures provided by the user. The app now accurately splits data between Perakende (Retail) and ERP12 sources, accurately calculates post-discount totals, handles unlimited tenants gracefully (skipping offline ones with a 20s timeout), and fetches hourly product matrix data via a highly optimized full-day endpoint ().
+A multi-tenant Expo app with FastAPI backend. The application features a newly implemented 3-layer caching strategy () that aggressively reads from the  MySQL database ( and  blobs) before falling back to . The backend runs scheduled tasks for POS notifications, including a new daily summary for negative stock. The frontend includes deep tab-based navigation with  for request cancellation on unmount to save bandwidth.
 
 **Last working item**:
-    - Last item agent was working: The user requested that the Ürünlerin Saatlik Satışları (Hourly Product Sales) section inside  accurately utilize the fields from the newly updated  procedure. The user wants to ensure that both the Data Source (Tenant) level and Data Source Location level rows accurately reflect the post-discount totals and proper data structure provided by this new procedure.
-    - Status: NOT STARTED
-    - Agent Testing Done: N
-    - Which testing method agent to use?: manual testing by curl (to verify backend endpoint output) and screenshot tool (to verify UI rendering in CompareModal).
+    - Last item agent was working: Fixing a critical frontend React crash (Rendered fewer hooks than expected) in . An early  was placed before a  hook, causing the app to crash immediately when rendering the Dashboard.
+    - Status: TESTING PENDING (Agent applied the fix but needs to verify it with the frontend testing agent or user).
+    - Agent Testing Done: N (For the latest fix).
+    - Which testing method agent to use?: Frontend testing agent.
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  Issue 1: Update CompareModal Hourly Product Matrix data mapping (P0)
-     - Attempted fixes: The backend endpoint  was already updated to fetch data using the new procedure. However, the frontend mapping in  needs to be reviewed to ensure it uses the correct new fields (like  instead of old generic total fields) for both Tenant and Location rows.
-     - Next debug checklist: Check  around line 600+ where  is mapped and rendered. Ensure the values displayed for ₺ amounts match the new procedure's logic.
-     - Why fix this issue and what will be achieved with the fix?: Ensures data consistency across the entire app, as the user strictly wants all hourly data to reflect post-discount, accurate SQL procedure outputs.
-     - Status: NOT STARTED
-     - Is recurring issue?: N
-     - Should Test frontend/backend/both after fix?: Both
+  Issue 1: Verify Dashboard Stability (Hooks Rule Violation Fix) (P0)
+     - Attempted fixes: Agent moved the early  below the   in  lines 440-472.
+     - Next debug checklist: Check if there are any other hooks below conditional returns in  or . Run the frontend testing agent or ask the user to build a new APK to confirm the app no longer crashes on launch.
+     - Why fix this issue and what will be achieved with the fix?: Unblocks the user. The app was instantly crashing on startup for the user due to this React error.
+     - Status: TESTING PENDING
+     - Is recurring issue?: Y (User has experienced a sequence of distinct frontend crashes on the new APKs).
+     - Should Test frontend/backend/both after fix?: Frontend
+     - Blocked on other issue: None.
 
 **In progress Task List**:
-  Task 1: Prepare App for Store Submission (iOS / Android)
-     - Where to resume: Once the user approves the current APK with all the new SQL procedures integrated, assist with generating the final production  for Play Store and discuss Apple Developer Account requirements for the .
-     - What will be achieved with this?: App release.
-     - Status: BLOCKED (Waiting for user verification of the massive data overhaul)
-     - Should Test frontend/backend/both after fix?: Both
-     - Blocked on something: Verification of Issue 1.
+  Task 1: User APK Verification
+     - Where to resume: Ask the user to Save to GitHub, pull the code, and take a new EAS Build APK to verify all the recent crash fixes.
+     - What will be achieved with this?: Ensures all OOM/ANR and JS crashes are resolved on the physical Android device.
+     - Status: BLOCKED (Waiting on user action)
+     - Should Test frontend/backend/both after fix?: Frontend
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
     - (P1) App Store & Google Play Submission: Prepare assets, privacy policy, and final EAS production builds.
     
     Future Tasks:
-    - (P2) Code refactoring: , , and  are massive. Extract sub-components to improve maintainability.
-    - (P3) Web Platform (Next.js): *NOTE: The user explicitly requested that the Web Platform be built in a completely separate Emergent session. Do NOT attempt to build the web platform in this workspace.*
+    - (P2) Code refactoring:  and  are massive. Extract sub-components.
 
 **Completed work in this session**
-- **Performance:** Created  endpoint. Reduces 36+ hourly API calls down to 1 call per tenant, making hourly product matrix loading 5-10x faster. (DONE)
-- **Error Handling:** Reduced tenant fetch timeout from 60s to 20s. Errored/empty tenants are gracefully skipped and marked with a Veri Yok badge without blocking the UI. (DONE)
-- **UI/UX:** Replaced expand-on-tap in CompareModal with a dedicated . Added swipe hints () to all horizontal scroll views. (DONE)
-- **SQL Procedure Integration (Massive Data Overhaul):** 
-  - Integrated Retail (Perakende) vs ERP12 splits across Cash, Credit Card, and Waiter Sales.
-  - Added new  component to show customer-level Open Account details.
-  - Updated Waiter Sales to support multi-tier  (Detail, Location Total, General Total).
-  - Updated  to use the new procedure for accurate post-discount totals. (DONE)
+- **Direct MySQL Backend Refactor:** Completely rewrote  and  to use a 3-layer system:  (MySQL) →  blob (MySQL) →  cache →  poll. Speeds improved up to 45x (e.g., 29s to 630ms).
+- **ANR/OOM Crash Fix:** Fixed Android memory crash on  by moving aggregation to a SQL , reducing 4500 raw rows to 51 rows (2.5MB to 1.5KB payload).
+- **Negative Stock Push Notifications:** Added  running daily at TR 13:00 and 20:00 to push a single summary notification per tenant.
+- **Frontend Tab Fetch Cancellation:** Added  combined with  across tabs to cancel heavy network requests when the user switches tabs.
+- **CompareModal Update:** Removed Seçili logic to evaluate and compare all tenants unconditionally.
+- **Report Tutar Filters:** Added client-side  and  numeric filtering to Fiş Kalem Listesi.
+- **Crash Fixes:** Fixed  typo in . Fixed  crash by handling POS  dict format in .
 
 **Earlier issues found/mentioned but not fixed**
-   - None.
+   - None remaining, all reported crashes have attempted fixes applied.
 
 **Known issue recurrence from previous fork**
   - Issue recurrence in previous fork: None
@@ -67,72 +64,80 @@ A production-ready, multi-tenant Expo application with a FastAPI backend. It fea
 
 
 **Key Technical Concepts**
-- **Legacy SQL Procedures:** The app relies on complex, heavy SQL procedures executed on the remote POS server. The FastAPI backend acts as an aggregator. The user frequently updates these procedures to add fields (like , , ).
-- **Parallel Chunking:** Fetching data across unlimited tenants is done using  in chunks (e.g., 4 at a time) to avoid proxy timeouts.
+- **ROWS_DATASETS System:** Specific datasets (, , , , , , ) are read directly from  table.
+- **Write-Through Cache:** Any fallback call to  is now intercepted, and the result is asynchronously written to  to ensure the next identical query is instantaneous.
+- **Delta Rows Handling:** POS  occasionally returns . Backend now intercepts this and automatically forces a read from the MySQL rows table to return a proper array to the frontend.
 
 **key DB schema**
-  - No changes to local DB schema. App relies on legacy remote POS schemas.
+  - : 
+    -  (JSON blobs for complex reports/dashboard)
+    -  (Parsed item-by-item rows for fast querying and pagination)
 
 **changes in tech stack**
-  - None.
+  - All data retrieval is heavily routed through .  is now strictly a fallback/polling mechanism.
 
 **All files of reference** 
-  - : Requires update for the last user request.
-  - : Created to handle deep-dive branch metrics.
-  - : Created to show open accounts.
-  - : Updated heavily to support new Waiter Sales and Hourly Location logic.
-  - : Updated aggregators () and endpoints (, ).
+  - : Handles caching and SQL queries.
+  - : Adjusted for the new caching mechanism and payload reductions.
+  - : Hook crash fix location.
+  - : Updated for optimized hourly API responses and .
+  - : Updated for  crash fix and Tutar filters.
 
 **Areas that need refactoring**: 
-  -  (2300+ lines).
-  -  (2400+ lines).
-  -  (~1000 lines).
+  - 
+  - 
 
 **key api endpoints**
-  - : Fetches an entire day's worth of hourly product sales in one query using .
-  - : New endpoint fetching customer-level open accounts.
+  -  (Now returns grouped aggregates)
+  - 
+  -  (New manual test trigger)
 
 **Critical Info for New Agent** 
-- **Formatting:** The user explicitly requested that all currency values use 2 decimal places. Use  or similar formatting.
-- **SQL Field Names:** The user provided a massive SQL update. Be aware of fields like , , . The backend  passes these through.
-- **Web App Separation:** Do NOT build the Next.js web platform in this session. Keep the workspace focused on the Expo mobile app.
+- **User Build Process:** The user tests by pushing code to GitHub (Save to GitHub button) and building APKs via Expo EAS Build. When verifying fixes, instruct the user to do this.
+- **Frontend Crashes:** Because of the Android device environment, bad JSON payloads (huge arrays) caused ANR (App Not Responding) crashes, and React Hook errors caused immediate close-outs (uygulamadan atıyor). Always be extremely defensive with API response parsing and adhere strictly to React Hook rules.
+- **Language:** The user exclusively communicates in Turkish.
 
 **documents and test reports created in this job** 
-  - None strictly documented.
+  -  updated with backend test results.
+  -  and  were run.
 
 **Last 10 User Messages and any pending HUMAN messages** 
- 1. (User): birde karşılaştırma ekranı kapanınca günlük veriye dönsün... (Huge request with multiple SQL procedures provided).
- 2. (Agent): Analyzed procedures, proposed a 4-step plan, asked for permission.
- 3. (User): procedür düzenlemesini yaptım bütün adımları uygula dasbıarda göster...
- 4. (Agent): Implemented Step 1 & 2 (Dashboard refresh, Cash/Card modal split).
- 5. (Agent): Implemented Step 3 & 4 (Open Account customer details, Waiter sales multi-tier support, 2-decimal formatting). Fixed a 502 timeout.
- 6. (User): ama sen lokasyon saatlik satış grafiğinde yapmamıssın onuda aynı kısımıdan çek... (Pointed out HourlyLocationSection wasn't using the new procedure).
- 7. (Agent): Updated  to use  to get accurate post-discount totals.
- 8. **(User) [PENDING]: karşılaştırma kısmındada saatlik ürün satış tarafında bunu kullan anladın mı hem veri kaynağına hemveri kaynağı lokasyon kısmında**
- *(User wants the 's hourly product matrix to accurately render data from the new procedure at both the Tenant and Location level).*
+ 1. (User): Yine atıyor düzgün kontrol et (It's crashing again, check properly)
+ 2. (Agent): Used troubleshoot_agent to find the ANR from a 2.3s cold load. Applied SQL  to .
+ 3. (User): Çözemiyon valla devamlı atıyor saatlik detayı tekrar requeste alacam
+ 4. (Agent): Reverted  from the ROWS fast-path back to fallback, disabled  fetching on frontend.
+ 5. (User): Yine atıyor biryerde bir sıkıntı var bul
+ 6. (Agent): Explored dashboard response payload size. Asked user for crash screenshot.
+ 7. (User): Uploaded screenshot showing .
+ 8. (Agent): Identified  format change from POS. Fixed backend to intercept and return valid list.
+ 9. (User): Uploaded screenshot showing .
+ 10. (Agent): Identified early  before  in . Applied the fix.
 
 **Project Health Check:**
-- Broken: None. 
-- Mocked: None. Live data is thoroughly confirmed.
+- Broken: Pending verification that the latest React hooks fix stopped the app from crashing on the user's phone.
+- Mocked: None.
 
 **3rd Party Integrations** 
   - Expo FCM V1 (Push Notifications) 
   - Remote POS Sync ()
-  - Brevo HTTP API (Emailing)
 
 **Testing status**
-  - Testing agent used after significant changes: NO (Main agent tested via backend curl logs).
-  - Troubleshoot agent used after agent stuck in loop: NO
-  - Test files created: None
-  - Known regressions: None
+  - Testing agent used after significant changes: YES (Frontend and Backend)
+  - Troubleshoot agent used after agent stuck in loop: YES (Diagnosed ANR/OOM issue)
+  - Test files created: None new permanently kept.
+  - Known regressions: None currently known.
 
 **Credentials to test flow:**
-  - Standard user login:  / 
+  - Login:  / 
 
 **What agent forgot to execute**
-  - The agent successfully executed all complex SQL integrations but ran out of context right as the user made their final request regarding  mapping. 
+  - The agent applied the fix for the React Hooks violation () but immediately ran out of context before using the frontend testing agent or asking the user to build a new APK to verify it.
 
 **Debugging checklist for current issue**
-    Issue: Map new procedure fields in  Hourly Product Matrix.
-    Frontend files to check:
-    - : Search for  rendering. Ensure the values displayed for amounts rely on the newly passed fields (e.g., ) rather than generic/legacy total fields. Ensure both Tenant () and Location () rows render correctly.</analysis>
+    Issue: Rendered fewer hooks than expected Crash on Dashboard
+    Frontend files to check: 
+    -  (Lines 440-475)
+    - 
+    Next Steps:
+    - Instruct the user to push to GitHub, take a new APK, and verify if the crash is gone.
+    - If the testing agent is invoked, make sure to reload the Expo bundler cache if needed to serve the latest changes.</analysis>

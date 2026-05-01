@@ -18,7 +18,7 @@ import json
 import requests
 from datetime import date, timedelta
 
-BASE_URL = "https://retail-sync-portal-1.preview.emergentagent.com/api"
+BASE_URL = "https://pos-perf-boost-1.preview.emergentagent.com/api"
 
 LOGIN_EMAIL = "cakmak_ebubekir@hotmail.com"
 LOGIN_PASSWORD = "admin"

@@ -23,7 +23,7 @@ import httpx
 
 BASE_URL = os.environ.get(
     "BACKEND_BASE",
-    "https://retail-sync-portal-1.preview.emergentagent.com",
+    "https://pos-perf-boost-1.preview.emergentagent.com",
 ).rstrip("/")
 API = f"{BASE_URL}/api"
 
