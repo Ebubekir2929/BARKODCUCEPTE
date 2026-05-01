@@ -622,9 +622,51 @@ test_plan:
           and unregistered the ExponentPushToken[TEST_STUB] push token from both.
 
 agent_communication:
-  - agent: "testing"
+  - agent: "main"
     message: |
-      ✅ NEGATIVE-STOCK SUMMARY NOTIFICATION — FULL PASS (23/23, /app/backend_test_eksistok.py, 2026-05-01 TR 15:21).
+      🚫 REQUEST_CREATE WHITELIST (2026-05-01 19:35 TR) — user request to "completely cancel request events on the dashboard".
+      
+      Added REQUEST_ALLOWED_DATASETS set + _is_request_create_allowed() helper in /app/backend/routes/data.py.
+      Inserted a gate inside _on_demand_request() right after the MySQL lookup (Step 0a + 0b) and
+      BEFORE sync.php dataset_get (Step 1) and request_create+poll (Step 2). Any dataset_key that
+      is NOT in the whitelist (and does not start with "rap_") now returns immediately with
+      {ok:true, data:[], _source:"mysql_only_blocked"} — no sync.php round-trip at all.
+      
+      ALLOWED today (everything else returns empty on MySQL miss):
+        • stok_extre              — stock ledger (stock_detail drill-down)
+        • kart_extre_cari         — customer ledger (acik_hesap_kisi_detail)
+        • rap_* prefix            — legacy reports screen (rap_fis_kalem_listesi_web, rap_cari_hesap_ekstresi_web, rap_personel_satis, …)
+      
+      BLOCKED now (previously would poll POS up to timeout_sec=35s):
+        • stok_bilgi_miktar       (user explicitly removed: "stok miktar request" gerek yok)
+        • hourly_stock_detail     (saatlik satış detayı — dashboard)
+        • fis_detay_toplam        (açık masa detayı — dashboard)
+        • iptal_detay/iptal_ozet  (MySQL-rows-table served via Step 0a; fallback blocked)
+        • acik_masa_detay         (MySQL-rows-table served via Step 0a; fallback blocked)
+        • Any other non-whitelisted key.
+      
+      Manual verification (curl, backend :8001):
+        - stock-detail stock_id=2631821 → miktar rows=0 (BLOCKED correctly), extre fetches via sync.php (whitelisted).
+        - hourly-detail hour=10:00-11:00 → _source=mysql_only_blocked, 481ms, rows=0 ✅ (was 2.3-22s POS poll before).
+        - Backend log shows explicit "[on_demand] BLOCKED request_create stok_bilgi_miktar …" and "… hourly_stock_detail …" lines.
+      
+      Frontend impact (expected & acceptable): on dashboard, if a tenant has no hourly_stock_detail
+      cached in MySQL, the hourly chart will simply show empty data instead of spinning for seconds.
+      The POS sync worker is still responsible for populating dataset_cache_rows / dataset_cache
+      on its own cadence (unchanged).
+      
+      Notification watchers (cancellations_loop, high_sales_loop, negative_stock) still call
+      sync.php dataset_get directly (not via _on_demand_request), so they continue to function
+      independently of this gate. No regression expected.
+
+  - agent: "main"
+    message: |
+      ✅ Dashboard-Hook-Crash + Request-Whitelist verified on web preview 19:35 TR:
+      • Login flow still works (berk/admin → Dashboard renders without Hooks error).
+      • Console logs clean (only benign shadow* / pointerEvents deprecation warnings).
+      • Dashboard cards render (0-values because berk has no tenants — correct).
+      • Backend `[on_demand] BLOCKED request_create …` lines emitted for hourly/stok_bilgi_miktar.
+      User still needs to push to GitHub + EAS Build a fresh APK to verify on native device.
       
       Key validated items:
       • Startup log emits "📦 Negative-stock summary watcher started — fires daily at TR [13, 20]:00"

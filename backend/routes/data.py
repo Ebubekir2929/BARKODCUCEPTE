@@ -28,6 +28,40 @@ router = APIRouter(prefix="/data", tags=["data"])
 # Value: { ts: float (epoch), payload: dict }
 _GLOBAL_CACHE: Dict[str, Dict[str, Any]] = {}
 
+# =========================================================================
+# REQUEST_CREATE WHITELIST  (user request 2026-05-01)
+# =========================================================================
+# Only these datasets may fall through to sync.php (dataset_get + request_create
+# polling) when MySQL cache misses. Everything else returns an empty result
+# immediately — this eliminates all live POS round-trips from the dashboard
+# and keeps the UI snappy even on cold starts.
+#
+# Keep this list TIGHT — adding a dataset here re-enables request_create for it.
+REQUEST_ALLOWED_DATASETS: set = {
+    # Drill-downs the user explicitly whitelisted (2026-05-01)
+    #   • Stok detay ekranında sadece "stok_extre" (hareket listesi) request atar.
+    #     "stok_bilgi_miktar" artık request atmıyor — MySQL'de varsa gelir, yoksa boş.
+    #   • Cari detay ekranında sadece "kart_extre_cari" request atar.
+    "stok_extre",          # stock ledger (stock_detail drill-down)
+    "kart_extre_cari",     # customer ledger (acik_hesap_kisi_detail / cari_detail)
+    # Legacy reports screen still needs live data from POS when MySQL
+    # cache lacks the specific params combination the user just chose.
+    # Prefix "rap_" covers every report dataset_key (rap_fis_kalem_listesi_web,
+    # rap_cari_hesap_ekstresi_web, rap_personel_satis, rap_gunluk_ozet, …).
+}
+
+def _is_request_create_allowed(dataset_key: str) -> bool:
+    """Return True when we are allowed to fall through to sync.php for this
+    dataset. Covers both the explicit whitelist and the rap_* prefix."""
+    if not dataset_key:
+        return False
+    if dataset_key in REQUEST_ALLOWED_DATASETS:
+        return True
+    if dataset_key.startswith("rap_"):
+        return True
+    return False
+
+
 
 def _sum_float(val):
     """Safely parse a numeric string/value to float"""
@@ -694,6 +728,19 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
       1. sync.php `dataset_get` (network, but avoids POS SQL run)
       2. sync.php `request_create`+poll  (actually executes query on POS)
 
+    IMPORTANT — REQUEST_CREATE WHITELIST (user request 2026-05-01):
+    Only datasets in `REQUEST_ALLOWED_DATASETS` are permitted to fall through to
+    Step 1 (sync.php dataset_get) and Step 2 (request_create+poll). For every
+    other dataset, we read MySQL and if nothing is cached we return an empty
+    result immediately — this eliminates all POS round-trips from the main
+    dashboard and keeps the UI instantaneous on cold starts.
+
+    Allowed today:
+      • stok_extre               — stock ledger drill-down
+      • stok_bilgi_miktar        — stock quantity detail (paired with stok_extre)
+      • kart_extre_cari          — customer ledger drill-down
+      • All rap_* report keys    — legacy reports screen still needs live data
+
     Passing `skip_mysql_cache=True` forces a fresh sync.php call (use sparingly when
     freshness is critical). Passing `mysql_cache_max_age_sec=N` discards MySQL
     cached rows older than N seconds and falls through to sync.php.
@@ -749,6 +796,29 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
                 }
         except Exception as e:
             logger.debug(f"[on_demand] mysql direct lookup {dataset_key} failed: {e}")
+
+    # ---------- Whitelist gate: skip sync.php for non-whitelisted datasets ----------
+    # User request (2026-05-01): dashboard datasets must not trigger POS
+    # round-trips. If MySQL cache missed and this dataset is not in
+    # REQUEST_ALLOWED_DATASETS (or not a rap_* report), return empty data now.
+    if not _is_request_create_allowed(dataset_key):
+        logger.info(
+            f"[on_demand] BLOCKED request_create {dataset_key} tenant={tenant_id} — "
+            f"not in whitelist; returning empty (MySQL-only mode)"
+        )
+        if raw_cache:
+            return {
+                "ok": True,
+                "cache": {"data": []},
+                "_cache_hit": False,
+                "_source": "mysql_only_blocked",
+            }
+        return {
+            "ok": True,
+            "data": [],
+            "_cache_hit": False,
+            "_source": "mysql_only_blocked",
+        }
 
     # ---------- Step 1: try sync.php cache (instant if hot) ----------
     try:
