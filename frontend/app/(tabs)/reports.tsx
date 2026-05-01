@@ -1371,7 +1371,7 @@ export default function ReportsScreen() {
       }
     }
     return d;
-  }, [reportData, deferredSearch, deferredSortKey, deferredSortAsc, activeReport?.datasetKey, filterValues?.MinTutar, filterValues?.MaxTutar]);
+  }, [reportData, deferredSearch, deferredSortKey, deferredSortAsc, selectedReport?.datasetKey, filterValues?.MinTutar, filterValues?.MaxTutar]);
 
   const toggleSort = (key: string) => { if (sortKey === key) setSortAsc(!sortAsc); else { setSortKey(key); setSortAsc(true); } };
 

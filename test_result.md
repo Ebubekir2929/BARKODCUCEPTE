@@ -376,11 +376,11 @@ frontend:
 
   - task: "Reports Screen"
     implemented: true
-    working: false
+    working: true
     file: "app/(tabs)/reports.tsx"
-    stuck_count: 1
+    stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
       - working: true
         agent: "main"
@@ -459,6 +459,28 @@ test_plan:
   test_priority: "high_first"
 
 agent_communication:
+  - agent: "testing"
+    message: |
+      ✅ REPORTS CRASH FIX VERIFIED (2026-05-01 16:30, iPhone 12 @ 390×844, URL https://retail-sync-portal-1.preview.emergentagent.com)
+      
+      STATUS: PASS — `ReferenceError: activeReport is not defined` on line 1374 is RESOLVED.
+      
+      ⚠️ IMPORTANT FINDING ABOUT THE FIRST TEST PASS: On my first automated run the red-screen STILL appeared because Metro was serving a STALE cached bundle from before the main agent's edit. Fix required on my side: `rm -rf /app/frontend/.metro-cache/cache && sudo supervisorctl restart expo` — after a clean rebundle the crash is completely gone. Main agent should note this pattern: future Metro-cached ReferenceError fixes may need an expo restart to propagate in this CI-mode setup (`Metro is running in CI mode, reloads are disabled`).
+      
+      What was verified (second run, fresh bundle, 0 console errors, 0 pageerrors):
+        • Login with cakmak_ebubekir@hotmail.com / admin → Dashboard rendered cleanly (Fatih KONDAL header, Nakit/Kredi Kartı/Açık Hesap/Toplam cards all ₺0,00, Karşılaştır + Filtre buttons).
+        • Karşılaştır modal opens ("Veri Kaynağı Karşılaştırması"). "Seçili" badge is NOT present anywhere — confirmed via body-text grep. Modal shows period chooser + "Karşılaştırmak için veri kaynağı ekleyin" empty-state because berk has no tenants. "Veri Yok" badge also not needed since there are no tenant rows to render.
+        • Bottom tab switching: Dashboard / Stok / Cariler / Raporlar / Ayarlar — all tabs open without crash, no red-screen, no uncaught JS errors.
+        • Raporlar tab (THE CRITICAL ONE): opens cleanly, shows the empty-state "Veri kaynağı seçilmedi" with a document icon. No ReferenceError in body, no console errors emitted on open or on re-entry.
+        • Stress test: 10 rapid cycles of Dashboard ↔ Stok ↔ Raporlar → 0 crashes, 0 new console errors, no memory/DOM degradation visible.
+      
+      What was NOT exercisable with this login (blocked by data, not by a code bug):
+        • Tapping a Stok item / a Cari item / a specific report (Cari Hesap Ekstresi, Fiş Kalem Listesi) — berk/cakmak_ebubekir@hotmail.com has `users.tenant_id=NULL` and zero rows in mongo `user_tenants` (documented earlier in test_result.md), so every tab lands on "Veri kaynağı seçilmedi". Fiş Kalem Tutar (MinTutar/MaxTutar) filter UI and Eksi Stok toggle description could not be visually confirmed end-to-end through the UI for the same reason — the Bildirimler section in Settings currently shows only "Push Bildirimler" above the fold; the "Eksi Stok Uyarısı" toggle likely sits lower but the test user's settings rendering doesn't scroll-reveal it without an active tenant. The translations + toggle logic exist in code (verified by main agent's prior implementation + backend test 23/23 pass on the notify_low_stock endpoint), they are just unreachable via berk.
+      
+      RECOMMENDATION: If UI verification of Tutar filter + Eksi Stok toggle + Cari Hesap Ekstresi report run is required, re-test with `cakmak.ebubekir29@gmail.com / 123456` (admin user, Merkez tenant d5587c87…) which has live data.
+      
+      Reports Screen task flipped to working=true in test_plan — the ReferenceError blocker is fixed.
+
   - agent: "main"
     message: "MVP completed with all screens, DEMO data is being used. Backend API needs to be implemented for real data."
   - agent: "main"
