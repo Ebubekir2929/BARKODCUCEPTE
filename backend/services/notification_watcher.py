@@ -28,11 +28,21 @@ EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 _watcher_task: asyncio.Task | None = None
 _high_sales_task: asyncio.Task | None = None
 _cancellations_task: asyncio.Task | None = None
+_negative_stock_task: asyncio.Task | None = None
 
 # Tunables (in seconds)
 _MAIN_LOOP_INTERVAL = 30        # Main loop tick (cancellations + low-stock)
 _HIGH_SALES_INTERVAL = 15       # Fast loop tick for high-sales only
 _PARALLEL_TENANT_CONCURRENCY = 5  # max concurrent tenant scans
+
+# TR saati = UTC+3. Eksi stok özeti her gün SAAT 13 ve SAAT 20'de gönderilir.
+_NEGATIVE_STOCK_TARGET_HOURS_TR = [13, 20]
+_NEGATIVE_STOCK_CHECK_INTERVAL_SEC = 60  # check every minute
+
+
+def _tr_now() -> datetime:
+    """Turkey time (UTC+3). Python datetime, naive (no tzinfo)."""
+    return datetime.utcnow() + timedelta(hours=3)
 
 
 async def _pos_request_data(
@@ -586,79 +596,11 @@ async def _check_tenant_for_user(
         except Exception as e:
             logger.warning(f"[scan] high_sales watcher failed (user {user['user_id']}, tenant {tenant_id}): {e}")
 
-    # --- 2) Eksi Stok (MIKTAR < 0) — local dataset_cache via get_data_pool ---
-    if user["notify_low_stock"]:
-        try:
-            from services import get_data_pool
-            import json as _json
-            data_pool = await get_data_pool()
-            async with data_pool.acquire() as conn:
-                async with conn.cursor() as cur:
-                    await cur.execute("""
-                        SELECT data_json FROM dataset_cache
-                        WHERE tenant_id=%s AND dataset_key='stock_list'
-                        ORDER BY updated_at DESC
-                    """, (tenant_id,))
-                    rows = await cur.fetchall()
-
-            # Merge all cached pages and de-duplicate by stok kod
-            totals: Dict[str, Dict[str, Any]] = {}
-            total_items = 0
-            for (data_json,) in rows:
-                if not data_json:
-                    continue
-                try:
-                    items = _json.loads(data_json)
-                except Exception:
-                    continue
-                if not isinstance(items, list):
-                    continue
-                for it in items:
-                    total_items += 1
-                    kod = str(it.get("STOK_KOD") or it.get("KOD") or it.get("ID") or "").strip()
-                    if not kod:
-                        continue
-                    try:
-                        miktar = float(it.get("MIKTAR") or it.get("STOK_MIKTAR") or 0)
-                    except (TypeError, ValueError):
-                        miktar = 0.0
-                    if kod not in totals:
-                        totals[kod] = {
-                            "ad": it.get("STOK_AD") or it.get("AD") or it.get("STOK_ADI") or kod,
-                            "miktar": 0.0,
-                        }
-                    totals[kod]["miktar"] += miktar
-
-            low_stock_count = sum(1 for _, info in totals.items() if info["miktar"] < 0)
-            logger.info(
-                f"[scan] stock_list tenant={tenant_id} cached_items={total_items} "
-                f"unique_codes={len(totals)} negative={low_stock_count}"
-            )
-
-            pushed_stock = 0
-            today_str = datetime.now().strftime("%Y-%m-%d")
-            for kod, info in totals.items():
-                if info["miktar"] >= 0:
-                    continue
-                # Re-alert once per day per stock code
-                key = f"{kod}:{today_str}"
-                if await _mark_event_seen(tenant_id, "eksi_stok", key):
-                    await _push_many(
-                        tokens,
-                        f"📦 Eksi Stok · {tenant_name}",
-                        f"{info['ad']} (Kod: {kod}) — {info['miktar']:,.2f} adet",
-                        {
-                            "type": "low_stock", "stok_kod": kod,
-                            "miktar": info["miktar"],
-                            "tenant": tenant_id, "tenant_name": tenant_name,
-                        },
-                    )
-                    pushed_stock += 1
-                    logger.info(f"[scan] ✅ LOW_STOCK PUSHED kod={kod} miktar={info['miktar']}")
-            if pushed_stock:
-                logger.info(f"[scan] SUMMARY tenant={tenant_id} low_stock_pushed={pushed_stock}")
-        except Exception as e:
-            logger.warning(f"[scan] stok watcher failed (user {user['user_id']}, tenant {tenant_id}): {e}")
+    # --- 2) Eksi Stok summary notifications moved to dedicated _negative_stock_summary_loop
+    #         (fires twice a day at TR 13:00 and 20:00 with ONE summary per tenant
+    #          instead of per-item spam). The notify_low_stock flag is still honored
+    #          there. We no longer run per-item eksi-stok alerts here.
+    _ = user["notify_low_stock"]  # kept for compatibility; used by new loop
 
     await _update_last_check(user["user_id"])
 
@@ -1090,6 +1032,221 @@ async def _scan_cancellations_for_tenant(tenant: Dict[str, Any]) -> int:
     return pushed
 
 
+async def _collect_low_stock_subscribers() -> List[Dict[str, Any]]:
+    """Return all (user, tenant) pairs with notify_low_stock=1 and ≥1 active push token.
+
+    Unlike `_get_users_to_check`, this ignores the `check_interval_minutes` throttle
+    and `last_check_at` because we fire on a fixed schedule (13:00 & 20:00 TR),
+    not on a polling interval.
+    """
+    try:
+        from server import db as mongo_db  # type: ignore
+    except Exception:
+        mongo_db = None
+
+    pool = await get_patron_pool()
+    out: List[Dict[str, Any]] = []
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("""
+                SELECT s.user_id, u.tenant_id
+                FROM user_notification_settings s
+                JOIN users u ON u.user_id = s.user_id
+                WHERE u.active = 1 AND s.notify_low_stock = 1
+            """)
+            rows = await cur.fetchall()
+
+            for r in rows:
+                user_id = r[0]
+                primary_tid = r[1]
+                # Active tokens
+                await cur.execute(
+                    "SELECT token FROM user_push_tokens WHERE user_id=%s AND active=1",
+                    (user_id,),
+                )
+                tokens = [t[0] for t in await cur.fetchall()]
+                if not tokens:
+                    continue
+
+                # Collect tenant list (primary + additional user_tenants)
+                tenants: List[Dict[str, str]] = []
+                if primary_tid:
+                    name = "Ana Veri"
+                    if mongo_db is not None:
+                        try:
+                            doc = await mongo_db.tenant_names.find_one({
+                                "user_id": user_id, "tenant_id": primary_tid,
+                            })
+                            if doc and doc.get("name"):
+                                name = doc["name"]
+                        except Exception:
+                            pass
+                    tenants.append({"tenant_id": primary_tid, "name": name})
+                if mongo_db is not None:
+                    try:
+                        extras = await mongo_db.user_tenants.find({"user_id": user_id}).to_list(20)
+                        for et in extras or []:
+                            tid = et.get("tenant_id")
+                            if not tid:
+                                continue
+                            if any(t["tenant_id"] == tid for t in tenants):
+                                continue
+                            tenants.append({
+                                "tenant_id": tid,
+                                "name": et.get("name") or tid,
+                            })
+                    except Exception:
+                        pass
+
+                for t in tenants:
+                    out.append({
+                        "user_id": user_id,
+                        "tenant_id": t["tenant_id"],
+                        "tenant_name": t["name"],
+                        "tokens": tokens,
+                    })
+    return out
+
+
+async def _run_negative_stock_summary_scan(slot_label: str):
+    """Fire a single round of eksi-stok özet bildirimleri.
+
+    For each (user, tenant) with notify_low_stock=1:
+      - Load stock_list from kasacepteweb via services.dataset_cache.get_dataset_items
+      - Count MIKTAR < 0 items
+      - If count>0 and (tenant_id, 'eksi_stok_ozet', f'{date}:h{hour}') is new → push ONE summary
+
+    slot_label = e.g. "2026-05-01:h13"
+    """
+    try:
+        from services.dataset_cache import get_dataset_items
+    except Exception as e:
+        logger.warning(f"[neg_stock_summary] import dataset_cache failed: {e}")
+        return
+
+    subs = await _collect_low_stock_subscribers()
+    if not subs:
+        logger.info(f"[neg_stock_summary] slot={slot_label} no subscribers with notify_low_stock")
+        return
+
+    # Group by tenant_id so we only load each tenant's stock list once, even if
+    # multiple users want it.
+    tenant_info: Dict[str, Dict[str, Any]] = {}
+    for s in subs:
+        tid = s["tenant_id"]
+        if tid not in tenant_info:
+            tenant_info[tid] = {
+                "tenant_name": s["tenant_name"],
+                "recipients": [],  # list of (user_id, tokens)
+            }
+        tenant_info[tid]["recipients"].append({
+            "user_id": s["user_id"],
+            "tokens": s["tokens"],
+        })
+
+    total_pushed = 0
+    for tid, info in tenant_info.items():
+        try:
+            items = await get_dataset_items(tid, "stock_list")
+            negative_items = []
+            for it in items:
+                try:
+                    m = float(it.get("MIKTAR") or 0)
+                except (TypeError, ValueError):
+                    m = 0.0
+                if m < 0:
+                    negative_items.append({
+                        "ad": it.get("AD") or it.get("STOK_AD") or "",
+                        "kod": it.get("KOD") or it.get("STOK_KOD") or "",
+                        "miktar": m,
+                    })
+
+            cnt = len(negative_items)
+            logger.info(f"[neg_stock_summary] slot={slot_label} tenant={tid} ({info['tenant_name']}) negative={cnt}")
+
+            # Compose body: number + up to 3 example items so users get useful signal
+            if cnt == 0:
+                # Still mark seen so we don't keep re-checking; actually skip mark
+                # because we want a fresh chance if data updates later in the same slot.
+                continue
+
+            total_abs = sum(abs(x["miktar"]) for x in negative_items)
+            # Top 3 most-negative for teaser
+            sorted_items = sorted(negative_items, key=lambda x: x["miktar"])[:3]
+            teaser = "; ".join(
+                f"{(x['ad'] or x['kod'])[:28]} ({x['miktar']:.0f})"
+                for x in sorted_items if (x['ad'] or x['kod'])
+            )
+            body = f"{cnt} ürün eksi stokta (toplam {total_abs:,.0f} adet eksik)"
+            if teaser:
+                body = f"{body}\n{teaser}"
+
+            # Dedup per tenant+slot
+            dedup_key = f"eksi_stok_ozet:{slot_label}"
+            if not await _mark_event_seen(tid, "eksi_stok_ozet", dedup_key):
+                logger.info(f"[neg_stock_summary] slot={slot_label} tenant={tid} already pushed this slot — skip")
+                continue
+
+            # Collect all tokens for all users of this tenant (deduped)
+            all_tokens: List[str] = []
+            seen_tokens = set()
+            for rcp in info["recipients"]:
+                for tok in rcp["tokens"]:
+                    if tok not in seen_tokens:
+                        seen_tokens.add(tok)
+                        all_tokens.append(tok)
+
+            if not all_tokens:
+                continue
+
+            await _push_many(
+                all_tokens,
+                f"📦 Eksi Stok · {info['tenant_name']}",
+                body,
+                {
+                    "type": "low_stock_summary",
+                    "tenant": tid,
+                    "tenant_name": info["tenant_name"],
+                    "count": cnt,
+                    "slot": slot_label,
+                },
+            )
+            total_pushed += 1
+            logger.info(
+                f"[neg_stock_summary] ✅ PUSHED tenant={tid} ({info['tenant_name']}) "
+                f"count={cnt} tokens={len(all_tokens)} slot={slot_label}"
+            )
+        except Exception as e:
+            logger.warning(f"[neg_stock_summary] tenant={tid} failed: {e}")
+
+    logger.info(f"[neg_stock_summary] slot={slot_label} complete — total_tenants_pushed={total_pushed}")
+
+
+async def _negative_stock_summary_loop():
+    """Runs forever; fires `_run_negative_stock_summary_scan` at TR 13:00 and 20:00.
+
+    Check minute-by-minute; dedup via notification_events_seen so even if we
+    overlap several minutes at the top of the hour we still push exactly once
+    per slot per tenant.
+    """
+    logger.info(
+        f"📦 Negative-stock summary watcher started — fires daily at TR "
+        f"{_NEGATIVE_STOCK_TARGET_HOURS_TR}:00"
+    )
+    while True:
+        try:
+            tr_now = _tr_now()
+            if tr_now.hour in _NEGATIVE_STOCK_TARGET_HOURS_TR:
+                # Run anywhere in the first 10 minutes of the target hour.
+                # Dedup prevents duplicate pushes.
+                if tr_now.minute < 10:
+                    slot_label = f"{tr_now.strftime('%Y-%m-%d')}:h{tr_now.hour:02d}"
+                    await _run_negative_stock_summary_scan(slot_label)
+        except Exception as e:
+            logger.error(f"[neg_stock_summary] loop error: {e}")
+        await asyncio.sleep(_NEGATIVE_STOCK_CHECK_INTERVAL_SEC)
+
+
 async def _cancellations_loop():
     """Dedicated fast loop for cancellation detection (~15s cadence).
 
@@ -1133,7 +1290,7 @@ async def _cancellations_loop():
 
 def start_watcher():
     """Called once at FastAPI startup."""
-    global _watcher_task, _high_sales_task, _cancellations_task
+    global _watcher_task, _high_sales_task, _cancellations_task, _negative_stock_task
     loop = asyncio.get_event_loop()
     if _watcher_task is None or _watcher_task.done():
         _watcher_task = loop.create_task(_watcher_loop())
@@ -1141,17 +1298,21 @@ def start_watcher():
         _high_sales_task = loop.create_task(_high_sales_loop())
     if _cancellations_task is None or _cancellations_task.done():
         _cancellations_task = loop.create_task(_cancellations_loop())
+    if _negative_stock_task is None or _negative_stock_task.done():
+        _negative_stock_task = loop.create_task(_negative_stock_summary_loop())
 
 
 def stop_watcher():
     """Called at FastAPI shutdown."""
-    global _watcher_task, _high_sales_task, _cancellations_task
+    global _watcher_task, _high_sales_task, _cancellations_task, _negative_stock_task
     if _watcher_task and not _watcher_task.done():
         _watcher_task.cancel()
     if _high_sales_task and not _high_sales_task.done():
         _high_sales_task.cancel()
     if _cancellations_task and not _cancellations_task.done():
         _cancellations_task.cancel()
+    if _negative_stock_task and not _negative_stock_task.done():
+        _negative_stock_task.cancel()
 
 
 # Backward-compat alias for routes/notifications.py /scan-now endpoint

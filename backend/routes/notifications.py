@@ -710,14 +710,89 @@ async def scan_now(body: ScanNowBody, current_user: dict = Depends(get_current_u
     }
 
 
+@router.post("/scan-now-eksi-stok")
+async def scan_now_eksi_stok(current_user: dict = Depends(get_current_user)):
+    """Manually trigger an eksi-stok (negative stock) summary scan for debugging.
+
+    This bypasses the fixed 13:00/20:00 TR schedule and the per-slot dedup so you
+    can immediately see whether a push would be delivered with the current data.
+    """
+    from datetime import datetime, timedelta
+    from services.notification_watcher import (
+        _collect_low_stock_subscribers,
+        _push_many,
+    )
+    from services.dataset_cache import get_dataset_items
+
+    user_id = current_user["user_id"]
+    subs_all = await _collect_low_stock_subscribers()
+    subs = [s for s in subs_all if s["user_id"] == user_id]
+    if not subs:
+        return {
+            "ok": False,
+            "reason": "no_subscribers_for_user",
+            "hint": "Enable 'Eksi Stok' (notify_low_stock) in settings and ensure push tokens exist.",
+            "user_id": user_id,
+        }
+
+    tenant_results = []
+    for s in subs:
+        tid = s["tenant_id"]
+        tname = s["tenant_name"]
+        items = await get_dataset_items(tid, "stock_list")
+        negatives = []
+        for it in items:
+            try:
+                m = float(it.get("MIKTAR") or 0)
+            except (TypeError, ValueError):
+                m = 0.0
+            if m < 0:
+                negatives.append({
+                    "ad": it.get("AD") or it.get("STOK_AD") or "",
+                    "kod": it.get("KOD") or it.get("STOK_KOD") or "",
+                    "miktar": m,
+                })
+
+        cnt = len(negatives)
+        pushed = False
+        if cnt > 0 and s["tokens"]:
+            total_abs = sum(abs(x["miktar"]) for x in negatives)
+            top = sorted(negatives, key=lambda x: x["miktar"])[:3]
+            teaser = "; ".join(
+                f"{(x['ad'] or x['kod'])[:28]} ({x['miktar']:.0f})"
+                for x in top if (x['ad'] or x['kod'])
+            )
+            body = f"{cnt} ürün eksi stokta (toplam {total_abs:,.0f} adet eksik)"
+            if teaser:
+                body = f"{body}\n{teaser}"
+            await _push_many(
+                s["tokens"],
+                f"📦 Eksi Stok · {tname}",
+                body,
+                {
+                    "type": "low_stock_summary",
+                    "tenant": tid,
+                    "tenant_name": tname,
+                    "count": cnt,
+                    "test": True,
+                },
+            )
+            pushed = True
+
+        tenant_results.append({
+            "tenant_id": tid,
+            "tenant_name": tname,
+            "total_items": len(items),
+            "negative_count": cnt,
+            "pushed": pushed,
+            "sample": negatives[:5],
+        })
+
+    return {"ok": True, "tenants": tenant_results}
+
+
 @router.post("/settings")
 async def set_settings(body: NotificationSettings, current_user: dict = Depends(get_current_user)):
-    """Upsert the current user's notification preferences.
-
-    Also resets `last_check_at` so the watcher picks up the new interval
-    immediately on the next tick (otherwise users stuck in the old 15-min
-    window would have to wait for it to expire).
-    """
     user_id = current_user["user_id"]
     pool = await get_patron_pool()
     async with pool.acquire() as conn:

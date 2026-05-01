@@ -445,13 +445,107 @@ agent_communication:
   - agent: "testing"
     message: "✅ MYSQL-DIRECT ENDPOINTS REGRESSION (2026-05-01, 28/28 PASS — /app/backend_test.py): All endpoints functional. _source='mysql_direct' present in stock-list, cari-list, stock-price-names. Pagination, last-page partial, server-side filters (search, groups, markas, kdv_values, aktif, hareketli, qty, profit, price range; bakiye=borclu/alacakli/sifir; bakiye_min/max) all behave correctly with 0 violations across returned rows for tested filters (search=BORU, aktif+qty=high, kdv=20, bakiye=borclu). Cold/warm latency targets met (Merkez stock-list cold 1.67s, warm 279ms). iptal-list (sync.php dataset_get) returned 182 rows in 4.53s. stock-detail returned {ok, miktar:[2], extre:[]} via _on_demand_request fallback chain. Auth: all 6 endpoints reject no-bearer with 403 (FastAPI HTTPBearer default — acceptable per project pattern). Bogus tenant → 200 + empty data (no 500 stack-trace). report-run validation: invalid dataset_key → 400 'Geçersiz rapor:'; missing tenant_id/dataset_key → 400 Turkish messages.\n\n⚠️ TWO NON-CODE FINDINGS THAT NEED MAIN-AGENT ATTENTION:\n  (A) DATA INGESTION GAP: Tenant Gümüşhane (4d9b503a96f5430aad34c430301a8aa1) has ZERO rows in MySQL kasacepteweb.dataset_cache_rows AND dataset_cache for stock_list, cari_bakiye_liste, stok_fiyat_adlari. Verified directly with COUNT(*) queries. Review request expected ~63840/2273/7 rows. The endpoints correctly return total_count=0 with _source='mysql_direct' (graceful, no errors). The POS client must push stock/cari data into dataset_cache_rows for this tenant — this is NOT a backend code regression. Merkez (d5587c87...) currently has 466 stock_list rows (review said 2466) and 1 cari (review said 6); endpoint reports MySQL truth.\n  (B) /api/data/report-run does NOT accept dataset_key='rap_filtre_lookup' — it's not in the allowed_keys whitelist (routes/data.py L1413-1417). Calling it returns 400 'Geçersiz rapor: rap_filtre_lookup'. The codebase already has a dedicated endpoint /api/data/report-filter-options that uses rap_filtre_lookup internally and works correctly (returns 3 items for STOK_FIYAT_AD). The review request asked to test rap_filtre_lookup via /report-run; current behaviour is intentional but if main agent wants to also expose it via /report-run, simply add 'rap_filtre_lookup' to allowed_keys. Recommend keeping current design and updating documentation/clients to use /report-filter-options. No backend code change required."
 
+  - agent: "main"
+    message: "📦 EKSİ STOK BİLDİRİMİ (2026-05-01 saat ~12:18): notification_watcher.py'ye yeni `_negative_stock_summary_loop` eklendi. Her gün TR saati 13:00 ve 20:00'de tetiklenir, her tenant için MIKTAR<0 ürünleri sayar ve TEK bildirim gönderir: 'Eksi Stok · <Mağaza> — N ürün eksi stokta (toplam X adet eksik)' + en negatif 3 ürün teaser'ı. Dedup: `eksi_stok_ozet:YYYY-MM-DD:hHH`. notify_low_stock=1 olan kullanıcıların primary_tenant + user_tenants'ı kontrol edilir. Data kaynak: kasacepteweb.dataset_cache_rows (stock_list) via get_dataset_items(). Eski her-ürün-için-ayrı-bildirim davranışı devre dışı bırakıldı (scan_loop içinde). Yeni manual test endpoint: POST /api/notifications/scan-now-eksi-stok (dedup bypass eder). Frontend: translations 'low_stock_alert/desc' güncellendi. Settings toggle 'notify_low_stock' bu özelliği kontrol ediyor. Test ederken: Gümüşhane tenant'ının stock_list'i şu an boş, Merkez 6 cari ve 2466 stok içeriyor."
+
 test_plan:
-  current_focus:
-    - "Stock List API (MySQL direct)"
-    - "Cari List API (MySQL direct)"
-    - "Stock Price Names API (MySQL direct)"
-    - "Report Run with MySQL fast-path"
-    - "iptal-list endpoint (uses dataset_get)"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+backend_new_tasks_results:
+  - task: "Negative-stock summary notification (loop + manual endpoint)"
+    implemented: true
+    working: true
+    file: "services/notification_watcher.py + routes/notifications.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ TESTED 2026-05-01 (23/23 PASS, /app/backend_test_eksistok.py)
+          1) Startup banner present in /var/log/supervisor/backend.err.log
+             — "📦 Negative-stock summary watcher started — fires daily at TR [13, 20]:00"
+             (backend restarted once to pick up the new _negative_stock_summary_loop code).
+          2) POST /api/notifications/scan-now-eksi-stok
+             • no-subs path (berk, notify_low_stock=0): returns {ok:false, reason:"no_subscribers_for_user", hint, user_id:8}
+             • enabling settings + registering ExponentPushToken[TEST_STUB] for berk
+               STILL returns no_subscribers_for_user — this is CORRECT behaviour: user 8
+               has no primary users.tenant_id and no mongo user_tenants rows, so
+               _collect_low_stock_subscribers yields no (user,tenant) pairs.
+             • Happy path exercised with admin user 55 (cakmak.ebubekir29@gmail.com,
+               tenants: Merkez d5587c87… + Gümüşhane 4d9b503a…):
+               Response: ok:true, tenants:[
+                 {tenant_id:'d5587c87…', tenant_name:'Merkez', total_items:2466,
+                  negative_count:30, pushed:true, sample:[5 items, e.g. 'BOSELLO (-11)']},
+                 {tenant_id:'4d9b503a…', tenant_name:'Gümüşhane', total_items:0,
+                  negative_count:0, pushed:false, sample:[]}
+               ]  ← matches review spec ("Merkez ~2466 items") EXACTLY.
+             • Push dispatched via Expo to the stub token (Expo drops it silently as
+               expected — confirmed in logs; ticket status=error code=DeviceNotRegistered).
+          3) Per-item spam disabled in _check_tenant_for_user:
+             • Confirmed marker comment "Eksi Stok summary notifications moved to
+               dedicated _negative_stock_summary_loop" is present.
+             • No "for kod, info in totals.items()" loop calling _push_many remains
+               in _check_tenant_for_user. Only the new summary loop emits low-stock pushes.
+          4) Dedup-bypass on manual endpoint confirmed: two consecutive scan-now-eksi-stok
+             calls both returned pushed=true for Merkez (the scheduled loop uses
+             `eksi_stok_ozet:YYYY-MM-DD:hHH` dedup via _mark_event_seen; the manual
+             endpoint intentionally skips _mark_event_seen so repeated manual calls always push).
+          5) GET /api/notifications/settings returns notify_low_stock in the payload
+             and POST /settings persists it (verified true after POST).
+          6) Regression checks: my-tokens 200 OK, register-token 200 OK, settings GET/POST
+             200 OK. Cancellations + high-sales loops unaffected (15s loops firing
+             normally in backend logs; iptal_detay HIT 182 rows for Merkez,
+             fis_gunluk_bildirim_feed HIT for Merkez).
+
+          NON-CODE FINDING (notable for main agent):
+          • Review request used credentials `cakmak_ebubekir@hotmail.com / admin` (user 8, "berk")
+            but expected Merkez stock (2466 items). User 8 has ZERO tenants in MySQL
+            (users.tenant_id is NULL) and ZERO rows in mongo user_tenants. Hence the
+            endpoint correctly returns no_subscribers_for_user for berk — the expected
+            happy-path data belongs to user 55 (admin / cakmak.ebubekir29@gmail.com).
+            The endpoint is 100% working; the review-spec login/data mismatch is only a
+            documentation inconsistency. No backend fix required.
+
+          CLEANUP: restored notify_low_stock=false for both users at end of test,
+          and unregistered the ExponentPushToken[TEST_STUB] push token from both.
+
+agent_communication:
+  - agent: "testing"
+    message: |
+      ✅ NEGATIVE-STOCK SUMMARY NOTIFICATION — FULL PASS (23/23, /app/backend_test_eksistok.py, 2026-05-01 TR 15:21).
+      
+      Key validated items:
+      • Startup log emits "📦 Negative-stock summary watcher started — fires daily at TR [13, 20]:00"
+        (required a backend restart since the module was loaded before the new code was added).
+      • POST /api/notifications/scan-now-eksi-stok behaves exactly as specified:
+          - returns {ok:false, reason:"no_subscribers_for_user"} when no active tokens
+            OR user has no tenants.
+          - returns {ok:true, tenants:[…]} with full row shape (tenant_id, tenant_name,
+            total_items, negative_count, pushed, sample) for subscribers with tenants.
+          - Merkez (d5587c87…) reported total_items=2466, negative_count=30, pushed=true
+            — matches the review expectation exactly.
+          - Dedup is bypassed on the manual endpoint: repeated calls still push
+            (verified 1st and 2nd call both pushed=true for Merkez).
+      • Per-item low_stock spam inside _check_tenant_for_user is DISABLED — marker
+        comment present, no _push_many-per-item loop remains. Only the new
+        _negative_stock_summary_loop emits low-stock notifications.
+      • GET /api/notifications/settings now includes notify_low_stock in the settings
+        object. POST /settings persists it (true→roundtrip verified).
+      • Regression sanity: my-tokens, register-token, login, settings all still 200 OK.
+        Cancellations loop continues firing (iptal_detay HIT 182 rows for Merkez);
+        high-sales loop firing on fis_gunluk_bildirim_feed.
+      
+      NON-CODE NOTE: the review spec uses `cakmak_ebubekir@hotmail.com` (user 8 "berk")
+      but expects Merkez data which belongs to `cakmak.ebubekir29@gmail.com` (user 55).
+      User 8 has zero tenants attached (no primary, no user_tenants rows), so the
+      endpoint correctly returns no_subscribers_for_user for berk. The happy-path
+      assertions were exercised with user 55 to validate the real data flow.
+      No backend code change required.
+      
+      Cleanup done: notify_low_stock restored to 0 for both users; test push token
+      unregistered.
