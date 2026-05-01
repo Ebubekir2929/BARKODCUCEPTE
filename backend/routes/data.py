@@ -251,12 +251,53 @@ async def fetch_dataset(pool, tenant_id: str, dataset_key: str, filter_date: Opt
         data = json.loads(row[0]) if row[0] else []
     except json.JSONDecodeError:
         data = []
-    
+
     try:
         params = json.loads(row[4]) if row[4] else {}
     except json.JSONDecodeError:
         params = {}
-    
+
+    # ─── Delta-rows format detection ───
+    # POS migrated to a delta-format where dataset_cache.data_json contains a
+    # placeholder dict like {"delta_rows": true, "meta": {...}, "row_count": N}
+    # and the actual records live in dataset_cache_rows. Frontend always
+    # expects `data` to be a list, so we transparently load the rows here.
+    if isinstance(data, dict) and (data.get("delta_rows") is True
+                                   or "active_rows" in (data.get("meta") or {})
+                                   or (not data.get("data") and data.get("row_count"))):
+        try:
+            async with pool.acquire() as conn2:
+                async with conn2.cursor() as cur2:
+                    await cur2.execute(
+                        """
+                        SELECT row_json FROM dataset_cache_rows
+                        WHERE tenant_id=%s AND dataset_key=%s AND deleted_at IS NULL
+                        ORDER BY id ASC LIMIT 5000
+                        """,
+                        (tenant_id, dataset_key),
+                    )
+                    rs = await cur2.fetchall()
+            parsed = []
+            for (raw,) in rs:
+                if not raw:
+                    continue
+                try:
+                    parsed.append(json.loads(raw))
+                except Exception:
+                    continue
+            data = parsed
+        except Exception as e:
+            logger.warning(f"[fetch_dataset] delta_rows fallback for {dataset_key} failed: {e}")
+            data = []
+    elif isinstance(data, dict):
+        # Some datasets wrap as {"data": [...]} — unwrap
+        inner = data.get("data")
+        if isinstance(inner, list):
+            data = inner
+
+    if not isinstance(data, list):
+        data = []
+
     # Fix large integers for JavaScript safety
     data = _fix_large_ints(data)
     
