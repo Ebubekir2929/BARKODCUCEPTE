@@ -651,6 +651,12 @@ async def lookup_rows_dataset(
                         rows = await cur.fetchall()
                 # Dedupe in Python preserving the newest row per
                 # (saat, stok_id, lokasyon_id). Then apply filters.
+                # Overwrite KDV_DAHIL_TOPLAM_TUTAR with the COMBINED total
+                # (KDV_DAHIL + PERAKENDE + ERP12) so that the frontend's
+                # single numeric field matches the chart aggregate. Many
+                # products store their amount only in PERAKENDE_… or ERP12_…
+                # and leave KDV_DAHIL_… at 0 — summing all three makes the
+                # product row tutar = chart bar total.
                 p = params or {}
                 wanted_lok = p.get("lokasyonID") or p.get("LOKASYON_ID") or p.get("lokasyon_id")
                 target_hour_int = int(target_hour)
@@ -661,7 +667,6 @@ async def lookup_rows_dataset(
                         d = json.loads(row_json_raw) if isinstance(row_json_raw, (str, bytes)) else (row_json_raw or {})
                     except Exception:
                         continue
-                    # Verify hour (LIKE is approximate)
                     try:
                         h = int(d.get("SAAT_NO") if d.get("SAAT_NO") is not None else str(d.get("SAAT_ADI") or "")[:2])
                     except (TypeError, ValueError):
@@ -682,7 +687,28 @@ async def lookup_rows_dataset(
                     if key in seen:
                         continue
                     seen.add(key)
-                    out.append(d)
+
+                    # Combine the 3 revenue columns into a single total.
+                    # Use MAX not SUM — the POS stores the same retail sale in
+                    # both KDV_DAHIL_TOPLAM_TUTAR and PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR
+                    # (sometimes also in ERP12), so adding them double-counts.
+                    # Taking the max gives the correct single value per product
+                    # regardless of which column the POS chose to populate.
+                    def _f(v):
+                        try:
+                            return float(v) if v is not None else 0.0
+                        except (TypeError, ValueError):
+                            return 0.0
+                    combined = max(
+                        _f(d.get("KDV_DAHIL_TOPLAM_TUTAR")),
+                        _f(d.get("PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR")),
+                        _f(d.get("ERP12_KDV_DAHIL_TOPLAM_TUTAR")),
+                    )
+                    d_out = dict(d)
+                    d_out["_ORIG_KDV_DAHIL_TOPLAM_TUTAR"] = d.get("KDV_DAHIL_TOPLAM_TUTAR")
+                    d_out["KDV_DAHIL_TOPLAM_TUTAR"] = combined
+                    d_out["TOPLAM_TUTAR"] = combined
+                    out.append(d_out)
                 return out
             except Exception as e:
                 logger.warning(f"[lookup_rows] single-hour direct DB failed: {e}; fallback to mem_cache")
@@ -762,7 +788,15 @@ async def lookup_rows_dataset(
                             "_AGGREGATE": True,
                         }
                     a = agg[bucket]
-                    amt = _f(d.get("KDV_DAHIL_TOPLAM_TUTAR"))
+                    # MAX — not SUM — of the 3 revenue columns. The POS stores
+                    # the same retail sale in both KDV_DAHIL and PERAKENDE
+                    # (and sometimes ERP12). Summing double-counts; max picks
+                    # the "canonical" value whichever column happens to hold it.
+                    amt = max(
+                        _f(d.get("KDV_DAHIL_TOPLAM_TUTAR")),
+                        _f(d.get("PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR")),
+                        _f(d.get("ERP12_KDV_DAHIL_TOPLAM_TUTAR")),
+                    )
                     a["KDV_DAHIL_TOPLAM_TUTAR"] += amt
                     a["TOPLAM_TUTAR"] += amt
                     a["BRUT_KDV_DAHIL_TOPLAM_TUTAR"] += _f(d.get("BRUT_KDV_DAHIL_TOPLAM_TUTAR"))

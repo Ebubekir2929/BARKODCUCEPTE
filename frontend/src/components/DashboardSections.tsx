@@ -488,12 +488,20 @@ export const HourlyLocationSection: React.FC<{
   const hasAnySales = effectiveData.some((r: any) => parseFloat(r?.TOPLAM || '0') > 0);
   if (!hasAnySales) return null;
 
-  // Group by LOKASYON
+  // Group by LOKASYON (and sort hours ascending within each location)
   const byLocation: Record<string, any[]> = {};
   effectiveData.forEach((r: any) => {
     const loc = r.LOKASYON || 'Bilinmeyen';
     if (!byLocation[loc]) byLocation[loc] = [];
     byLocation[loc].push(r);
+  });
+  // Parse the "HH:00 - HH:00" prefix as an integer so "06:00 - 07:00" < "22:00 - 23:00".
+  const _parseHour = (s: string): number => {
+    const m = /^(\d{1,2})/.exec(String(s || ''));
+    return m ? parseInt(m[1], 10) : 0;
+  };
+  Object.keys(byLocation).forEach((loc) => {
+    byLocation[loc].sort((a, b) => _parseHour(a?.SAAT_ADI) - _parseHour(b?.SAAT_ADI));
   });
 
   const getLocTotal = (loc: string, rows: any[]): number => {
@@ -589,7 +597,9 @@ export const HourlyLocationSection: React.FC<{
         Object.values(byLocation).forEach((rows: any) => {
           rows.forEach((r: any) => allHours.add(r.SAAT_ADI || ''));
         });
-        const hourList = Array.from(allHours).filter(Boolean).sort();
+        const hourList = Array.from(allHours)
+          .filter(Boolean)
+          .sort((a, b) => _parseHour(a) - _parseHour(b));
         // Build matrix: location → hour → amount
         const locColors = ['#2563EB', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#EC4899', '#84CC16'];
         const locNames = Object.keys(byLocation);

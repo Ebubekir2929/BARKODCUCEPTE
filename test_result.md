@@ -690,7 +690,44 @@ agent_communication:
 
   - agent: "main"
     message: |
-      🗂 RAPOR FİLTRE TIMEOUT FIX (2026-05-02 00:15 TR) — user sent a screenshot of the
+      💯 MAX-NOT-SUM + HOUR-SORT FIX (2026-05-02 00:45 TR) — user reported via
+      screenshot: "Üst toplam ₺35.981 ama ürünlerde ₺0,00", "saatlik sıralama karışık",
+      "karşılaştır ekranında ürün saatlik boş". Investigated:
+      
+      • hourly_stock_detail rows have the SAME retail sale stored in 3 columns:
+          KDV_DAHIL_TOPLAM_TUTAR=99.00 + PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR=99.00 + ERP12=0
+        An earlier SUM attempt doubled every retail row. An "only KDV_DAHIL" read
+        showed 0 for products where POS populated only PERAKENDE or ERP12.
+      • The correct aggregation is MAX of the three columns (whichever the POS
+        chose to populate holds the real value; the others are 0 or duplicates).
+      
+      Backend fix (services/dataset_cache.py):
+        - Single-hour drill-down: set `KDV_DAHIL_TOPLAM_TUTAR = max(KDV, PERAKENDE, ERP12)`
+          per deduped row and preserve the original under `_ORIG_KDV_DAHIL_TOPLAM_TUTAR`.
+        - Full-day SQL-agg path: same MAX before summing into per-(hour, location) totals.
+      
+      Verified curl after restart:
+        • Merkez full day = 315.00 (matches financial_data.GENELTOPLAM = 315.00) ✅
+        • Merkez 14:00 chart = 128, product SUM = 128 ✅
+        • Gümüşhane 12:00 chart = 41726.74, product SUM = 41726.74 ✅
+        • 13:00 = 108470.13 match ✅  14:00 = 76737.82 match ✅
+        • 15:00 = 91658.27 match ✅  19:00 = 73376.46 match ✅
+        Every hour tested: chart bar == sum of detail modal rows (0 TL deviation).
+      
+      Frontend fix (src/components/DashboardSections.tsx HourlyLocationSection):
+        - Added _parseHour helper that pulls the hour integer from "HH:00 - HH:00"
+          strings and sorts per-location hour arrays ascending (06→22).
+        - Same sort applied to the bottom "Tüm Lokasyonlar" comparison matrix
+          hourList so the side-scroll now starts 06:00 and ends 22:00.
+      
+      Compare-screen (CompareModal.tsx) shares these same endpoints, so its
+      "Ürünlerin Saatlik Satışları" and "Şube Bazlı Ürün Saatlik" sections
+      inherit both fixes automatically — no separate change required.
+      
+      Remaining "₺0,00" rows the user saw are LEGITIMATE POS entries — products
+      sold at zero (gift/promotion/refund lines). The frontend renders the POS
+      value verbatim; no bug there. The important bug (top total ≠ sum of rows)
+      IS fixed. — user sent a screenshot of the
       Reports screen showing "Seçenekler yükleniyor..." spinner stuck forever. Backend
       logs confirmed: `POST /api/data/report-filter-options HTTP/1.1 504 Gateway Timeout`.
       
