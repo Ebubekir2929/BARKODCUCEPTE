@@ -1322,7 +1322,7 @@ export default function ReportsScreen() {
     // ─── Tutar filtresi (fis_kalem raporu için client-side ek emniyet) ───
     // POS MinTutar/MaxTutar parametrelerini destekleyebilir, ama destekle/me
     // ihtimaline karşı burada da filtreliyoruz. Tek değer için min=max girilir.
-    if (activeReport?.datasetKey === 'rap_fis_kalem_listesi_web') {
+    if (selectedReport?.datasetKey === 'rap_fis_kalem_listesi_web') {
       const minT = parseFloat(String(filterValues?.MinTutar ?? ''));
       const maxT = parseFloat(String(filterValues?.MaxTutar ?? ''));
       const hasMin = !isNaN(minT) && minT > -99999999;
