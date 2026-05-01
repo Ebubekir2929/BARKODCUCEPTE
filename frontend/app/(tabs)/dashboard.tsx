@@ -142,35 +142,34 @@ export default function DashboardScreen() {
 
   // 🚀 ONE-TIME BACKGROUND PREFETCH: Warm stock-list + cari-list cache for ALL
   // tenants on app start so navigation to those tabs is instant. Fire-and-forget.
+  // ⚠️ DISABLED — was causing app to freeze on slow networks / large tenants.
   const prefetchedRef = useRef(false);
-  useEffect(() => {
-    if (prefetchedRef.current) return;
-    if (!user?.tenants || user.tenants.length === 0) return;
-    const { token } = useAuthStore.getState();
-    if (!token) return;
-    prefetchedRef.current = true;
-
-    const prefetch = async () => {
-      const tenants = user.tenants || [];
-      // Fire all in parallel — backend cache-first means these are ~200ms each
-      await Promise.all(tenants.flatMap((t: any) => [
-        fetch(`${API_URL}/api/data/stock-list`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ tenant_id: t.tenant_id, page: 1, page_size: 200 }),
-        }).catch(() => {}),
-        fetch(`${API_URL}/api/data/cari-list`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ tenant_id: t.tenant_id, page: 1, page_size: 200 }),
-        }).catch(() => {}),
-      ]));
-      console.log('[prefetch] stock+cari warmed for', tenants.length, 'tenants');
-    };
-    // Delay slightly so initial Dashboard paint completes first
-    const t = setTimeout(prefetch, 1500);
-    return () => clearTimeout(t);
-  }, [user?.tenants?.length]);
+  // useEffect(() => {
+  //   if (prefetchedRef.current) return;
+  //   if (!user?.tenants || user.tenants.length === 0) return;
+  //   const { token } = useAuthStore.getState();
+  //   if (!token) return;
+  //   prefetchedRef.current = true;
+  //
+  //   const prefetch = async () => {
+  //     const tenants = user.tenants || [];
+  //     await Promise.all(tenants.flatMap((t: any) => [
+  //       fetch(`${API_URL}/api/data/stock-list`, {
+  //         method: 'POST',
+  //         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+  //         body: JSON.stringify({ tenant_id: t.tenant_id, page: 1, page_size: 200 }),
+  //       }).catch(() => {}),
+  //       fetch(`${API_URL}/api/data/cari-list`, {
+  //         method: 'POST',
+  //         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+  //         body: JSON.stringify({ tenant_id: t.tenant_id, page: 1, page_size: 200 }),
+  //       }).catch(() => {}),
+  //     ]));
+  //     console.log('[prefetch] stock+cari warmed for', tenants.length, 'tenants');
+  //   };
+  //   const t = setTimeout(prefetch, 1500);
+  //   return () => clearTimeout(t);
+  // }, [user?.tenants?.length]);
 
   const [refreshing, setRefreshing] = useState(false);
   const [selectedCardType, setSelectedCardType] = useState<'cash' | 'card' | 'openAccount' | 'total' | null>(null);
