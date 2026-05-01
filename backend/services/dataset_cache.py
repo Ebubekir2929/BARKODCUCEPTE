@@ -461,6 +461,45 @@ def filter_hourly_stock_detail_rows(items: List[dict], params: dict) -> List[dic
     return out
 
 
+async def _load_filtered_rows_sql(
+    tenant_id: str,
+    dataset_key: str,
+    sql_filter: str,
+    sql_params: tuple,
+) -> List[dict]:
+    """Load rows from dataset_cache_rows with a custom SQL WHERE clause.
+
+    Used for datasets with cheap-to-push-down filters (e.g. date ranges on
+    hourly_stock_detail) so we don't have to load 60k+ rows into Python memory
+    just to discard 99% of them.
+    """
+    pool = await get_data_pool()
+    items: List[dict] = []
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"""
+                SELECT row_json FROM dataset_cache_rows
+                WHERE tenant_id=%s AND dataset_key=%s AND deleted_at IS NULL
+                  AND ({sql_filter})
+                ORDER BY id ASC
+                """,
+                (tenant_id, dataset_key, *sql_params),
+            )
+            while True:
+                batch = await cur.fetchmany(2000)
+                if not batch:
+                    break
+                for (raw,) in batch:
+                    if not raw:
+                        continue
+                    try:
+                        items.append(json.loads(raw))
+                    except Exception:
+                        continue
+    return items
+
+
 async def lookup_rows_dataset(
     tenant_id: str,
     dataset_key: str,
@@ -500,6 +539,63 @@ async def lookup_rows_dataset(
         logger.debug(f"[lookup_rows] existence check failed for {dataset_key}: {e}")
         return None
 
+    # ─── Optimisation: SQL-level pushdown for hourly_stock_detail ───
+    # This dataset can be huge (5k+ rows for busy tenants) but the frontend
+    # only needs per-hour totals. Use MySQL string functions to aggregate
+    # at the DB layer — avoids parsing 5k JSON blobs in Python (which was
+    # taking 2.3s and triggering Android ANR).
+    if dataset_key == "hourly_stock_detail":
+        try:
+            from services import get_data_pool
+            pool = await get_data_pool()
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute(
+                        """
+                        SELECT
+                          SUBSTRING_INDEX(SUBSTRING_INDEX(row_json, '"SAAT_ADI":"', -1), '"', 1) AS saat_adi,
+                          SUBSTRING_INDEX(SUBSTRING_INDEX(row_json, '"LOKASYON":"', -1), '"', 1) AS lokasyon,
+                          SUBSTRING_INDEX(SUBSTRING_INDEX(row_json, '"LOKASYON_ID":', -1), ',', 1) + 0 AS lokasyon_id,
+                          SUM(CAST(NULLIF(SUBSTRING_INDEX(SUBSTRING_INDEX(row_json, '"KDV_DAHIL_TOPLAM_TUTAR":', -1), ',', 1), '') AS DECIMAL(18,4))) AS amount,
+                          SUM(CAST(NULLIF(SUBSTRING_INDEX(SUBSTRING_INDEX(row_json, '"SATIR_SAYISI":', -1), ',', 1), '') AS UNSIGNED)) AS satir,
+                          COUNT(*) AS row_count
+                        FROM dataset_cache_rows
+                        WHERE tenant_id=%s AND dataset_key='hourly_stock_detail' AND deleted_at IS NULL
+                        GROUP BY saat_adi, lokasyon, lokasyon_id
+                        """,
+                        (tenant_id,),
+                    )
+                    rows = await cur.fetchall()
+            # Build the synthetic "row" list the frontend expects: 1 row per
+            # (hour, location) carrying the aggregated KDV_DAHIL_TOPLAM_TUTAR.
+            # Filter by lokasyon if requested.
+            p = params or {}
+            wanted_lok = p.get("lokasyonID") or p.get("LOKASYON_ID") or p.get("lokasyon_id")
+            out = []
+            for r in rows:
+                if not r:
+                    continue
+                lok_id = int(r[2] or 0)
+                if wanted_lok not in (None, "", 0):
+                    try:
+                        if int(wanted_lok) != lok_id:
+                            continue
+                    except (TypeError, ValueError):
+                        pass
+                out.append({
+                    "SAAT_ADI": (r[0] or "").strip(),
+                    "LOKASYON": (r[1] or "").strip(),
+                    "LOKASYON_ID": lok_id,
+                    "KDV_DAHIL_TOPLAM_TUTAR": float(r[3] or 0),
+                    "TOPLAM_TUTAR": float(r[3] or 0),
+                    "SATIR_SAYISI": int(r[4] or 0),
+                    "_AGGREGATE": True,
+                })
+            return out
+        except Exception as e:
+            logger.warning(f"[lookup_rows] hourly_stock_detail SQL agg failed: {e}; falling back")
+            # Fall through to the slow Python path below
+
     items = await get_dataset_items(tenant_id, dataset_key)
     if not items:
         return None  # nothing pushed yet
@@ -514,7 +610,6 @@ async def lookup_rows_dataset(
         return filter_hourly_stock_detail_rows(items, params)
     if dataset_key == "rap_filtre_lookup":
         return filter_rap_filtre_lookup_rows(items, params)
-    # stock_list / cari_bakiye_liste already have specialized handlers in their endpoints
     return list(items)
 
 

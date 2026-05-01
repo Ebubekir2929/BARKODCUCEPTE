@@ -507,6 +507,46 @@ agent_communication:
   - agent: "main"
     message: "💾 CACHE WRITE-THROUGH + COMPARE FIX + TUTAR FILTER (2026-05-01 14:20): (1) services/dataset_cache.py'ye write_dataset_cache() helper eklendi. INSERT ... ON DUPLICATE KEY UPDATE ile sync.php sonuçlarını kasacepteweb.dataset_cache'e yazıyor. _on_demand_request hem step 1 (sync_cache hit) hem step 2 (request_create+poll done) sonrası asyncio.create_task(write_dataset_cache(...)) çağırıyor. Sonraki çağrı MySQL fast-path Step 0'dan dönüyor. (2) lookup_cached_report ROW_COUNT DESC öncelikli sıralama: POS bazen aynı params_json için 1-row delta update yazıyor → bizim full sweep ile yazılan satırın daha fazla data'sı var → DESC sıralama tercih ediyor. iptal-list testi: cold 3.2s → warm 630ms (5.2x speedup, doğru 182 rows). (3) CompareModal.tsx: 'Seçili' badge kaldırıldı — şimdi tüm tenantlar tek seferde karşılaştırılıyor; aktif olan (data{N}) ile diğerleri arasında gizli ayrım yok. (4) reports.tsx Fiş Kalem Listesi: MinTutar / MaxTutar parametreleri defaultParams'a, 'Tutar' grubu altında numeric filter UI'ya eklendi. processedData'ya client-side ek emniyet filtresi: SATIR_GENEL_TOPLAM aralık dışındaki satırlar gizleniyor (POS desteklese de desteklemese de garantili çalışır). Tek tutar için min=max girilebilir. Test gerekli: (a) iptal-list 2.+ çağrılarda MySQL hit (rows>0, <1s), (b) CompareModal ekranında 'Seçili' yazı yok, (c) report-run rap_fis_kalem_listesi_web MinTutar/MaxTutar parametreli."
 
+  - agent: "testing"
+    message: |
+      ✅ HOURLY-DETAIL-FULL + REGRESSION SUITE PASSED (20/21, /app/backend_test.py, 2026-05-01 17:40 TR)
+      Full results table:
+      
+        hourly-full cold  (Gümüşhane)        1926 ms    1594 B   hours=15 rows=51  _cache=live      ✅ <2s cold, <5KB payload
+        hourly-full warm  (Gümüşhane)         324 ms    1595 B   _cache=fresh                        ✅ Minor: 24ms over the 300ms aspirational target; well under ANR.
+        hourly-full cold  (Merkez)             777 ms    380 B    hours=3 rows=3   _cache=live       ✅
+        hourly-full warm  (Merkez)             275 ms    381 B    _cache=fresh                        ✅
+        Aggregate row shape verified for EVERY hour: KDV_DAHIL_TOPLAM_TUTAR + TOPLAM_TUTAR + FIS_SAYISI + _AGGREGATE:true, by_hour[HH] is list[1]. ✅
+      
+        iptal-list cold (Merkez)              785 ms   293 B   rows=1    ✅ (Merkez has 1 cancellation today)
+        iptal-list warm (Merkez)              438 ms   293 B   rows=1    ✅
+        iptal-list cold (Gümüşhane)           949 ms  6981 B   rows=25   ✅ (matches expected)
+        iptal-list warm (Gümüşhane)           436 ms  6981 B   rows=25   ✅
+      
+        stock-list fiyat_ad=0  (Merkez)      1653 ms    94 KB  total=2466  src=mysql_direct   ✅
+        stock-list fiyat_ad=1017 (Merkez)     276 ms   2.9 KB  total=6     (subset)           ✅
+        stock-list fiyat_ad=0  (Gümüşhane)   6666 ms   110 KB  total=63840 src=mysql_direct   ⚠️ COLD >ANR 5s on the VERY FIRST call after worker restart (mysql fetch + python filter of 63840 rows into JSON). Re-ran the same request 3× immediately afterwards → 397ms, 295ms, 299ms (in-memory cache warm). Not reproducible once hot. Payload 110KB is per-page=200 slice.
+        stock-list fiyat_ad=1017 (Gümüşhane)  324 ms   114 KB  total=9729  (subset)           ✅ subset returned correctly
+      
+        cari-list (Merkez)                    608 ms   2.2 KB  total=6     src=mysql_direct   ✅
+        cari-list (Gümüşhane)                1058 ms    73 KB  total=2275  src=mysql_direct   ✅
+      
+        table-detail invalid pos_id=999999999  736 ms   62 B    HTTP 200 ok=True data=[]      ✅ No crash, graceful empty-result
+      
+        dashboard (Merkez)                   2287 ms   5.3 KB  keys=13   ✅ <50KB payload
+        dashboard (Gümüşhane)                2316 ms    19 KB  keys=13   ✅ <50KB payload
+      
+      CRITICAL KPIs MET:
+        • No 500 errors anywhere.
+        • All warm responses <500ms (most <350ms).
+        • hourly-detail-full payload 1.5KB ⬅ down from ~4558 rows — aggregation is working.
+        • dashboard payload <50KB on both tenants.
+      
+      ONE SOFT FAILURE:
+        • stock-list Gümüşhane (fiyat_ad=0) cold path took 6.67s once (worker process had a cold in-memory cache + DB connection pool wake-up). All subsequent calls land in the in-memory cache under 400ms. This is NOT a regression vs. prior test (2026-05-01 reported 1.67s for Merkez with 466 rows; Gümüşhane has 63840 rows which is 137× the volume). If the <5s ANR ceiling is strict for every cold worker launch, consider: (a) preloading mysql_direct cache for primary tenants at startup, or (b) running the Python filter/paginate inside the MySQL query (LIMIT/OFFSET + WHERE on dataset_cache_rows) so initial fetch touches only 50 rows. Not a blocker for current deployment — subsequent calls are fast and dashboard+hourly endpoints are well within spec.
+      
+      Hourly-detail-full optimization (the main focus of this review) is CONFIRMED WORKING: SQL-level aggregation returns 1 row per hour with _AGGREGATE:true, payload 1.5KB for Gümüşhane (was ~4558 rows before), cold <2s, warm <350ms, cache=fresh on second call.
+
 test_plan:
   current_focus:
     - "Reports Screen — fix ReferenceError: activeReport is not defined (line 1374)"
