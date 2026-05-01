@@ -195,24 +195,11 @@ async def lookup_cached_report(
 ) -> Optional[Dict[str, Any]]:
     """Try to find a cached report result in kasacepteweb.dataset_cache.
 
-    The POS client writes the raw JSON result into `dataset_cache.data_json` when it
-    fulfils a sync.php request_create call. If we can find a matching row (same
-    tenant + dataset_key + params) we can serve it directly without another sync.php
-    round-trip.
-
-    Params are serialized with `json.dumps(..., sort_keys=True, separators=(',', ':'))`
-    to match the POS client's canonical format.
-
-    Args:
-      tenant_id: tenant ID
-      dataset_key: e.g. 'rap_cari_hesap_ekstresi_web'
-      params: the same dict the frontend sent
-      max_age_sec: only return the cached row if it's younger than this many seconds.
-                   None = no age limit.
-
-    Returns:
-      { 'data': list, 'row_count': int, 'synced_at': datetime, 'age_sec': float }
-      or None if nothing matching is in cache (or it's too old).
+    First attempts an exact binary params_json match; if that misses, loads up to
+    20 most-recent candidate rows for (tenant, dataset_key) and compares each
+    stored `params_json` to the caller's params as a **dict** (order-insensitive,
+    whitespace-insensitive, trailing "0" tolerant). This greatly improves hit
+    rate when the POS uses a slightly different JSON formatter than we do.
     """
     try:
         params_str = json.dumps(params or {}, sort_keys=True, separators=(',', ':'), ensure_ascii=False)
@@ -221,12 +208,38 @@ async def lookup_cached_report(
 
     pool = await get_data_pool()
     from datetime import datetime
+
+    def _norm_dict(d):
+        """Normalise a dict so equal semantic params compare equal."""
+        if not isinstance(d, dict):
+            return d
+        out = {}
+        for k, v in d.items():
+            if v is None:
+                continue
+            if isinstance(v, str):
+                v = v.strip()
+                if v == "":
+                    continue
+            if isinstance(v, (int, float)):
+                # Treat 0 and 0.0 and '' as equivalent "none"
+                if v == 0:
+                    continue
+            if isinstance(v, dict):
+                v = _norm_dict(v)
+                if not v:
+                    continue
+            out[str(k).strip()] = v
+        return out
+
+    target_norm = _norm_dict(params or {})
+
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            # Primary lookup: exact params_json match (binary-safe)
+            # 1) Fast path: exact binary match
             await cur.execute(
                 """
-                SELECT data_json, row_count, synced_at
+                SELECT data_json, row_count, synced_at, params_json
                 FROM dataset_cache
                 WHERE tenant_id=%s AND dataset_key=%s AND params_json=%s
                 ORDER BY synced_at DESC LIMIT 1
@@ -234,6 +247,28 @@ async def lookup_cached_report(
                 (tenant_id, dataset_key, params_str),
             )
             row = await cur.fetchone()
+
+            # 2) Fallback: fuzzy semantic match across recent entries
+            if not row:
+                await cur.execute(
+                    """
+                    SELECT data_json, row_count, synced_at, params_json
+                    FROM dataset_cache
+                    WHERE tenant_id=%s AND dataset_key=%s
+                    ORDER BY synced_at DESC LIMIT 20
+                    """,
+                    (tenant_id, dataset_key),
+                )
+                candidates = await cur.fetchall()
+                for cand in candidates:
+                    try:
+                        cand_params = json.loads(cand[3] or "{}")
+                    except Exception:
+                        continue
+                    if _norm_dict(cand_params) == target_norm:
+                        row = cand
+                        break
+
     if not row:
         return None
 

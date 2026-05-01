@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from 'expo-router';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAuthStore } from '../../src/store/authStore';
 import { useLanguageStore } from '../../src/store/languageStore';
@@ -881,15 +882,19 @@ export default function ReportsScreen() {
   // Result cache: key = `${reportKey}|${JSON.stringify(filterValues)}` -> { data, loadedPages }
   const resultCacheRef = useRef<Map<string, { data: any[]; pages: number }>>(new Map());
 
-  // Cancel in-flight requests when component unmounts or tab changes
-  useEffect(() => {
-    return () => {
-      if (abortRef.current) {
-        try { abortRef.current.abort(); } catch(_) {}
-      }
-      runTokenRef.current++; // invalidate any pending runs
-    };
-  }, []);
+  // Cancel in-flight requests when leaving this tab. Note: tab switches in
+  // expo-router don't unmount the screen, so a useEffect cleanup never fires
+  // until the user logs out — useFocusEffect is the correct hook here.
+  useFocusEffect(
+    React.useCallback(() => {
+      return () => {
+        if (abortRef.current) {
+          try { abortRef.current.abort(); } catch(_) {}
+        }
+        runTokenRef.current++; // invalidate any pending runs
+      };
+    }, [])
+  );
 
   // Debounce search input (300ms) so we don't filter on every keystroke
   useEffect(() => {

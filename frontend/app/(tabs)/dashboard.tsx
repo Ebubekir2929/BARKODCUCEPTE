@@ -91,10 +91,15 @@ export default function DashboardScreen() {
   // Refreshes on app open + every 60s.
   useEffect(() => {
     if (!user?.tenants || user.tenants.length === 0) return;
+    if (!isTabFocused) return; // pause while on another tab — user explicitly asked
     const { token } = useAuthStore.getState();
     if (!token) return;
 
+    let cancelled = false;
+    const ctrls: AbortController[] = [];
+
     const fetchAllTotals = async () => {
+      if (cancelled) return;
       const fmtDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       const sdate = fmtDate(filters.startDate);
       const edate = fmtDate(filters.endDate);
@@ -105,10 +110,12 @@ export default function DashboardScreen() {
       const updates: Record<string, number> = {};
 
       for (let i = 0; i < tenants.length; i += CHUNK) {
+        if (cancelled) return;
         const batch = tenants.slice(i, i + CHUNK).map(async (t, idx) => {
           const sourceKey = `data${i + idx + 1}`;
           try {
             const ctrl = new AbortController();
+            ctrls.push(ctrl);
             const timer = setTimeout(() => ctrl.abort(), 25000);
             const resp = await fetch(
               `${API_URL}/api/data/dashboard?tenant_id=${encodeURIComponent(t.tenant_id)}&sdate=${sdate}&edate=${edate}`,
@@ -130,15 +137,20 @@ export default function DashboardScreen() {
         await Promise.all(batch);
       }
 
-      if (Object.keys(updates).length > 0) {
+      if (!cancelled && Object.keys(updates).length > 0) {
         setSourceTotals(prev => ({ ...prev, ...updates }));
       }
     };
 
     fetchAllTotals();
     const interval = setInterval(fetchAllTotals, 60000);
-    return () => clearInterval(interval);
-  }, [user?.tenants?.length, filters.startDate.getTime(), filters.endDate.getTime()]);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      // Abort any pending fetches so we don't waste backend cycles
+      ctrls.forEach(c => { try { c.abort(); } catch {} });
+    };
+  }, [user?.tenants?.length, filters.startDate.getTime(), filters.endDate.getTime(), isTabFocused]);
 
   // 🚀 ONE-TIME BACKGROUND PREFETCH: Warm stock-list + cari-list cache for ALL
   // tenants on app start so navigation to those tabs is instant. Fire-and-forget.
@@ -237,14 +249,15 @@ export default function DashboardScreen() {
       setFreshHourlySales(null);
       return;
     }
+    if (!isTabFocused) return; // pause refresh when not on Dashboard tab
     const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const sdate = fmt(filters.startDate);
     const edate = fmt(filters.endDate);
     let cancelled = false;
+    const ctrl = new AbortController();
     (async () => {
       try {
         const { token } = useAuthStore.getState();
-        const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 60000);
         const resp = await fetch(`${API_URL}/api/data/hourly-detail-full`, {
           method: 'POST',
@@ -277,8 +290,11 @@ export default function DashboardScreen() {
         // silently fall back to legacy hourly_data
       }
     })();
-    return () => { cancelled = true; };
-  }, [activeTenantId, filters.startDate.getTime(), filters.endDate.getTime()]);
+    return () => {
+      cancelled = true;
+      try { ctrl.abort(); } catch {}
+    };
+  }, [activeTenantId, filters.startDate.getTime(), filters.endDate.getTime(), isTabFocused]);
 
   // Effective hourly sales: prefer fresh procedure data; fall back to legacy hourly_data
   const effectiveHourlySales = useMemo<HourlySales[]>(() => {
@@ -806,8 +822,8 @@ export default function DashboardScreen() {
           <WaiterSalesSection data={sourceData.waiterSales} />
         )}
 
-        {/* Hourly Sales Chart */}
-        {(sourceData?.hourlySales || []).length > 0 && (
+        {/* Hourly Sales Chart — only show if at least one hour has actual sales */}
+        {(sourceData?.hourlySales || []).some((h: any) => (h?.amount || 0) > 0) && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.sectionHeader}>
             <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('hourly_sales')}</Text>
@@ -837,28 +853,47 @@ export default function DashboardScreen() {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chartScroll}>
             <View style={styles.barChart}>
               {(sourceData?.hourlySales || []).map((hour, index) => {
-                const barHeight = (hour.amount / maxHourAmount) * 150;
+                const amt = hour.amount || 0;
+                const barHeight = maxHourAmount > 0 ? (amt / maxHourAmount) * 150 : 0;
                 const isHighlighted = highlightedHourIndex === index;
                 const isBest = hour.hour === bestSellingHour.hour;
+                const hasSales = amt > 0;
+                // Format amount: <1K = exact TL, 1K-999K = "12K", >=1M = "1.2M"
+                const formatted = amt === 0
+                  ? '—'
+                  : amt < 1000
+                    ? amt.toFixed(0)
+                    : amt < 1000000
+                      ? `${(amt / 1000).toFixed(amt < 10000 ? 1 : 0)}K`
+                      : `${(amt / 1000000).toFixed(1)}M`;
                 return (
                   <TouchableOpacity
                     key={hour.hour}
                     style={styles.barContainer}
                     onPress={() => handleHourPress(hour, index)}
+                    activeOpacity={0.7}
                   >
-                    <Text style={[styles.barValue, { color: colors.textSecondary }]}>
-                      {(hour.amount / 1000).toFixed(0)}K
+                    <Text style={[
+                      styles.barValue,
+                      {
+                        color: isHighlighted ? colors.primary : isBest ? colors.success : hasSales ? colors.text : colors.textSecondary,
+                        opacity: hasSales ? 1 : 0.4,
+                      },
+                    ]}>
+                      {formatted}
                     </Text>
                     <View
                       style={[
                         styles.bar,
                         {
-                          height: barHeight,
+                          height: hasSales ? Math.max(barHeight, 6) : 2,
                           backgroundColor: isHighlighted
                             ? colors.primary
                             : isBest
                             ? colors.success
-                            : colors.primary + '60',
+                            : hasSales
+                              ? colors.primary + '60'
+                              : colors.border,
                         },
                       ]}
                     />
@@ -1851,13 +1886,16 @@ const styles = StyleSheet.create({
     width: 32,
   },
   barValue: {
-    fontSize: 9,
+    fontSize: 11,
+    fontWeight: '700',
     marginBottom: 4,
+    minWidth: 34,
+    textAlign: 'center',
   },
   bar: {
-    width: 24,
+    width: 26,
     borderRadius: 6,
-    minHeight: 4,
+    minHeight: 2,
   },
   barLabel: {
     fontSize: 10,

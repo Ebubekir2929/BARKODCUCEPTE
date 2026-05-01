@@ -448,13 +448,19 @@ agent_communication:
   - agent: "main"
     message: "📦 EKSİ STOK BİLDİRİMİ (2026-05-01 saat ~12:18): notification_watcher.py'ye yeni `_negative_stock_summary_loop` eklendi. Her gün TR saati 13:00 ve 20:00'de tetiklenir, her tenant için MIKTAR<0 ürünleri sayar ve TEK bildirim gönderir: 'Eksi Stok · <Mağaza> — N ürün eksi stokta (toplam X adet eksik)' + en negatif 3 ürün teaser'ı. Dedup: `eksi_stok_ozet:YYYY-MM-DD:hHH`. notify_low_stock=1 olan kullanıcıların primary_tenant + user_tenants'ı kontrol edilir. Data kaynak: kasacepteweb.dataset_cache_rows (stock_list) via get_dataset_items(). Eski her-ürün-için-ayrı-bildirim davranışı devre dışı bırakıldı (scan_loop içinde). Yeni manual test endpoint: POST /api/notifications/scan-now-eksi-stok (dedup bypass eder). Frontend: translations 'low_stock_alert/desc' güncellendi. Settings toggle 'notify_low_stock' bu özelliği kontrol ediyor. Test ederken: Gümüşhane tenant'ının stock_list'i şu an boş, Merkez 6 cari ve 2466 stok içeriyor."
 
+  - agent: "main"
+    message: "🔄 ALL SYNC ENDPOINTS → MySQL FAST-PATH + REQUEST CANCELLATION + UI FIXES (2026-05-01 13:27): Kullanıcı 'sadece iptal değil hepsi' dedi. (1) /api/data/table-detail artık _on_demand_request kullanıyor (eski çift-step sync_post kaldırıldı). Tüm on-demand endpoint'ler artık 3-tier cache (MySQL direct → sync.php cache → request_create+poll). (2) lookup_cached_report fuzzy semantic match: param JSON formatlama farklılıkları artık cache hit'i engellemiyor (None/empty/0 normalize, 20 son cache satırından dict-eşitlik kontrolü). (3) Adaptive polling: 150ms×10 → 350ms×15 → 800ms (cached requests <500ms döner). (4) FRONTEND request iptali: dashboard.tsx fetchAllTotals + freshHourlySales artık tab focused olmadığında çalışmıyor; tab'dan çıkınca AbortController.abort() çağrılıyor. (5) reports.tsx: useEffect → useFocusEffect (tab unmount olmuyor expo-router'da, useFocusEffect doğru). (6) Hourly chart sıfır-değerli olduğunda gizleniyor (some(amount>0) check). (7) stock-list fiyat_ad filtresi backend'te tamam (Bayi=1017→6, Parekende=1016→2466). (8) rap_filtre_lookup whitelist'e eklendi. Lütfen tekrar test edelim — özellikle (a) /api/data/table-detail (POS_ID parametresi), (b) /api/data/iptal-list cache-hit, (c) /api/data/stock-list fiyat_ad=specific, (d) regression /api/data/cari-list."
+
 test_plan:
-  current_focus: []
+  current_focus:
+    - "POST /api/data/table-detail (now uses _on_demand_request)"
+    - "Cache-hit log verification across all on-demand endpoints"
+    - "lookup_cached_report fuzzy match semantic equality"
+    - "stock-list fiyat_ad filter (verify Bayi/Parekende returns different counts)"
+    - "Adaptive polling fast-path for cached results"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
-
-backend_new_tasks_results:
   - task: "Negative-stock summary notification (loop + manual endpoint)"
     implemented: true
     working: true

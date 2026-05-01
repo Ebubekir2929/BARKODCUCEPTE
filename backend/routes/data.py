@@ -605,45 +605,14 @@ async def get_table_detail(
         raise HTTPException(status_code=400, detail="tenant_id ve pos_id gerekli")
     
     try:
-        # Step 1: Create request
-        create_resp = await sync_post({
-            "action": "request_create",
-            "dataset_key": "acik_masa_detay",
-            "params": {"POS_ID": int(pos_id)},
-            "priority_no": 1,
-            "requested_by": "mobile",
-        }, tenant_id)
-        
-        request_uid = create_resp.get("request_uid", "")
-        if not request_uid:
-            raise HTTPException(status_code=502, detail="Detay isteği oluşturulamadı")
-        
-        # Step 2: Poll for result (max 35 seconds)
-        for _ in range(50):  # 50 * 0.7s = 35s max
-            status_resp = await sync_post({
-                "action": "request_status",
-                "request_uid": request_uid,
-                "include_data": True,
-            }, tenant_id)
-            
-            status = status_resp.get("status", "unknown")
-            
-            if status == "done":
-                data = status_resp.get("cache", {}).get("data", [])
-                return {
-                    "ok": True,
-                    "request_uid": request_uid,
-                    "data": _fix_large_ints(data) if isinstance(data, list) else [],
-                }
-            
-            if status == "error":
-                error_text = status_resp.get("error_text", "Bilinmeyen hata")
-                raise HTTPException(status_code=502, detail=f"POS hatası: {error_text}")
-            
-            await asyncio.sleep(0.7)
-        
-        raise HTTPException(status_code=504, detail="Detay zamanında gelmedi. Lütfen tekrar deneyin.")
-    
+        # Use unified 3-tier cache (MySQL direct → sync.php cache → request_create+poll)
+        result = await _on_demand_request(
+            tenant_id,
+            "acik_masa_detay",
+            {"POS_ID": int(pos_id)},
+            timeout_sec=35,
+        )
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -744,9 +713,14 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
     if not request_uid:
         raise HTTPException(status_code=502, detail="İstek oluşturulamadı")
     
-    # Step 2: Poll for result
-    poll_interval = 0.25  # was 0.4 — fastest safe rate for snappier reports/stock
-    for _ in range(int(timeout_sec / poll_interval)):
+    # Step 2: Poll for result — adaptive backoff for snappier cached responses.
+    # Most already-cached queries finish in <0.5s; fresh queries take 2-10s.
+    # Start polling very fast (80ms) for first 10 tries, then back off.
+    poll_start = time.time()
+    poll_count = 0
+    deadline = poll_start + timeout_sec
+    while time.time() < deadline:
+        poll_count += 1
         status_resp = await sync_post({
             "action": "request_status",
             "request_uid": request_uid,
@@ -761,7 +735,7 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
                 received = status_resp.get("received_parts", 0)
                 total = status_resp.get("total_parts", 0)
                 logger.info(f"[on_demand] {dataset_key} chunked upload {received}/{total}; retrying...")
-                await asyncio.sleep(0.8)  # was 1.5 — faster chunk retry
+                await asyncio.sleep(0.6)
                 continue
 
         status = status_resp.get("status", "unknown")
@@ -779,18 +753,21 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
         
         if status == "error":
             error_text = status_resp.get("error_text", "Bilinmeyen hata")
-            # Detect upstream MySQL "max_allowed_packet" — too much data for one query.
-            # Return clean 502 with a friendly Turkish message instead of cryptic stacktrace,
-            # so the client can show "Veri çok büyük, daraltın" or fall back gracefully.
             if "max_allowed_packet" in str(error_text).lower():
                 raise HTTPException(
                     status_code=502,
                     detail="POS sunucusu cevap çok büyük olduğu için döndüremedi. Lütfen tarih aralığını kısaltın veya sayfa boyutunu küçültün.",
                 )
             raise HTTPException(status_code=502, detail=f"POS hatası: {error_text}")
-        
-        await asyncio.sleep(0.7)
-    
+
+        # Adaptive backoff
+        if poll_count <= 10:
+            await asyncio.sleep(0.15)   # fast start: 150ms × 10 = 1.5s total
+        elif poll_count <= 25:
+            await asyncio.sleep(0.35)   # medium: 350ms × 15 = 5.25s
+        else:
+            await asyncio.sleep(0.8)    # slow: 800ms for long-running queries
+
     raise HTTPException(status_code=504, detail="Detay zamanında gelmedi. Lütfen tekrar deneyin.")
 
 
@@ -1069,15 +1046,17 @@ async def get_iptal_list(
         all_data = []
         for dt in dates_to_fetch:
             try:
-                resp = await sync_post({
-                    "action": "dataset_get",
-                    "dataset_key": "iptal_detay",
-                    "params": {
+                # Prefer MySQL direct (_on_demand_request handles 3-tier caching)
+                resp = await _on_demand_request(
+                    tenant_id,
+                    "iptal_detay",
+                    {
                         "sdate": f"{dt} 00:00:00",
                         "edate": f"{dt} 23:59:59",
                         "IPTAL_ID": None,
                     },
-                }, tenant_id)
+                    timeout_sec=45,
+                )
                 day_data = resp.get("data", [])
                 if isinstance(day_data, list):
                     all_data.extend(day_data)
@@ -1163,6 +1142,25 @@ async def get_stock_list_sync(
         t0 = time.time()
         items = await get_dataset_items(tenant_id, "stock_list", force_refresh=force_refresh)
         load_ms = int((time.time() - t0) * 1000)
+
+        # --- FIYAT_AD filter ---
+        # Each stock row has a FIYAT_AD / FIYAT_AD_ID field identifying which
+        # price list its FIYAT came from. When the user selects a specific
+        # fiyat_ad from the frontend dropdown we only return rows that match it.
+        # `0` / "" / None = "all" (show everything).
+        if fiyat_ad not in (None, "", 0, "0"):
+            try:
+                fa_id = int(fiyat_ad)
+            except (TypeError, ValueError):
+                fa_id = None
+            if fa_id:
+                def _fa(it):
+                    raw = it.get("FIYAT_AD") or it.get("FIYAT_AD_ID") or 0
+                    try:
+                        return int(raw)
+                    except (TypeError, ValueError):
+                        return 0
+                items = [it for it in items if _fa(it) == fa_id]
 
         # If any filter is explicitly requested, apply it BEFORE pagination.
         has_filter = any(k in body for k in (
