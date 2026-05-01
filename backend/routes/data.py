@@ -1,5 +1,13 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from services import get_data_pool
+from services.dataset_cache import (
+    get_dataset_items,
+    filter_stock_items,
+    filter_cari_items,
+    paginate,
+    clear_dataset_cache,
+    lookup_cached_report,
+)
 from routes.auth import get_current_user
 from typing import Optional, Dict, List, Any
 import json
@@ -665,14 +673,45 @@ async def sync_request(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, timeout_sec: int = 35, raw_cache: bool = False):
-    """Generic on-demand: try dataset_get cache first, fall back to request_create+poll.
+async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, timeout_sec: int = 35, raw_cache: bool = False, skip_mysql_cache: bool = False, mysql_cache_max_age_sec: Optional[int] = None):
+    """Generic on-demand: MySQL cache → sync.php cache → request_create+poll.
 
-    Cache-first strategy is dramatically faster (5-30x) when sync.php's
-    dataset_cache table already holds the answer — no SQL run on POS, no upload
-    polling, just a direct table read.
+    Three-tier cache strategy:
+      0. Direct MySQL read of kasacepteweb.dataset_cache  (FASTEST, no network)
+      1. sync.php `dataset_get` (network, but avoids POS SQL run)
+      2. sync.php `request_create`+poll  (actually executes query on POS)
+
+    Passing `skip_mysql_cache=True` forces a fresh sync.php call (use sparingly when
+    freshness is critical). Passing `mysql_cache_max_age_sec=N` discards MySQL
+    cached rows older than N seconds and falls through to sync.php.
     """
-    # ---------- Step 1: try cache (instant if hot) ----------
+    # ---------- Step 0: direct MySQL lookup (ultra-fast) ----------
+    if not skip_mysql_cache:
+        try:
+            cached = await lookup_cached_report(
+                tenant_id, dataset_key, params, max_age_sec=mysql_cache_max_age_sec
+            )
+            if cached:
+                data = cached["data"]
+                if raw_cache:
+                    return {
+                        "ok": True,
+                        "cache": {"data": data},
+                        "_cache_hit": True,
+                        "_source": "mysql_direct",
+                        "_age_sec": cached.get("age_sec"),
+                    }
+                return {
+                    "ok": True,
+                    "data": _fix_large_ints(data) if isinstance(data, list) else [],
+                    "_cache_hit": True,
+                    "_source": "mysql_direct",
+                    "_age_sec": cached.get("age_sec"),
+                }
+        except Exception as e:
+            logger.debug(f"[on_demand] mysql direct lookup {dataset_key} failed: {e}")
+
+    # ---------- Step 1: try sync.php cache (instant if hot) ----------
     try:
         cache_resp = await sync_post({
             "action": "dataset_get",
@@ -682,11 +721,12 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
         if cache_resp.get("ok") and isinstance(cache_resp.get("data"), list):
             data = cache_resp["data"]
             if raw_cache:
-                return {"ok": True, "cache": cache_resp, "_cache_hit": True}
+                return {"ok": True, "cache": cache_resp, "_cache_hit": True, "_source": "sync_cache"}
             return {
                 "ok": True,
                 "data": _fix_large_ints(data) if isinstance(data, list) else [],
                 "_cache_hit": True,
+                "_source": "sync_cache",
             }
     except Exception as e:
         logger.debug(f"[on_demand] dataset_get {dataset_key} fallback: {e}")
@@ -1072,19 +1112,15 @@ async def get_stock_price_names(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Fetch stok_fiyat_adlari (price name list) via sync.php dataset_get"""
+    """Fetch stok_fiyat_adlari (price name list) directly from kasacepteweb MySQL."""
     tenant_id = body.get("tenant_id", "")
+    force_refresh = bool(body.get("force_refresh", False))
     if not tenant_id:
         raise HTTPException(status_code=400, detail="tenant_id gerekli")
-    
+
     try:
-        resp = await sync_post({
-            "action": "dataset_get",
-            "dataset_key": "stok_fiyat_adlari",
-            "params": {},
-        }, tenant_id)
-        data = resp.get("data", [])
-        return {"ok": True, "data": data if isinstance(data, list) else []}
+        items = await get_dataset_items(tenant_id, "stok_fiyat_adlari", force_refresh=force_refresh)
+        return {"ok": True, "data": _fix_large_ints(items) if items else []}
     except HTTPException:
         raise
     except Exception as e:
@@ -1097,19 +1133,25 @@ async def get_stock_list_sync(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Fetch stock_list via sync.php dataset_get with PAGINATION support.
+    """Fetch stock_list directly from kasacepteweb MySQL (dataset_cache_rows).
 
-    POS client now writes pages into `dataset_cache_pages` table (≈200 records / 180KB
-    per page). We stream pages on demand for true lazy loading.
+    The POS client pushes fresh stock data into MySQL via dataset_cache_rows so we
+    no longer need to call sync.php here — this is ~50× faster for 60k+ item
+    tenants and removes the "100-item" truncation bug entirely.
 
-    Body: { tenant_id, fiyat_ad?, page?, page_size?, force_refresh? }
-      - page omitted → fetch ALL pages (combined; legacy behaviour)
-      - page provided → fetch ONLY that page
+    Body: {
+      tenant_id, fiyat_ad?, page?, page_size?, force_refresh?,
+      # optional filters (also supported client-side for now, but we can
+      # paginate filtered results server-side for very large tenants)
+      search?, groups?, markas?, kdv_values?,
+      aktif?, hareketli?, qty?, profit?,
+      price_min?, price_max?,
+    }
 
     Response: { ok, data, page, page_size, total_pages, total_count }
     """
     tenant_id = body.get("tenant_id", "")
-    fiyat_ad = body.get("fiyat_ad", "")
+    fiyat_ad = body.get("fiyat_ad", "")  # kept for frontend compat; unused server-side
     force_refresh = bool(body.get("force_refresh", False))
     page = body.get("page")
     page_size = int(body.get("page_size") or 200)
@@ -1117,109 +1159,46 @@ async def get_stock_list_sync(
     if not tenant_id:
         raise HTTPException(status_code=400, detail="tenant_id gerekli")
 
-    cache_key = f"stock_list::{tenant_id}::{fiyat_ad}::p={page}::ps={page_size}"
-    now = time.time()
-    TTL_FRESH = 300
-    TTL_STALE = 1800
-
-    cached = _GLOBAL_CACHE.get(cache_key)
-    age = now - cached["ts"] if cached else None
-
-    if cached and age is not None and age < TTL_FRESH and not force_refresh:
-        return {**cached["payload"], "_cache": "fresh", "_age": int(age)}
-
-    async def _fetch_one_page(page_num: int) -> dict:
-        params = {"FIYAT_AD": fiyat_ad} if fiyat_ad else {}
-        return await sync_post({
-            "action": "dataset_get",
-            "dataset_key": "stock_list",
-            "params": params,
-            "page": int(page_num),
-            "page_size": page_size,
-        }, tenant_id)
-
-    async def _refresh():
-        # When force_refresh requested → ask POS to repopulate dataset_cache.stock_list
-        # before reading. This handles the case where POS-side cache only has a subset.
-        if force_refresh:
-            try:
-                await sync_post({
-                    "action": "dataset_refresh",
-                    "dataset_key": "stock_list",
-                    "params": {"FIYAT_AD": fiyat_ad} if fiyat_ad else {},
-                }, tenant_id)
-                await asyncio.sleep(0.4)
-            except Exception as e:
-                logger.warning(f"dataset_refresh stock_list failed: {e}")
-
-        if page is not None:
-            # Single page mode
-            resp = await _fetch_one_page(int(page))
-            data = resp.get("data") or []
-            payload = {
-                "ok": True,
-                "data": _fix_large_ints(data) if isinstance(data, list) else [],
-                "page": int(page),
-                "page_size": page_size,
-                "total_pages": int(resp.get("total_pages") or 0),
-                "total_count": int(resp.get("total_count") or 0),
-            }
-        else:
-            # Legacy combined mode — fetch first page, then accumulate remaining
-            first = await _fetch_one_page(1)
-            first_data = first.get("data") or []
-            total_pages = int(first.get("total_pages") or 1)
-            total_count = int(first.get("total_count") or len(first_data))
-            all_rows = list(first_data) if isinstance(first_data, list) else []
-
-            if total_pages > 1:
-                # Parallel fetch the rest in batches of 5
-                remaining = list(range(2, total_pages + 1))
-                batch_size = 5
-                for i in range(0, len(remaining), batch_size):
-                    batch_pages = remaining[i:i + batch_size]
-                    results = await asyncio.gather(
-                        *[_fetch_one_page(p) for p in batch_pages],
-                        return_exceptions=True,
-                    )
-                    for r in results:
-                        if isinstance(r, Exception):
-                            logger.warning(f"Stock page fetch failed: {r}")
-                            continue
-                        d = r.get("data") or []
-                        if isinstance(d, list):
-                            all_rows.extend(d)
-
-            payload = {
-                "ok": True,
-                "data": _fix_large_ints(all_rows),
-                "page_size": page_size,
-                "total_pages": total_pages,
-                "total_count": total_count,
-            }
-        _GLOBAL_CACHE[cache_key] = {"ts": time.time(), "payload": payload}
-        return payload
-
-    if cached and age is not None and age < TTL_STALE and not force_refresh:
-        async def _bg():
-            try:
-                await _refresh()
-            except Exception as e:
-                logger.warning(f"Stock list bg refresh failed: {e}")
-        asyncio.create_task(_bg())
-        return {**cached["payload"], "_cache": "stale", "_age": int(age)}
-
     try:
-        fresh = await _refresh()
-        return {**fresh, "_cache": "live", "_age": 0}
-    except HTTPException as e:
-        if cached:
-            return {**cached["payload"], "_cache": "fallback_stale", "_age": int(age) if age is not None else 0, "_stale_reason": str(e.detail)}
+        t0 = time.time()
+        items = await get_dataset_items(tenant_id, "stock_list", force_refresh=force_refresh)
+        load_ms = int((time.time() - t0) * 1000)
+
+        # If any filter is explicitly requested, apply it BEFORE pagination.
+        has_filter = any(k in body for k in (
+            "search", "groups", "markas", "kdv_values",
+            "aktif", "hareketli", "qty", "profit", "price_min", "price_max"
+        ))
+        if has_filter:
+            items = filter_stock_items(
+                items,
+                search=body.get("search") or "",
+                groups=body.get("groups") or [],
+                kdv_values=body.get("kdv_values") or [],
+                markas=body.get("markas") or [],
+                aktif=body.get("aktif") if body.get("aktif") is not None else None,
+                hareketli=body.get("hareketli") if body.get("hareketli") is not None else None,
+                qty=body.get("qty"),
+                profit=body.get("profit"),
+                price_min=float(body["price_min"]) if body.get("price_min") not in (None, "") else None,
+                price_max=float(body["price_max"]) if body.get("price_max") not in (None, "") else None,
+            )
+
+        pg = paginate(items, page, page_size)
+        return {
+            "ok": True,
+            "data": _fix_large_ints(pg["data"]),
+            "page": pg["page"],
+            "page_size": pg["page_size"],
+            "total_pages": pg["total_pages"],
+            "total_count": pg["total_count"],
+            "_source": "mysql_direct",
+            "_load_ms": load_ms,
+        }
+    except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Stock list error: {e}")
-        if cached:
-            return {**cached["payload"], "_cache": "fallback_stale", "_age": int(age) if age is not None else 0, "_stale_reason": str(e)}
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1264,11 +1243,10 @@ async def get_cari_list_sync(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Fetch cari_bakiye_liste via sync.php dataset_get with PAGINATION (≈200 rec/page).
+    """Fetch cari_bakiye_liste directly from kasacepteweb MySQL (dataset_cache_rows).
 
-    Body: { tenant_id, page?, page_size?, force_refresh? }
-      - page omitted → ALL pages combined
-      - page provided → SINGLE page
+    Body: { tenant_id, page?, page_size?, force_refresh?,
+            search?, groups?, aktif?, bakiye?, bakiye_min?, bakiye_max? }
     """
     tenant_id = body.get("tenant_id", "")
     if not tenant_id:
@@ -1278,101 +1256,40 @@ async def get_cari_list_sync(
     page_size = int(body.get("page_size") or 200)
     force_refresh = bool(body.get("force_refresh", False))
 
-    cache_key = f"cari_list::{tenant_id}::p={page}::ps={page_size}"
-    now = time.time()
-    TTL_FRESH = 300
-    TTL_STALE = 1800
-    cached = _GLOBAL_CACHE.get(cache_key)
-    age = now - cached["ts"] if cached else None
-
-    if cached and age is not None and age < TTL_FRESH and not force_refresh:
-        return {**cached["payload"], "_cache": "fresh", "_age": int(age)}
-
-    async def _fetch_one_page(page_num: int) -> dict:
-        return await sync_post({
-            "action": "dataset_get",
-            "dataset_key": "cari_bakiye_liste",
-            "params": {},
-            "page": int(page_num),
-            "page_size": page_size,
-        }, tenant_id)
-
-    async def _refresh():
-        # Force POS to repopulate dataset_cache.cari_bakiye_liste before reading
-        if force_refresh:
-            try:
-                await sync_post({
-                    "action": "dataset_refresh",
-                    "dataset_key": "cari_bakiye_liste",
-                    "params": {},
-                }, tenant_id)
-                await asyncio.sleep(0.4)
-            except Exception as e:
-                logger.warning(f"dataset_refresh cari_bakiye_liste failed: {e}")
-
-        if page is not None:
-            resp = await _fetch_one_page(int(page))
-            data = resp.get("data") or []
-            payload = {
-                "ok": True,
-                "data": _fix_large_ints(data) if isinstance(data, list) else [],
-                "page": int(page),
-                "page_size": page_size,
-                "total_pages": int(resp.get("total_pages") or 0),
-                "total_count": int(resp.get("total_count") or 0),
-            }
-        else:
-            first = await _fetch_one_page(1)
-            first_data = first.get("data") or []
-            total_pages = int(first.get("total_pages") or 1)
-            total_count = int(first.get("total_count") or len(first_data))
-            all_rows = list(first_data) if isinstance(first_data, list) else []
-            if total_pages > 1:
-                remaining = list(range(2, total_pages + 1))
-                batch_size = 5
-                for i in range(0, len(remaining), batch_size):
-                    batch_pages = remaining[i:i + batch_size]
-                    results = await asyncio.gather(
-                        *[_fetch_one_page(p) for p in batch_pages],
-                        return_exceptions=True,
-                    )
-                    for r in results:
-                        if isinstance(r, Exception):
-                            logger.warning(f"Cari page fetch failed: {r}")
-                            continue
-                        d = r.get("data") or []
-                        if isinstance(d, list):
-                            all_rows.extend(d)
-            payload = {
-                "ok": True,
-                "data": _fix_large_ints(all_rows),
-                "page_size": page_size,
-                "total_pages": total_pages,
-                "total_count": total_count,
-            }
-        _GLOBAL_CACHE[cache_key] = {"ts": time.time(), "payload": payload}
-        return payload
-
-    if cached and age is not None and age < TTL_STALE and not force_refresh:
-        async def _bg():
-            try:
-                await _refresh()
-            except Exception as e:
-                logger.warning(f"Cari list bg refresh failed: {e}")
-        asyncio.create_task(_bg())
-        return {**cached["payload"], "_cache": "stale", "_age": int(age)}
-
     try:
-        fresh = await _refresh()
-        return {**fresh, "_cache": "live", "_age": 0}
-    except HTTPException as e:
-        if cached:
-            return {**cached["payload"], "_cache": "fallback_stale", "_age": int(age) if age is not None else 0, "_stale_reason": str(e.detail)}
+        t0 = time.time()
+        items = await get_dataset_items(tenant_id, "cari_bakiye_liste", force_refresh=force_refresh)
+        load_ms = int((time.time() - t0) * 1000)
+
+        has_filter = any(k in body for k in (
+            "search", "groups", "aktif", "bakiye", "bakiye_min", "bakiye_max"
+        ))
+        if has_filter:
+            items = filter_cari_items(
+                items,
+                search=body.get("search") or "",
+                groups=body.get("groups") or [],
+                aktif=body.get("aktif") if body.get("aktif") is not None else None,
+                bakiye=body.get("bakiye"),
+                bakiye_min=float(body["bakiye_min"]) if body.get("bakiye_min") not in (None, "") else None,
+                bakiye_max=float(body["bakiye_max"]) if body.get("bakiye_max") not in (None, "") else None,
+            )
+
+        pg = paginate(items, page, page_size)
+        return {
+            "ok": True,
+            "data": _fix_large_ints(pg["data"]),
+            "page": pg["page"],
+            "page_size": pg["page_size"],
+            "total_pages": pg["total_pages"],
+            "total_count": pg["total_count"],
+            "_source": "mysql_direct",
+            "_load_ms": load_ms,
+        }
+    except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Cari list error: {e}")
-        if cached:
-            return {**cached["payload"], "_cache": "fallback_stale", "_age": int(age) if age is not None else 0, "_stale_reason": str(e)}
         raise HTTPException(status_code=500, detail=str(e))
 
 

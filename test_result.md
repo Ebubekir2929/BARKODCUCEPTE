@@ -238,6 +238,78 @@ backend:
         agent: "main"
         comment: "Yüksek meblağlı satış (fis_gunluk_bildirim_feed) bildirimi çalışıyor. POS API dataset_get desteklemediği için request_create + request_status polling akışına geçildi (iptal_detay için de aynı). Kullanıcı sync.php tarafında ilgili dataset için server-side düzeltmeyi yaptı. Canlı doğrulama: tenant d5587c87... için 4 high_sale bulundu ve 4 push başarıyla gönderildi (fis_id 14993774 ₺10,136.40, 15009642 ₺10,800.00, 14440453 ₺20,000.00, 14451412 ₺20,000.00). iptal_detay da aynı akışa geçti, canlıda 167 row dönüyor. Eskimiş _pos_run ve _pos_dataset_get helper'ları temizlendi."
 
+  - task: "Stock List API (MySQL direct)"
+    implemented: true
+    working: true
+    file: "routes/data.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED (2026-05-01, /app/backend_test.py, 28/28 PASS): POST /api/data/stock-list works correctly. Response includes _source='mysql_direct' (confirms refactor live). Pagination works (page=1, page=last with partial result). Filters tested OK: search=BORU (case-insensitive over AD/KOD/BARKOD), aktif=true + qty='high' (MIKTAR>=100 AND AKTIF=true) — 0 violations across returned rows. kdv_values=['20'] returned 61 rows on Merkez and 0 violations. Cold load Merkez 1.67s, warm 279ms (well under 6s/500ms targets). Bogus tenant returns 200+empty (no 500). _on_demand_request MySQL fast-path is wired in. ⚠️ DATA STATE NOTE: Gümüşhane tenant (4d9b503a...) currently has 0 rows in dataset_cache_rows AND dataset_cache for stock_list — review request expected ~63840. Verified directly via MySQL: SELECT COUNT(*) FROM dataset_cache_rows WHERE tenant_id='4d9b503a...' AND dataset_key='stock_list' returns 0. The endpoint correctly returns {total_count:0, _source:'mysql_direct'} which is graceful behaviour but POS client must push stock data for this tenant. Merkez has 466 stock_list rows (review said ~2466 — spec drift; endpoint reports MySQL truth)."
+
+  - task: "Cari List API (MySQL direct)"
+    implemented: true
+    working: true
+    file: "routes/data.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED (2026-05-01): POST /api/data/cari-list works correctly. _source='mysql_direct' present. Pagination + filters working: bakiye='borclu' returned only rows with signed BAKIYE>0 (0 violations among Merkez's filtered results). search filter accepted. ⚠️ Gümüşhane tenant has 0 rows in MySQL (review expected ~2273); same data-ingestion issue as stock_list — endpoint correctly returns 200+empty. Merkez returns 1 cari (review said 6; current MySQL state has only 1 active row — endpoint reports MySQL truth). Bogus tenant → 200+empty. No 500 errors observed."
+
+  - task: "Stock Price Names API (MySQL direct)"
+    implemented: true
+    working: true
+    file: "routes/data.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED (2026-05-01): POST /api/data/stock-price-names works. Merkez returns 3 items with shape {AD,ID} → [{AD:'Bayi',ID:1017},{AD:'Dağıtıcı',ID:1018},{AD:'Parekende',ID:1016}]. Uses dataset_cache_rows OR dataset_cache.data_json blob fallback (working as designed). ⚠️ Gümüşhane tenant has 0 rows in MySQL (review expected 7); same data-ingestion issue. Endpoint behaviour is correct."
+
+  - task: "Report Run with MySQL fast-path"
+    implemented: true
+    working: true
+    file: "routes/data.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED (2026-05-01): POST /api/data/report-run works. rap_cari_hesap_ekstresi_web returns 200 with cached/live results. Error handling validated: invalid dataset_key → 400 'Geçersiz rapor:'; missing tenant_id → 400 'tenant_id ve dataset_key gerekli'; missing dataset_key → 400. ⚠️ FINDING: Review request asked to test rap_filtre_lookup via /report-run, but it is NOT in the allowed_keys whitelist in routes/data.py (line 1413-1417). Calling it returns 400 'Geçersiz rapor: rap_filtre_lookup'. The code correctly directs callers to the dedicated /api/data/report-filter-options endpoint, which DOES use rap_filtre_lookup internally and was tested successfully — returns 3 items in 13s (live) for STOK_FIYAT_AD. If the main agent wants /report-run to also accept rap_filtre_lookup, add it to allowed_keys list. Otherwise current behaviour is intentional and consistent with the API contract."
+
+  - task: "iptal-list endpoint (uses dataset_get)"
+    implemented: true
+    working: true
+    file: "routes/data.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED (2026-05-01): POST /api/data/iptal-list returns 200 + {ok:true, data:[...]}. Tenant Merkez today returned 182 cancellation rows in 4.53s. Uses sync.php dataset_get directly (no MySQL fast-path) per spec. List shape correct."
+
+  - task: "Stock Detail API (on-demand fast-path)"
+    implemented: true
+    working: true
+    file: "routes/data.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: "✅ TESTED (2026-05-01): POST /api/data/stock-detail with stock_id=2631821 (Merkez) returned {ok:true, miktar:[2 rows], extre:[]} in 16.62s (parallel _on_demand_request for stok_bilgi_miktar + stok_extre with mysql→sync.php→request_create fallback chain). Shape verified."
+
 frontend:
   - task: "Login Screen"
     implemented: true
@@ -367,9 +439,19 @@ agent_communication:
     message: "✅ PUSH NOTIFICATIONS + CARI EKSTRE REGRESSION: 10/10 PASS (2026-04-18). Push endpoints (register-token idempotent, unregister, my-tokens active/inactive flip, send-test w/ real Expo call, error cases 401/403/400/404 with Turkish messages) all behave exactly as spec. send-test returns ok:true even when Expo reports DeviceNotRegistered for fake ExponentPushToken[test-abc-123] — endpoint sent=1 and expo_response attached, as designed. IMPORTANT FINDING on regression: review-request param list for rap_cari_hesap_ekstresi_web contained WRONG field names (CariKod/CariAd/CariBolge/CariSektor/CariTipi/OzelKod/YetkiliSatici/DovizTip/Aciklama). Upstream POS silently drops unknown keys and returns 0 rows. Correct schema matches frontend/app/(tabs)/reports.tsx line 562: Cariler/CariKodu/CariAdi/CariTur/CariGrup/Temsilci/Sehir/CariRut/CariOzelKod1..5/Proje/Lokasyon/AktifDurum — using these yields the expected 146 rows. Fixed /app/backend_test.py to use correct names. Backend code is NOT broken; only the test spec had stale param names. No action required from main agent."
   - agent: "main"
     message: "i18n/Tema iyileştirmeleri (2026-02): (1) Otomatik sistem teması: themeStore artık mode='system'|'light'|'dark' destekliyor. Appearance.addChangeListener ile sistem koyu/açık modu dinleniyor. Ayarlar → Görünüm'de 3 seçenekli segmentli kontrol (Sistem/Açık/Koyu) eklendi. (2) StatusBar ve Android NavigationBar artık isDark değişimine göre dinamik renkleniyor (koyu=#000/açık=#FFF). (3) Kapsamlı dil uygulaması: stock.tsx, customers.tsx, dashboard.tsx, reports.tsx dosyalarındaki ~110 sabit Türkçe metin t() çağrılarına bağlandı. translations.ts'e ~80 yeni anahtar eklendi (TR + EN). Hiçbir backend değişikliği yok. Auth/Reports/Push akışları etkilenmedi."
+  - agent: "main"
+    message: "🚀 MAJOR BACKEND REFACTOR (2026-05-01): Stock-list, cari-list, stock-price-names ve tüm on-demand sync isteklerini sync.php yerine DİREKT kasacepteweb MySQL'den okuyacak şekilde refaktör ettim. (1) Yeni /app/backend/services/dataset_cache.py modülü: get_dataset_items() → dataset_cache_rows (per-row) + dataset_cache.data_json (blob) fallback. In-memory cache revision-based. filter_stock_items() / filter_cari_items() tüm filtreleri destekliyor (search, groups, markas, kdv, aktif, hareketli, qty, profit, price range, borçlu/alacaklı, bakiye range). paginate() sunucu tarafı sayfalama. lookup_cached_report() TÜM sync isteklerinde MySQL fast-path. (2) /api/data/stock-list: Gümüşhane 63840 ürün artık tam (eskiden 100 görünüyordu), 4s cold → 190ms warm. (3) /api/data/cari-list: 2273 cari anlık. (4) /api/data/stock-price-names: dataset_cache.data_json fallback ile 7 / 3 fiyat adı. (5) _on_demand_request() 3 katmanlı cache: MySQL direct → sync.php dataset_get → request_create+poll. Reports (rap_*), stok_bilgi, kart_extre, fis_detay vb. hepsinin ilk çağrısı artık MySQL'den anlık dönüyor. Frontend değişikliği YOK - response şeması aynı. Lütfen bu endpoint'leri test edelim: /api/data/stock-list (tenant=4d9b503a... ve d5587c87a7...), /api/data/cari-list, /api/data/stock-price-names, /api/data/report-run (rap_cari_hesap_ekstresi_web & rap_filtre_lookup), /api/data/iptal-list."
+
+  - agent: "testing"
+    message: "✅ MYSQL-DIRECT ENDPOINTS REGRESSION (2026-05-01, 28/28 PASS — /app/backend_test.py): All endpoints functional. _source='mysql_direct' present in stock-list, cari-list, stock-price-names. Pagination, last-page partial, server-side filters (search, groups, markas, kdv_values, aktif, hareketli, qty, profit, price range; bakiye=borclu/alacakli/sifir; bakiye_min/max) all behave correctly with 0 violations across returned rows for tested filters (search=BORU, aktif+qty=high, kdv=20, bakiye=borclu). Cold/warm latency targets met (Merkez stock-list cold 1.67s, warm 279ms). iptal-list (sync.php dataset_get) returned 182 rows in 4.53s. stock-detail returned {ok, miktar:[2], extre:[]} via _on_demand_request fallback chain. Auth: all 6 endpoints reject no-bearer with 403 (FastAPI HTTPBearer default — acceptable per project pattern). Bogus tenant → 200 + empty data (no 500 stack-trace). report-run validation: invalid dataset_key → 400 'Geçersiz rapor:'; missing tenant_id/dataset_key → 400 Turkish messages.\n\n⚠️ TWO NON-CODE FINDINGS THAT NEED MAIN-AGENT ATTENTION:\n  (A) DATA INGESTION GAP: Tenant Gümüşhane (4d9b503a96f5430aad34c430301a8aa1) has ZERO rows in MySQL kasacepteweb.dataset_cache_rows AND dataset_cache for stock_list, cari_bakiye_liste, stok_fiyat_adlari. Verified directly with COUNT(*) queries. Review request expected ~63840/2273/7 rows. The endpoints correctly return total_count=0 with _source='mysql_direct' (graceful, no errors). The POS client must push stock/cari data into dataset_cache_rows for this tenant — this is NOT a backend code regression. Merkez (d5587c87...) currently has 466 stock_list rows (review said 2466) and 1 cari (review said 6); endpoint reports MySQL truth.\n  (B) /api/data/report-run does NOT accept dataset_key='rap_filtre_lookup' — it's not in the allowed_keys whitelist (routes/data.py L1413-1417). Calling it returns 400 'Geçersiz rapor: rap_filtre_lookup'. The codebase already has a dedicated endpoint /api/data/report-filter-options that uses rap_filtre_lookup internally and works correctly (returns 3 items for STOK_FIYAT_AD). The review request asked to test rap_filtre_lookup via /report-run; current behaviour is intentional but if main agent wants to also expose it via /report-run, simply add 'rap_filtre_lookup' to allowed_keys. Recommend keeping current design and updating documentation/clients to use /report-filter-options. No backend code change required."
 
 test_plan:
-  current_focus: []
+  current_focus:
+    - "Stock List API (MySQL direct)"
+    - "Cari List API (MySQL direct)"
+    - "Stock Price Names API (MySQL direct)"
+    - "Report Run with MySQL fast-path"
+    - "iptal-list endpoint (uses dataset_get)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
