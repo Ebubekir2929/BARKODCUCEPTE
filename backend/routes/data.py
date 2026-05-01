@@ -8,6 +8,8 @@ from services.dataset_cache import (
     clear_dataset_cache,
     lookup_cached_report,
     write_dataset_cache,
+    lookup_rows_dataset,
+    ROWS_DATASETS,
 )
 from routes.auth import get_current_user
 from typing import Optional, Dict, List, Any
@@ -655,7 +657,33 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
     freshness is critical). Passing `mysql_cache_max_age_sec=N` discards MySQL
     cached rows older than N seconds and falls through to sync.php.
     """
-    # ---------- Step 0: direct MySQL lookup (ultra-fast) ----------
+    # ---------- Step 0a: dataset_cache_rows fast-path (per-row pushed datasets) ----------
+    # When the POS client pushes data directly to dataset_cache_rows (e.g.
+    # iptal_detay, acik_masa_detay, hourly_stock_detail, rap_acik_hesap_kisi_ozet_web,
+    # iptal_ozet, stock_list, cari_bakiye_liste), we can read it without hitting
+    # sync.php at all. Filters are applied in Python on the cached rows.
+    if not skip_mysql_cache and dataset_key in ROWS_DATASETS:
+        try:
+            rows = await lookup_rows_dataset(tenant_id, dataset_key, params)
+            if rows is not None:
+                # rows is a list (possibly empty) — data exists; serve directly
+                if raw_cache:
+                    return {
+                        "ok": True,
+                        "cache": {"data": rows},
+                        "_cache_hit": True,
+                        "_source": "rows_table",
+                    }
+                return {
+                    "ok": True,
+                    "data": _fix_large_ints(rows) if isinstance(rows, list) else [],
+                    "_cache_hit": True,
+                    "_source": "rows_table",
+                }
+        except Exception as e:
+            logger.debug(f"[on_demand] rows_table lookup {dataset_key} failed: {e}")
+
+    # ---------- Step 0b: direct MySQL blob lookup (legacy dataset_cache.data_json) ----------
     if not skip_mysql_cache:
         try:
             cached = await lookup_cached_report(

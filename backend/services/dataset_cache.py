@@ -306,6 +306,194 @@ async def lookup_cached_report(
     }
 
 
+# =========================================================================
+#  Per-row dataset filtering (rows-table-backed datasets)
+# =========================================================================
+
+# Datasets that are pushed directly to `dataset_cache_rows` by the POS client.
+# For these we read all rows, then filter by request params in Python — far
+# faster than re-querying via sync.php on every request.
+ROWS_DATASETS: set = {
+    "stock_list",
+    "cari_bakiye_liste",
+    "iptal_ozet",
+    "iptal_detay",
+    "acik_masa_detay",
+    "rap_acik_hesap_kisi_ozet_web",
+    "hourly_stock_detail",
+    "rap_filtre_lookup",
+}
+
+
+def filter_rap_filtre_lookup_rows(items: List[dict], params: dict) -> List[dict]:
+    """Filter cached rap_filtre_lookup rows by Kaynak (source) and Q (search)."""
+    p = params or {}
+    kaynak = (p.get("Kaynak") or "").strip().upper()
+    q = (p.get("Q") or "").strip().lower()
+    out = []
+    for r in items:
+        if kaynak:
+            rs = str(r.get("KAYNAK") or r.get("SOURCE") or r.get("KAYNAK_KOD") or "").strip().upper()
+            if rs and rs != kaynak:
+                continue
+        if q:
+            ad = str(r.get("AD") or r.get("ADI") or r.get("LABEL") or "").lower()
+            kod = str(r.get("KOD") or r.get("ID") or r.get("VALUE") or "").lower()
+            if q not in ad and q not in kod:
+                continue
+        out.append(r)
+    return out
+
+
+def _between_dates(row: dict, sdate: Optional[str], edate: Optional[str], date_keys: list) -> bool:
+    """Return True if row's date (under any of `date_keys`) falls within [sdate, edate].
+
+    sdate/edate may be 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'. We compare lexically
+    after slicing to the same length, which works fine for ISO-formatted dates.
+    """
+    if not sdate and not edate:
+        return True
+    val = None
+    for k in date_keys:
+        v = row.get(k)
+        if v:
+            val = str(v).strip()
+            break
+    if not val:
+        return True  # no date in row — keep it rather than dropping
+    if sdate:
+        s = str(sdate).strip()
+        if val[:len(s)] < s[:len(val)]:
+            # Try date portion only (10 chars)
+            if val[:10] < s[:10]:
+                return False
+    if edate:
+        e = str(edate).strip()
+        if val[:len(e)] > e[:len(val)]:
+            if val[:10] > e[:10]:
+                return False
+    return True
+
+
+def filter_iptal_rows(items: List[dict], params: dict) -> List[dict]:
+    """Filter cached iptal_detay / iptal_ozet rows by sdate/edate and IPTAL_ID."""
+    sdate = (params or {}).get("sdate") or ""
+    edate = (params or {}).get("edate") or ""
+    iptal_id = (params or {}).get("IPTAL_ID")
+    out = []
+    for r in items:
+        if iptal_id not in (None, "", 0):
+            try:
+                if int(r.get("IPTAL_ID") or 0) != int(iptal_id):
+                    continue
+            except (TypeError, ValueError):
+                continue
+        if not _between_dates(r, sdate, edate, ["IPTAL_TARIHI", "TARIH", "FIS_TARIHI", "TARIH_SAAT"]):
+            continue
+        out.append(r)
+    return out
+
+
+def filter_acik_masa_detay_rows(items: List[dict], params: dict) -> List[dict]:
+    """Filter cached acik_masa_detay rows by POS_ID."""
+    pos_id = (params or {}).get("POS_ID")
+    if pos_id in (None, "", 0):
+        return list(items)
+    try:
+        pid = int(pos_id)
+    except (TypeError, ValueError):
+        return list(items)
+    return [r for r in items if int(r.get("POS_ID") or 0) == pid]
+
+
+def filter_acik_hesap_rows(items: List[dict], params: dict) -> List[dict]:
+    """Filter cached rap_acik_hesap_kisi_ozet_web rows by date range + cari fields."""
+    p = params or {}
+    sdate = p.get("BASTARIH") or ""
+    edate = p.get("BITTARIH") or ""
+    cari_id = p.get("CARI_ID") or p.get("Cariler") or ""
+    cari_grup = (p.get("CariGrup") or "").strip()
+    cari_tur = (p.get("CariTur") or "").strip()
+    out = []
+    for r in items:
+        if cari_id not in (None, "", 0):
+            try:
+                if int(r.get("CARI_ID") or 0) != int(cari_id):
+                    continue
+            except (TypeError, ValueError):
+                continue
+        if cari_grup and str(r.get("CARI_GRUP") or "").strip() != cari_grup:
+            continue
+        if cari_tur and str(r.get("CARI_TUR") or "").strip() != cari_tur:
+            continue
+        if not _between_dates(r, sdate, edate, ["TARIH", "BASTARIH", "VADE_TARIHI"]):
+            continue
+        out.append(r)
+    return out
+
+
+def filter_hourly_stock_detail_rows(items: List[dict], params: dict) -> List[dict]:
+    """Filter cached hourly_stock_detail rows by sdate/edate + LOKASYON + STOK_ID."""
+    p = params or {}
+    sdate = p.get("sdate") or p.get("SDATE") or p.get("BASTARIH") or ""
+    edate = p.get("edate") or p.get("EDATE") or p.get("BITTARIH") or ""
+    stok_id = p.get("ID") or p.get("STOK_ID") or 0
+    lokasyon = p.get("LOKASYON")
+    saat = p.get("SAAT") or p.get("HOUR")
+    out = []
+    for r in items:
+        if stok_id not in (None, "", 0):
+            try:
+                if int(r.get("STOK_ID") or r.get("ID") or 0) != int(stok_id):
+                    continue
+            except (TypeError, ValueError):
+                continue
+        if lokasyon not in (None, "", 0):
+            if str(r.get("LOKASYON") or "").strip() != str(lokasyon).strip():
+                if str(r.get("LOKASYON_ID") or "") != str(lokasyon):
+                    continue
+        if saat not in (None, ""):
+            if str(r.get("SAAT") or r.get("HOUR") or "").strip() != str(saat).strip():
+                continue
+        if not _between_dates(r, sdate, edate, ["TARIH", "FIS_TARIHI", "SAAT_TARIH"]):
+            continue
+        out.append(r)
+    return out
+
+
+async def lookup_rows_dataset(
+    tenant_id: str,
+    dataset_key: str,
+    params: dict,
+) -> Optional[List[dict]]:
+    """Try to serve a request from `dataset_cache_rows` (param-filtered).
+
+    Returns:
+      list of matching rows if the dataset has been pushed AND filter matched
+      (could be empty list — the data exists, just no matches for these params)
+      None if nothing has been pushed yet → caller should fall back to sync.php
+    """
+    if dataset_key not in ROWS_DATASETS:
+        return None
+
+    items = await get_dataset_items(tenant_id, dataset_key)
+    if not items:
+        return None  # nothing pushed yet
+
+    if dataset_key in ("iptal_ozet", "iptal_detay"):
+        return filter_iptal_rows(items, params)
+    if dataset_key == "acik_masa_detay":
+        return filter_acik_masa_detay_rows(items, params)
+    if dataset_key == "rap_acik_hesap_kisi_ozet_web":
+        return filter_acik_hesap_rows(items, params)
+    if dataset_key == "hourly_stock_detail":
+        return filter_hourly_stock_detail_rows(items, params)
+    if dataset_key == "rap_filtre_lookup":
+        return filter_rap_filtre_lookup_rows(items, params)
+    # stock_list / cari_bakiye_liste already have specialized handlers in their endpoints
+    return list(items)
+
+
 async def write_dataset_cache(
     tenant_id: str,
     dataset_key: str,
