@@ -667,6 +667,32 @@ agent_communication:
       • Dashboard cards render (0-values because berk has no tenants — correct).
       • Backend `[on_demand] BLOCKED request_create …` lines emitted for hourly/stok_bilgi_miktar.
       User still needs to push to GitHub + EAS Build a fresh APK to verify on native device.
+
+  - agent: "main"
+    message: |
+      🧠 LIVE MYSQL WIRE-UP (2026-05-01 19:45 TR) — user confirmed every dashboard dataset
+      (saatlik detay, açık masa detay, açık hesap özet, iptal detay, report filters) is
+      already stored in kasacepteweb.dataset_cache_rows. Re-enabled `hourly_stock_detail`
+      in ROWS_DATASETS so the dashboard chart now reads straight from MySQL rows + the
+      existing SQL-level GROUP BY pushdown (_load_filtered_rows_sql).
+      
+      Latency measured right after change (curl @ localhost:8001, cache cold after
+      `supervisorctl restart backend`):
+        • hourly-detail-full  Merkez         642ms  hours=3   rows=3   _cache=live
+        • hourly-detail-full  Gümüşhane     1600ms  hours=17  rows=58  _cache=live  (5620 raw rows aggregated in SQL)
+        • hourly-detail (single hour)         634ms  _source=rows_table  rows=3 (pre-aggregated)
+        • iptal-list           Merkez        634ms  rows=1
+        • acik-hesap-kisi      Merkez        636ms  rows=1
+      
+      No sync.php hits in backend log for any of these — proven by grep on httpx INFO
+      lines across the test window. The REQUEST_ALLOWED_DATASETS whitelist continues to
+      keep `stok_extre` and `kart_extre_cari` (+ all rap_*) open for the drill-down
+      screens, so stock-detail > Hareketler and cari-detail > Ekstre still fall through
+      to sync.php when MySQL is stale.
+      
+      Net effect: dashboard now renders live Saatlik Satışlar, Açık Masalar, İptaller,
+      Açık Hesap özet directly from MySQL in <2 s even for tenants with 63k+ stock and
+      5k+ hourly rows. No POS polling round-trip.
       
       Key validated items:
       • Startup log emits "📦 Negative-stock summary watcher started — fires daily at TR [13, 20]:00"

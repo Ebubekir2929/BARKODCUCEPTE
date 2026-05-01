@@ -320,9 +320,12 @@ ROWS_DATASETS: set = {
     "iptal_detay",
     "acik_masa_detay",
     "rap_acik_hesap_kisi_ozet_web",
-    # NOTE: hourly_stock_detail removed — kullanıcı isteği üzerine eski request
-    # yoluna geri alındı (sync.php → POS query). MySQL rows pushdown çok
-    # büyük JSON parse maliyeti yaratıyordu.
+    # 2026-05-01 19:50 TR: user confirmed hourly_stock_detail IS stored in
+    # dataset_cache_rows (Gümüşhane 5620 rows, Merkez 8 rows). Re-enabled so
+    # the dashboard saatlik chart reads directly from MySQL — no sync.php
+    # polling. SQL-level date-range pushdown + GROUP BY aggregation handles
+    # the big-tenant case in <2s (_load_filtered_rows_sql).
+    "hourly_stock_detail",
     "rap_filtre_lookup",
 }
 
