@@ -476,6 +476,30 @@ async def lookup_rows_dataset(
     if dataset_key not in ROWS_DATASETS:
         return None
 
+    # Fast existence check: a single COUNT(*) takes <5ms thanks to the
+    # (tenant_id, dataset_key, params_hash, deleted_at) index. We skip the
+    # potentially-expensive `get_dataset_items` (which can load 60k+ rows)
+    # if nothing has been pushed yet for this tenant+dataset.
+    try:
+        from services import get_data_pool
+        pool = await get_data_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT 1 FROM dataset_cache_rows
+                    WHERE tenant_id=%s AND dataset_key=%s AND deleted_at IS NULL
+                    LIMIT 1
+                    """,
+                    (tenant_id, dataset_key),
+                )
+                exists = await cur.fetchone()
+        if not exists:
+            return None  # nothing pushed yet → fall back
+    except Exception as e:
+        logger.debug(f"[lookup_rows] existence check failed for {dataset_key}: {e}")
+        return None
+
     items = await get_dataset_items(tenant_id, dataset_key)
     if not items:
         return None  # nothing pushed yet
