@@ -376,15 +376,49 @@ frontend:
 
   - task: "Reports Screen"
     implemented: true
-    working: true
+    working: false
     file: "app/(tabs)/reports.tsx"
-    stuck_count: 0
+    stuck_count: 1
     priority: "high"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
       - working: true
         agent: "main"
         comment: "5 report types with CSV/HTML export functionality"
+      - working: false
+        agent: "testing"
+        comment: |
+          ❌ CRITICAL CRASH FOUND (2026-05-01) — ROOT CAUSE OF "uygulama atıyor"
+          
+          Steps to reproduce: Login → tap "Raporlar" tab → red-screen / Uncaught Error.
+          
+          Exact error (captured in browser console + on-device LogBox):
+            `ReferenceError: activeReport is not defined`
+            at ReportsScreen (app/(tabs)/reports.tsx:1374:69)
+          
+          File: /app/frontend/app/(tabs)/reports.tsx, line 1374
+          Code: `}, [reportData, deferredSearch, deferredSortKey, deferredSortAsc, activeReport?.datasetKey, filterValues?.MinTutar, filterValues?.MaxTutar]);`
+          
+          Variable `activeReport` does NOT exist anywhere in the file. The actual state
+          variable defined at line 862 is `selectedReport` (`const [selectedReport, setSelectedReport] = useState<ReportDef | null>(null);`).
+          All other references in the file correctly use `selectedReport`.
+          
+          ✅ FIX: change `activeReport?.datasetKey` → `selectedReport?.datasetKey` on line 1374.
+          
+          IMPACT: Reports tab is COMPLETELY UNUSABLE — clicking it triggers an
+          immediate JS exception that turns the screen into a red-error overlay
+          (or a blank/frozen screen on production builds). This is exactly the
+          "app keeps closing/freezing" symptom the user reported.
+          
+          Other tabs (Dashboard, Stock, Customers, Settings) load without
+          uncaught errors during smoke test (only deprecation warnings for
+          shadow*/pointerEvents — non-fatal). Login + Dashboard rendered
+          correctly with cards (Nakit/Kart/Açık Hesap/Toplam) and
+          "Karşılaştır" button visible. Could not validate Compare modal,
+          Fiş Kalem Tutar filter, or Cari Hesap Ekstresi flow because the
+          Reports crash and tab-label mismatches blocked deeper navigation
+          (note: bottom-tab labels are "Cariler"/"Raporlar"/"Ayarlar", not
+          "Cari" — purely a selector concern, not an app bug).
 
   - task: "Settings Screen"
     implemented: true
@@ -453,13 +487,11 @@ agent_communication:
 
 test_plan:
   current_focus:
-    - "iptal-list cold→warm cache hit (write_dataset_cache → MySQL fast-path)"
-    - "Other on-demand endpoints write-through (table-detail, stock-detail, report-run)"
-    - "CompareModal renders all tenants without 'Seçili' label"
-    - "Fiş Kalem Listesi MinTutar/MaxTutar filter (POS + client-side)"
-  stuck_tasks: []
+    - "Reports Screen — fix ReferenceError: activeReport is not defined (line 1374)"
+  stuck_tasks:
+    - "Reports Screen"
   test_all: false
-  test_priority: "high_first"
+  test_priority: "stuck_first"
   - task: "Negative-stock summary notification (loop + manual endpoint)"
     implemented: true
     working: true
