@@ -1414,6 +1414,7 @@ async def run_report(
         "rap_fiyat_listeleri_web", "rap_satis_adet_kar_web", "rap_stok_envanter_web",
         "rap_lm_gelir_tablosu", "rap_personel_satis_ozet_web",
         "rap_fis_kalem_listesi_web", "rap_cari_hesap_ekstresi_web",
+        "rap_filtre_lookup", "rap_acik_hesap_kisi_ozet_web",
     ]
     if dataset_key not in allowed_keys:
         raise HTTPException(status_code=400, detail=f"Geçersiz rapor: {dataset_key}")
