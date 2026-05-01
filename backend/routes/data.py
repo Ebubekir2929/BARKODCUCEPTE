@@ -927,7 +927,10 @@ async def get_hourly_stock_detail_full(
         result_inner = await _on_demand_request(tenant_id, "hourly_stock_detail", params, timeout_sec=45)
         rows_inner = result_inner.get("data", []) if isinstance(result_inner, dict) else []
         import re as _re
-        by_hour_inner: Dict[str, List[Any]] = {}
+        # Aggregate per hour to keep payload small (frontend only needs the
+        # hour-total amount, not every fiş satırı). Sending 4558 detail rows
+        # over the wire was crashing low-end Android devices via OOM/ANR.
+        hour_agg: Dict[str, Dict[str, float]] = {}
         for r in rows_inner:
             hour_label = r.get("SAAT_ADI") or r.get("SAAT") or ""
             if not hour_label:
@@ -938,10 +941,33 @@ async def get_hourly_stock_detail_full(
                     hour_label = f"{h:02d}:00 - {(h + 1) % 24:02d}:00"
             if not hour_label:
                 hour_label = "Bilinmeyen"
-            if hour_label not in by_hour_inner:
-                by_hour_inner[hour_label] = []
-            by_hour_inner[hour_label].append(r)
-        payload = {"ok": True, "by_hour": by_hour_inner, "row_count": len(rows_inner)}
+            if hour_label not in hour_agg:
+                hour_agg[hour_label] = {"amount": 0.0, "count": 0}
+            try:
+                amt = float(r.get("KDV_DAHIL_TOPLAM_TUTAR") or r.get("TOPLAM_TUTAR") or 0)
+            except (TypeError, ValueError):
+                amt = 0.0
+            hour_agg[hour_label]["amount"] += amt
+            hour_agg[hour_label]["count"] += 1
+
+        # Wrap each hour into a single-element list so the existing frontend
+        # parser (which iterates `by_hour[hour].forEach(r => r.KDV_DAHIL_TOPLAM_TUTAR)`)
+        # keeps working unchanged.
+        by_hour_inner: Dict[str, List[Any]] = {
+            hour: [{
+                "KDV_DAHIL_TOPLAM_TUTAR": agg["amount"],
+                "TOPLAM_TUTAR": agg["amount"],
+                "FIS_SAYISI": agg["count"],
+                "_AGGREGATE": True,
+            }]
+            for hour, agg in hour_agg.items()
+        }
+        payload = {
+            "ok": True,
+            "by_hour": by_hour_inner,
+            "row_count": len(rows_inner),
+            "hour_count": len(by_hour_inner),
+        }
         _GLOBAL_CACHE[cache_key] = {"ts": time.time(), "payload": payload}
         return payload
 
