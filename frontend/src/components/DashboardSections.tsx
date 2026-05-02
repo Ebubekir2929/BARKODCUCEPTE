@@ -41,18 +41,21 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
     byLocation[loc].push(r);
   });
 
-  // Compute totals per tab — prefer procedure's TOPLAM_TUTAR (= ACIK + KAPANAN)
-  // when available; fallback to manual sum.
-  // 2026-05-02 — add discount (iskonto) so the net (NET = TOPLAM − iskonto)
-  // is displayed alongside gross. POS fields:
-  //   • Garson (POS)     → PERAKENDE_GENEL_ISKONTO_TUTARI
-  //   • Personel (ERP12) → ERP12_GENEL_ISKONTO_TUTARI
+  // Compute totals per tab.
+  // 2026-05-02 (user request) — "Toplam tutar perakende satış tutarı":
+  // use PERAKENDE_SATIS_TUTARI for garson / ERP12_SATIS_TUTARI for personel
+  // directly as the displayed total. The discount (iskonto) is already
+  // subtracted from these fields by the POS procedure; we show it as a
+  // separate chip for transparency.
   const totals = detayRows.reduce(
     (acc, r: any) => {
       const fisAdet = tab === 'garson' ? parseInt(r.PERAKENDE_FIS_SAYISI || '0') : parseInt(r.ERP12_FIS_SAYISI || '0');
       const acik = tab === 'garson' ? parseFloat(r.ACIK_FIS_TUTARI || '0') : 0;
       const kapanan = parseFloat(r.KAPANAN_SATIS_TUTARI || '0');
-      const rowToplam = parseFloat(r.TOPLAM_TUTAR || String(acik + kapanan));
+      const netSatis =
+        tab === 'garson'
+          ? parseFloat(r.PERAKENDE_SATIS_TUTARI || r.KAPANAN_SATIS_TUTARI || '0')
+          : parseFloat(r.ERP12_SATIS_TUTARI || r.PERSONEL_NET_SATIS_TUTARI || r.KAPANAN_SATIS_TUTARI || '0');
       const acikSay = tab === 'garson' ? parseInt(r.ACIK_FIS_SAYISI || '0') : 0;
       const kapananSay = tab === 'garson' ? parseInt(r.KAPANAN_FIS_SAYISI || '0') : fisAdet;
       const miktar = parseFloat(r.TOPLAM_MIKTAR || '0');
@@ -63,19 +66,17 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
       acc.fis += fisAdet;
       acik && (acc.acik += acik);
       acc.kapanan += kapanan;
-      acc.toplam += rowToplam;
+      acc.netSatis += netSatis;
       acc.acikSay += acikSay;
       acc.kapananSay += kapananSay;
       acc.miktar += miktar;
       acc.iskonto += iskonto;
       return acc;
     },
-    { fis: 0, acik: 0, kapanan: 0, toplam: 0, acikSay: 0, kapananSay: 0, miktar: 0, iskonto: 0 }
+    { fis: 0, acik: 0, kapanan: 0, netSatis: 0, acikSay: 0, kapananSay: 0, miktar: 0, iskonto: 0 }
   );
-  // Use procedure's TOPLAM_TUTAR sum if available; falls back to acik+kapanan
-  const grossTutar = totals.toplam || (totals.acik + totals.kapanan);
-  // Net = gross − iskonto (subtracted from total as per user request 2026-05-02)
-  const totalTutar = Math.max(0, grossTutar - totals.iskonto);
+  // Main total = PERAKENDE_SATIS_TUTARI (garson) / ERP12_SATIS_TUTARI (personel)
+  const totalTutar = totals.netSatis;
 
   const tabColor = tab === 'garson' ? '#10B981' : '#8B5CF6';
 
@@ -157,8 +158,11 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
           </View>
 
           {Object.entries(byLocation).map(([loc, kisiler]) => {
-            const locAcik = kisiler.reduce((s: number, r: any) => s + (tab === 'garson' ? parseFloat(r.ACIK_FIS_TUTARI || '0') : 0), 0);
-            const locKapanan = kisiler.reduce((s: number, r: any) => s + parseFloat(r.KAPANAN_SATIS_TUTARI || '0'), 0);
+            const locTutar = kisiler.reduce((s: number, r: any) =>
+              s + (tab === 'garson'
+                ? parseFloat(r.PERAKENDE_SATIS_TUTARI || r.KAPANAN_SATIS_TUTARI || '0')
+                : parseFloat(r.ERP12_SATIS_TUTARI || r.PERSONEL_NET_SATIS_TUTARI || r.KAPANAN_SATIS_TUTARI || '0')),
+              0);
             const locIskonto = kisiler.reduce(
               (s: number, r: any) =>
                 s +
@@ -167,7 +171,6 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
                   : parseFloat(r.ERP12_GENEL_ISKONTO_TUTARI || r.ERP12_SATIR_ISKONTO_TUTARI || '0')),
               0,
             );
-            const locTutar = Math.max(0, (locAcik + locKapanan) - locIskonto);
             const locFis = kisiler.reduce((s: number, r: any) =>
               s + (tab === 'garson' ? parseInt(r.PERAKENDE_FIS_SAYISI || '0') : parseInt(r.ERP12_FIS_SAYISI || '0')), 0);
             return (
@@ -210,8 +213,12 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
                     tab === 'garson'
                       ? parseFloat(g.PERAKENDE_GENEL_ISKONTO_TUTARI || g.PERAKENDE_SATIR_ISKONTO_TUTARI || '0')
                       : parseFloat(g.ERP12_GENEL_ISKONTO_TUTARI || g.ERP12_SATIR_ISKONTO_TUTARI || '0');
-                  const grossTuar = acikTutar + kapananTutar;
-                  const netTuar = Math.max(0, grossTuar - iskonto);
+                  // Toplam = perakende/erp12 satış tutarı (iskonto zaten düşülmüş net değer)
+                  const netTuar =
+                    tab === 'garson'
+                      ? parseFloat(g.PERAKENDE_SATIS_TUTARI || g.KAPANAN_SATIS_TUTARI || '0')
+                      : parseFloat(g.ERP12_SATIS_TUTARI || g.PERSONEL_NET_SATIS_TUTARI || g.KAPANAN_SATIS_TUTARI || '0');
+                  const grossTuar = netTuar + iskonto;
                   return (
                     <View key={idx} style={[styles.itemCard, { backgroundColor: colors.background, borderColor: colors.border, marginLeft: 12 }]}>
                       <View style={styles.itemRow}>
