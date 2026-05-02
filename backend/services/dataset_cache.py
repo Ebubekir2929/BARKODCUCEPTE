@@ -71,13 +71,56 @@ async def _load_all_rows(tenant_id: str, dataset_key: str) -> List[dict]:
     """Full load of parsed JSON rows.
 
     Strategy:
-      1. Prefer `dataset_cache_rows` (one DB row per item) – used for large datasets
-         like stock_list / cari_bakiye_liste.
+      0. (NEW 2026-05-02) For PAGES_DATASETS, concatenate every page from
+         `dataset_cache_pages`. Each page row holds a JSON array in `data_json`.
+      1. Prefer `dataset_cache_rows` (one DB row per item) – used for hourly
+         datasets and similar high-cardinality non-paginated keys.
       2. Fallback to `dataset_cache.data_json` (a single JSON array blob) – used
          for small lookup datasets like stok_fiyat_adlari.
     """
     pool = await get_data_pool()
     items: List[dict] = []
+
+    # 0) Pages table (new pagination layout for big datasets)
+    if dataset_key in PAGES_DATASETS:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """
+                    SELECT params_hash
+                    FROM dataset_cache_pages
+                    WHERE tenant_id=%s AND dataset_key=%s
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    (tenant_id, dataset_key),
+                )
+                latest = await cur.fetchone()
+                if latest:
+                    await cur.execute(
+                        """
+                        SELECT data_json
+                        FROM dataset_cache_pages
+                        WHERE tenant_id=%s AND dataset_key=%s AND params_hash=%s
+                        ORDER BY page_no ASC
+                        """,
+                        (tenant_id, dataset_key, latest[0]),
+                    )
+                    pages = await cur.fetchall()
+                    for (raw,) in pages or []:
+                        if not raw:
+                            continue
+                        try:
+                            arr = json.loads(raw)
+                        except Exception:
+                            continue
+                        if isinstance(arr, list):
+                            items.extend(p for p in arr if isinstance(p, dict))
+                        elif isinstance(arr, dict) and isinstance(arr.get("data"), list):
+                            items.extend(p for p in arr["data"] if isinstance(p, dict))
+            if items:
+                return items
+
     # 1) Try per-row table first
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -314,19 +357,21 @@ async def lookup_cached_report(
 # For these we read all rows, then filter by request params in Python — far
 # faster than re-querying via sync.php on every request.
 ROWS_DATASETS: set = {
+    # 2026-05-02 — new architecture per user spec.
+    # Only `hourly_stock_detail` lives in dataset_cache_rows now.
+    # stock_list / cari_bakiye_liste moved to dataset_cache_pages (PAGES_DATASETS below).
+    # acik_masa_detay, iptal_detay, iptal_ozet, rap_acik_hesap_kisi_ozet_web,
+    # rap_filtre_lookup moved to the dataset_cache blob (read via fetch_dataset
+    # → lookup_cached_report).
+    "hourly_stock_detail",
+}
+
+# Datasets paginated into dataset_cache_pages. Each page holds a JSON array of
+# rows in `data_json` plus a `page_no`. We aggregate all pages for a tenant /
+# dataset in `lookup_pages_dataset` to produce the full row list.
+PAGES_DATASETS: set = {
     "stock_list",
     "cari_bakiye_liste",
-    "iptal_ozet",
-    "iptal_detay",
-    "acik_masa_detay",
-    "rap_acik_hesap_kisi_ozet_web",
-    # 2026-05-01 19:50 TR: user confirmed hourly_stock_detail IS stored in
-    # dataset_cache_rows (Gümüşhane 5620 rows, Merkez 8 rows). Re-enabled so
-    # the dashboard saatlik chart reads directly from MySQL — no sync.php
-    # polling. SQL-level date-range pushdown + GROUP BY aggregation handles
-    # the big-tenant case in <2s (_load_filtered_rows_sql).
-    "hourly_stock_detail",
-    "rap_filtre_lookup",
 }
 
 
@@ -566,6 +611,80 @@ async def _load_filtered_rows_sql(
     return items
 
 
+async def lookup_pages_dataset(
+    tenant_id: str,
+    dataset_key: str,
+    params: dict,
+) -> Optional[List[dict]]:
+    """Aggregate all pages for a paginated dataset from `dataset_cache_pages`.
+
+    `dataset_cache_pages` stores chunks of large datasets (page_no, data_json
+    holding a JSON array). We concatenate every page (latest snapshot per
+    page_no) and then pass the resulting full row list through the regular
+    Python filter pipeline.
+
+    Returns:
+      list of rows after filter; or None if no pages exist for this tenant
+      / dataset (caller may then fall back to blob lookup or sync.php).
+    """
+    if dataset_key not in PAGES_DATASETS:
+        return None
+    try:
+        from services import get_data_pool
+        pool = await get_data_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                # Pick the most recent params_hash for this tenant/dataset
+                # so we don't mix snapshots from different push batches.
+                await cur.execute(
+                    """
+                    SELECT params_hash
+                    FROM dataset_cache_pages
+                    WHERE tenant_id=%s AND dataset_key=%s
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                    """,
+                    (tenant_id, dataset_key),
+                )
+                row = await cur.fetchone()
+                if not row:
+                    return None
+                latest_hash = row[0]
+                await cur.execute(
+                    """
+                    SELECT data_json
+                    FROM dataset_cache_pages
+                    WHERE tenant_id=%s AND dataset_key=%s AND params_hash=%s
+                    ORDER BY page_no ASC
+                    """,
+                    (tenant_id, dataset_key, latest_hash),
+                )
+                pages = await cur.fetchall()
+        # Concatenate page arrays in order
+        merged: List[dict] = []
+        for (data_json_raw,) in pages or []:
+            try:
+                arr = json.loads(data_json_raw) if data_json_raw else []
+            except Exception:
+                continue
+            if isinstance(arr, list):
+                merged.extend(arr)
+            elif isinstance(arr, dict) and isinstance(arr.get("data"), list):
+                merged.extend(arr["data"])
+        if not merged:
+            return []
+        # Apply per-dataset Python filter so things like sdate/edate, lokasyon,
+        # and Q-search work the same as for the rows-table path.
+        if dataset_key == "stock_list":
+            return filter_stock_items(merged, params or {})
+        if dataset_key == "cari_bakiye_liste":
+            return filter_cari_items(merged, params or {})
+        return merged
+    except Exception as e:
+        logger.warning(f"[lookup_pages] {dataset_key} failed: {e}")
+        return None
+
+
 async def lookup_rows_dataset(
     tenant_id: str,
     dataset_key: str,
@@ -573,11 +692,18 @@ async def lookup_rows_dataset(
 ) -> Optional[List[dict]]:
     """Try to serve a request from `dataset_cache_rows` (param-filtered).
 
+    Delegates to `lookup_pages_dataset` for paginated datasets (stock_list,
+    cari_bakiye_liste — stored in dataset_cache_pages).
+
     Returns:
       list of matching rows if the dataset has been pushed AND filter matched
       (could be empty list — the data exists, just no matches for these params)
       None if nothing has been pushed yet → caller should fall back to sync.php
     """
+    # Paginated datasets live in dataset_cache_pages (new architecture 2026-05-02).
+    if dataset_key in PAGES_DATASETS:
+        return await lookup_pages_dataset(tenant_id, dataset_key, params)
+
     if dataset_key not in ROWS_DATASETS:
         return None
 

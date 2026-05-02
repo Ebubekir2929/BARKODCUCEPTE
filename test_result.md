@@ -690,7 +690,56 @@ agent_communication:
 
   - agent: "main"
     message: |
-      💯 MAX-NOT-SUM + HOUR-SORT FIX (2026-05-02 00:45 TR) — user reported via
+      🏗 NEW DATA ARCHITECTURE WIRED-UP (2026-05-02 14:20 TR)
+      
+      Per user spec, the kasacepteweb cache layout is now:
+        • dataset_cache_pages    : stock_list, cari_bakiye_liste     (NEW table)
+        • dataset_cache_rows     : hourly_stock_detail               (only this)
+        • dataset_cache (blob)   : acik_masalar, acik_masa_detay,
+                                   rap_acik_hesap_kisi_ozet_web,
+                                   rap_filtre_lookup, financial_data,
+                                   financial_data_location, hourly_data,
+                                   hourly_location_data, cancel_data,
+                                   iptal_ozet, iptal_detay,
+                                   garson_satis_ozet, firma_sabitleri,
+                                   stok_fiyat_adlari
+        • request_create allowed : stok_extre, stok_bilgi_miktar,
+                                   kart_extre_cari, fis_detay_toplam,
+                                   rap_* (excluding rap_filtre_lookup)
+      
+      Backend changes (services/dataset_cache.py + routes/data.py):
+        1. Added PAGES_DATASETS = {stock_list, cari_bakiye_liste} and
+           lookup_pages_dataset() that picks the latest params_hash for the
+           tenant/dataset and concatenates every page (`data_json` JSON arrays
+           ordered by page_no) into a single row list. Filters via
+           filter_stock_items / filter_cari_items.
+        2. Slimmed ROWS_DATASETS to {hourly_stock_detail} only.
+        3. _load_all_rows now has Step 0 that handles PAGES_DATASETS first
+           (used by get_dataset_items / mem-cache slow path).
+        4. Replaced REQUEST_ALLOWED_DATASETS with the new whitelist
+           (stok_bilgi_miktar back in; iptal_detay out; fis_detay_toplam in).
+        5. Removed the old stock_list "fast-path" SQL against
+           dataset_cache_rows — that table is no longer populated for stock_list.
+           The PAGES_DATASETS path in _load_all_rows handles pagination via
+           the existing slow-path which is in-memory cached after first hit.
+      
+      Verified curl after restart:
+        • POST /api/data/stock-list  Merkez page=1 size=3 → total=2466,
+          rows=[{ID:443226,…},{ID:439028,KOD:STK-00000020,AD:'239361/PE100…',
+          GRUP:GENEL,MIK:21.92},…]  ~1500 ms  (cold cache; subsequent calls
+          serve from mem cache <50 ms)
+        • POST /api/data/cari-list   Merkez page=1 size=3 → total=6, fields
+          AD/KOD/BAKIYE/BA/CARI_GRUP all populated.
+        • Dashboard endpoint still returns hourly_data, hourly_location_data,
+          iptal_detay, iptal_ozet, financial_data, garson_satis_ozet,
+          acik_masalar — all from the dataset_cache blob via fetch_dataset.
+      
+      Frontend impact: stock.tsx already reads `item.ID || item.STOK_ID` and
+      `item.AD || item.STOK_ADI`, so the new compact field names are picked
+      up automatically. CompareModal's "Ürünlerin Saatlik Satışları" and
+      "Şube Bazlı Ürün Saatlik Satışlar" tabs use /hourly-detail-full →
+      hourly_stock_detail (which still lives in dataset_cache_rows) — covered
+      by the previous dedupe + MAX-not-SUM fix. — user reported via
       screenshot: "Üst toplam ₺35.981 ama ürünlerde ₺0,00", "saatlik sıralama karışık",
       "karşılaştır ekranında ürün saatlik boş". Investigated:
       

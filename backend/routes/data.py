@@ -38,19 +38,19 @@ _GLOBAL_CACHE: Dict[str, Dict[str, Any]] = {}
 #
 # Keep this list TIGHT — adding a dataset here re-enables request_create for it.
 REQUEST_ALLOWED_DATASETS: set = {
-    # Drill-downs the user explicitly whitelisted (2026-05-01)
-    #   • Stok detay ekranında sadece "stok_extre" (hareket listesi) request atar.
-    #     "stok_bilgi_miktar" artık request atmıyor — MySQL'de varsa gelir, yoksa boş.
-    #   • Cari detay ekranında sadece "kart_extre_cari" request atar.
-    #   • İptal detay drill-down: MySQL'de yalnızca header (SATIR_MI=False) tutuluyor;
-    #     kullanıcı bir iptal'e dokunduğunda satır kalemleri için POS'a gidilir.
+    # 2026-05-02 — new architecture per user spec.
+    # These datasets are NOT cached in MySQL (no rows / no blob copy that
+    # matches caller's params), so they must be fetched from POS via sync.php
+    # request_create + poll. Everything else is served from MySQL only.
     "stok_extre",          # stock ledger (stock_detail drill-down)
+    "stok_bilgi_miktar",   # stock quantity per location (paired with stok_extre)
     "kart_extre_cari",     # customer ledger (acik_hesap_kisi_detail / cari_detail)
-    "iptal_detay",         # cancellation line items (iptal-detail modal drill-down)
-    # Legacy reports screen still needs live data from POS when MySQL
-    # cache lacks the specific params combination the user just chose.
-    # Prefix "rap_" covers every report dataset_key (rap_fis_kalem_listesi_web,
-    # rap_cari_hesap_ekstresi_web, rap_personel_satis, rap_gunluk_ozet, …).
+    "fis_detay_toplam",    # receipt detail (table-detail drill-down)
+    # iptal_detay removed — now lives in dataset_cache blob; served via fetch_dataset.
+    # Legacy reports screen still needs live data from POS (rap_fis_kalem_listesi_web,
+    # rap_cari_hesap_ekstresi_web, rap_personel_satis, rap_gunluk_ozet, …) covered by
+    # the rap_ prefix in `_is_request_create_allowed` (rap_filtre_lookup is denied
+    # there because its data lives in the dataset_cache blob too).
 }
 
 def _is_request_create_allowed(dataset_key: str) -> bool:
@@ -1349,54 +1349,12 @@ async def get_stock_list_sync(
                 fa_id = None
 
         if not has_filter and fa_id is None and page is not None:
-            # Fast path: serve directly from MySQL with LIMIT/OFFSET — no full
-            # in-memory parse needed. Only kicks in when there are no filters
-            # AND a specific page is requested (which is the dashboard's
-            # default mode for stock-list pagination).
-            try:
-                pool = await get_data_pool()
-                p = max(1, int(page))
-                offset = (p - 1) * page_size
-                async with pool.acquire() as conn:
-                    async with conn.cursor() as cur:
-                        await cur.execute(
-                            """
-                            SELECT row_json FROM dataset_cache_rows
-                            WHERE tenant_id=%s AND dataset_key='stock_list' AND deleted_at IS NULL
-                            ORDER BY id ASC LIMIT %s OFFSET %s
-                            """,
-                            (tenant_id, page_size, offset),
-                        )
-                        page_rows = await cur.fetchall()
-                        await cur.execute(
-                            """
-                            SELECT COUNT(*) FROM dataset_cache_rows
-                            WHERE tenant_id=%s AND dataset_key='stock_list' AND deleted_at IS NULL
-                            """,
-                            (tenant_id,),
-                        )
-                        total_count = (await cur.fetchone())[0]
-                if total_count > 0:
-                    page_data = []
-                    for (raw,) in page_rows:
-                        if not raw:
-                            continue
-                        try:
-                            page_data.append(json.loads(raw))
-                        except Exception:
-                            continue
-                    total_pages = max(1, (total_count + page_size - 1) // page_size)
-                    return {
-                        "ok": True,
-                        "data": _fix_large_ints(page_data),
-                        "page": p,
-                        "page_size": page_size,
-                        "total_pages": total_pages,
-                        "total_count": total_count,
-                        "_source": "mysql_paginated",
-                    }
-            except Exception as e:
-                logger.warning(f"[stock-list] paginated fast-path failed, falling back: {e}")
+            # Fast path replaced 2026-05-02 — stock_list now lives in
+            # dataset_cache_pages (each row holds a page = JSON array). The
+            # old per-row SQL LIMIT/OFFSET path doesn't apply anymore.
+            # _load_all_rows handles PAGES_DATASETS, so slow-path is fast
+            # enough (in-memory cached after first load).
+            pass
 
         # Slow path: full in-memory load + filtering (used when any filter active)
         t0 = time.time()
