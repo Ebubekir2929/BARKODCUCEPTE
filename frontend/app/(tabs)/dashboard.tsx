@@ -1530,7 +1530,25 @@ export default function DashboardScreen() {
                   <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_cancellations')}</Text>
                 </View>
               ) : iptalListItems.length > 0 ? (
-                iptalListItems.map((item: any, idx: number) => (
+                // Sort by cancellation date DESC (newest first) — user request 2026-05-02
+                [...iptalListItems]
+                  .sort((a: any, b: any) => {
+                    const ta = String(a.TARIH_IPTAL || a.TARIH || '');
+                    const tb = String(b.TARIH_IPTAL || b.TARIH || '');
+                    return tb.localeCompare(ta);
+                  })
+                  .map((item: any, idx: number) => {
+                  // Format "2026-05-02 14:09:26" → "02.05.2026 14:09"
+                  const rawDate = String(item.TARIH_IPTAL || item.TARIH || '').trim();
+                  let prettyDate = rawDate;
+                  if (rawDate) {
+                    const m = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})[\sT]?(\d{2})?:?(\d{2})?/);
+                    if (m) {
+                      const [, y, mo, d, hh, mm] = m;
+                      prettyDate = hh && mm ? `${d}.${mo}.${y} ${hh}:${mm}` : `${d}.${mo}.${y}`;
+                    }
+                  }
+                  return (
                   <TouchableOpacity
                     key={idx}
                     style={[styles.receiptCard, { backgroundColor: colors.card, borderColor: colors.border }]}
@@ -1542,6 +1560,12 @@ export default function DashboardScreen() {
                         <Text style={[styles.receiptCardDate, { color: colors.textSecondary }]}>
                           {item.IPTAL_TIPI || 'İptal'} · {item.DETAY_SATIR_SAYISI || 0} satır
                         </Text>
+                        {!!prettyDate && (
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                            <Ionicons name="calendar-outline" size={12} color={colors.primary} />
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: colors.primary }} numberOfLines={1}>{prettyDate}</Text>
+                          </View>
+                        )}
                       </View>
                       <Text style={[styles.receiptCardAmount, { color: colors.error }]}>
                         ₺{parseFloat(item.TUTAR || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
@@ -1549,7 +1573,7 @@ export default function DashboardScreen() {
                     </View>
                     <View style={styles.receiptCardFooter}>
                       <Text style={[styles.receiptCardReason, { color: colors.textSecondary }]} numberOfLines={1}>
-                        {item.TARIH_IPTAL || item.TARIH || ''}
+                        {prettyDate}
                       </Text>
                       <View style={styles.receiptCardAction}>
                         <Text style={[styles.receiptCardActionText, { color: colors.primary }]}>{t('detail_short')}</Text>
@@ -1557,7 +1581,8 @@ export default function DashboardScreen() {
                       </View>
                     </View>
                   </TouchableOpacity>
-                ))
+                  );
+                })
               ) : (
                 <View style={{ alignItems: 'center', paddingVertical: 20 }}>
                   <Text style={[{ color: colors.textSecondary }]}>{t('no_cancellation_receipts')}</Text>

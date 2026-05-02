@@ -1085,6 +1085,39 @@ export default function ReportsScreen() {
         }
       }
     });
+    // 2026-05-02 (user request) — POS rejects partial-day ranges when only a
+    // date (without time) is passed. Normalise every date-typed filter so:
+    //   • BASTARIH / start-date fields → "YYYY-MM-DD 00:00:00"
+    //   • BITTARIH / end-date fields   → "YYYY-MM-DD 23:59:59"
+    // This guarantees "tam bir günü seçme" (full-day selection) works.
+    const _padDate = (v: any, endOfDay: boolean): string => {
+      const s = String(v ?? '').trim();
+      if (!s) return s;
+      // Already has time → keep as-is (respect user's explicit time)
+      if (/\d{2}:\d{2}/.test(s)) return s;
+      // Pure "YYYY-MM-DD" → append time suffix
+      const datePart = s.split(' ')[0].split('T')[0];
+      return endOfDay ? `${datePart} 23:59:59` : `${datePart} 00:00:00`;
+    };
+    (selectedReport.filters || []).forEach((f) => {
+      if (f.type !== 'date') return;
+      const v = baseParams[f.name];
+      if (v === undefined || v === null || v === '') return;
+      const isEnd = /^(BIT|BITTARIH|BITIS|END_)/i.test(f.name) || /bit|end/i.test(f.name);
+      baseParams[f.name] = _padDate(v, isEnd);
+    });
+    // Edge: some reports have implicit BASTARIH/BITTARIH defaults (not declared
+    // in filters[]) — pad those too just in case.
+    ['BASTARIH', 'SDATE', 'sdate'].forEach((k) => {
+      if (baseParams[k] !== undefined && baseParams[k] !== null && baseParams[k] !== '') {
+        baseParams[k] = _padDate(baseParams[k], false);
+      }
+    });
+    ['BITTARIH', 'EDATE', 'edate'].forEach((k) => {
+      if (baseParams[k] !== undefined && baseParams[k] !== null && baseParams[k] !== '') {
+        baseParams[k] = _padDate(baseParams[k], true);
+      }
+    });
     const pageSize = Number(baseParams.PageSize || 500);
     const cacheKey = `${selectedReport.key}|${JSON.stringify(filterValues)}`;
 
