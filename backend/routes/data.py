@@ -704,6 +704,44 @@ async def get_table_detail(
             {"POS_ID": int(pos_id)},
             timeout_sec=35,
         )
+
+        # POS stores acik_masa_detay in a wrapper format:
+        # [{ SATIR_TIPI: "ACIK_MASA_DETAY_TOPLAM", URUNLER: [{AD, FIYAT, MIKTAR, TUTAR, STOK_BIRIM_AD}, ...], ...metadata }]
+        # The frontend expects a flat list of products, so we unwrap URUNLER here.
+        try:
+            rows = result.get("data") if isinstance(result, dict) else None
+            if isinstance(rows, list) and rows:
+                flat: list = []
+                header: dict = {}
+                for r in rows:
+                    if not isinstance(r, dict):
+                        continue
+                    urunler = r.get("URUNLER")
+                    if isinstance(urunler, list) and urunler:
+                        # Keep first header metadata (for MASA / LOKASYON / GARSON / TOPLAM)
+                        if not header:
+                            header = {
+                                k: r.get(k) for k in (
+                                    "POS_ID", "MASA", "MASA_ID", "BOLUM",
+                                    "LOKASYON", "LOKASYON_ID",
+                                    "GARSON_AD", "GARSON_ID",
+                                    "KDV_DAHIL_TOPLAM_TUTAR", "TOPLAM_TUTAR",
+                                    "TOPLAM_MIKTAR", "ODENEN_TUTAR", "KALAN_TUTAR",
+                                    "SATIR_SAYISI", "SON_ZAMAN",
+                                )
+                            }
+                        flat.extend([u for u in urunler if isinstance(u, dict)])
+                    else:
+                        # Already flat (legacy / alt format) — keep as-is
+                        flat.append(r)
+                if flat:
+                    if isinstance(result, dict):
+                        result["data"] = flat
+                        if header:
+                            result["header"] = header
+        except Exception as _unwrap_err:
+            logger.debug(f"acik_masa_detay unwrap skipped: {_unwrap_err}")
+
         return result
     except HTTPException:
         raise
@@ -1049,44 +1087,25 @@ async def get_hourly_stock_detail_full(
         return {**cached["payload"], "_cache": "fresh", "_age": int(age)}
 
     async def _do_fetch():
-        result_inner = await _on_demand_request(tenant_id, "hourly_stock_detail", params, timeout_sec=45)
+        # 2026-05-02 — return RAW product rows (not Python-side aggregated)
+        # so the frontend can both:
+        #   • aggregate per (hour, lokasyon) to draw the chart bars
+        #   • show "products sold in this hour" with STOK_ADI, MIKTAR, FIYAT
+        # Pass _skip_aggregate=True so lookup_rows_dataset skips the SQL
+        # GROUP BY pushdown for hourly_stock_detail and returns the deduped
+        # raw rows.
+        rich_params = dict(params)
+        rich_params["_skip_aggregate"] = True
+        result_inner = await _on_demand_request(tenant_id, "hourly_stock_detail", rich_params, timeout_sec=45)
         rows_inner = result_inner.get("data", []) if isinstance(result_inner, dict) else []
-        import re as _re
-        # Aggregate per hour to keep payload small (frontend only needs the
-        # hour-total amount, not every fiş satırı). Sending 4558 detail rows
-        # over the wire was crashing low-end Android devices via OOM/ANR.
-        hour_agg: Dict[str, Dict[str, float]] = {}
+        # Bucket raw rows by hour (preserve ALL fields — STOK_ADI, MIKTAR,
+        # KDV_DAHIL_BIRIM_FIYAT, LOKASYON, LOKASYON_ID, …)
+        by_hour_inner: Dict[str, List[Any]] = {}
         for r in rows_inner:
-            hour_label = r.get("SAAT_ADI") or r.get("SAAT") or ""
+            hour_label = (r.get("SAAT_ADI") or r.get("SAAT") or "").strip()
             if not hour_label:
-                ts = r.get("TARIH") or r.get("ISLEM_TARIHI") or r.get("FIS_TARIHI") or ""
-                m = _re.search(r"(\d{1,2}):\d{2}", str(ts))
-                if m:
-                    h = int(m.group(1))
-                    hour_label = f"{h:02d}:00 - {(h + 1) % 24:02d}:00"
-            if not hour_label:
-                hour_label = "Bilinmeyen"
-            if hour_label not in hour_agg:
-                hour_agg[hour_label] = {"amount": 0.0, "count": 0}
-            try:
-                amt = float(r.get("KDV_DAHIL_TOPLAM_TUTAR") or r.get("TOPLAM_TUTAR") or 0)
-            except (TypeError, ValueError):
-                amt = 0.0
-            hour_agg[hour_label]["amount"] += amt
-            hour_agg[hour_label]["count"] += 1
-
-        # Wrap each hour into a single-element list so the existing frontend
-        # parser (which iterates `by_hour[hour].forEach(r => r.KDV_DAHIL_TOPLAM_TUTAR)`)
-        # keeps working unchanged.
-        by_hour_inner: Dict[str, List[Any]] = {
-            hour: [{
-                "KDV_DAHIL_TOPLAM_TUTAR": agg["amount"],
-                "TOPLAM_TUTAR": agg["amount"],
-                "FIS_SAYISI": agg["count"],
-                "_AGGREGATE": True,
-            }]
-            for hour, agg in hour_agg.items()
-        }
+                continue
+            by_hour_inner.setdefault(hour_label, []).append(r)
         payload = {
             "ok": True,
             "by_hour": by_hour_inner,

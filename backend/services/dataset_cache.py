@@ -738,18 +738,19 @@ async def lookup_rows_dataset(
     # taking 2.3s and triggering Android ANR).
     if dataset_key == "hourly_stock_detail":
         # SQL aggregation pushdown is ONLY appropriate when the request spans
-        # the whole day (or multiple hours) — that's the dashboard "hourly chart"
-        # use-case. For single-hour drill-downs we MUST return raw product rows
-        # so the frontend modal can show "products sold in this hour".
+        # the whole day (or multiple hours) AND the caller wants AGGREGATE
+        # data (dashboard "saatlik chart"). For everything else (single-hour
+        # drill-down, CompareModal product breakdown, "Şube Bazlı Tüm Ürünler"
+        # matrix) we MUST return raw product rows.
         sdate_str = (params or {}).get("sdate", "") or ""
         edate_str = (params or {}).get("edate", "") or ""
+        skip_agg = bool((params or {}).get("_skip_aggregate", False))
         is_single_hour = (
             len(sdate_str) >= 16 and len(edate_str) >= 16
             and sdate_str[:10] == edate_str[:10]
             and sdate_str[11:13] == edate_str[11:13]
         )
-        if is_single_hour:
-            # Direct DB query ordered by updated_at DESC so the Python dedupe
+        if is_single_hour or skip_agg:
             # picks the most recent push per (saat_adi, stok_id, lokasyon_id).
             # This MUST match the dedupe order used by the full-day SQL agg
             # below, otherwise the single-hour SUM and the dashboard chart
@@ -759,33 +760,37 @@ async def lookup_rows_dataset(
                 pool = await get_data_pool()
                 async with pool.acquire() as conn:
                     async with conn.cursor() as cur:
-                        target_hour = sdate_str[11:13]
-                        # Pre-filter by SAAT_ADI prefix in SQL to dramatically
-                        # reduce the row count (e.g. Gümüşhane 5640 → ~500).
-                        like_pattern = f"%\"SAAT_ADI\":\"{target_hour}:00 - %"
-                        await cur.execute(
-                            """
-                            SELECT row_json, updated_at
-                            FROM dataset_cache_rows
-                            WHERE tenant_id=%s AND dataset_key='hourly_stock_detail'
-                              AND deleted_at IS NULL
-                              AND row_json LIKE %s
-                            ORDER BY updated_at DESC
-                            """,
-                            (tenant_id, like_pattern),
-                        )
+                        if skip_agg and not is_single_hour:
+                            # Full-day RAW — no hour pre-filter, return ALL rows
+                            await cur.execute(
+                                """
+                                SELECT row_json, updated_at
+                                FROM dataset_cache_rows
+                                WHERE tenant_id=%s AND dataset_key='hourly_stock_detail'
+                                  AND deleted_at IS NULL
+                                ORDER BY updated_at DESC
+                                """,
+                                (tenant_id,),
+                            )
+                            target_hour_int = None
+                        else:
+                            target_hour = sdate_str[11:13]
+                            like_pattern = f"%\"SAAT_ADI\":\"{target_hour}:00 - %"
+                            await cur.execute(
+                                """
+                                SELECT row_json, updated_at
+                                FROM dataset_cache_rows
+                                WHERE tenant_id=%s AND dataset_key='hourly_stock_detail'
+                                  AND deleted_at IS NULL
+                                  AND row_json LIKE %s
+                                ORDER BY updated_at DESC
+                                """,
+                                (tenant_id, like_pattern),
+                            )
+                            target_hour_int = int(target_hour)
                         rows = await cur.fetchall()
-                # Dedupe in Python preserving the newest row per
-                # (saat, stok_id, lokasyon_id). Then apply filters.
-                # Overwrite KDV_DAHIL_TOPLAM_TUTAR with the COMBINED total
-                # (KDV_DAHIL + PERAKENDE + ERP12) so that the frontend's
-                # single numeric field matches the chart aggregate. Many
-                # products store their amount only in PERAKENDE_… or ERP12_…
-                # and leave KDV_DAHIL_… at 0 — summing all three makes the
-                # product row tutar = chart bar total.
                 p = params or {}
                 wanted_lok = p.get("lokasyonID") or p.get("LOKASYON_ID") or p.get("lokasyon_id")
-                target_hour_int = int(target_hour)
                 seen: set = set()
                 out: list = []
                 for row_json_raw, _upd in rows or []:
@@ -793,12 +798,13 @@ async def lookup_rows_dataset(
                         d = json.loads(row_json_raw) if isinstance(row_json_raw, (str, bytes)) else (row_json_raw or {})
                     except Exception:
                         continue
-                    try:
-                        h = int(d.get("SAAT_NO") if d.get("SAAT_NO") is not None else str(d.get("SAAT_ADI") or "")[:2])
-                    except (TypeError, ValueError):
-                        continue
-                    if h != target_hour_int:
-                        continue
+                    if target_hour_int is not None:
+                        try:
+                            h = int(d.get("SAAT_NO") if d.get("SAAT_NO") is not None else str(d.get("SAAT_ADI") or "")[:2])
+                        except (TypeError, ValueError):
+                            continue
+                        if h != target_hour_int:
+                            continue
                     if wanted_lok not in (None, "", 0):
                         try:
                             if int(wanted_lok) != int(d.get("LOKASYON_ID") or 0):
