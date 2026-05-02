@@ -728,56 +728,121 @@ async def _get_tenants_for_high_sales() -> List[Dict[str, Any]]:
 
 
 async def _scan_high_sales_for_tenant(tenant: Dict[str, Any]) -> int:
-    """Single POS scan for one tenant; dispatches to all matching users."""
+    """Single scan for one tenant using `rap_fis_kalem_listesi_web` from the
+    MySQL dataset cache (already pushed & kept fresh by POS on its own cadence).
+
+    Why not `fis_gunluk_bildirim_feed`? — POS' own view of that dataset only
+    returns receipts flagged BILDIRIMLIK=1. Customers reported high-value sales
+    not firing the watcher even with threshold set to ₺0 because the POS feed
+    excluded them. Reading `rap_fis_kalem_listesi_web` (kept up-to-date by the
+    POS push worker) captures ALL receipts for today and lets us decide the
+    threshold purely on our side.
+
+    Schema: one row per line item (BELGENO + STOK_AD + MIKTAR + SATIR_GENEL_TOPLAM).
+    We group by BELGENO and sum SATIR_GENEL_TOPLAM to get the receipt total.
+    """
     tenant_id = tenant["tenant_id"]
     tenant_name = tenant.get("tenant_name") or "Veri"
     users = tenant["users"]
     if not users:
         return 0
 
-    # Use the lowest active threshold so POS returns everything we might need
-    min_threshold = min(float(u["threshold"]) for u in users)
-    # POS uses Turkey local time (UTC+3) — send in TR timezone
-    today_str = (datetime.utcnow() + timedelta(hours=3)).strftime("%Y-%m-%d")
+    from services.dataset_cache import get_data_pool
+    import json as _json
 
     try:
-        rows = await _pos_request_data(tenant_id, "fis_gunluk_bildirim_feed", {
-            "TARIH": today_str,
-            "MinTutar": min_threshold,
-            "SonFisId": 0,
-            "Lokasyon": "",
-            "Personel": "",
-            "FisTuru": "",
-        }, timeout_s=60)
+        pool = await get_data_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                # Pick the freshest blob for this tenant (any params_json — we
+                # don't need an exact match, we just need today's data).
+                await cur.execute(
+                    """
+                    SELECT data_json FROM dataset_cache
+                    WHERE tenant_id=%s AND dataset_key='rap_fis_kalem_listesi_web'
+                    ORDER BY synced_at DESC LIMIT 1
+                    """,
+                    (tenant_id,),
+                )
+                row = await cur.fetchone()
     except Exception as e:
-        logger.warning(f"[high_sales_loop] tenant={tenant_id} POS error: {e}")
+        logger.warning(f"[high_sales_loop] tenant={tenant_id} MySQL error: {e}")
         return 0
 
-    if not rows:
+    if not row:
+        logger.debug(f"[high_sales_loop] tenant={tenant_id} no rap_fis_kalem_listesi_web cache yet")
         return 0
 
-    pushed = 0
-    for s in rows:
-        fis_id = s.get("FIS_ID")
-        if fis_id is None:
+    try:
+        raw_rows = _json.loads(row[0] or "[]")
+    except Exception:
+        return 0
+    if not isinstance(raw_rows, list) or not raw_rows:
+        return 0
+
+    # Filter by today's date (TR) so stale multi-day caches don't re-fire
+    today_tr = _tr_now().strftime("%Y-%m-%d")
+    # POS returns FIS_TARIHI as "May  2 2026  5:15PM" (ODBC/SQL Server default)
+    # OR "2026-05-02 17:15:00" depending on driver — accept both.
+    def _is_today(d: Any) -> bool:
+        s = str(d or "").strip()
+        if not s:
+            return False
+        if s.startswith(today_tr):
+            return True
+        # "May  2 2026  5:15PM" — match year/day/month parts
+        tr_now = _tr_now()
+        months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+        mo_str = months[tr_now.month - 1]
+        day_str = str(tr_now.day)
+        yr_str = str(tr_now.year)
+        return (mo_str in s) and (f" {day_str} {yr_str} " in f" {s} ") if (mo_str in s and yr_str in s) else False
+
+    # Group by BELGENO → sum SATIR_GENEL_TOPLAM, take first non-empty meta
+    by_belge: Dict[str, Dict[str, Any]] = {}
+    for r in raw_rows:
+        if not isinstance(r, dict):
             continue
-        bildirimlik = s.get("BILDIRIMLIK")
+        if not _is_today(r.get("FIS_TARIHI")):
+            continue
+        belge = str(r.get("BELGENO") or "").strip()
+        if not belge:
+            continue
         try:
-            tutar = float(s.get("TUTAR") or 0)
+            tutar = float(r.get("SATIR_GENEL_TOPLAM") or 0)
         except (TypeError, ValueError):
             tutar = 0.0
-        if bildirimlik is not None and str(bildirimlik) not in ("1", "True", "true"):
+        entry = by_belge.get(belge)
+        if not entry:
+            entry = {
+                "total": 0.0,
+                "FIS_ID": r.get("FIS_ID") or r.get("FIS_NO") or belge,
+                "BELGENO": belge,
+                "FIS_TARIHI": r.get("FIS_TARIHI"),
+                "FIS_TURU": r.get("FIS_TURU") or "",
+                "LOKASYON": r.get("LOKASYON_AD") or r.get("LOKASYON") or "",
+                "PERSONEL": r.get("PERSONEL_AD") or r.get("KESEN_PERSONEL") or "",
+                "CARI_AD": r.get("CARI_AD") or "",
+            }
+            by_belge[belge] = entry
+        entry["total"] += tutar
+
+    pushed = 0
+    for belge, fis in by_belge.items():
+        tutar = float(fis["total"])
+        if tutar <= 0:
             continue
 
-        belgeno = str(s.get("BELGENO") or "").strip()
-        lokasyon = str(s.get("LOKASYON") or "").strip()
-        personel = str(s.get("KESEN_PERSONEL") or "").strip()
+        belgeno = fis["BELGENO"]
+        fis_id = fis["FIS_ID"]
+        lokasyon = str(fis["LOKASYON"] or "").strip()
+        personel = str(fis["PERSONEL"] or "").strip()
 
         # Per-user dedup so users with different thresholds get fair coverage
         for u in users:
             if tutar < float(u["threshold"]):
                 continue
-            key = f"{fis_id}:u{u['user_id']}"
+            key = f"{belgeno}:u{u['user_id']}"
             if not await _mark_event_seen(tenant_id, "yuksek_satis", key):
                 continue  # already pushed for this user
 
@@ -802,7 +867,7 @@ async def _scan_high_sales_for_tenant(tenant: Dict[str, Any]) -> int:
             pushed += 1
             logger.info(
                 f"[high_sales_loop] ✅ PUSHED tenant={tenant_id} user={u['user_id']} "
-                f"fis_id={fis_id} tutar={tutar:.2f}"
+                f"belge={belgeno} tutar={tutar:.2f}"
             )
 
     return pushed
