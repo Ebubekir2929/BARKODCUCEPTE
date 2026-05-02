@@ -2096,7 +2096,17 @@ const ReportCardComp: React.FC<ReportCardProps> = ({ item, report, colors, rende
     const fmt = (n: number) => n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const fisTuru = String(item.FIS_TURU || '-');
     const belge = String(item.BELGENO || '');
-    const tarih = String(item.FIS_TARIHI || '').split(' ')[0];
+    // Show full date & time (user wants receipt timestamps visible) —
+    // normalise "YYYY-MM-DD HH:MM:SS" → "DD.MM.YYYY HH:MM"
+    const rawTarih = String(item.FIS_TARIHI || '').trim();
+    let tarih = rawTarih;
+    if (rawTarih) {
+      const m = rawTarih.match(/^(\d{4})-(\d{2})-(\d{2})[\sT]?(\d{2})?:?(\d{2})?/);
+      if (m) {
+        const [, y, mo, d, hh, mm] = m;
+        tarih = hh && mm ? `${d}.${mo}.${y} ${hh}:${mm}` : `${d}.${mo}.${y}`;
+      }
+    }
     const cariAd = String(item.CARI_AD || '');
     const kalem = item.KALEM_SAYISI || 0;
     const miktar = parseFloat(String(item.MIKTAR_FIS || '0'));
@@ -2107,6 +2117,12 @@ const ReportCardComp: React.FC<ReportCardProps> = ({ item, report, colors, rende
           <View style={{ flex: 1, paddingRight: 12 }}>
             <Text style={[cardStyles.code, { color: colors.primary, fontWeight: '700' }]} numberOfLines={1}>{belge}</Text>
             <Text style={[cardStyles.title, { color: colors.text }]} numberOfLines={2}>{fisTuru}</Text>
+            {!!tarih && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 }}>
+                <Ionicons name="calendar-outline" size={12} color={colors.textSecondary} />
+                <Text style={{ fontSize: 11, color: colors.textSecondary, fontWeight: '600' }} numberOfLines={1}>{tarih}</Text>
+              </View>
+            )}
           </View>
           <View style={{ alignItems: 'flex-end' }}>
             <Text style={[cardStyles.amount, { color: colors.primary }]} numberOfLines={1}>₺{fmt(toplam)}</Text>
