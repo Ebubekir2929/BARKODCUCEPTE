@@ -690,7 +690,55 @@ agent_communication:
 
   - agent: "main"
     message: |
-      🏗 NEW DATA ARCHITECTURE WIRED-UP (2026-05-02 14:20 TR)
+      🎯 USER-SPEC POLISH (2026-05-02 14:50 TR) — kullanıcı 9 ayrı maddelik checklist
+      gönderdi. Hepsi mevcut yapıya uyduruldu:
+      
+      ✅ Müşteri açık hesapları (rap_acik_hesap_kisi_ozet_web) → blob'tan okunuyor.
+        Test: /api/data/acik-hesap-kisi Merkez → 2 row (deneme + GENEL KULLANICI).
+      
+      ✅ Saatlik satış grafiği ürün-bazlı detay + lokasyon-bazlı grafik →
+        hourly_stock_detail rows tablosu (dataset_cache_rows). Hâlihazırda öyle.
+      
+      ✅ Karşılaştırma (CompareModal) "Ürünlerin Saatlik Satışları" + "Şube Bazlı
+        Tüm Ürünler" → /api/data/hourly-detail-full → hourly_stock_detail rows.
+        Mevcut.
+      
+      ✅ Açık masa masa detayı (acik_masa_detay) → blob (dataset_cache).
+        Test: /api/data/table-detail POS_ID=… → mysql_direct, 1 row.
+      
+      ✅ İptal detayı (iptal_detay) → blob. iptal-list endpoint header listesini
+        veriyor (IPTAL_ID:null params hash). Drill-down için POS henüz veri pushlamıyor;
+        whitelist'ten çıkarıldı (kullanıcı isteği).
+      
+      ✅ Rapor filtre seçenekleri (rap_filtre_lookup) → blob. Yeni POS layout TEK
+        bir entry'de {Kaynak:"",Q:""} ile 740 satır gönderiyor. report-filter-options
+        endpoint'i artık tüm blob'u alıp Python'da `Kaynak == source` filter ile
+        seçeneği döndürüyor:
+          • FIS_TURU=37, FIS_ALT_TIPI=16, PERSONEL=3, SEHIR=81, TEMSILCI=1 ✅
+      
+      ✅ "Veri yoksa o alanı grafiğe ekleme 0 sa yani":
+        - Frontend src/components/DashboardSections.tsx HourlyLocationSection:
+          byLocation grouping artık `amt <= 0` rows skip ediyor (saat hiç gözükmez).
+        - Frontend app/(tabs)/dashboard.tsx ana saatlik bar chart:
+          `(sourceData?.hourlySales).filter(h => (h.amount||0) > 0)` ile zero
+          saatler chart'tan filtrelendi. Total label de bu filtre üzerinden çalışır.
+      
+      🚫 REQUEST_ALLOWED_DATASETS son durumu:
+          stok_extre, stok_bilgi_miktar, kart_extre_cari, fis_detay_toplam,
+          rap_* (rap_filtre_lookup hariç). iptal_detay artık whitelist DIŞINDA.
+      
+      Mimari:
+          dataset_cache_pages    → stock_list, cari_bakiye_liste
+          dataset_cache_rows     → hourly_stock_detail
+          dataset_cache (blob)   → acik_masalar, acik_masa_detay,
+                                   rap_acik_hesap_kisi_ozet_web,
+                                   rap_filtre_lookup, financial_data,
+                                   financial_data_location, hourly_data,
+                                   hourly_location_data, cancel_data,
+                                   iptal_ozet, iptal_detay, garson_satis_ozet,
+                                   firma_sabitleri, stok_fiyat_adlari
+          request_create only    → stok_extre, stok_bilgi_miktar,
+                                   kart_extre_cari, fis_detay_toplam, rap_*
       
       Per user spec, the kasacepteweb cache layout is now:
         • dataset_cache_pages    : stock_list, cari_bakiye_liste     (NEW table)

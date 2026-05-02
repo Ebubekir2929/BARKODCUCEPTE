@@ -809,7 +809,7 @@ export default function DashboardScreen() {
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chartScroll}>
             <View style={styles.barChart}>
-              {(sourceData?.hourlySales || []).map((hour, index) => {
+              {(sourceData?.hourlySales || []).filter((h: any) => (h?.amount || 0) > 0).map((hour, index) => {
                 const amt = hour.amount || 0;
                 const barHeight = maxHourAmount > 0 ? (amt / maxHourAmount) * 150 : 0;
                 const isHighlighted = highlightedHourIndex === index;

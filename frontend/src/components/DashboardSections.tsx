@@ -491,6 +491,11 @@ export const HourlyLocationSection: React.FC<{
   // Group by LOKASYON (and sort hours ascending within each location)
   const byLocation: Record<string, any[]> = {};
   effectiveData.forEach((r: any) => {
+    // Skip zero-amount rows entirely (user req 2026-05-02): "veri yoksa
+    // o alanı grafiğe ekleme 0 sa yani". A row with TOPLAM = 0 / KDV = 0
+    // adds an empty bar; just hide it.
+    const amt = parseFloat(r?.TOPLAM || r?.KDV_DAHIL_TOPLAM_TUTAR || '0');
+    if (!Number.isFinite(amt) || amt <= 0) return;
     const loc = r.LOKASYON || 'Bilinmeyen';
     if (!byLocation[loc]) byLocation[loc] = [];
     byLocation[loc].push(r);

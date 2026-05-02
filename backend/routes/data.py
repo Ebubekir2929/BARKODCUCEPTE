@@ -1750,10 +1750,26 @@ async def get_report_filter_options(
         return {**cached["payload"], "_cache": "fresh", "_age": int(age)}
 
     async def _refresh():
+        # 2026-05-02 — POS sync now stores rap_filtre_lookup as a SINGLE big
+        # blob with params {Kaynak:"", Q:""} containing every dropdown's rows
+        # under a `Kaynak` field. So we fetch the full blob once and filter
+        # by `Kaynak == source` in Python instead of asking POS per-source.
         result = await _on_demand_request(tenant_id, "rap_filtre_lookup", {
-            "Kaynak": source,
+            "Kaynak": "",
             "Q": "",
         }, timeout_sec=30)
+        # Filter the rows for the requested source
+        try:
+            all_rows = result.get("data", []) if isinstance(result, dict) else []
+        except Exception:
+            all_rows = []
+        if isinstance(all_rows, list) and source:
+            wanted = source.strip().upper()
+            filtered = [
+                r for r in all_rows
+                if str(r.get("Kaynak") or r.get("KAYNAK") or "").strip().upper() == wanted
+            ]
+            result = {**(result if isinstance(result, dict) else {}), "data": filtered}
         _GLOBAL_CACHE[cache_key] = {"ts": time.time(), "payload": result}
         return result
 
