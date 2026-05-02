@@ -49,6 +49,10 @@ export const FilterModal: React.FC<FilterModalProps> = ({
   const [endDateInput, setEndDateInput] = useState(formatDateForInput(currentFilters.endDate));
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
+  // Track which "Hızlı Tarih" chip is active so it can be visually highlighted
+  // (blue border + filled background) — cleared the moment the user types or
+  // picks a custom date manually.
+  const [activeQuickDate, setActiveQuickDate] = useState<string | null>(null);
 
   useEffect(() => {
     if (visible) {
@@ -56,6 +60,7 @@ export const FilterModal: React.FC<FilterModalProps> = ({
       setDateRange({ start: currentFilters.startDate, end: currentFilters.endDate });
       setStartDateInput(formatDateForInput(currentFilters.startDate));
       setEndDateInput(formatDateForInput(currentFilters.endDate));
+      setActiveQuickDate(null);
     }
   }, [visible]);
 
@@ -97,6 +102,7 @@ export const FilterModal: React.FC<FilterModalProps> = ({
     setDateRange({ start, end });
     setStartDateInput(formatDateForInput(start));
     setEndDateInput(formatDateForInput(end));
+    setActiveQuickDate(option.label);
   };
 
   const parseDate = (input: string): Date | null => {
@@ -117,12 +123,14 @@ export const FilterModal: React.FC<FilterModalProps> = ({
     setStartDateInput(text);
     const parsed = parseDate(text);
     if (parsed) setDateRange(prev => ({ ...prev, start: parsed }));
+    setActiveQuickDate(null);
   };
 
   const handleEndDateChange = (text: string) => {
     setEndDateInput(text);
     const parsed = parseDate(text);
     if (parsed) setDateRange(prev => ({ ...prev, end: parsed }));
+    setActiveQuickDate(null);
   };
 
   const onStartDatePickerChange = (event: any, selectedDate?: Date) => {
@@ -130,6 +138,7 @@ export const FilterModal: React.FC<FilterModalProps> = ({
     if (selectedDate) {
       setDateRange(prev => ({ ...prev, start: selectedDate }));
       setStartDateInput(formatDateForInput(selectedDate));
+      setActiveQuickDate(null);
     }
   };
 
@@ -138,6 +147,7 @@ export const FilterModal: React.FC<FilterModalProps> = ({
     if (selectedDate) {
       setDateRange(prev => ({ ...prev, end: selectedDate }));
       setEndDateInput(formatDateForInput(selectedDate));
+      setActiveQuickDate(null);
     }
   };
 
@@ -192,15 +202,27 @@ export const FilterModal: React.FC<FilterModalProps> = ({
             {/* Quick Date Selection */}
             <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('quick_date')}</Text>
             <View style={styles.quickDateList}>
-              {quickDateOptions.map((option) => (
-                <TouchableOpacity
-                  key={option.label}
-                  style={[styles.quickDateItem, { backgroundColor: colors.card, borderColor: colors.border }]}
-                  onPress={() => selectQuickDate(option)}
-                >
-                  <Text style={[styles.quickDateText, { color: colors.text }]}>{option.label}</Text>
-                </TouchableOpacity>
-              ))}
+              {quickDateOptions.map((option) => {
+                const isActive = activeQuickDate === option.label;
+                return (
+                  <TouchableOpacity
+                    key={option.label}
+                    style={[
+                      styles.quickDateItem,
+                      { backgroundColor: colors.card, borderColor: colors.border },
+                      isActive && { borderColor: colors.primary, backgroundColor: colors.primary + '20', borderWidth: 1.5 },
+                    ]}
+                    onPress={() => selectQuickDate(option)}
+                  >
+                    {isActive && (
+                      <Ionicons name="checkmark-circle" size={14} color={colors.primary} style={{ marginRight: 4 }} />
+                    )}
+                    <Text style={[styles.quickDateText, { color: isActive ? colors.primary : colors.text, fontWeight: isActive ? '700' : '500' }]}>
+                      {option.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             {/* Manual Date Entry */}
@@ -348,6 +370,8 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   quickDateItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 20,
