@@ -1408,10 +1408,61 @@ export default function ReportsScreen() {
 
   const toggleSort = (key: string) => { if (sortKey === key) setSortAsc(!sortAsc); else { setSortKey(key); setSortAsc(true); } };
 
+  // Normalise any date-ish string so AM/PM suffix is stripped and rendered in
+  // 24-hour Turkish form: "DD.MM.YYYY HH:MM". Handles:
+  //   "2026-05-02 14:09:26"  "2026-05-02T14:09:26"  "05/02/2026 02:09:26 PM"
+  //   "02.05.2026 14:09"     "2026-05-02"           ISO timestamps
+  const _formatDateCell = (raw: string): string => {
+    if (!raw) return '';
+    const s = String(raw).trim();
+    // Prefer regex parse (no Date object → avoid timezone drift)
+    // ISO: YYYY-MM-DD[ T]HH:MM[:SS]
+    const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[\sT](\d{2}):(\d{2})(?::\d{2})?)?/);
+    if (iso) {
+      const [, y, mo, d, hh, mm] = iso;
+      return hh && mm ? `${d}.${mo}.${y} ${hh}:${mm}` : `${d}.${mo}.${y}`;
+    }
+    // US: MM/DD/YYYY HH:MM:SS AM/PM → convert to 24h
+    const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?)?/i);
+    if (us) {
+      const [, mo, d, y, h, mm, ampm] = us;
+      let hh = h ? parseInt(h, 10) : NaN;
+      if (ampm && !Number.isNaN(hh)) {
+        const up = ampm.toUpperCase();
+        if (up === 'PM' && hh < 12) hh += 12;
+        if (up === 'AM' && hh === 12) hh = 0;
+      }
+      if (Number.isNaN(hh)) return `${d.padStart(2,'0')}.${mo.padStart(2,'0')}.${y}`;
+      return `${d.padStart(2,'0')}.${mo.padStart(2,'0')}.${y} ${String(hh).padStart(2,'0')}:${mm}`;
+    }
+    // Already DD.MM.YYYY — strip time-seconds, drop AM/PM if any
+    const tr = s.match(/^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?)?/i);
+    if (tr) {
+      const [, d, mo, y, h, mm, ampm] = tr;
+      let hh = h ? parseInt(h, 10) : NaN;
+      if (ampm && !Number.isNaN(hh)) {
+        const up = ampm.toUpperCase();
+        if (up === 'PM' && hh < 12) hh += 12;
+        if (up === 'AM' && hh === 12) hh = 0;
+      }
+      if (Number.isNaN(hh)) return `${d}.${mo}.${y}`;
+      return `${d}.${mo}.${y} ${String(hh).padStart(2,'0')}:${mm}`;
+    }
+    return s;
+  };
+
   const renderValue = (val: any, col: ColDef) => {
     if (col.type === 'money') return `₺${parseFloat(val || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`;
     if (col.type === 'number') return parseFloat(val || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2 });
     if (col.type === 'bool') return val === true || val === 1 || val === '1' ? 'Evet' : 'Hayır';
+    // Heuristic: column name contains TARIH / ZAMAN / DATE → normalise date+time (no AM/PM)
+    if (typeof val === 'string' && /TARIH|ZAMAN|DATE|_DT\b/i.test(col.key)) {
+      return _formatDateCell(val);
+    }
+    // Auto-detect ISO/US date-like strings in generic columns
+    if (typeof val === 'string' && /^(\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4}|\d{2}\.\d{2}\.\d{4})(?:[\sT]\d{1,2}:\d{2})?/.test(val)) {
+      return _formatDateCell(val);
+    }
     return String(val || '-');
   };
 
@@ -1827,14 +1878,29 @@ export default function ReportsScreen() {
       {datePickerFor && (Platform.OS === 'web' ? (
         <Modal visible animationType="fade" transparent statusBarTranslucent>
           <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center', padding: 30 }]}>
-            <View style={{ backgroundColor: colors.card, padding: 20, borderRadius: 16, width: '90%', maxWidth: 320, gap: 16 }}>
+            <View style={{ backgroundColor: colors.card, padding: 20, borderRadius: 16, width: '90%', maxWidth: 340, gap: 14 }}>
               <Text style={[{ fontSize: 15, fontWeight: '700', color: colors.text }]}>Tarih Seçin</Text>
-              <TextInput
-                style={[styles.filterInput, { backgroundColor: colors.background, borderColor: colors.border, color: colors.text, fontSize: 16, letterSpacing: 1 }]}
-                value={filterValues[datePickerFor] || today()}
-                onChangeText={(v) => setFilterValues(prev => ({ ...prev, [datePickerFor]: v }))}
-                placeholder="YYYY-MM-DD" placeholderTextColor={colors.textSecondary}
-              />
+              {/* Native HTML <input type="date"> gives the browser calendar popup (no AM/PM) */}
+              {React.createElement('input' as any, {
+                type: 'date',
+                value: String(filterValues[datePickerFor] || today()).split(' ')[0].split('T')[0],
+                onChange: (e: any) => {
+                  const iso = String(e?.target?.value || '');
+                  if (iso) setFilterValues(prev => ({ ...prev, [datePickerFor]: iso }));
+                },
+                style: {
+                  fontSize: 16,
+                  padding: 12,
+                  borderRadius: 10,
+                  border: `1px solid ${colors.border}`,
+                  background: colors.background,
+                  color: colors.text,
+                  outline: 'none',
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  fontFamily: 'inherit',
+                },
+              })}
               <View style={{ flexDirection: 'row', gap: 8 }}>
                 <TouchableOpacity
                   style={{ flex: 1, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' }}
