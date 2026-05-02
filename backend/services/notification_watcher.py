@@ -39,6 +39,11 @@ _PARALLEL_TENANT_CONCURRENCY = 5  # max concurrent tenant scans
 _NEGATIVE_STOCK_TARGET_HOURS_TR = [13, 20]
 _NEGATIVE_STOCK_CHECK_INTERVAL_SEC = 60  # check every minute
 
+# Per-tenant throttle for `rap_fis_kalem_listesi_web` refresh request_create.
+# Prevents spamming POS when a tenant's cache is permanently stale (POS offline
+# or the SP has no rows for today). Resets every process restart.
+_high_sales_refresh_cooldown: Dict[str, float] = {}
+
 
 def _tr_now() -> datetime:
     """Turkey time (UTC+3). Python datetime, naive (no tzinfo)."""
@@ -729,17 +734,21 @@ async def _get_tenants_for_high_sales() -> List[Dict[str, Any]]:
 
 async def _scan_high_sales_for_tenant(tenant: Dict[str, Any]) -> int:
     """Single scan for one tenant using `rap_fis_kalem_listesi_web` from the
-    MySQL dataset cache (already pushed & kept fresh by POS on its own cadence).
+    MySQL dataset cache.
+
+    Strategy:
+      1) If the cache for this tenant is missing or older than ~90s, fire a
+         background POS `request_create` call so POS will push a fresh snapshot
+         within the next few seconds. We DON'T block — the next 15s iteration
+         will pick it up.
+      2) Read whatever is in the MySQL cache right now, group by BELGENO, and
+         push alerts for receipts ≥ threshold.
 
     Why not `fis_gunluk_bildirim_feed`? — POS' own view of that dataset only
     returns receipts flagged BILDIRIMLIK=1. Customers reported high-value sales
     not firing the watcher even with threshold set to ₺0 because the POS feed
-    excluded them. Reading `rap_fis_kalem_listesi_web` (kept up-to-date by the
-    POS push worker) captures ALL receipts for today and lets us decide the
-    threshold purely on our side.
-
-    Schema: one row per line item (BELGENO + STOK_AD + MIKTAR + SATIR_GENEL_TOPLAM).
-    We group by BELGENO and sum SATIR_GENEL_TOPLAM to get the receipt total.
+    excluded them. Reading `rap_fis_kalem_listesi_web` (kept up-to-date by our
+    own periodic request_create) captures ALL receipts for today.
     """
     tenant_id = tenant["tenant_id"]
     tenant_name = tenant.get("tenant_name") or "Veri"
@@ -750,53 +759,101 @@ async def _scan_high_sales_for_tenant(tenant: Dict[str, Any]) -> int:
     from services.dataset_cache import get_data_pool
     import json as _json
 
+    today_tr_str = _tr_now().strftime("%Y-%m-%d")
+    # Default refresh params covering today. POS will push data_json to
+    # dataset_cache regardless of which user originally ran the report.
+    refresh_params = {
+        "BASTARIH": f"{today_tr_str} 00:00:00",
+        "BITTARIH": f"{today_tr_str} 23:59:59",
+        "Lokasyon": "",
+        "Pc_Ad": "",
+        "Stoklar": "",
+        "StokGrup": "",
+        "StokCinsi": "",
+        "StokMarka": "",
+        "StokVergi": "",
+        "FisTipi": 0,
+        "KdvDahil": 1,
+        "Page": 1,
+        "PageSize": 500,
+    }
+
+    # ---------- Step 1: peek at cache freshness ----------
+    row_data: Any = None
+    cache_age_sec = 10_000.0
     try:
         pool = await get_data_pool()
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
-                # Pick the freshest blob for this tenant (any params_json — we
-                # don't need an exact match, we just need today's data).
                 await cur.execute(
                     """
-                    SELECT data_json FROM dataset_cache
+                    SELECT data_json,
+                           TIMESTAMPDIFF(SECOND, synced_at, UTC_TIMESTAMP()) AS age_sec
+                    FROM dataset_cache
                     WHERE tenant_id=%s AND dataset_key='rap_fis_kalem_listesi_web'
                     ORDER BY synced_at DESC LIMIT 1
                     """,
                     (tenant_id,),
                 )
                 row = await cur.fetchone()
+                if row:
+                    row_data = row[0]
+                    cache_age_sec = float(row[1] or 10_000)
     except Exception as e:
-        logger.warning(f"[high_sales_loop] tenant={tenant_id} MySQL error: {e}")
-        return 0
+        logger.warning(f"[high_sales_loop] tenant={tenant_id} MySQL peek error: {e}")
 
-    if not row:
-        logger.debug(f"[high_sales_loop] tenant={tenant_id} no rap_fis_kalem_listesi_web cache yet")
+    # ---------- Step 2: trigger a background POS refresh if data is stale ----------
+    # Throttled so POS isn't hammered when a tenant's SP consistently returns
+    # nothing (POS offline, empty day, wrong credentials, etc.). At most one
+    # refresh per 180 seconds per tenant.
+    import time as _time
+    now_ts = _time.monotonic()
+    last_refresh = _high_sales_refresh_cooldown.get(tenant_id, 0.0)
+    can_refresh = (now_ts - last_refresh) > 180
+    if cache_age_sec > 90 and can_refresh:
+        try:
+            _high_sales_refresh_cooldown[tenant_id] = now_ts
+            asyncio.create_task(
+                _pos_request_data(
+                    tenant_id, "rap_fis_kalem_listesi_web",
+                    refresh_params, timeout_s=60,
+                )
+            )
+            logger.info(
+                f"[high_sales_loop] tenant={tenant_id} cache age={cache_age_sec:.0f}s "
+                f"→ queued fresh request_create (next refresh in 180s)"
+            )
+        except Exception as e:
+            logger.debug(f"[high_sales_loop] refresh trigger failed: {e}")
+
+    if row_data is None:
         return 0
 
     try:
-        raw_rows = _json.loads(row[0] or "[]")
+        raw_rows = _json.loads(row_data or "[]")
     except Exception:
         return 0
     if not isinstance(raw_rows, list) or not raw_rows:
         return 0
 
     # Filter by today's date (TR) so stale multi-day caches don't re-fire
-    today_tr = _tr_now().strftime("%Y-%m-%d")
     # POS returns FIS_TARIHI as "May  2 2026  5:15PM" (ODBC/SQL Server default)
     # OR "2026-05-02 17:15:00" depending on driver — accept both.
     def _is_today(d: Any) -> bool:
         s = str(d or "").strip()
         if not s:
             return False
-        if s.startswith(today_tr):
+        if s.startswith(today_tr_str):
             return True
-        # "May  2 2026  5:15PM" — match year/day/month parts
+        # "May  2 2026  5:15PM" — match year/month/day parts
         tr_now = _tr_now()
         months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
         mo_str = months[tr_now.month - 1]
-        day_str = str(tr_now.day)
         yr_str = str(tr_now.year)
-        return (mo_str in s) and (f" {day_str} {yr_str} " in f" {s} ") if (mo_str in s and yr_str in s) else False
+        day_str = str(tr_now.day)
+        if mo_str in s and yr_str in s and f" {day_str} {yr_str}" in f" {s}":
+            return True
+        return False
 
     # Group by BELGENO → sum SATIR_GENEL_TOPLAM, take first non-empty meta
     by_belge: Dict[str, Dict[str, Any]] = {}
