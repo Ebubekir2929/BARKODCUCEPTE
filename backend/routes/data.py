@@ -85,6 +85,49 @@ def _sum_float(val):
         return 0.0
 
 
+def _flatten_hourly_urunler(rows: list) -> list:
+    """Expand `hourly_stock_detail` parent rows (one per SAAT+LOKASYON) into
+    per-product rows by flattening each row's `URUNLER` array.
+
+    POS pushes `hourly_stock_detail` as aggregate parents of the form:
+      { SAAT_ADI, SAAT_NO, LOKASYON, LOKASYON_ID, TARIH, URUNLER: [ {STOK_ADI, ...}, ... ] }
+
+    Downstream dashboards (Saatlik Satış Detayı modal, Karşılaştır drill-down,
+    Lokasyon Saatlik Satışlar) need one visible line per product; we copy
+    parent fields (SAAT_ADI, LOKASYON, …) onto each child product so the
+    frontend can render them directly.
+
+    Parents that have no URUNLER list are passed through unchanged (keeps
+    legacy aggregate-only callers working). Caller decides whether to use
+    the flat list.
+    """
+    if not isinstance(rows, list):
+        return rows if rows is not None else []
+    out: list = []
+    # Fields to inherit from the parent hour+location row
+    PARENT_FIELDS = (
+        "SAAT_ADI", "SAAT_NO", "TARIH",
+        "LOKASYON", "LOKASYON_ID",
+        "SATIR_TIPI",
+    )
+    for r in rows:
+        if not isinstance(r, dict):
+            out.append(r)
+            continue
+        urunler = r.get("URUNLER")
+        if isinstance(urunler, list) and urunler:
+            parent_bits = {k: r.get(k) for k in PARENT_FIELDS if k in r}
+            for u in urunler:
+                if not isinstance(u, dict):
+                    continue
+                flat = {**parent_bits, **u}
+                out.append(flat)
+        else:
+            # Keep parent row as-is when no URUNLER (rare / legacy)
+            out.append(r)
+    return out
+
+
 def _fix_large_ints(data):
     """Convert large integers to strings to prevent JavaScript precision loss"""
     if isinstance(data, list):
@@ -1098,6 +1141,12 @@ async def get_hourly_stock_detail_full(
         rich_params["_skip_aggregate"] = True
         result_inner = await _on_demand_request(tenant_id, "hourly_stock_detail", rich_params, timeout_sec=45)
         rows_inner = result_inner.get("data", []) if isinstance(result_inner, dict) else []
+        # POS pushes parent aggregate rows (one per SAAT_ADI+LOKASYON) with a
+        # nested `URUNLER` array carrying per-product fields (STOK_ADI,
+        # BIRIM_ADI, TOPLAM_MIKTAR, KDV_DAHIL_TOPLAM_TUTAR, …). Flatten to
+        # URUN-level so the chart AND the product-detail modal render correctly.
+        # Totals remain consistent because parent fields == sum of children.
+        rows_inner = _flatten_hourly_urunler(rows_inner)
         # Bucket raw rows by hour (preserve ALL fields — STOK_ADI, MIKTAR,
         # KDV_DAHIL_BIRIM_FIYAT, LOKASYON, LOKASYON_ID, …)
         by_hour_inner: Dict[str, List[Any]] = {}
@@ -1182,7 +1231,19 @@ async def get_hourly_stock_detail(
     }
     
     try:
-        return await _on_demand_request(tenant_id, "hourly_stock_detail", params)
+        result = await _on_demand_request(tenant_id, "hourly_stock_detail", params)
+        # Flatten parent rows (SAAT+LOKASYON aggregates) into per-product rows
+        # by expanding the `URUNLER` array. Saatlik Satış Detayı modalında
+        # her ürün (STOK_ADI + BIRIM_ADI + MIKTAR + TUTAR) ayrı satır olarak
+        # gözüksün.
+        try:
+            if isinstance(result, dict):
+                d = result.get("data")
+                if isinstance(d, list) and d:
+                    result["data"] = _flatten_hourly_urunler(d)
+        except Exception as _unwrap_err:
+            logger.debug(f"hourly-detail flatten skipped: {_unwrap_err}")
+        return result
     except HTTPException:
         raise
     except Exception as e:
