@@ -733,22 +733,12 @@ async def _get_tenants_for_high_sales() -> List[Dict[str, Any]]:
 
 
 async def _scan_high_sales_for_tenant(tenant: Dict[str, Any]) -> int:
-    """Single scan for one tenant using `rap_fis_kalem_listesi_web` from the
-    MySQL dataset cache.
+    """Single POS scan for one tenant using `fis_gunluk_bildirim_feed`
+    (POS's lightweight notification feed — designed exactly for this purpose).
 
-    Strategy:
-      1) If the cache for this tenant is missing or older than ~90s, fire a
-         background POS `request_create` call so POS will push a fresh snapshot
-         within the next few seconds. We DON'T block — the next 15s iteration
-         will pick it up.
-      2) Read whatever is in the MySQL cache right now, group by BELGENO, and
-         push alerts for receipts ≥ threshold.
-
-    Why not `fis_gunluk_bildirim_feed`? — POS' own view of that dataset only
-    returns receipts flagged BILDIRIMLIK=1. Customers reported high-value sales
-    not firing the watcher even with threshold set to ₺0 because the POS feed
-    excluded them. Reading `rap_fis_kalem_listesi_web` (kept up-to-date by our
-    own periodic request_create) captures ALL receipts for today.
+    Note: POS side must expose all today's receipts in this feed (no BILDIRIMLIK
+    filter) for the watcher to see every high-value sale. User is maintaining
+    that SP on the POS side.
     """
     tenant_id = tenant["tenant_id"]
     tenant_name = tenant.get("tenant_name") or "Veri"
@@ -756,150 +746,49 @@ async def _scan_high_sales_for_tenant(tenant: Dict[str, Any]) -> int:
     if not users:
         return 0
 
-    from services.dataset_cache import get_data_pool
-    import json as _json
+    # Use the lowest active threshold so POS returns everything we might need
+    min_threshold = min(float(u["threshold"]) for u in users)
+    # POS uses Turkey local time (UTC+3) — send in TR timezone
+    today_str = _tr_now().strftime("%Y-%m-%d")
 
-    today_tr_str = _tr_now().strftime("%Y-%m-%d")
-    # Default refresh params covering today. POS will push data_json to
-    # dataset_cache regardless of which user originally ran the report.
-    refresh_params = {
-        "BASTARIH": f"{today_tr_str} 00:00:00",
-        "BITTARIH": f"{today_tr_str} 23:59:59",
-        "Lokasyon": "",
-        "Pc_Ad": "",
-        "Stoklar": "",
-        "StokGrup": "",
-        "StokCinsi": "",
-        "StokMarka": "",
-        "StokVergi": "",
-        "FisTipi": 0,
-        "KdvDahil": 1,
-        "Page": 1,
-        "PageSize": 500,
-    }
-
-    # ---------- Step 1: peek at cache freshness ----------
-    row_data: Any = None
-    cache_age_sec = 10_000.0
     try:
-        pool = await get_data_pool()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """
-                    SELECT data_json,
-                           TIMESTAMPDIFF(SECOND, synced_at, UTC_TIMESTAMP()) AS age_sec
-                    FROM dataset_cache
-                    WHERE tenant_id=%s AND dataset_key='rap_fis_kalem_listesi_web'
-                    ORDER BY synced_at DESC LIMIT 1
-                    """,
-                    (tenant_id,),
-                )
-                row = await cur.fetchone()
-                if row:
-                    row_data = row[0]
-                    cache_age_sec = float(row[1] or 10_000)
+        rows = await _pos_request_data(tenant_id, "fis_gunluk_bildirim_feed", {
+            "TARIH": today_str,
+            "MinTutar": min_threshold,
+            "SonFisId": 0,
+            "Lokasyon": "",
+            "Personel": "",
+            "FisTuru": "",
+        }, timeout_s=60)
     except Exception as e:
-        logger.warning(f"[high_sales_loop] tenant={tenant_id} MySQL peek error: {e}")
-
-    # ---------- Step 2: trigger a background POS refresh if data is stale ----------
-    # Throttled so POS isn't hammered when a tenant's SP consistently returns
-    # nothing (POS offline, empty day, wrong credentials, etc.). At most one
-    # refresh per 180 seconds per tenant.
-    import time as _time
-    now_ts = _time.monotonic()
-    last_refresh = _high_sales_refresh_cooldown.get(tenant_id, 0.0)
-    can_refresh = (now_ts - last_refresh) > 180
-    if cache_age_sec > 90 and can_refresh:
-        try:
-            _high_sales_refresh_cooldown[tenant_id] = now_ts
-            asyncio.create_task(
-                _pos_request_data(
-                    tenant_id, "rap_fis_kalem_listesi_web",
-                    refresh_params, timeout_s=60,
-                )
-            )
-            logger.info(
-                f"[high_sales_loop] tenant={tenant_id} cache age={cache_age_sec:.0f}s "
-                f"→ queued fresh request_create (next refresh in 180s)"
-            )
-        except Exception as e:
-            logger.debug(f"[high_sales_loop] refresh trigger failed: {e}")
-
-    if row_data is None:
+        logger.warning(f"[high_sales_loop] tenant={tenant_id} POS error: {e}")
         return 0
 
-    try:
-        raw_rows = _json.loads(row_data or "[]")
-    except Exception:
+    if not rows:
         return 0
-    if not isinstance(raw_rows, list) or not raw_rows:
-        return 0
-
-    # Filter by today's date (TR) so stale multi-day caches don't re-fire
-    # POS returns FIS_TARIHI as "May  2 2026  5:15PM" (ODBC/SQL Server default)
-    # OR "2026-05-02 17:15:00" depending on driver — accept both.
-    def _is_today(d: Any) -> bool:
-        s = str(d or "").strip()
-        if not s:
-            return False
-        if s.startswith(today_tr_str):
-            return True
-        # "May  2 2026  5:15PM" — match year/month/day parts
-        tr_now = _tr_now()
-        months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
-        mo_str = months[tr_now.month - 1]
-        yr_str = str(tr_now.year)
-        day_str = str(tr_now.day)
-        if mo_str in s and yr_str in s and f" {day_str} {yr_str}" in f" {s}":
-            return True
-        return False
-
-    # Group by BELGENO → sum SATIR_GENEL_TOPLAM, take first non-empty meta
-    by_belge: Dict[str, Dict[str, Any]] = {}
-    for r in raw_rows:
-        if not isinstance(r, dict):
-            continue
-        if not _is_today(r.get("FIS_TARIHI")):
-            continue
-        belge = str(r.get("BELGENO") or "").strip()
-        if not belge:
-            continue
-        try:
-            tutar = float(r.get("SATIR_GENEL_TOPLAM") or 0)
-        except (TypeError, ValueError):
-            tutar = 0.0
-        entry = by_belge.get(belge)
-        if not entry:
-            entry = {
-                "total": 0.0,
-                "FIS_ID": r.get("FIS_ID") or r.get("FIS_NO") or belge,
-                "BELGENO": belge,
-                "FIS_TARIHI": r.get("FIS_TARIHI"),
-                "FIS_TURU": r.get("FIS_TURU") or "",
-                "LOKASYON": r.get("LOKASYON_AD") or r.get("LOKASYON") or "",
-                "PERSONEL": r.get("PERSONEL_AD") or r.get("KESEN_PERSONEL") or "",
-                "CARI_AD": r.get("CARI_AD") or "",
-            }
-            by_belge[belge] = entry
-        entry["total"] += tutar
 
     pushed = 0
-    for belge, fis in by_belge.items():
-        tutar = float(fis["total"])
-        if tutar <= 0:
+    for s in rows:
+        fis_id = s.get("FIS_ID")
+        if fis_id is None:
+            continue
+        bildirimlik = s.get("BILDIRIMLIK")
+        try:
+            tutar = float(s.get("TUTAR") or 0)
+        except (TypeError, ValueError):
+            tutar = 0.0
+        if bildirimlik is not None and str(bildirimlik) not in ("1", "True", "true"):
             continue
 
-        belgeno = fis["BELGENO"]
-        fis_id = fis["FIS_ID"]
-        lokasyon = str(fis["LOKASYON"] or "").strip()
-        personel = str(fis["PERSONEL"] or "").strip()
+        belgeno = str(s.get("BELGENO") or "").strip()
+        lokasyon = str(s.get("LOKASYON") or "").strip()
+        personel = str(s.get("KESEN_PERSONEL") or "").strip()
 
         # Per-user dedup so users with different thresholds get fair coverage
         for u in users:
             if tutar < float(u["threshold"]):
                 continue
-            key = f"{belgeno}:u{u['user_id']}"
+            key = f"{fis_id}:u{u['user_id']}"
             if not await _mark_event_seen(tenant_id, "yuksek_satis", key):
                 continue  # already pushed for this user
 
@@ -924,7 +813,7 @@ async def _scan_high_sales_for_tenant(tenant: Dict[str, Any]) -> int:
             pushed += 1
             logger.info(
                 f"[high_sales_loop] ✅ PUSHED tenant={tenant_id} user={u['user_id']} "
-                f"belge={belgeno} tutar={tutar:.2f}"
+                f"fis_id={fis_id} belge={belgeno} tutar={tutar:.2f}"
             )
 
     return pushed
