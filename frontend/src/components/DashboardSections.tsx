@@ -176,12 +176,25 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
             return (
               <View key={loc}>
                 <TouchableOpacity
-                  style={[styles.groupHeader, { backgroundColor: colors.background, borderColor: colors.border }]}
+                  style={[styles.groupHeader, { backgroundColor: colors.background, borderColor: colors.border, flexDirection: 'column', alignItems: 'stretch', paddingVertical: 10, gap: 6 }]}
                   onPress={() => setExpanded(expanded === loc ? null : loc)}
                 >
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, paddingRight: 8 }}>
+                  {/* Üst satır — Lokasyon adı (tam genişlik), toplam, chevron */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <Ionicons name={tab === 'garson' ? 'restaurant-outline' : 'briefcase-outline'} size={18} color={tabColor} />
-                    <Text style={[styles.groupName, { color: colors.text, flexShrink: 1 }]} numberOfLines={1}>{loc}</Text>
+                    <Text
+                      style={[styles.groupName, { color: colors.text, flex: 1 }]}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.85}
+                    >{loc}</Text>
+                    <Text style={[styles.groupTotal, { color: colors.text, fontWeight: '700' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                      ₺{fmtTL(locTutar)}
+                    </Text>
+                    <Ionicons name={expanded === loc ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
+                  </View>
+                  {/* Alt satır — metrik chip'leri (ayrı satır → lokasyon adı kısaltılmaz) */}
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, paddingLeft: 26 }}>
                     <View style={[styles.countBadge, { backgroundColor: tabColor + '15' }]}>
                       <Text style={[styles.countText, { color: tabColor }]}>{kisiler.length}</Text>
                     </View>
@@ -190,15 +203,9 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
                     </View>
                     {locIskonto > 0 && (
                       <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: '#F59E0B20' }}>
-                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#F59E0B' }} numberOfLines={1}>-₺{fmtTL(locIskonto)}</Text>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#F59E0B' }} numberOfLines={1}>İsk: -₺{fmtTL(locIskonto)}</Text>
                       </View>
                     )}
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, maxWidth: 140 }}>
-                    <Text style={[styles.groupTotal, { color: colors.text, fontWeight: '700' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
-                      ₺{fmtTL(locTutar)}
-                    </Text>
-                    <Ionicons name={expanded === loc ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
                   </View>
                 </TouchableOpacity>
 
