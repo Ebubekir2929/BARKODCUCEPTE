@@ -46,7 +46,9 @@ REQUEST_ALLOWED_DATASETS: set = {
     "stok_bilgi_miktar",   # stock quantity per location (paired with stok_extre)
     "kart_extre_cari",     # customer ledger (acik_hesap_kisi_detail / cari_detail)
     "fis_detay_toplam",    # receipt detail (table-detail drill-down)
-    # iptal_detay removed — now lives in dataset_cache blob; served via fetch_dataset.
+    "iptal_detay",         # cancellation line items (drill into a specific IPTAL_ID)
+                           # — blob cache only has headers (SATIR_MI=false); the
+                           # product line items must come from POS on-demand.
     # Legacy reports screen still needs live data from POS (rap_fis_kalem_listesi_web,
     # rap_cari_hesap_ekstresi_web, rap_personel_satis, rap_gunluk_ozet, …) covered by
     # the rap_ prefix in `_is_request_create_allowed` (rap_filtre_lookup is denied
@@ -1256,26 +1258,84 @@ async def get_iptal_detail(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """On-demand: Cancel receipt detail - items in a specific cancelled receipt"""
+    """On-demand: Cancel receipt detail - items in a specific cancelled receipt.
+
+    Strategy:
+      1. Try MySQL blob cache (fast, if line items already cached).
+      2. If the cached result contains only the iptal HEADER (SATIR_MI=false) and
+         no product line items, force a fresh sync.php request_create call so POS
+         sends the SATIR_MI=true detail rows.
+      3. Return ONLY the product line items (SATIR_MI=true), matching IPTAL_ID
+         when provided — so the modal shows `STOK_AD`, `MIKTAR`, `SATIR_TUTAR`.
+    """
     tenant_id = body.get("tenant_id", "")
     iptal_id = body.get("iptal_id")
     filter_date = body.get("date", "")
-    
+
     if not tenant_id or iptal_id is None:
         raise HTTPException(status_code=400, detail="tenant_id ve iptal_id gerekli")
-    
+
     if not filter_date:
         from datetime import date as date_cls
         filter_date = date_cls.today().strftime("%Y-%m-%d")
-    
+
     params = {
         "sdate": f"{filter_date} 00:00:00",
         "edate": f"{filter_date} 23:59:59",
         "IPTAL_ID": int(iptal_id),
     }
-    
+
+    def _extract_line_items(payload: dict) -> list:
+        """Keep only product-line rows matching the requested IPTAL_ID."""
+        rows = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            return []
+        out: list = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            # Must be a product line (SATIR_MI=true) or at least have STOK_AD/STOK_ADI/STOK_ID
+            is_satir = (
+                r.get("SATIR_MI") is True
+                or bool(r.get("STOK_AD") or r.get("STOK_ADI") or r.get("STOK_ID"))
+            )
+            if not is_satir:
+                continue
+            try:
+                if int(r.get("IPTAL_ID") or 0) != int(iptal_id):
+                    continue
+            except (TypeError, ValueError):
+                continue
+            out.append(r)
+        return out
+
     try:
-        return await _on_demand_request(tenant_id, "iptal_detay", params)
+        # Step 1 — try cache
+        result = await _on_demand_request(tenant_id, "iptal_detay", params)
+        line_items = _extract_line_items(result)
+
+        # Step 2 — cache returned only headers → force fresh sync.php call
+        if not line_items:
+            logger.info(
+                f"[iptal-detail] cache had no line items for IPTAL_ID={iptal_id}, "
+                f"forcing sync.php request_create"
+            )
+            try:
+                result = await _on_demand_request(
+                    tenant_id,
+                    "iptal_detay",
+                    params,
+                    timeout_sec=30,
+                    skip_mysql_cache=True,
+                )
+                line_items = _extract_line_items(result)
+            except Exception as e_fresh:
+                logger.warning(f"[iptal-detail] fresh sync.php failed: {e_fresh}")
+
+        # Return only product rows — modal renders them as line items
+        if isinstance(result, dict):
+            result["data"] = line_items
+        return result
     except HTTPException:
         raise
     except Exception as e:
