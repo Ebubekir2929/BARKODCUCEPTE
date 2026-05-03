@@ -13,6 +13,7 @@ import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useLocalSearchParams, router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -59,13 +60,30 @@ export default function StockScreen() {
   // Filters
   const [filterGroups, setFilterGroups] = useState<string[]>([]);   // multi-select
   const [filterProfit, setFilterProfit] = useState<'all' | 'profit' | 'loss'>('all');
-  const [filterQty, setFilterQty] = useState<'all' | 'low' | 'mid' | 'high'>('all');
+  const [filterQty, setFilterQty] = useState<'all' | 'low' | 'mid' | 'high' | 'negative'>('all');
   const [filterKdvs, setFilterKdvs] = useState<string[]>([]);       // multi-select
   // 2026-05-03 — extra filter dimensions (atama / depo baremleri)
   const [filterMarkalar, setFilterMarkalar] = useState<string[]>([]);
   const [filterCinsler, setFilterCinsler] = useState<string[]>([]);
   const [filterOzelKod1, setFilterOzelKod1] = useState<string[]>([]);
   const [filterOzelKod2, setFilterOzelKod2] = useState<string[]>([]);
+
+  // 2026-05-03 — deep-link from notification taps (low_stock_summary push)
+  // Handles `onlyNegative=1` query param → switches the filter to "negative" so
+  // the user lands directly on negative-stock items.
+  const navParams = useLocalSearchParams<{ onlyNegative?: string; openLowStockSummary?: string }>();
+  const _stockDeepLinkRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    const sig = String(navParams?.onlyNegative || '') + '|' + String(navParams?.openLowStockSummary || '');
+    if (sig === _stockDeepLinkRef.current) return;
+    if (!navParams?.onlyNegative && !navParams?.openLowStockSummary) return;
+    _stockDeepLinkRef.current = sig;
+    if (navParams?.onlyNegative === '1' || navParams?.openLowStockSummary === '1') {
+      setFilterQty('negative');
+      setSearchQuery('');
+    }
+    try { router.setParams({ onlyNegative: '', openLowStockSummary: '', tenant: '' } as any); } catch {}
+  }, [navParams?.onlyNegative, navParams?.openLowStockSummary]);
 
   const toggleGroup = (g: string) => {
     setFilterGroups((prev) => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]);
@@ -303,6 +321,8 @@ export default function StockScreen() {
     if (filterQty === 'low') list = list.filter((s: any) => { const m = parseFloat(s.MIKTAR || '0'); return m > 0 && m < 10; });
     if (filterQty === 'mid') list = list.filter((s: any) => { const m = parseFloat(s.MIKTAR || '0'); return m >= 10 && m < 100; });
     if (filterQty === 'high') list = list.filter((s: any) => parseFloat(s.MIKTAR || '0') >= 100);
+    // 2026-05-03 — "Eksi Stok" filter (deep-link from low_stock_summary push)
+    if (filterQty === 'negative') list = list.filter((s: any) => parseFloat(s.MIKTAR || '0') < 0);
     if (filterKdvs.length > 0) list = list.filter((s: any) => {
       const v = String(s.KDV_PAREKENDE || s.KDV || '').replace('.00', '');
       return filterKdvs.includes(v);
@@ -488,7 +508,7 @@ export default function StockScreen() {
               </View>
             ))}
             {filterProfit !== 'all' ? <View style={[styles.chip, { backgroundColor: filterProfit === 'profit' ? colors.success + '15' : colors.error + '15' }]}><Text style={[styles.chipText, { color: filterProfit === 'profit' ? colors.success : colors.error }]}>{filterProfit === 'profit' ? t('profitable') : t('unprofitable')}</Text><TouchableOpacity onPress={() => setFilterProfit('all')}><Ionicons name="close" size={12} color={filterProfit === 'profit' ? colors.success : colors.error} /></TouchableOpacity></View> : null}
-            {filterQty !== 'all' ? <View style={[styles.chip, { backgroundColor: colors.warning + '15' }]}><Text style={[styles.chipText, { color: colors.warning }]}>{filterQty === 'low' ? t('low_stock_label') : filterQty === 'mid' ? t('mid_stock_label') : t('high_stock_label')}</Text><TouchableOpacity onPress={() => setFilterQty('all')}><Ionicons name="close" size={12} color={colors.warning} /></TouchableOpacity></View> : null}
+            {filterQty !== 'all' ? <View style={[styles.chip, { backgroundColor: (filterQty === 'negative' ? colors.error : colors.warning) + '15' }]}><Text style={[styles.chipText, { color: filterQty === 'negative' ? colors.error : colors.warning }]}>{filterQty === 'negative' ? 'Eksi Stok' : filterQty === 'low' ? t('low_stock_label') : filterQty === 'mid' ? t('mid_stock_label') : t('high_stock_label')}</Text><TouchableOpacity onPress={() => setFilterQty('all')}><Ionicons name="close" size={12} color={filterQty === 'negative' ? colors.error : colors.warning} /></TouchableOpacity></View> : null}
             {filterKdvs.map((k) => (
               <View key={`k-${k}`} style={[styles.chip, { backgroundColor: colors.info + '15' }]}>
                 <Text style={[styles.chipText, { color: colors.info }]}>KDV %{k}</Text>
@@ -662,12 +682,13 @@ export default function StockScreen() {
                 <Text style={[{ fontSize: 14, fontWeight: '800', color: colors.text }]}>{t('quantity')}</Text>
               </View>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 18 }}>
-                {[{ k: 'all' as const, l: t('all') }, { k: 'low' as const, l: '<10' }, { k: 'mid' as const, l: '10-100' }, { k: 'high' as const, l: '100+' }].map(o => {
+                {[{ k: 'all' as const, l: t('all') }, { k: 'negative' as const, l: 'Eksi (<0)' }, { k: 'low' as const, l: '<10' }, { k: 'mid' as const, l: '10-100' }, { k: 'high' as const, l: '100+' }].map(o => {
                   const on = filterQty === o.k;
+                  const negative = o.k === 'negative';
                   return (
-                    <TouchableOpacity key={o.k} style={[styles.filterChip, on ? { backgroundColor: colors.warning, borderColor: colors.warning } : { borderColor: colors.border, backgroundColor: colors.card }]} onPress={() => setFilterQty(o.k)} activeOpacity={0.7}>
+                    <TouchableOpacity key={o.k} style={[styles.filterChip, on ? (negative ? { backgroundColor: colors.error, borderColor: colors.error } : { backgroundColor: colors.warning, borderColor: colors.warning }) : { borderColor: colors.border, backgroundColor: colors.card }]} onPress={() => setFilterQty(o.k)} activeOpacity={0.7}>
                       {on && <Ionicons name="checkmark" size={14} color="#fff" style={{ marginRight: 4 }} />}
-                      <Text style={[{ fontSize: 12, color: on ? '#fff' : colors.text, fontWeight: on ? '700' : '500' }]}>{o.l}</Text>
+                      <Text style={[{ fontSize: 12, color: on ? '#fff' : (negative ? colors.error : colors.text), fontWeight: on ? '700' : '500' }]}>{o.l}</Text>
                     </TouchableOpacity>
                   );
                 })}

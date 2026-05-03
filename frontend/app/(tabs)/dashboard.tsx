@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, router } from 'expo-router';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAuthStore } from '../../src/store/authStore';
 import { useLanguageStore } from '../../src/store/languageStore';
@@ -210,6 +210,55 @@ export default function DashboardScreen() {
 
   // Fresh hourly sales (post-discount KDV_DAHIL_TOPLAM_TUTAR) from new procedure GET_HOURLY_STOCK_DETAIL
   const [freshHourlySales, setFreshHourlySales] = useState<HourlySales[] | null>(null);
+
+  // 2026-05-03 — deep-link from notification taps (notificationTapHandler)
+  // Picks up `openIptal=<id>` or `openHighSale=<belgeno>` from the URL params
+  // and opens the right modal automatically.
+  const navParams = useLocalSearchParams<{
+    openIptal?: string;
+    openIptalTenant?: string;
+    openHighSale?: string;
+    openHighSaleAmount?: string;
+    openHighSaleTenant?: string;
+  }>();
+  // Use a ref to avoid re-firing on re-renders (params can persist in nav state)
+  const _deepLinkProcessedRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    const sig = JSON.stringify({
+      i: navParams?.openIptal || '',
+      h: navParams?.openHighSale || '',
+    });
+    if (sig === _deepLinkProcessedRef.current) return;
+    if (!navParams?.openIptal && !navParams?.openHighSale) return;
+    _deepLinkProcessedRef.current = sig;
+
+    if (navParams?.openIptal) {
+      const iptalId = String(navParams.openIptal);
+      // Open iptal list modal and immediately fetch detail for the requested ID.
+      setShowIptalListModal(true);
+      // Wait a tick for state to settle, then trigger detail fetch.
+      setTimeout(() => {
+        fetchIptalDetail(iptalId, { IPTAL_ID: iptalId });
+      }, 350);
+      // Clear params so subsequent tabs don't keep re-triggering.
+      try { router.setParams({ openIptal: '', openIptalTenant: '' } as any); } catch {}
+    } else if (navParams?.openHighSale) {
+      const belge = String(navParams.openHighSale);
+      const tutar = String(navParams.openHighSaleAmount || '');
+      // Friendly toast / alert showing the receipt details.
+      try {
+        const { Alert } = require('react-native');
+        Alert.alert(
+          '💰 Yüksek Satış',
+          tutar
+            ? `Belge: #${belge}\nTutar: ₺${parseFloat(tutar).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`
+            : `Belge: #${belge}`,
+          [{ text: 'Tamam', style: 'default' }],
+        );
+      } catch {}
+      try { router.setParams({ openHighSale: '', openHighSaleAmount: '', openHighSaleTenant: '' } as any); } catch {}
+    }
+  }, [navParams?.openIptal, navParams?.openHighSale]);
 
   // Check if filter is active (from live data hook)
   const isFilterActive = isDataFiltered;
