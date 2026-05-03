@@ -179,6 +179,23 @@ export default function CustomersScreen() {
 
   const [filterCities, setFilterCities] = useState<string[]>([]);    // multi-select şehir
   const [filterGroups, setFilterGroups] = useState<string[]>([]);    // multi-select cari grup
+  const [showFilterModal, setShowFilterModal] = useState(false);
+
+  // Compute unique cities & groups from the loaded list (for the filter modal)
+  const uniqueCities = useMemo(() => {
+    const s = new Set<string>();
+    cariList.forEach((c: any) => { const v = String(c.SEHIR || c.IL || '').trim(); if (v) s.add(v); });
+    return Array.from(s).sort();
+  }, [cariList]);
+  const uniqueCariGroups = useMemo(() => {
+    const s = new Set<string>();
+    cariList.forEach((c: any) => { const v = String(c.GRUP || c.CARI_GRUP || c.GRUP_AD || '').trim(); if (v) s.add(v); });
+    return Array.from(s).sort();
+  }, [cariList]);
+  const toggleCariList = (current: string[], setter: (v: string[]) => void, val: string) => {
+    setter(current.includes(val) ? current.filter(x => x !== val) : [...current, val]);
+  };
+  const cariActiveFilterCount = (filterType !== 'all' ? 1 : 0) + (filterCities.length > 0 ? 1 : 0) + (filterGroups.length > 0 ? 1 : 0);
 
   const filteredCaris = useMemo(() => {
     let f = cariList;
@@ -355,12 +372,20 @@ export default function CustomersScreen() {
       </View>
 
       {/* Filter pills */}
-      <View style={{ flexDirection: 'row', paddingHorizontal: 16, gap: 6, marginTop: 6 }}>
+      <View style={{ flexDirection: 'row', paddingHorizontal: 16, gap: 6, marginTop: 6, alignItems: 'center' }}>
         {[{ k: 'all' as const, l: t('all'), c: colors.primary }, { k: 'borclu' as const, l: `${t('debtor')} (${summary.borcluCount})`, c: colors.error }, { k: 'alacakli' as const, l: `${t('creditor')} (${summary.alacakliCount})`, c: colors.success }].map(o => (
           <TouchableOpacity key={o.k} style={[styles.pill, { backgroundColor: filterType === o.k ? o.c + '20' : colors.card, borderColor: filterType === o.k ? o.c : colors.border }]} onPress={() => setFilterType(o.k)}>
             <Text style={[{ fontSize: 11, fontWeight: '600', color: filterType === o.k ? o.c : colors.textSecondary }]}>{o.l}</Text>
           </TouchableOpacity>
         ))}
+        {/* 2026-05-03 — extra filters (city / group) */}
+        <TouchableOpacity
+          onPress={() => setShowFilterModal(true)}
+          style={[styles.pill, { backgroundColor: cariActiveFilterCount > 0 ? colors.primary + '15' : colors.card, borderColor: cariActiveFilterCount > 0 ? colors.primary : colors.border, flexDirection: 'row', alignItems: 'center', gap: 4 }]}
+        >
+          <Ionicons name="options-outline" size={14} color={cariActiveFilterCount > 0 ? colors.primary : colors.textSecondary} />
+          <Text style={[{ fontSize: 11, fontWeight: '700', color: cariActiveFilterCount > 0 ? colors.primary : colors.textSecondary }]}>Filtre{cariActiveFilterCount > 0 ? ` (${cariActiveFilterCount})` : ''}</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Search */}
@@ -580,6 +605,112 @@ export default function CustomersScreen() {
           <Text style={[{ color: '#fff', fontSize: 13, fontWeight: '600' }]}>{toastMsg}</Text>
         </View>
       )}
+
+      {/* 2026-05-03 — Cari Filter Modal (city / group multi-select) */}
+      <Modal visible={showFilterModal} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setShowFilterModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={{ backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '88%' }}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Ionicons name="options" size={22} color={colors.primary} />
+                <Text style={[styles.modalTitle, { color: colors.text }]}>Filtrele</Text>
+                {cariActiveFilterCount > 0 && (
+                  <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: colors.primary }}>
+                    <Text style={{ fontSize: 11, fontWeight: '800', color: '#fff' }}>{cariActiveFilterCount}</Text>
+                  </View>
+                )}
+              </View>
+              <TouchableOpacity onPress={() => setShowFilterModal(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
+            </View>
+            <ScrollView style={{ padding: 16, paddingBottom: 80 }}>
+              {/* Şehir */}
+              {uniqueCities.length > 0 && (
+                <>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <Ionicons name="location" size={16} color={colors.warning} />
+                    <Text style={[{ fontSize: 14, fontWeight: '800', color: colors.text }]}>Şehir</Text>
+                    {filterCities.length > 0 && (
+                      <View style={{ paddingHorizontal: 7, paddingVertical: 1, borderRadius: 8, backgroundColor: colors.warning + '25' }}>
+                        <Text style={{ fontSize: 10, fontWeight: '800', color: colors.warning }}>{filterCities.length}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
+                    {uniqueCities.slice(0, 100).map(c => {
+                      const on = filterCities.includes(c);
+                      return (
+                        <TouchableOpacity
+                          key={c}
+                          style={[
+                            { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 16, borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
+                            on ? { backgroundColor: colors.warning, borderColor: colors.warning } : { borderColor: colors.border, backgroundColor: colors.card },
+                          ]}
+                          onPress={() => toggleCariList(filterCities, setFilterCities, c)}
+                        >
+                          {on && <Ionicons name="checkmark" size={14} color="#fff" style={{ marginRight: 4 }} />}
+                          <Text style={[{ fontSize: 12, color: on ? '#fff' : colors.text, fontWeight: on ? '700' : '500' }]}>{c}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </>
+              )}
+              {/* Grup */}
+              {uniqueCariGroups.length > 0 && (
+                <>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <Ionicons name="albums" size={16} color={colors.success} />
+                    <Text style={[{ fontSize: 14, fontWeight: '800', color: colors.text }]}>Grup</Text>
+                    {filterGroups.length > 0 && (
+                      <View style={{ paddingHorizontal: 7, paddingVertical: 1, borderRadius: 8, backgroundColor: colors.success + '25' }}>
+                        <Text style={{ fontSize: 10, fontWeight: '800', color: colors.success }}>{filterGroups.length}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 24 }}>
+                    {uniqueCariGroups.slice(0, 100).map(g => {
+                      const on = filterGroups.includes(g);
+                      return (
+                        <TouchableOpacity
+                          key={g}
+                          style={[
+                            { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 16, borderWidth: 1, flexDirection: 'row', alignItems: 'center' },
+                            on ? { backgroundColor: colors.success, borderColor: colors.success } : { borderColor: colors.border, backgroundColor: colors.card },
+                          ]}
+                          onPress={() => toggleCariList(filterGroups, setFilterGroups, g)}
+                        >
+                          {on && <Ionicons name="checkmark" size={14} color="#fff" style={{ marginRight: 4 }} />}
+                          <Text style={[{ fontSize: 12, color: on ? '#fff' : colors.text, fontWeight: on ? '700' : '500' }]}>{g}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </>
+              )}
+              {(uniqueCities.length === 0 && uniqueCariGroups.length === 0) && (
+                <Text style={[{ color: colors.textSecondary, textAlign: 'center', marginVertical: 30 }]}>
+                  Filtre için yeterli veri yok (cari kayıtlarında şehir/grup alanları boş).
+                </Text>
+              )}
+            </ScrollView>
+            {/* Sticky bottom apply bar */}
+            <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: 12, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface, flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity
+                style={{ flex: 0.4, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: colors.error + '15' }}
+                onPress={() => { setFilterCities([]); setFilterGroups([]); setFilterType('all'); }}
+              >
+                <Text style={{ color: colors.error, fontWeight: '800' }}>Hepsini Sıfırla</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 0.6, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: colors.primary }}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <Text style={{ color: '#fff', fontWeight: '800' }}>Uygula{cariActiveFilterCount > 0 ? ` (${cariActiveFilterCount})` : ''}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }

@@ -280,6 +280,31 @@ export default function StockScreen() {
     return Array.from(s).sort((a, b) => parseFloat(a) - parseFloat(b));
   }, [stockList]);
 
+  // 2026-05-03 — extra filter dimensions for the filter modal.
+  const uniqueMarkalar = useMemo(() => {
+    const s = new Set<string>();
+    stockList.forEach((i: any) => { const v = String(i.MARKA || i.MARKA_AD || '').trim(); if (v) s.add(v); });
+    return Array.from(s).sort();
+  }, [stockList]);
+  const uniqueCinsler = useMemo(() => {
+    const s = new Set<string>();
+    stockList.forEach((i: any) => { const v = String(i.CINS || i.CINS_AD || '').trim(); if (v) s.add(v); });
+    return Array.from(s).sort();
+  }, [stockList]);
+  const uniqueOzelKod1 = useMemo(() => {
+    const s = new Set<string>();
+    stockList.forEach((i: any) => { const v = String(i.STOK_OZEL_KOD1 || '').trim(); if (v) s.add(v); });
+    return Array.from(s).sort();
+  }, [stockList]);
+  const uniqueOzelKod2 = useMemo(() => {
+    const s = new Set<string>();
+    stockList.forEach((i: any) => { const v = String(i.STOK_OZEL_KOD2 || '').trim(); if (v) s.add(v); });
+    return Array.from(s).sort();
+  }, [stockList]);
+  const toggleInList = (current: string[], setter: (v: string[]) => void, val: string) => {
+    setter(current.includes(val) ? current.filter(x => x !== val) : [...current, val]);
+  };
+
   // Filtered list
   const filteredStocks = useMemo(() => {
     let list = stockList;
@@ -340,8 +365,12 @@ export default function StockScreen() {
     if (filterProfit !== 'all') c++;
     if (filterQty !== 'all') c++;
     if (filterKdvs.length > 0) c++;
+    if (filterMarkalar.length > 0) c++;
+    if (filterCinsler.length > 0) c++;
+    if (filterOzelKod1.length > 0) c++;
+    if (filterOzelKod2.length > 0) c++;
     return c;
-  }, [filterGroups, filterProfit, filterQty, filterKdvs]);
+  }, [filterGroups, filterProfit, filterQty, filterKdvs, filterMarkalar, filterCinsler, filterOzelKod1, filterOzelKod2]);
 
   const selectedPriceLabel = useMemo(() => {
     const f = priceNames.find((p: any) => String(p.ID) === selectedPriceName || String(p.AD) === selectedPriceName);
@@ -732,12 +761,116 @@ export default function StockScreen() {
                   );
                 })}
               </View>
+
+              {/* Marka — multi-select */}
+              {uniqueMarkalar.length > 0 && (
+                <>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <Ionicons name="bookmark" size={16} color={colors.success} />
+                    <Text style={[{ fontSize: 14, fontWeight: '800', color: colors.text }]}>Marka</Text>
+                    {filterMarkalar.length > 0 && (
+                      <View style={{ paddingHorizontal: 7, paddingVertical: 1, borderRadius: 8, backgroundColor: colors.success + '25' }}>
+                        <Text style={{ fontSize: 10, fontWeight: '800', color: colors.success }}>{filterMarkalar.length}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
+                    {uniqueMarkalar.slice(0, 80).map(m => {
+                      const on = filterMarkalar.includes(m);
+                      return (
+                        <TouchableOpacity key={m} style={[styles.filterChip, on ? { backgroundColor: colors.success, borderColor: colors.success } : { borderColor: colors.border, backgroundColor: colors.card }]} onPress={() => toggleInList(filterMarkalar, setFilterMarkalar, m)} activeOpacity={0.7}>
+                          {on && <Ionicons name="checkmark" size={14} color="#fff" style={{ marginRight: 4 }} />}
+                          <Text style={[{ fontSize: 12, color: on ? '#fff' : colors.text, fontWeight: on ? '700' : '500' }]} numberOfLines={1}>{m}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </>
+              )}
+
+              {/* Cins — multi-select */}
+              {uniqueCinsler.length > 0 && (
+                <>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <Ionicons name="apps" size={16} color={colors.warning} />
+                    <Text style={[{ fontSize: 14, fontWeight: '800', color: colors.text }]}>Cins</Text>
+                    {filterCinsler.length > 0 && (
+                      <View style={{ paddingHorizontal: 7, paddingVertical: 1, borderRadius: 8, backgroundColor: colors.warning + '25' }}>
+                        <Text style={{ fontSize: 10, fontWeight: '800', color: colors.warning }}>{filterCinsler.length}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
+                    {uniqueCinsler.slice(0, 80).map(c => {
+                      const on = filterCinsler.includes(c);
+                      return (
+                        <TouchableOpacity key={c} style={[styles.filterChip, on ? { backgroundColor: colors.warning, borderColor: colors.warning } : { borderColor: colors.border, backgroundColor: colors.card }]} onPress={() => toggleInList(filterCinsler, setFilterCinsler, c)} activeOpacity={0.7}>
+                          {on && <Ionicons name="checkmark" size={14} color="#fff" style={{ marginRight: 4 }} />}
+                          <Text style={[{ fontSize: 12, color: on ? '#fff' : colors.text, fontWeight: on ? '700' : '500' }]} numberOfLines={1}>{c}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </>
+              )}
+
+              {/* Atama Baremi 1 (Stok Özel Kod 1) — multi-select */}
+              {uniqueOzelKod1.length > 0 && (
+                <>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <Ionicons name="pricetag" size={16} color={colors.primary} />
+                    <Text style={[{ fontSize: 14, fontWeight: '800', color: colors.text }]}>Atama Baremi 1</Text>
+                    {filterOzelKod1.length > 0 && (
+                      <View style={{ paddingHorizontal: 7, paddingVertical: 1, borderRadius: 8, backgroundColor: colors.primary + '25' }}>
+                        <Text style={{ fontSize: 10, fontWeight: '800', color: colors.primary }}>{filterOzelKod1.length}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 18 }}>
+                    {uniqueOzelKod1.slice(0, 60).map(o => {
+                      const on = filterOzelKod1.includes(o);
+                      return (
+                        <TouchableOpacity key={o} style={[styles.filterChip, on ? { backgroundColor: colors.primary, borderColor: colors.primary } : { borderColor: colors.border, backgroundColor: colors.card }]} onPress={() => toggleInList(filterOzelKod1, setFilterOzelKod1, o)} activeOpacity={0.7}>
+                          {on && <Ionicons name="checkmark" size={14} color="#fff" style={{ marginRight: 4 }} />}
+                          <Text style={[{ fontSize: 12, color: on ? '#fff' : colors.text, fontWeight: on ? '700' : '500' }]} numberOfLines={1}>{o}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </>
+              )}
+
+              {/* Atama Baremi 2 (Stok Özel Kod 2) — multi-select */}
+              {uniqueOzelKod2.length > 0 && (
+                <>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <Ionicons name="pricetags" size={16} color={colors.info} />
+                    <Text style={[{ fontSize: 14, fontWeight: '800', color: colors.text }]}>Atama Baremi 2</Text>
+                    {filterOzelKod2.length > 0 && (
+                      <View style={{ paddingHorizontal: 7, paddingVertical: 1, borderRadius: 8, backgroundColor: colors.info + '25' }}>
+                        <Text style={{ fontSize: 10, fontWeight: '800', color: colors.info }}>{filterOzelKod2.length}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 24 }}>
+                    {uniqueOzelKod2.slice(0, 60).map(o => {
+                      const on = filterOzelKod2.includes(o);
+                      return (
+                        <TouchableOpacity key={o} style={[styles.filterChip, on ? { backgroundColor: colors.info, borderColor: colors.info } : { borderColor: colors.border, backgroundColor: colors.card }]} onPress={() => toggleInList(filterOzelKod2, setFilterOzelKod2, o)} activeOpacity={0.7}>
+                          {on && <Ionicons name="checkmark" size={14} color="#fff" style={{ marginRight: 4 }} />}
+                          <Text style={[{ fontSize: 12, color: on ? '#fff' : colors.text, fontWeight: on ? '700' : '500' }]} numberOfLines={1}>{o}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </>
+              )}
             </ScrollView>
             {/* Sticky bottom apply bar */}
             <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: 12, borderTopWidth: 1, borderTopColor: colors.border, backgroundColor: colors.surface, flexDirection: 'row', gap: 10 }}>
               <TouchableOpacity
                 style={{ flex: 0.4, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: colors.error + '15' }}
-                onPress={() => { setFilterGroups([]); setFilterProfit('all'); setFilterQty('all'); setFilterKdvs([]); }}
+                onPress={() => { setFilterGroups([]); setFilterProfit('all'); setFilterQty('all'); setFilterKdvs([]); setFilterMarkalar([]); setFilterCinsler([]); setFilterOzelKod1([]); setFilterOzelKod2([]); }}
                 activeOpacity={0.8}
               >
                 <Text style={{ color: colors.error, fontWeight: '800' }}>Hepsini Sıfırla</Text>
