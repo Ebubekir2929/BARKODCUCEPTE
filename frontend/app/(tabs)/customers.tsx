@@ -177,13 +177,36 @@ export default function CustomersScreen() {
     })();
   }, [activeTenantId]);
 
+  const [filterCities, setFilterCities] = useState<string[]>([]);    // multi-select şehir
+  const [filterGroups, setFilterGroups] = useState<string[]>([]);    // multi-select cari grup
+
   const filteredCaris = useMemo(() => {
     let f = cariList;
-    if (searchQuery) { const q = searchQuery.toLowerCase(); f = f.filter((c: any) => (c.AD || c.CARI_ADI || '').toLowerCase().includes(q) || (c.KOD || c.CARI_KODU || '').toLowerCase().includes(q)); }
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase().trim();
+      const tokens = q.split(/\s+/).filter(Boolean);
+      // 2026-05-03 — wider search across name, code, phone, city, tax id, address
+      const haystackOf = (c: any) => [
+        c.AD, c.CARI_ADI, c.UNVAN,
+        c.KOD, c.CARI_KODU,
+        c.TELEFON, c.TEL, c.GSM, c.CEP, c.MOBILE,
+        c.SEHIR, c.ILCE, c.ULKE, c.ADRES,
+        c.VERGI_NO, c.VERGI_DAIRESI, c.TC_KIMLIK,
+        c.GRUP, c.CARI_GRUP, c.GRUP_AD,
+        c.YETKILI, c.EMAIL, c.WEB,
+        c.OZEL_KOD1, c.OZEL_KOD2, c.OZEL_KOD3,
+      ].filter(Boolean).join(' ').toLowerCase();
+      f = f.filter((c: any) => {
+        const hay = haystackOf(c);
+        return tokens.every(tok => hay.includes(tok));
+      });
+    }
     if (filterType === 'borclu') f = f.filter((c: any) => parseFloat(c.BAKIYE || '0') > 0);
     if (filterType === 'alacakli') f = f.filter((c: any) => parseFloat(c.BAKIYE || '0') < 0);
+    if (filterCities.length > 0) f = f.filter((c: any) => filterCities.includes(c.SEHIR || c.IL || ''));
+    if (filterGroups.length > 0) f = f.filter((c: any) => filterGroups.includes(c.GRUP || c.CARI_GRUP || c.GRUP_AD || ''));
     return f;
-  }, [cariList, searchQuery, filterType]);
+  }, [cariList, searchQuery, filterType, filterCities, filterGroups]);
 
   const summary = useMemo(() => {
     let borc = 0, alacak = 0;
@@ -383,7 +406,7 @@ export default function CustomersScreen() {
       {loading ? (
         <View style={styles.loadingContainer}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_customers')}</Text></View>
       ) : (
-        <FlashList ref={listRef as any} data={filteredCaris} renderItem={renderCariItem} keyExtractor={(item, idx) => String(item.KART || item.ID || idx)} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
+        <FlashList ref={listRef as any} data={filteredCaris} renderItem={renderCariItem} keyExtractor={(item, idx) => String(item.KART || item.ID || idx)} estimatedItemSize={120} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
           drawDistance={500}
           onScroll={(e) => {
             const y = e.nativeEvent.contentOffset.y;

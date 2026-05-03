@@ -61,6 +61,11 @@ export default function StockScreen() {
   const [filterProfit, setFilterProfit] = useState<'all' | 'profit' | 'loss'>('all');
   const [filterQty, setFilterQty] = useState<'all' | 'low' | 'mid' | 'high'>('all');
   const [filterKdvs, setFilterKdvs] = useState<string[]>([]);       // multi-select
+  // 2026-05-03 — extra filter dimensions (atama / depo baremleri)
+  const [filterMarkalar, setFilterMarkalar] = useState<string[]>([]);
+  const [filterCinsler, setFilterCinsler] = useState<string[]>([]);
+  const [filterOzelKod1, setFilterOzelKod1] = useState<string[]>([]);
+  const [filterOzelKod2, setFilterOzelKod2] = useState<string[]>([]);
 
   const toggleGroup = (g: string) => {
     setFilterGroups((prev) => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]);
@@ -261,12 +266,28 @@ export default function StockScreen() {
   const filteredStocks = useMemo(() => {
     let list = stockList;
     if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter((s: any) =>
-        (s.AD || '').toLowerCase().includes(q) ||
-        (s.KOD || '').toLowerCase().includes(q) ||
-        (s.BARKOD || '').includes(q)
-      );
+      const q = searchQuery.toLowerCase().trim();
+      const tokens = q.split(/\s+/).filter(Boolean);
+      // 2026-05-03 (user request) — wider search: scan AD, KOD, BARKOD, MARKA,
+      // CINS, GRUP, ACIKLAMA, REF_KOD, plus STOK_OZEL_KOD1..9 (atama/depo
+      // baremleri). All tokens must match somewhere (AND across tokens).
+      const haystackOf = (s: any) => [
+        s.AD, s.STOK_AD, s.STOK_ADI,
+        s.KOD, s.STOK_KODU,
+        s.BARKOD, s.BARKOD2, s.BARKOD3,
+        s.MARKA, s.MARKA_AD,
+        s.CINS, s.CINS_AD,
+        s.GRUP, s.STOK_GRUP, s.GRUP_AD,
+        s.ACIKLAMA, s.NOTLAR,
+        s.REF_KOD, s.URETICI_KOD,
+        s.STOK_OZEL_KOD1, s.STOK_OZEL_KOD2, s.STOK_OZEL_KOD3,
+        s.STOK_OZEL_KOD4, s.STOK_OZEL_KOD5, s.STOK_OZEL_KOD6,
+        s.STOK_OZEL_KOD7, s.STOK_OZEL_KOD8, s.STOK_OZEL_KOD9,
+      ].filter(Boolean).join(' ').toLowerCase();
+      list = list.filter((s: any) => {
+        const hay = haystackOf(s);
+        return tokens.every(tok => hay.includes(tok));
+      });
     }
     if (filterGroups.length > 0) list = list.filter((s: any) => filterGroups.includes(s.STOK_GRUP || s.GRUP || ''));
     if (filterProfit === 'profit') list = list.filter((s: any) => {
@@ -286,8 +307,12 @@ export default function StockScreen() {
       const v = String(s.KDV_PAREKENDE || s.KDV || '').replace('.00', '');
       return filterKdvs.includes(v);
     });
+    if (filterMarkalar.length > 0) list = list.filter((s: any) => filterMarkalar.includes(s.MARKA || s.MARKA_AD || ''));
+    if (filterCinsler.length > 0) list = list.filter((s: any) => filterCinsler.includes(s.CINS || s.CINS_AD || ''));
+    if (filterOzelKod1.length > 0) list = list.filter((s: any) => filterOzelKod1.includes(s.STOK_OZEL_KOD1 || ''));
+    if (filterOzelKod2.length > 0) list = list.filter((s: any) => filterOzelKod2.includes(s.STOK_OZEL_KOD2 || ''));
     return list;
-  }, [stockList, searchQuery, filterGroups, filterProfit, filterQty, filterKdvs]);
+  }, [stockList, searchQuery, filterGroups, filterProfit, filterQty, filterKdvs, filterMarkalar, filterCinsler, filterOzelKod1, filterOzelKod2]);
 
   const activeFilterCount = useMemo(() => {
     let c = 0;
@@ -527,6 +552,10 @@ export default function StockScreen() {
           data={filteredStocks}
           renderItem={renderStockItem}
           keyExtractor={(item: any, idx) => String(item?.KOD || item?.STOK_KODU || item?.ID || idx)}
+          // Stable item-size hint prevents FlashList from rendering large
+          // empty gaps when its recycler hasn't measured a card yet (the
+          // "DENEME / boşluk / DENEME 1" issue from 2026-05-03).
+          estimatedItemSize={150}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
           showsVerticalScrollIndicator={false}
           drawDistance={800}

@@ -10,6 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as NavigationBar from 'expo-navigation-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import notificationService from '../src/services/notificationService';
+import { attachNotificationTapHandler } from '../src/services/notificationTapHandler';
 
 function AppShell() {
   const { colors } = useThemeStore();
@@ -41,6 +42,8 @@ export default function RootLayout() {
     loadLanguage();
     checkAuth();
     hydratePrefs();
+    // Notification tap → deep link (cold-start + warm)
+    attachNotificationTapHandler();
   }, []);
 
   // Auto-register push token every time the user becomes authenticated so the
