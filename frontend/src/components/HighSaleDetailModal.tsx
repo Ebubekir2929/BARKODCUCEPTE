@@ -49,7 +49,10 @@ export const HighSaleDetailModal: React.FC<Props> = ({
         setLoading(true);
         setError(null);
         const { token: authToken } = useAuthStore.getState();
-        const r = await fetch(`${apiBase}/api/data/fis-detail`, {
+        // 2026-05-05 — Use /high-sale-detail which reads fis_gunluk_bildirim_feed
+        // from MySQL cache (the user is going to extend that dataset's rows
+        // with a `URUNLER` array). Falls back to fis_detay_toplam internally.
+        const r = await fetch(`${apiBase}/api/data/high-sale-detail`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken || ''}` },
           body: JSON.stringify({ tenant_id: tenantId, fis_id: fisId }),

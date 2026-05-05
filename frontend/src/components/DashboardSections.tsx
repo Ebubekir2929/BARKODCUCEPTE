@@ -31,6 +31,12 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
   const garsonRows = allDetay.filter((r: any) => parseInt(r.PERAKENDE_FIS_SAYISI || '0') > 0);
   const personelRows = allDetay.filter((r: any) => parseInt(r.ERP12_FIS_SAYISI || '0') > 0);
 
+  // 2026-05-05 — hide the entire section when neither garson nor personel has
+  // any sales rows. Without this the "Garson / Personel Satışları" header was
+  // rendering as an empty card on dashboards where the user didn't punch any
+  // receipts that day (user request).
+  if (garsonRows.length === 0 && personelRows.length === 0) return null;
+
   const detayRows = tab === 'garson' ? garsonRows : personelRows;
 
   // Group by location

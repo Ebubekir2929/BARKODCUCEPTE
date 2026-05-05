@@ -1742,6 +1742,141 @@ async def get_fis_detail(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/high-sale-detail")
+async def get_high_sale_detail(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """2026-05-05 — Yüksek Satış push'una tıklandığında çağrılır.
+
+    Strategy: read `fis_gunluk_bildirim_feed` directly from MySQL cache
+    (cache-first via `_on_demand_request`). Find the row whose FIS_ID matches
+    the requested one and return its nested `URUNLER` array (line items) as
+    `details`. The row itself is returned as `totals` so the modal can show
+    BELGENO / KESEN_PERSONEL / LOKASYON / TUTAR.
+
+    The user has agreed to extend `fis_gunluk_bildirim_feed` rows with a
+    `URUNLER` array on the POS side; if the array is missing we fall back to
+    `fis_detay_toplam` (also cache-first) so the modal still has lines to show.
+    """
+    tenant_id = body.get("tenant_id", "")
+    fis_id = body.get("fis_id")
+    if not tenant_id or fis_id is None:
+        raise HTTPException(status_code=400, detail="tenant_id ve fis_id gerekli")
+
+    try:
+        fis_id_int = int(fis_id)
+    except (TypeError, ValueError):
+        fis_id_int = None
+
+    def _match_row(rows: list) -> dict:
+        if not isinstance(rows, list):
+            return {}
+        target_str = str(fis_id)
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            row_fid = r.get("FIS_ID")
+            if row_fid is None:
+                continue
+            if fis_id_int is not None:
+                try:
+                    if int(row_fid) == fis_id_int:
+                        return r
+                    continue
+                except (TypeError, ValueError):
+                    pass
+            if str(row_fid) == target_str:
+                return r
+        return {}
+
+    def _flatten_urunler(row: dict) -> list:
+        """Extract a flat list of product rows from a feed row.
+
+        The POS may nest the items under any of these keys: URUNLER, ITEMS,
+        LINES, KALEMLER, SATIRLAR. JSON strings are parsed; arrays-of-arrays
+        are flattened. Each item is returned as-is so the frontend can render
+        STOK_AD / MIKTAR / FIYAT / TUTAR / KDV.
+        """
+        candidates = ("URUNLER", "ITEMS", "LINES", "KALEMLER", "SATIRLAR")
+        raw = None
+        for k in candidates:
+            if k in row:
+                raw = row[k]
+                break
+        if raw is None:
+            return []
+        # JSON-encoded array of objects
+        if isinstance(raw, str):
+            import json as _json
+            try:
+                raw = _json.loads(raw)
+            except Exception:
+                return []
+        if not isinstance(raw, list):
+            return []
+        out: list = []
+        for el in raw:
+            if isinstance(el, dict):
+                out.append(el)
+            elif isinstance(el, list):
+                # nested array of dicts
+                for sub in el:
+                    if isinstance(sub, dict):
+                        out.append(sub)
+        return out
+
+    try:
+        # Step 1 — read cache (no params filter; we filter client-side)
+        result = await _on_demand_request(
+            tenant_id, "fis_gunluk_bildirim_feed", {}, raw_cache=True
+        )
+        rows = []
+        cache = result.get("cache") or {}
+        if isinstance(cache.get("data"), list):
+            rows = cache["data"]
+        elif isinstance(result.get("data"), list):
+            rows = result["data"]
+
+        row = _match_row(rows)
+        details = _flatten_urunler(row)
+
+        # Step 2 — fallback to fis_detay_toplam if URUNLER missing
+        if not details and fis_id_int is not None:
+            try:
+                fb = await _on_demand_request(
+                    tenant_id, "fis_detay_toplam", {"FisId": fis_id_int},
+                    timeout_sec=20, raw_cache=True,
+                )
+                fb_data = (fb.get("cache") or {}).get("data") or fb.get("data")
+                # `fis_detay_toplam` may return [[details], [totals]] or {result_sets:[…]}
+                if isinstance(fb_data, dict):
+                    rs = fb_data.get("result_sets") or []
+                    if isinstance(rs, list) and rs and isinstance(rs[0], list):
+                        details = rs[0]
+                    elif "details" in fb_data and isinstance(fb_data["details"], list):
+                        details = fb_data["details"]
+                elif isinstance(fb_data, list):
+                    if fb_data and isinstance(fb_data[0], list):
+                        details = fb_data[0]
+                    else:
+                        details = fb_data
+            except Exception as e_fb:
+                logger.info(f"[high-sale-detail] fis_detay_toplam fallback failed: {e_fb}")
+
+        return {
+            "ok": True,
+            "_source": result.get("_source", "unknown"),
+            "details": _fix_large_ints(details) if isinstance(details, list) else [],
+            "totals": _fix_large_ints([row]) if row else [],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"high-sale-detail error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # === RAPOR ENDPOINTS ===
 
 @router.post("/report-run")

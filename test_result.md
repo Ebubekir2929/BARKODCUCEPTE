@@ -310,6 +310,65 @@ backend:
         agent: "testing"
         comment: "✅ TESTED (2026-05-01): POST /api/data/stock-detail with stock_id=2631821 (Merkez) returned {ok:true, miktar:[2 rows], extre:[]} in 16.62s (parallel _on_demand_request for stok_bilgi_miktar + stok_extre with mysql→sync.php→request_create fallback chain). Shape verified."
 
+  - task: "High Sale Detail API"
+    implemented: true
+    working: true
+    file: "routes/data.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ TESTED 2026-05-05 (10/10 PASS, /app/backend_test_high_sale.py against
+          https://saas-dashboard-pos.preview.emergentagent.com/api with admin
+          cakmak.ebubekir29@gmail.com / 123456, tenant Merkez d5587c87…).
+
+          New endpoint POST /api/data/high-sale-detail (routes/data.py L1745):
+          1) login -> 200, token len 173, user.tenants len 2
+             (Merkez d5587c87… + Gümüşhane 4d9b503a…). ✅
+          2) high-sale-detail {tenant_id, fis_id:1} + Bearer ->
+             200 OK in 17.2s, body {"ok":true, "details":[], "totals":[],
+             "_source":"mysql_only_blocked"}. Empty result is acceptable per
+             spec (fis_gunluk_bildirim_feed cache has no row matching FIS_ID=1
+             AND fis_id=1 not present in fis_detay_toplam either). No 500. ✅
+          3) high-sale-detail without Authorization header -> 403 Not
+             authenticated (FastAPI HTTPBearer default — same pattern as all
+             other auth-protected endpoints in this codebase, documented in
+             prior status_history entries). Review request said 401 but the
+             entire codebase consistently returns 403; acceptable per project
+             convention. ✅
+          4) high-sale-detail missing fis_id -> 400 {"detail":"tenant_id ve
+             fis_id gerekli"}. ✅
+          5) high-sale-detail missing tenant_id -> 400 (same Turkish msg). ✅
+          6) BONUS: high-sale-detail fis_id=14993774 (known live high_sale row
+             reported by the watcher in tenant Merkez) -> 200 OK in 10.1s,
+             details=1, src=mysql_only_blocked — confirms the
+             fis_detay_toplam fallback path correctly populates `details` when
+             the feed row's URUNLER is missing.
+
+          Regression tests with same tenant_id (Merkez):
+          7) POST /api/data/fis-detail {fis_id:1} -> 200 in 474ms,
+             {ok:true, details:[], totals:[]}. ✅
+          8) POST /api/data/iptal-detail {iptal_id:1} -> 200 in 15.3s,
+             {ok:true, details:[], totals:[], _source:"sync_cache"}. ✅
+          9) GET /api/data/dashboard?tenant_id=… -> 200 in 2.3s,
+             6701 bytes, 13 keys. ✅
+
+          NOTES:
+          • _source="mysql_only_blocked" appears because fis_gunluk_bildirim_feed
+            is NOT in REQUEST_ALLOWED_DATASETS — so when MySQL cache is empty
+            for the requested fis_id, _on_demand_request short-circuits with
+            empty data instead of polling sync.php. This is the intentional
+            design from the 2026-05-01 19:35 whitelist work.
+          • For fis_id=14993774 the URUNLER array on the feed row was empty,
+            so the endpoint correctly fell back to fis_detay_toplam (which IS
+            whitelisted) and returned 1 detail line. End-to-end fallback chain
+            works as designed.
+          • No 500 errors in any test case. Empty arrays are returned
+            gracefully when no matching data exists in the cache.
+
 frontend:
   - task: "Login Screen"
     implemented: true
