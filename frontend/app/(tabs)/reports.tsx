@@ -1296,6 +1296,24 @@ export default function ReportsScreen() {
         return;
       }
 
+      // 2026-05-05 — Some POS endpoints ignore the `Page` parameter and return
+      // the same rows for every page request. We detect this by hashing the
+      // rows we've already collected and deduplicating subsequent pages. If a
+      // batch is 100 % duplicate we stop early so we don't bloat the result
+      // (Fiyat Listesi / Stok Envanter / Perakende were duplicating to ~3-5×).
+      // Use a Set keyed by JSON.stringify(row) for content-based dedupe.
+      const seenKeys = new Set<string>();
+      const _hash = (r: any) => {
+        try {
+          // Prefer an explicit primary-key combo when available; otherwise hash whole row
+          const k = (r.KOD ?? r.STOK_KOD ?? r.STOK_KODU ?? r.BELGENO ?? r.IPTAL_ID ?? r.FIS_ID ?? r.ID ?? '');
+          const k2 = (r.STOK_FIYAT_AD ?? r.LOKASYON ?? r.CARI_KODU ?? '');
+          if (k) return String(k) + '|' + String(k2);
+        } catch {}
+        return JSON.stringify(r);
+      };
+      for (const r of firstRows) seenKeys.add(_hash(r));
+
       // Background: fetch remaining pages IN PARALLEL batches, append as each batch completes
       setMoreLoading(true);
       let page = 2;
@@ -1318,7 +1336,17 @@ export default function ReportsScreen() {
         for (const r of results) {
           const rows = (r && r.ok && Array.isArray(r.data)) ? r.data.map(indexRow) : [];
           if (rows.length === 0) { done = true; break; }
-          batchRows.push(...rows);
+          // Dedupe against everything we've already seen
+          const fresh: any[] = [];
+          for (const row of rows) {
+            const k = _hash(row);
+            if (seenKeys.has(k)) continue;
+            seenKeys.add(k);
+            fresh.push(row);
+          }
+          // 100 % duplicate page → POS isn't paginating, stop the loop entirely.
+          if (fresh.length === 0) { done = true; break; }
+          batchRows.push(...fresh);
           if (rows.length < pageSize) { done = true; break; }
         }
         if (batchRows.length > 0) {
@@ -1477,16 +1505,18 @@ export default function ReportsScreen() {
     return String(val || '-');
   };
 
-  // PDF Export — 2026-05-05 large-dataset safe (chunked, warns user, supports
-  // a graceful CSV fallback when the row count is too high to fit a single
-  // expo-print HTML buffer without crashing the JS runtime / native bridge).
-  const PDF_HARD_LIMIT = 20000;       // refuse outright above this (would crash)
-  const PDF_WARN_THRESHOLD = 2000;    // warn user above this but allow continue
-  const PDF_CHUNK_SIZE = 500;         // build HTML in 500-row chunks via array.join
+  // PDF Export — 2026-05-05 large-dataset safe (chunked, progress overlay).
+  // 2026-05-05 v2 — User asked to drop the warning thresholds entirely; just
+  // generate the PDF no matter how many rows. We keep aggressive chunking
+  // (250-row pieces with `setTimeout(0)` yields) plus a transient progress
+  // pill so the user knows the app didn't freeze.
+  const PDF_CHUNK_SIZE = 250;
+  const [pdfProgress, setPdfProgress] = useState<{ done: number; total: number } | null>(null);
 
   const exportPdfImpl = async (limit?: number) => {
     if (!selectedReport || processedData.length === 0) return;
     setExportLoading(true);
+    setPdfProgress({ done: 0, total: typeof limit === 'number' ? Math.min(limit, processedData.length) : processedData.length });
     await new Promise(resolve => setTimeout(resolve, 0));
     const rows = typeof limit === 'number' ? processedData.slice(0, limit) : processedData;
     const cols = selectedReport.columns;
@@ -1567,17 +1597,19 @@ export default function ReportsScreen() {
 
     // ─── Chunked HTML body builder ────────────────────────────────────
     // Building rows.map(renderRow).join('') for very large arrays causes
-    // memory spikes that crash expo-print on Android. We chunk into 500-row
+    // memory spikes that crash expo-print on Android. We chunk into 250-row
     // batches with `await setTimeout(0)` between each so the JS runtime can
-    // breathe. Each chunk's strings are pushed onto an array and then joined
-    // once at the end (single allocation).
+    // breathe + GC. We also bump the progress pill so the user knows the app
+    // didn't freeze on huge exports.
     const bodyChunks: string[] = [];
     for (let i = 0; i < rows.length; i += PDF_CHUNK_SIZE) {
       const chunk = rows.slice(i, i + PDF_CHUNK_SIZE);
       const chunkParts: string[] = [];
       for (const r of chunk) chunkParts.push(renderRow(r));
       bodyChunks.push(chunkParts.join(''));
-      // Yield to UI / GC every chunk
+      // Yield to UI / GC every chunk + update progress
+      const done = Math.min(i + PDF_CHUNK_SIZE, rows.length);
+      setPdfProgress({ done, total: rows.length });
       if (i + PDF_CHUNK_SIZE < rows.length) await new Promise(res => setTimeout(res, 0));
     }
     const bodyHtml = bodyChunks.join('');
@@ -1614,38 +1646,15 @@ export default function ReportsScreen() {
       showError('PDF Hatası', 'PDF oluşturulurken bir hata oluştu. Veri çok büyükse Excel/CSV deneyin.');
     } finally {
       setExportLoading(false);
+      setPdfProgress(null);
     }
   };
 
-  // 2026-05-05 — wrapper that warns the user before generating very large PDFs.
-  // Above HARD_LIMIT we refuse and only offer Excel.
+  // 2026-05-05 v2 — User asked to drop the size-based warnings; we just run.
+  // The chunked builder + progress overlay handle very large reports safely
+  // without the app freezing.
   const exportPdf = async () => {
     if (!selectedReport || processedData.length === 0) return;
-    const total = processedData.length;
-    if (total > PDF_HARD_LIMIT) {
-      showWarning(
-        'Veri Çok Büyük',
-        `${total.toLocaleString('tr-TR')} kayıt PDF için fazla. Uygulamanın çökmemesi için Excel/CSV kullanmanız önerilir.`,
-        [
-          { text: 'Excel İndir', style: 'default', onPress: () => exportExcel() },
-          { text: 'İptal', style: 'cancel' },
-        ],
-      );
-      return;
-    }
-    if (total > PDF_WARN_THRESHOLD) {
-      showWarning(
-        'Çok Sayıda Kayıt',
-        `${total.toLocaleString('tr-TR')} kayıt var. PDF biraz uzun sürebilir ve telefonun yavaşlamasına yol açabilir. Daha hızlı bir çıktı için ilk 1.000 kaydı veya Excel'i tercih edebilirsiniz.`,
-        [
-          { text: 'Hepsini PDF Yap', style: 'default', onPress: () => exportPdfImpl() },
-          { text: 'İlk 1.000', style: 'default', onPress: () => exportPdfImpl(1000) },
-          { text: 'Excel İndir', style: 'default', onPress: () => exportExcel() },
-          { text: 'İptal', style: 'cancel' },
-        ],
-      );
-      return;
-    }
     await exportPdfImpl();
   };
 
@@ -2210,6 +2219,41 @@ export default function ReportsScreen() {
       {/* 2026-05-05 — Premium gradient alert (CustomAlert) for required-field
           warnings, PDF size confirmations, and Excel/PDF errors. */}
       <CustomAlert {...alertProps} />
+
+      {/* 2026-05-05 — PDF generation progress overlay (tens of thousands of rows). */}
+      {pdfProgress && (
+        <View
+          pointerEvents="auto"
+          style={{
+            position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.55)',
+            alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+          }}
+        >
+          <View style={{ backgroundColor: colors.card, borderRadius: 16, padding: 22, minWidth: 260, alignItems: 'center', borderWidth: 1, borderColor: colors.border }}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={{ marginTop: 14, fontSize: 14, fontWeight: '700', color: colors.text }}>
+              PDF Hazırlanıyor…
+            </Text>
+            <Text style={{ marginTop: 4, fontSize: 12, color: colors.textSecondary }}>
+              {pdfProgress.done.toLocaleString('tr-TR')} / {pdfProgress.total.toLocaleString('tr-TR')} satır
+            </Text>
+            {/* Progress bar */}
+            <View style={{ marginTop: 10, width: 220, height: 6, borderRadius: 3, backgroundColor: colors.border, overflow: 'hidden' }}>
+              <View
+                style={{
+                  width: `${Math.min(100, Math.round((pdfProgress.done / Math.max(1, pdfProgress.total)) * 100))}%`,
+                  height: '100%',
+                  backgroundColor: colors.primary,
+                }}
+              />
+            </View>
+            <Text style={{ marginTop: 8, fontSize: 11, color: colors.textSecondary }}>
+              Lütfen bekleyin, uygulamayı kapatmayın.
+            </Text>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }

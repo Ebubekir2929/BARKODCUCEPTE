@@ -14,6 +14,40 @@ import { attachNotificationTapHandler } from '../src/services/notificationTapHan
 
 function AppShell() {
   const { colors } = useThemeStore();
+
+  // 2026-05-05 — Web keyboard shortcuts: `/` focuses the nearest search input,
+  // `Esc` closes any open native dialog (browser already maps `Esc` to Modal's
+  // onRequestClose, but we also blur the focused element so dropdowns close).
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const handler = (e: any) => {
+      // Slash → focus first visible search input on the page
+      if (e.key === '/' && !(['INPUT', 'TEXTAREA'].includes(e.target?.tagName || ''))) {
+        try {
+          const el: any = (globalThis as any).document.querySelector(
+            'input[placeholder*="ara" i], input[placeholder*="search" i], input[type="search"]'
+          );
+          if (el && typeof el.focus === 'function') {
+            e.preventDefault();
+            el.focus();
+            try { el.select?.(); } catch {}
+          }
+        } catch {}
+      }
+      // Esc → blur active element (helps close picker dropdowns)
+      if (e.key === 'Escape') {
+        try {
+          const a: any = (globalThis as any).document?.activeElement;
+          if (a && typeof a.blur === 'function') a.blur();
+        } catch {}
+      }
+    };
+    try {
+      (globalThis as any).window?.addEventListener?.('keydown', handler);
+      return () => (globalThis as any).window?.removeEventListener?.('keydown', handler);
+    } catch { return undefined; }
+  }, []);
+
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
       <Stack

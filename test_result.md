@@ -1128,6 +1128,39 @@ agent_communication:
       User 8 has zero tenants attached (no primary, no user_tenants rows), so the
       endpoint correctly returns no_subscribers_for_user for berk. The happy-path
       assertions were exercised with user 55 to validate the real data flow.
+
+
+  -agent: "main"
+  -message: |
+      2026-05-05 — Reports v2 fixes (user follow-up).
+      
+      A. **PDF dev/exp size warnings dropped** — user wanted PDF to always run
+         no matter how many rows. Removed PDF_HARD_LIMIT and
+         PDF_WARN_THRESHOLD branches; the wrapper just calls exportPdfImpl().
+      
+      B. **PDF generation progress overlay** — semi-transparent backdrop with
+         centred card showing spinner + "X / Y satır" + animated progress bar
+         + "Lütfen bekleyin, uygulamayı kapatmayın" hint. Pumps on every
+         250-row chunk so the user sees real progress on huge exports.
+      
+      C. **Pagination duplicate fix** (root cause for inflated row counts) —
+         When the POS endpoint ignores the `Page` parameter, every batched
+         page returned the same rows, causing Fiyat Listesi / Stok Envanter /
+         Perakende to balloon to 3-5× expected size. We now hash each row
+         (preferring KOD|STOK_FIYAT_AD / KOD|LOKASYON / KOD|CARI_KODU
+         primary keys; falling back to JSON.stringify), maintain a
+         `seenKeys` Set, and stop pagination as soon as a parallel batch is
+         100 % duplicate. Result: report counts now match the real POS
+         dataset (~2.500 rows for Fiyat Listesi / Envanter on Merkez).
+      
+      D. **Web keyboard shortcuts** — In `_layout.tsx`'s AppShell:
+         - Slash (`/`) outside an input → focuses the first visible search
+           input (Stock/Customer/Reports search boxes).
+         - Esc → blurs the active element so dropdowns / pickers close.
+         No-op on iOS / Android.
+      
+      Backend: no changes.
+
       No backend code change required.
       
       Cleanup done: notify_low_stock restored to 0 for both users; test push token
