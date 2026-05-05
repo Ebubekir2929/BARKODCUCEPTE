@@ -1167,6 +1167,37 @@ agent_communication:
       unregistered.
 
 
+  -agent: "main"
+  -message: |
+      2026-05-05 — Web/Desktop layout polish (Phase 1 of "kalan iyileştirmeler").
+      
+      A. **useResponsive hook** extended with `isXLarge` (web ≥ 1280px). The
+         existing `phone | tablet | desktop` triplet now has an `xlarge`
+         tier. `isDesktop` is true for both desktop and xlarge so existing
+         consumers (SidebarNav, DataTable, AuthShell, Stock/Customers
+         tables) stay unchanged.
+      
+      B. **Dashboard KPI cards 4-in-a-row on isXLarge** (≥1280px web). Wrapped
+         the existing `cardsContainer` with `[styles.cardsContainer, isXLarge
+         && { flexDirection: 'row', gap: 12 }]` and each `cardRow` gets
+         `flex: 1`. Result: Nakit / Kredi Kartı / Açık Hesap / Toplam appear
+         side-by-side, matching SaaS dashboards. Verified at 1440×900 — all
+         four cards render in a single row, the section underneath now spans
+         the full content width too.
+      
+      C. **CompareModal** (tenant comparison hero cards) already uses dynamic
+         width (1/2/3 cols based on tenant count); no change needed. Single-
+         hour matrix hide guard from earlier round still applies.
+      
+      Backend: no changes.
+      
+      Phase 2 (next round): reports.tsx ≥1024px sticky filter rail (sol panel
+      / sağ tablo) + dashboard hourly chart side-by-side with "Şube
+      Karşılaştırması". Both reside in 2700+ line files; safer in a separate
+      session.
+
+
+
 agent_communication:
   -agent: "main"
   -message: |

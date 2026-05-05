@@ -14,7 +14,7 @@ import { useWindowDimensions, Platform } from 'react-native';
  * mobile UX even on a 12" iPad in landscape since the bottom-tab nav is more
  * thumb-friendly there. Web is the only platform where desktop layout kicks in.
  */
-export type DeviceClass = 'phone' | 'tablet' | 'desktop';
+export type DeviceClass = 'phone' | 'tablet' | 'desktop' | 'xlarge';
 
 export interface ResponsiveInfo {
   width: number;
@@ -23,6 +23,8 @@ export interface ResponsiveInfo {
   isPhone: boolean;
   isTablet: boolean;
   isDesktop: boolean;
+  /** Web ≥ 1280px — used for "ultra-wide" grid layouts (KPIs in 1 row). */
+  isXLarge: boolean;
   /** True for web tablet+desktop — useful for switching to side nav. */
   isWideWeb: boolean;
   /** Web only flag (Platform.OS === 'web'). */
@@ -35,7 +37,8 @@ export function useResponsive(): ResponsiveInfo {
 
   let device: DeviceClass = 'phone';
   if (isWeb) {
-    if (width >= 1024) device = 'desktop';
+    if (width >= 1280) device = 'xlarge';
+    else if (width >= 1024) device = 'desktop';
     else if (width >= 768) device = 'tablet';
     else device = 'phone';
   }
@@ -46,7 +49,8 @@ export function useResponsive(): ResponsiveInfo {
     device,
     isPhone: device === 'phone',
     isTablet: device === 'tablet',
-    isDesktop: device === 'desktop',
+    isDesktop: device === 'desktop' || device === 'xlarge',
+    isXLarge: device === 'xlarge',
     isWideWeb: isWeb && device !== 'phone',
     isWeb,
   };

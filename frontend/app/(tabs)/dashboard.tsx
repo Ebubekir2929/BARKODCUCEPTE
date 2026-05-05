@@ -26,6 +26,7 @@ import { CompareModal } from '../../src/components/CompareModal';
 import { AcikHesapKisiDetail } from '../../src/components/AcikHesapKisiDetail';
 import { HighSaleDetailModal } from '../../src/components/HighSaleDetailModal';
 import { useLiveData } from '../../src/hooks/useLiveData';
+import { useResponsive } from '../../src/hooks/useResponsive';
 import { WaiterSalesSection, HourlyLocationSection } from '../../src/components/DashboardSections';
 import { BranchSales, HourlySales, OpenTable } from '../../src/types';
 
@@ -39,6 +40,7 @@ export default function DashboardScreen() {
   const { user } = useAuthStore();
   const { t } = useLanguageStore();
   const { activeSource } = useDataSourceStore();
+  const { isXLarge, isWideWeb } = useResponsive();
 
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [showCompareModal, setShowCompareModal] = useState(false);
@@ -680,9 +682,11 @@ export default function DashboardScreen() {
             </View>
           </View>
         )}
-        {/* Summary Cards */}
-        <View style={styles.cardsContainer}>
-          <View style={styles.cardRow}>
+        {/* Summary Cards
+            2026-05-05 — On extra-wide desktops (≥1280px web) render all four
+            cards in a single row instead of the mobile 2×2 grid. */}
+        <View style={[styles.cardsContainer, isXLarge && { flexDirection: 'row', gap: 12 }]}>
+          <View style={[styles.cardRow, isXLarge && { flex: 1 }]}>
             <SummaryCard
               title={t('cash')}
               amount={totals.cash}
@@ -702,7 +706,7 @@ export default function DashboardScreen() {
               changePercent={cardChangePercents.card}
             />
           </View>
-          <View style={styles.cardRow}>
+          <View style={[styles.cardRow, isXLarge && { flex: 1 }]}>
             <SummaryCard
               title={t('open_account')}
               amount={totals.openAccount}
