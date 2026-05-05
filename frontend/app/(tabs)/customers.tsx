@@ -16,6 +16,8 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import { useFocusEffect } from 'expo-router';
 import { ScrollFab } from '../../src/components/ScrollFab';
+import { useResponsive } from '../../src/hooks/useResponsive';
+import { DataTable, TableColumn } from '../../src/components/DataTable';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -32,6 +34,7 @@ export default function CustomersScreen() {
   const { t } = useLanguageStore();
   const { user } = useAuthStore();
   const { activeSource } = useDataSourceStore();
+  const { isDesktop } = useResponsive();
 
   const activeTenantId = useMemo(() => {
     if (!user?.tenants || user.tenants.length === 0) return '';
@@ -339,6 +342,75 @@ export default function CustomersScreen() {
     );
   }, [colors, openCariDetail]);
 
+  // 2026-05-05 — Desktop Data Table columns (standard layout).
+  // Used only when `isDesktop` is true; phone/tablet keeps the card layout.
+  const desktopCariColumns = useMemo<TableColumn<any>[]>(() => [
+    {
+      key: 'KOD', label: t('code') || 'Kod', flex: 1.1, minWidth: 80,
+      sortValue: (i: any) => String(i.KOD || i.CARI_KODU || ''),
+      render: (i: any) => <Text style={{ fontSize: 12, color: colors.textSecondary, fontWeight: '600' }} numberOfLines={1}>{i.KOD || i.CARI_KODU || '-'}</Text>,
+    },
+    {
+      key: 'AD', label: t('name') || 'Ad', flex: 3, minWidth: 200,
+      sortValue: (i: any) => String(i.AD || i.CARI_ADI || ''),
+      render: (i: any) => <Text style={{ fontSize: 13, color: colors.text, fontWeight: '700' }} numberOfLines={1}>{i.AD || i.CARI_ADI || i.UNVAN || '-'}</Text>,
+    },
+    {
+      key: 'SEHIR', label: 'Şehir', flex: 1.2, minWidth: 90,
+      sortValue: (i: any) => String(i.SEHIR || i.IL || ''),
+      render: (i: any) => <Text style={{ fontSize: 12, color: colors.textSecondary }} numberOfLines={1}>{i.SEHIR || i.IL || '-'}</Text>,
+    },
+    {
+      key: 'GRUP', label: 'Grup', flex: 1.2, minWidth: 90,
+      sortValue: (i: any) => String(i.GRUP || i.CARI_GRUP || i.GRUP_AD || ''),
+      render: (i: any) => {
+        const g = i.GRUP || i.CARI_GRUP || i.GRUP_AD || '';
+        if (!g) return <Text style={{ fontSize: 12, color: colors.textSecondary }}>-</Text>;
+        return (
+          <View style={{ backgroundColor: colors.primary + '15', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 }}>
+            <Text style={{ fontSize: 11, color: colors.primary, fontWeight: '700' }} numberOfLines={1}>{g}</Text>
+          </View>
+        );
+      },
+    },
+    {
+      key: 'TELEFON', label: 'Telefon', flex: 1.4, minWidth: 110,
+      sortValue: (i: any) => String(i.TELEFON || i.TEL || i.GSM || i.CEP || ''),
+      render: (i: any) => {
+        const v = i.TELEFON || i.TEL || i.GSM || i.CEP || i.MOBILE || '';
+        return <Text style={{ fontSize: 12, color: v ? colors.primary : colors.textSecondary }} numberOfLines={1}>{v || '-'}</Text>;
+      },
+    },
+    {
+      key: 'BAKIYE', label: 'Bakiye', flex: 1.3, minWidth: 110, align: 'right', numeric: true,
+      sortValue: (i: any) => parseFloat(i.BAKIYE || '0'),
+      render: (i: any) => {
+        const b = parseFloat(i.BAKIYE || '0');
+        const col = b > 0 ? colors.error : b < 0 ? colors.success : colors.textSecondary;
+        return (
+          <Text style={{ fontSize: 13, color: col, fontWeight: '800' }} numberOfLines={1}>
+            ₺{Math.abs(b).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </Text>
+        );
+      },
+    },
+    {
+      key: 'DURUM', label: 'Durum', flex: 0.8, minWidth: 80, align: 'center',
+      sortValue: (i: any) => parseFloat(i.BAKIYE || '0'),
+      render: (i: any) => {
+        const b = parseFloat(i.BAKIYE || '0');
+        if (b === 0) return <Text style={{ fontSize: 11, color: colors.textSecondary }}>-</Text>;
+        const isDebtor = b > 0;
+        const c = isDebtor ? colors.error : colors.success;
+        return (
+          <View style={{ backgroundColor: c + '15', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 }}>
+            <Text style={{ fontSize: 10.5, color: c, fontWeight: '700' }}>{isDebtor ? t('debtor') : t('creditor')}</Text>
+          </View>
+        );
+      },
+    },
+  ], [colors, t]);
+
   if (!activeTenantId) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
@@ -430,6 +502,24 @@ export default function CustomersScreen() {
 
       {loading ? (
         <View style={styles.loadingContainer}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_customers')}</Text></View>
+      ) : isDesktop ? (
+        <View style={{ flex: 1, paddingHorizontal: 16, paddingBottom: 16 }}>
+          <DataTable
+            data={filteredCaris}
+            columns={desktopCariColumns}
+            keyExtractor={(item: any, idx) => String(item.KART || item.ID || idx)}
+            onRowPress={(item) => {
+              setExtreStart(getDefDates().start);
+              setExtreEnd(getDefDates().end);
+              openCariDetail(item, getDefDates().start, getDefDates().end);
+            }}
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            estimatedItemSize={44}
+            dense
+            ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="people-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_customers')}</Text></View>}
+          />
+        </View>
       ) : (
         <FlashList ref={listRef as any} data={filteredCaris} renderItem={renderCariItem} keyExtractor={(item, idx) => String(item.KART || item.ID || idx)} estimatedItemSize={120} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
           drawDistance={500}

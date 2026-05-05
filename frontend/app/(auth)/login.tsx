@@ -17,6 +17,7 @@ import { useAuthStore } from '../../src/store/authStore';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useLanguageStore } from '../../src/store/languageStore';
 import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
+import { AuthShell } from '../../src/components/AuthShell';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 
@@ -134,6 +135,7 @@ export default function LoginScreen() {
   };
 
   return (
+    <AuthShell>
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -299,6 +301,7 @@ export default function LoginScreen() {
       {/* Custom Alert */}
       <CustomAlert {...alertProps} />
     </SafeAreaView>
+    </AuthShell>
   );
 }
 

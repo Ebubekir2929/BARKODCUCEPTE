@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/authStore';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
+import { AuthShell } from '../../src/components/AuthShell';
 import * as Clipboard from 'expo-clipboard';
 
 export default function RegisterScreen() {
@@ -355,6 +356,7 @@ export default function RegisterScreen() {
   );
 
   return (
+    <AuthShell brandTitle="Barkodcu Cepte" headline="Hesap Oluşturun" tagline="POS verilerinizi tek panelden yönetmek için kayıt olun. Birkaç saniyede başlayın.">
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -498,6 +500,7 @@ export default function RegisterScreen() {
         </View>
       </Modal>
     </SafeAreaView>
+    </AuthShell>
   );
 }
 

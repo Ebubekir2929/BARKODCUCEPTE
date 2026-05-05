@@ -989,3 +989,31 @@ agent_communication:
       
       Cleanup done: notify_low_stock restored to 0 for both users; test push token
       unregistered.
+
+
+agent_communication:
+  -agent: "main"
+  -message: |
+      2026-05-05 — Desktop Data Table views for Stock and Customers (P0 task completed).
+      
+      New component:
+      • /app/frontend/src/components/DataTable.tsx — generic virtualized FlashList-based
+        table with sticky sortable header, zebra row striping, dense-mode 44px rows,
+        and custom cell renderers (render prop + sortValue prop).
+      
+      Integration:
+      • /app/frontend/app/(tabs)/stock.tsx — added useResponsive + DataTable imports;
+        defined `desktopStockColumns` (KOD, AD, MARKA, GRUP, STOK, ALIŞ, SATIŞ, KDV,
+        KAR %, BARKOD). On `isDesktop` the FlashList card layout is replaced with
+        DataTable. Phone/tablet still use the existing card UI.
+      • /app/frontend/app/(tabs)/customers.tsx — same pattern. `desktopCariColumns`
+        = KOD, AD SOYAD, ŞEHIR, GRUP, TELEFON, BAKIYE, DURUM (Borçlu/Alacaklı badge).
+      
+      Validated via screenshot tool at 1440x900 with user cakmak.ebubekir29@gmail.com:
+        - Stok table renders 6 rows with full data, proper color coding (negative stock
+          in red, profit % in green, price in primary, barkod in blue link).
+        - Cariler table renders 6 rows with bakiye color-coded (borçlu red, alacaklı
+          green) and Durum pill.
+      
+      Mobile (390px) and tablet (<1024px) paths untouched; old card layout preserved.
+      No backend changes.

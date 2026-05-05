@@ -20,6 +20,8 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import { useFocusEffect } from 'expo-router';
 import { ScrollFab } from '../../src/components/ScrollFab';
+import { useResponsive } from '../../src/hooks/useResponsive';
+import { DataTable, TableColumn } from '../../src/components/DataTable';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -29,6 +31,7 @@ export default function StockScreen() {
   const { showError, showWarning, alertProps } = useAlert();
   const { user } = useAuthStore();
   const { activeSource } = useDataSourceStore();
+  const { isDesktop } = useResponsive();
 
   const activeTenantId = useMemo(() => {
     if (!user?.tenants || user.tenants.length === 0) return '';
@@ -478,6 +481,101 @@ export default function StockScreen() {
     );
   }, [colors, openStockDetail]);
 
+  // 2026-05-05 — Desktop Data Table columns (standard layout).
+  // Used only when `isDesktop` is true; phone/tablet keeps the card layout.
+  const desktopStockColumns = useMemo<TableColumn<any>[]>(() => [
+    {
+      key: 'KOD', label: t('code') || 'Kod', flex: 1.2, minWidth: 90,
+      sortValue: (i: any) => String(i.KOD || i.STOK_KODU || ''),
+      render: (i: any) => <Text style={{ fontSize: 12, color: colors.textSecondary, fontWeight: '600' }} numberOfLines={1}>{i.KOD || i.STOK_KODU || '-'}</Text>,
+    },
+    {
+      key: 'AD', label: t('name') || 'Ad', flex: 3, minWidth: 180,
+      sortValue: (i: any) => String(i.AD || i.STOK_ADI || ''),
+      render: (i: any) => <Text style={{ fontSize: 13, color: colors.text, fontWeight: '700' }} numberOfLines={1}>{i.AD || i.STOK_ADI || '-'}</Text>,
+    },
+    {
+      key: 'MARKA', label: 'Marka', flex: 1.3, minWidth: 90,
+      sortValue: (i: any) => String(i.MARKA || i.MARKA_AD || ''),
+      render: (i: any) => <Text style={{ fontSize: 12, color: colors.textSecondary }} numberOfLines={1}>{i.MARKA || i.MARKA_AD || '-'}</Text>,
+    },
+    {
+      key: 'STOK_GRUP', label: 'Grup', flex: 1.3, minWidth: 90,
+      sortValue: (i: any) => String(i.STOK_GRUP || i.GRUP || ''),
+      render: (i: any) => {
+        const g = i.STOK_GRUP || i.GRUP || '';
+        if (!g) return <Text style={{ fontSize: 12, color: colors.textSecondary }}>-</Text>;
+        return (
+          <View style={{ backgroundColor: colors.primary + '15', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 }}>
+            <Text style={{ fontSize: 11, color: colors.primary, fontWeight: '700' }} numberOfLines={1}>{g}</Text>
+          </View>
+        );
+      },
+    },
+    {
+      key: 'MIKTAR', label: 'Stok', flex: 0.9, minWidth: 70, align: 'right', numeric: true,
+      sortValue: (i: any) => parseFloat(i.MIKTAR || '0'),
+      render: (i: any) => {
+        const m = parseFloat(i.MIKTAR || '0');
+        const color = m < 0 ? colors.error : m === 0 ? colors.textSecondary : colors.success;
+        return <Text style={{ fontSize: 12.5, color, fontWeight: '700' }}>{m.toFixed(2)}</Text>;
+      },
+    },
+    {
+      key: 'SON_ALIS_FIYAT', label: 'Alış', flex: 1, minWidth: 80, align: 'right', numeric: true,
+      sortValue: (i: any) => parseFloat(i.SON_ALIS_FIYAT || '0'),
+      render: (i: any) => {
+        const v = parseFloat(i.SON_ALIS_FIYAT || '0');
+        return <Text style={{ fontSize: 12.5, color: colors.warning, fontWeight: '600' }}>₺{v > 0 ? v.toFixed(2) : '-'}</Text>;
+      },
+    },
+    {
+      key: 'FIYAT', label: 'Satış', flex: 1, minWidth: 80, align: 'right', numeric: true,
+      sortValue: (i: any) => parseFloat(i.FIYAT || '0'),
+      render: (i: any) => {
+        const v = parseFloat(i.FIYAT || '0');
+        return <Text style={{ fontSize: 13, color: colors.primary, fontWeight: '800' }}>₺{v > 0 ? v.toFixed(2) : '-'}</Text>;
+      },
+    },
+    {
+      key: 'KDV_PAREKENDE', label: 'KDV', flex: 0.6, minWidth: 50, align: 'center',
+      sortValue: (i: any) => parseFloat(i.KDV_PAREKENDE || '0'),
+      render: (i: any) => {
+        const v = String(i.KDV_PAREKENDE || '').replace('.00', '').replace('.0', '');
+        if (!v) return <Text style={{ fontSize: 12, color: colors.textSecondary }}>-</Text>;
+        return <Text style={{ fontSize: 11, color: colors.warning, fontWeight: '700' }}>%{v}</Text>;
+      },
+    },
+    {
+      key: 'PROFIT', label: 'Kar', flex: 1, minWidth: 80, align: 'right', numeric: true,
+      sortValue: (i: any) => {
+        const p = parseFloat(i.FIYAT || '0');
+        const b = parseFloat(i.SON_ALIS_FIYAT || '0');
+        return p > 0 && b > 0 ? (p - b) : -Infinity;
+      },
+      render: (i: any) => {
+        const p = parseFloat(i.FIYAT || '0');
+        const b = parseFloat(i.SON_ALIS_FIYAT || '0');
+        if (!(p > 0 && b > 0)) return <Text style={{ fontSize: 12, color: colors.textSecondary }}>-</Text>;
+        const d = p - b;
+        const pct = b > 0 ? (d / b) * 100 : 0;
+        const col = d >= 0 ? colors.success : colors.error;
+        return (
+          <Text style={{ fontSize: 12, color: col, fontWeight: '700' }} numberOfLines={1}>
+            {d >= 0 ? '+' : ''}{pct.toFixed(0)}%
+          </Text>
+        );
+      },
+    },
+    {
+      key: 'BARKOD', label: 'Barkod', flex: 1.5, minWidth: 110,
+      sortValue: (i: any) => String(i.BARKOD || ''),
+      render: (i: any) => i.BARKOD
+        ? <Text style={{ fontSize: 11, color: colors.primary }} numberOfLines={1}>{i.BARKOD}</Text>
+        : <Text style={{ fontSize: 12, color: colors.textSecondary }}>-</Text>,
+    },
+  ], [colors, t]);
+
   if (!activeTenantId) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
@@ -594,6 +692,20 @@ export default function StockScreen() {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_stock_list')}</Text>
+        </View>
+      ) : isDesktop ? (
+        <View style={{ flex: 1, paddingHorizontal: 16, paddingBottom: 16 }}>
+          <DataTable
+            data={filteredStocks}
+            columns={desktopStockColumns}
+            keyExtractor={(item: any, idx) => String(item?.KOD || item?.STOK_KODU || item?.ID || idx)}
+            onRowPress={(item) => openStockDetail(item)}
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            estimatedItemSize={44}
+            dense
+            ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="cube-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_stock_found')}</Text></View>}
+          />
         </View>
       ) : (
         <FlashList
