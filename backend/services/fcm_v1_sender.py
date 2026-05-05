@@ -36,22 +36,45 @@ FCM_V1_SCOPE = ["https://www.googleapis.com/auth/firebase.messaging"]
 def _load_credentials():
     """Lazy-load Firebase service account credentials.
 
+    Supports TWO sources:
+      1. Env var FIREBASE_SERVICE_ACCOUNT_JSON  → JSON content directly (Railway/Heroku friendly)
+      2. Env var FIREBASE_SERVICE_ACCOUNT_PATH  → path to JSON file (default: /app/backend/secrets/firebase-admin.json)
+
     Returns (creds_object, project_id) tuple, or (None, None) if not configured.
     """
     global _credentials, _project_id
     if _credentials is not None and _project_id is not None:
         return _credentials, _project_id
 
-    sa_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "/app/backend/secrets/firebase-admin.json")
-    if not sa_path or not os.path.isfile(sa_path):
-        logger.warning(f"[FCM v1] Service account file NOT FOUND at {sa_path} — web push DISABLED")
-        return None, None
+    import json
+    sa_data = None
+
+    # Option 1 — JSON content directly from env (preferred for managed platforms)
+    sa_json_content = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON", "").strip()
+    if sa_json_content:
+        try:
+            sa_data = json.loads(sa_json_content)
+            logger.info("[FCM v1] Loaded service account from FIREBASE_SERVICE_ACCOUNT_JSON env var")
+        except Exception as e:
+            logger.error(f"[FCM v1] FIREBASE_SERVICE_ACCOUNT_JSON parse error: {e}")
+            return None, None
+
+    # Option 2 — File path
+    if sa_data is None:
+        sa_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "/app/backend/secrets/firebase-admin.json")
+        if not sa_path or not os.path.isfile(sa_path):
+            logger.warning(f"[FCM v1] No FIREBASE_SERVICE_ACCOUNT_JSON env, file NOT FOUND at {sa_path} — web push DISABLED")
+            return None, None
+        try:
+            with open(sa_path, "r", encoding="utf-8") as f:
+                sa_data = json.load(f)
+            logger.info(f"[FCM v1] Loaded service account from file {sa_path}")
+        except Exception as e:
+            logger.error(f"[FCM v1] Failed to read service account file: {e}")
+            return None, None
 
     try:
         from google.oauth2 import service_account  # type: ignore
-        import json
-        with open(sa_path, "r", encoding="utf-8") as f:
-            sa_data = json.load(f)
         _project_id = sa_data.get("project_id")
         _credentials = service_account.Credentials.from_service_account_info(
             sa_data, scopes=FCM_V1_SCOPE,
