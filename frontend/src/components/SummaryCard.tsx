@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
 import { useLanguageStore } from '../store/languageStore';
@@ -74,45 +74,56 @@ export const SummaryCard: React.FC<SummaryCardProps> = ({
 const styles = StyleSheet.create({
   card: {
     flex: 1,
-    padding: 14,
-    borderRadius: 16,
+    padding: 16,
+    borderRadius: 18,
     marginHorizontal: 4,
     borderWidth: 1,
     minWidth: 150,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.03)',
+        transition: 'transform 160ms ease, box-shadow 160ms ease',
+      },
+      default: {},
+    }),
   },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
+    width: 42,
+    height: 42,
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
   },
   changeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 8,
-    gap: 2,
+    paddingHorizontal: 7,
+    paddingVertical: 4,
+    borderRadius: 9,
+    gap: 3,
   },
   changeText: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
   title: {
     fontSize: 12,
-    fontWeight: '500',
-    marginBottom: 3,
+    fontWeight: '600',
+    marginBottom: 4,
+    letterSpacing: 0.2,
+    textTransform: 'uppercase',
   },
   amount: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '800',
+    letterSpacing: -0.5,
   },
   lastWeekRow: {
     flexDirection: 'row',

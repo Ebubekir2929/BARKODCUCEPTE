@@ -1525,3 +1525,44 @@ agent_communication:
       
       Mobile (390px) and tablet (<1024px) paths untouched; old card layout preserved.
       No backend changes.
+
+
+  -agent: "main"
+  -message: |
+      2026-05-05 — CompareModal CRITICAL BUG FIX + Dashboard Premium Polish
+
+      **A. CompareModal — CRITICAL bundling fix (P0 blocker)**
+      • /app/frontend/src/components/CompareModal.tsx had a duplicate
+        `</SafeAreaView>` closing tag at line 1277 that caused Metro to fail
+        bundling the entire app. User reports of "compare modal crashes on
+        mobile" were actually the whole app failing to load.
+      • Removed the duplicate closing tag — confirmed expo bundles cleanly.
+
+      **B. CompareModal — large-data OOM crash fix**
+      • The "Ürünlerin Saatlik Satışları" section was iterating ALL products
+        with no cap, rendering hundreds of horizontal ScrollViews → OOM on
+        mobile when comparing tenants over long date ranges.
+      • Capped to top 30 products by total amount. Added a badge that shows
+        "İlk 30 / N" so user knows how many were truncated.
+      • Added `@shopify/flash-list` import (kept for future migration if cap
+        proves insufficient).
+
+      **C. Dashboard — premium edge-to-edge polish (web/desktop)**
+      • Removed the `maxWidth: 1680` constraint on ScrollView contentContainer
+        so the dashboard now extends fully edge-to-edge as the user requested
+        ("BOŞLUK BIRAKMA O KISIMDA").
+      • styles.section: borderRadius 16→18, multi-layer SaaS shadow
+        (`0 1px 2px / 0 4px 12px / 0 8px 24px` rgba) for premium depth on web.
+      • SummaryCard: padding 14→16, borderRadius 16→18, uppercase title with
+        letter-spacing, amount font 16→20 with -0.5 letter-spacing, multi-layer
+        web shadow + 160ms transitions for hover responsiveness.
+      • Header: greeting now uppercase with letter-spacing and 600 weight,
+        userName 20→22 with bold 800. Backdrop blur added on web for SaaS feel.
+      • filterButton: subtle web shadow + transitions for premium hover.
+
+      Files touched:
+        • /app/frontend/src/components/CompareModal.tsx
+        • /app/frontend/src/components/SummaryCard.tsx
+        • /app/frontend/app/(tabs)/dashboard.tsx
+
+      Backend: no changes.

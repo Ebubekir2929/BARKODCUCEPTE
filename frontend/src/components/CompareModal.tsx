@@ -10,6 +10,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useThemeStore } from '../store/themeStore';
@@ -1013,7 +1014,11 @@ export const CompareModal: React.FC<{
                 }
               });
 
-              const allProducts = Object.keys(productTotals).sort((a, b) => productTotals[b] - productTotals[a]);
+              // Cap to top N products to avoid mobile OOM crashes on large datasets
+              const MAX_PRODUCTS = 30;
+              const sortedAll = Object.keys(productTotals).sort((a, b) => productTotals[b] - productTotals[a]);
+              const totalProductCount = sortedAll.length;
+              const allProducts = sortedAll.slice(0, MAX_PRODUCTS);
 
               if (allProducts.length === 0 && !phLoading) return null;
 
@@ -1030,9 +1035,17 @@ export const CompareModal: React.FC<{
                       Ürünlerin Saatlik Satışları · Veri Kaynağı + Lokasyon
                     </Text>
                     {phLoading && <ActivityIndicator size="small" color={colors.primary} />}
+                    {totalProductCount > MAX_PRODUCTS && (
+                      <View style={{ backgroundColor: colors.primary + '18', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
+                        <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>
+                          İlk {MAX_PRODUCTS} / {totalProductCount}
+                        </Text>
+                      </View>
+                    )}
                   </View>
                   <Text style={{ color: colors.textSecondary, fontSize: 11, paddingHorizontal: 14, paddingBottom: 6 }}>
                     Üst satır: Veri Kaynağı toplamı · Alt satırlar: Lokasyon kırılımı · Saatlik post-iskonto net
+                    {totalProductCount > MAX_PRODUCTS ? `  ·  En çok satan ${MAX_PRODUCTS} ürün gösteriliyor` : ''}
                   </Text>
 
                   {allProducts.length === 0 && phLoading && (
@@ -1274,7 +1287,6 @@ export const CompareModal: React.FC<{
           filterEndDate={fmtDate(endDate)}
         />
       )}
-      </SafeAreaView>
       </View>
     </Modal>
   );

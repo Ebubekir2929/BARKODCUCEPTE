@@ -688,7 +688,7 @@ export default function DashboardScreen() {
       )}
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={Platform.OS === 'web' && isDesktop ? { maxWidth: 1680, width: '100%', alignSelf: 'center', paddingHorizontal: 0 } : undefined}
+        contentContainerStyle={Platform.OS === 'web' && isDesktop ? { width: '100%', paddingHorizontal: 0 } : undefined}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
@@ -879,15 +879,25 @@ export default function DashboardScreen() {
             </Text>
           </View>
 
-          {/* Bar Chart */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 4, paddingBottom: 6 }}>
-            <Ionicons name="swap-horizontal" size={12} color={colors.textSecondary} />
-            <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600', fontStyle: 'italic' }}>
-              ← Yana kaydırın →
-            </Text>
-          </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chartScroll}>
-            <View style={styles.barChart}>
+          {/* Bar Chart — Mobilde yatay scroll, web/desktop'ta tek bakışta */}
+          {Platform.OS !== 'web' || !isDesktop ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 4, paddingBottom: 6 }}>
+              <Ionicons name="swap-horizontal" size={12} color={colors.textSecondary} />
+              <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600', fontStyle: 'italic' }}>
+                ← Yana kaydırın →
+              </Text>
+            </View>
+          ) : null}
+          <ScrollView
+            horizontal={Platform.OS !== 'web' || !isDesktop}
+            showsHorizontalScrollIndicator={false}
+            style={styles.chartScroll}
+            contentContainerStyle={Platform.OS === 'web' && isDesktop ? { width: '100%' } : undefined}
+          >
+            <View style={[
+              styles.barChart,
+              Platform.OS === 'web' && isDesktop && { width: '100%', justifyContent: 'space-between' as const },
+            ]}>
               {(sourceData?.hourlySales || []).filter((h: any) => (h?.amount || 0) > 0).map((hour, index) => {
                 const amt = hour.amount || 0;
                 const barHeight = maxHourAmount > 0 ? (amt / maxHourAmount) * 150 : 0;
@@ -1892,14 +1902,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
+    ...Platform.select({
+      web: {
+        backdropFilter: 'saturate(180%) blur(20px)',
+        WebkitBackdropFilter: 'saturate(180%) blur(20px)',
+      } as any,
+      default: {},
+    }),
   },
   greeting: {
-    fontSize: 13,
+    fontSize: 12,
     marginBottom: 2,
+    fontWeight: '600',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
   },
   userName: {
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.5,
   },
   filterButton: {
     flexDirection: 'row',
@@ -1909,6 +1930,13 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     gap: 6,
+    ...Platform.select({
+      web: {
+        boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+        transition: 'background-color 160ms ease, transform 160ms ease',
+      } as any,
+      default: {},
+    }),
   },
   filterText: {
     fontSize: 14,
@@ -1929,12 +1957,12 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 16,
     padding: 16,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
     ...Platform.select({
       web: {
-        // SaaS-tarzı yumuşak gölge (Stripe / Linear benzeri) — sadece web
-        boxShadow: '0 1px 3px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.06)',
+        // Premium SaaS-style multi-layer shadow (Linear / Notion / Vercel inspired)
+        boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.03)',
       },
       default: {},
     }),
