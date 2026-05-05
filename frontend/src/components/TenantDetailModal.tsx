@@ -590,8 +590,12 @@ export const TenantDetailModal: React.FC<{
             </View>
           )}
 
-          {/* Saatlik Satış Matrisi — branch × hour */}
-          {Object.keys(hourlyLoc).length > 0 && branchNames.length > 0 && (
+          {/* Saatlik Satış Matrisi — branch × hour
+              2026-05-05 — Hide when allHours.length < 2: with a single hour the
+              matrix renders as a one-cell strip which looks awkward and adds no
+              value (the same row total appears in "Toplam Satış" / "Şube
+              Karşılaştırması" sections above). */}
+          {Object.keys(hourlyLoc).length > 0 && branchNames.length > 0 && allHours.length >= 2 && (
             <View style={[styles.sectionBox, { backgroundColor: colors.card, borderColor: colors.border, padding: 0 }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14, paddingBottom: 4 }}>
                 <Ionicons name="bar-chart-outline" size={16} color={color} />

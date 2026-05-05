@@ -56,6 +56,10 @@ export default function CustomersScreen() {
   const listRef = React.useRef<any>(null);
   const [showScrollUp, setShowScrollUp] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  // 2026-05-05 — transient "filtering…" spinner shown right after search /
+  // filter mutates while FlashList rebuilds its layout.
+  const [isFiltering, setIsFiltering] = useState(false);
+  const filterTimerRef = React.useRef<any>(null);
 
   // ⏹️ Cancel any in-flight POS request when leaving this screen
   useFocusEffect(
@@ -227,6 +231,18 @@ export default function CustomersScreen() {
     if (filterGroups.length > 0) f = f.filter((c: any) => filterGroups.includes(c.GRUP || c.CARI_GRUP || c.GRUP_AD || ''));
     return f;
   }, [cariList, searchQuery, filterType, filterCities, filterGroups]);
+
+  // 2026-05-05 — When the search query OR active filters mutate, FlashList may
+  // keep the scroll offset from the previous (longer) list which causes a
+  // black/empty viewport. Force scroll to top + show a brief spinner so the
+  // user always sees fresh content from the start.
+  useEffect(() => {
+    if (filterTimerRef.current) clearTimeout(filterTimerRef.current);
+    setIsFiltering(true);
+    try { listRef.current?.scrollToOffset?.({ offset: 0, animated: false }); } catch {}
+    filterTimerRef.current = setTimeout(() => setIsFiltering(false), 220);
+    return () => { if (filterTimerRef.current) clearTimeout(filterTimerRef.current); };
+  }, [searchQuery, filterType, filterCities, filterGroups]);
 
   const summary = useMemo(() => {
     let borc = 0, alacak = 0;
@@ -521,7 +537,8 @@ export default function CustomersScreen() {
           />
         </View>
       ) : (
-        <FlashList ref={listRef as any} data={filteredCaris} renderItem={renderCariItem} keyExtractor={(item, idx) => String(item.KART || item.ID || idx)} estimatedItemSize={120} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
+        <View style={{ flex: 1 }}>
+        <FlashList ref={listRef as any} data={filteredCaris} renderItem={renderCariItem} keyExtractor={(item, idx) => String(item.KART || item.ID || idx)} estimatedItemSize={120} extraData={`${searchQuery}|${filterType}|${filterCities.length}|${filterGroups.length}`} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
           drawDistance={500}
           onScroll={(e) => {
             const y = e.nativeEvent.contentOffset.y;
@@ -543,6 +560,14 @@ export default function CustomersScreen() {
             </View>
           ) : null)}
         />
+        {/* 2026-05-05 — Filter spinner overlay */}
+        {isFiltering && (
+          <View pointerEvents="none" style={{ position: 'absolute', top: 12, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={{ fontSize: 12, color: colors.text, fontWeight: '600' }}>{t('loading') || 'Yükleniyor...'}</Text>
+          </View>
+        )}
+        </View>
       )}
 
       {/* Floating scroll buttons */}
@@ -700,17 +725,23 @@ export default function CustomersScreen() {
       <Modal visible={showFilterModal} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setShowFilterModal(false)}>
         <View style={styles.modalOverlay}>
           <View style={{ backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '88%' }}>
-            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
                 <Ionicons name="options" size={22} color={colors.primary} />
-                <Text style={[styles.modalTitle, { color: colors.text }]}>Filtrele</Text>
+                <Text style={{ fontSize: 17, fontWeight: '700', color: colors.text }}>Filtrele</Text>
                 {cariActiveFilterCount > 0 && (
                   <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, backgroundColor: colors.primary }}>
                     <Text style={{ fontSize: 11, fontWeight: '800', color: '#fff' }}>{cariActiveFilterCount}</Text>
                   </View>
                 )}
               </View>
-              <TouchableOpacity onPress={() => setShowFilterModal(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => setShowFilterModal(false)}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 18, backgroundColor: colors.background }}
+              >
+                <Ionicons name="close" size={22} color={colors.text} />
+              </TouchableOpacity>
             </View>
             <ScrollView style={{ padding: 16, paddingBottom: 80 }}>
               {/* Şehir */}

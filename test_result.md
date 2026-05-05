@@ -1009,6 +1009,40 @@ agent_communication:
       • /app/frontend/app/(tabs)/customers.tsx — same pattern. `desktopCariColumns`
         = KOD, AD SOYAD, ŞEHIR, GRUP, TELEFON, BAKIYE, DURUM (Borçlu/Alacaklı badge).
       
+
+
+  -agent: "main"
+  -message: |
+      2026-05-05 — Mobile-side polish based on user WhatsApp feedback.
+      
+      Fixes:
+      1. **Stok arama sonrası kart aralarında boşluk** (FlashList stale recycler):
+         - Added `extraData` prop to FlashList in stock.tsx + customers.tsx so the
+           recycler drops its pool whenever search/filter mutates.
+         - Added `useEffect` that auto-scroll-to-offset(0) and shows a 220ms
+           spinner pill at the top of the list whenever filters change.
+         → No more "DENEME / boşluk / DENEME 1" issue, no more black void after
+           clearing the search box.
+      
+      2. **Karşılaştırma ekranı saatlik matris tek saat olunca saçma duruyor**:
+         - TenantDetailModal.tsx: hide "Şube × Saatlik Satış Matrisi" section when
+           `allHours.length < 2`. The single-cell strip added no value over the
+           "Toplam Satış" / "Şube Karşılaştırması" sections shown above.
+      
+      3. **Cari filtre modal × kapatma butonu ekrandan taşıyor**:
+         - Replaced the inline `styles.modalHeader` + tiny TouchableOpacity with
+           an explicit row layout (`paddingHorizontal: 16`, `justifyContent:
+           'space-between'`, flex:1 left side) and a 36×36 circular close button
+           with `hitSlop` 12px on every side. Now sits comfortably inside the
+           bottom sheet's right edge.
+      
+      4. **Karşılaştırma "Rendered more hooks" hata** (önceki turn):
+         - app/(tabs)/_layout.tsx: moved the 5 tab-icon `useCallback` hooks
+           ABOVE the early `return <SidebarLayout/>` so React always sees the
+           same hook count regardless of viewport breakpoint.
+      
+      No backend changes.
+
       Validated via screenshot tool at 1440x900 with user cakmak.ebubekir29@gmail.com:
         - Stok table renders 6 rows with full data, proper color coding (negative stock
           in red, profit % in green, price in primary, barkod in blue link).

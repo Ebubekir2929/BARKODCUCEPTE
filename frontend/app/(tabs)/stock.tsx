@@ -134,6 +134,11 @@ export default function StockScreen() {
   const listRef = React.useRef<any>(null);
   const [showScrollUp, setShowScrollUp] = useState(false);
   const [showScrollDown, setShowScrollDown] = useState(false);
+  // 2026-05-05 — transient "filtering…" spinner shown right after search /
+  // filter mutates while FlashList rebuilds its layout. Without it the user
+  // sees a blank/black region until the recycler redraws.
+  const [isFiltering, setIsFiltering] = useState(false);
+  const filterTimerRef = React.useRef<any>(null);
 
   // Fetch stock list incrementally — page 1 instantly, rest streamed in background
   const fetchStockList = useCallback(async (force: boolean = false) => {
@@ -361,6 +366,18 @@ export default function StockScreen() {
     if (filterOzelKod2.length > 0) list = list.filter((s: any) => filterOzelKod2.includes(s.STOK_OZEL_KOD2 || ''));
     return list;
   }, [stockList, searchQuery, filterGroups, filterProfit, filterQty, filterKdvs, filterMarkalar, filterCinsler, filterOzelKod1, filterOzelKod2]);
+
+  // 2026-05-05 — When the search query OR active filters mutate, FlashList may
+  // keep the scroll offset from the previous (longer) list which causes a
+  // black/empty viewport. Force scroll to top + show a brief spinner so the
+  // user always sees fresh content from the start.
+  useEffect(() => {
+    if (filterTimerRef.current) clearTimeout(filterTimerRef.current);
+    setIsFiltering(true);
+    try { listRef.current?.scrollToOffset?.({ offset: 0, animated: false }); } catch {}
+    filterTimerRef.current = setTimeout(() => setIsFiltering(false), 220);
+    return () => { if (filterTimerRef.current) clearTimeout(filterTimerRef.current); };
+  }, [searchQuery, filterGroups, filterProfit, filterQty, filterKdvs, filterMarkalar, filterCinsler, filterOzelKod1, filterOzelKod2]);
 
   const activeFilterCount = useMemo(() => {
     let c = 0;
@@ -708,7 +725,8 @@ export default function StockScreen() {
           />
         </View>
       ) : (
-        <FlashList
+        <View style={{ flex: 1 }}>
+          <FlashList
           ref={listRef as any}
           data={filteredStocks}
           renderItem={renderStockItem}
@@ -717,6 +735,11 @@ export default function StockScreen() {
           // empty gaps when its recycler hasn't measured a card yet (the
           // "DENEME / boşluk / DENEME 1" issue from 2026-05-03).
           estimatedItemSize={150}
+          // 2026-05-05 — extraData forces FlashList to drop its recycle pool
+          // whenever search/filter state changes. Without this it kept stale
+          // row offsets after typing in the search box (huge blank gaps) and
+          // showed a black void after clearing the query.
+          extraData={`${searchQuery}|${filterQty}|${filterProfit}|${filterGroups.length}|${filterKdvs.length}|${filterMarkalar.length}|${filterCinsler.length}|${filterOzelKod1.length}|${filterOzelKod2.length}`}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
           showsVerticalScrollIndicator={false}
           drawDistance={800}
@@ -730,6 +753,14 @@ export default function StockScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} tintColor={colors.primary} />}
           ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="cube-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_stock_found')}</Text></View>}
         />
+        {/* 2026-05-05 — Filter spinner overlay (light, non-blocking) */}
+        {isFiltering && (
+          <View pointerEvents="none" style={{ position: 'absolute', top: 12, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }}>
+            <ActivityIndicator size="small" color={colors.primary} />
+            <Text style={{ fontSize: 12, color: colors.text, fontWeight: '600' }}>{t('loading') || 'Yükleniyor...'}</Text>
+          </View>
+        )}
+        </View>
       )}
 
       {/* Floating scroll buttons */}
