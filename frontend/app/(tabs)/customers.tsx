@@ -188,6 +188,50 @@ export default function CustomersScreen() {
   const [filterGroups, setFilterGroups] = useState<string[]>([]);    // multi-select cari grup
   const [showFilterModal, setShowFilterModal] = useState(false);
 
+  // 2026-05-05 — Background auto-refresh (every 60s while on this screen).
+  // Quietly hits the cache-aware /cariler endpoint, compares row count + a
+  // sample hash, and swaps in the new data only if it actually differs.
+  // No UI disruption while the user scrolls. Toast shows when applied.
+  const [bgUpdatedToast, setBgUpdatedToast] = useState(false);
+  useEffect(() => {
+    if (!activeTenantId) return;
+    let cancelled = false;
+    const INTERVAL_MS = 60 * 1000;
+    const _hashList = (rows: any[]) => `${rows.length}|${rows.slice(0, 3).map((r: any) => r.KOD || r.CARI_KODU || '').join(',')}|${rows.slice(-3).map((r: any) => r.KOD || r.CARI_KODU || r.BAKIYE || '').join(',')}`;
+    const tick = async () => {
+      if (cancelled || loading) return;
+      try {
+        const { token } = useAuthStore.getState();
+        // 2026-05-05 — Use /cari-list with a large page_size for a single
+        // cache-aware MySQL fetch.
+        const r = await fetch(`${API_URL}/api/data/cari-list`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({
+            tenant_id: activeTenantId,
+            page: 1,
+            page_size: 50000,
+            force_refresh: false,
+          }),
+        });
+        if (cancelled) return;
+        const j = await r.json();
+        if (!j.ok || !Array.isArray(j.data)) return;
+        setCariList((prev) => {
+          if (cancelled) return prev;
+          const newSig = _hashList(j.data);
+          const oldSig = _hashList(prev);
+          if (newSig === oldSig) return prev;
+          setBgUpdatedToast(true);
+          setTimeout(() => setBgUpdatedToast(false), 2500);
+          return j.data;
+        });
+      } catch { /* ignore poll errors */ }
+    };
+    const id = setInterval(tick, INTERVAL_MS);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [activeTenantId, loading]);
+
   // Compute unique cities & groups from the loaded list (for the filter modal)
   const uniqueCities = useMemo(() => {
     const s = new Set<string>();

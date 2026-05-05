@@ -261,6 +261,57 @@ export default function StockScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTenantId, selectedPriceName]);
 
+  // 2026-05-05 — Background auto-refresh (every 60s while on this screen).
+  // Quietly hits the cache-aware /stoklar endpoint, compares row count + a
+  // sample hash of the response to the current list and swaps in the new
+  // data only if it actually differs. No spinner, no list clear → no UI
+  // disruption while the user is scrolling. Toast pill shows briefly when
+  // an update is applied.
+  const _bgUpdatedRef = React.useRef(false);
+  const [bgUpdatedToast, setBgUpdatedToast] = useState(false);
+  useEffect(() => {
+    if (!activeTenantId) return;
+    let cancelled = false;
+    const INTERVAL_MS = 60 * 1000;
+    const _hashList = (rows: any[]) => `${rows.length}|${rows.slice(0, 3).map((r: any) => r.KOD || r.STOK_KODU || '').join(',')}|${rows.slice(-3).map((r: any) => r.KOD || r.STOK_KODU || r.MIKTAR || '').join(',')}`;
+    const tick = async () => {
+      if (cancelled || stockLoading) return;
+      try {
+        const { token } = useAuthStore.getState();
+        // 2026-05-05 — Use /stock-list with a large page_size to grab the
+        // entire catalog in a single hop (cache-aware MySQL read).
+        const r = await fetch(`${API_URL}/api/data/stock-list`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({
+            tenant_id: activeTenantId,
+            fiyat_ad: selectedPriceName,
+            page: 1,
+            page_size: 50000,
+            force_refresh: false,
+          }),
+        });
+        if (cancelled) return;
+        const j = await r.json();
+        if (!j.ok || !Array.isArray(j.data)) return;
+        // Compare hashes — only update if changed
+        setStockList((prev) => {
+          if (cancelled) return prev;
+          const newSig = _hashList(j.data);
+          const oldSig = _hashList(prev);
+          if (newSig === oldSig) return prev;
+          // Update applied — flash a brief toast
+          _bgUpdatedRef.current = true;
+          setBgUpdatedToast(true);
+          setTimeout(() => setBgUpdatedToast(false), 2500);
+          return j.data;
+        });
+      } catch { /* ignore poll errors */ }
+    };
+    const id = setInterval(tick, INTERVAL_MS);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [activeTenantId, selectedPriceName, stockLoading]);
+
   // ⏹️ Cancel any in-flight POS request when leaving this screen
   useFocusEffect(
     React.useCallback(() => {

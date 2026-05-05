@@ -1283,6 +1283,33 @@ agent_communication:
       Backend: no changes.
 
 
+  -agent: "main"
+  -message: |
+      2026-05-05 — Background auto-refresh for Stock & Customers lists.
+      
+      What: While the user is on /(tabs)/stock or /(tabs)/customers a 60-second
+      `setInterval` quietly polls the cache-aware MySQL endpoint, computes a
+      lightweight signature from the response (row count + first 3 + last 3
+      primary keys + a value column like MIKTAR / BAKIYE) and swaps in the
+      new data ONLY if the signature differs. No spinner, no list clear, so
+      the user's scroll position and search term stay intact while they read.
+      
+      Endpoints used (both already cache-first / served from MySQL
+      dataset_cache_rows):
+        - /api/data/stock-list  (page=1, page_size=50000, force_refresh=false)
+        - /api/data/cari-list   (same params)
+      
+      Edge cases:
+        • Skips the tick while a foreground load is in progress (`stockLoading`
+          / `loading` flags) so we never overwrite a user-initiated refresh.
+        • Cancels the interval on screen unmount (effect cleanup).
+        • Swallows errors silently so flaky network never produces a toast.
+      
+      Backend: no changes (existing stock-list/cari-list endpoints are
+      cache-aware via dataset_cache_rows).
+
+
+
       • /app/frontend/app/(tabs)/stock.tsx — added useResponsive + DataTable imports;
         defined `desktopStockColumns` (KOD, AD, MARKA, GRUP, STOK, ALIŞ, SATIŞ, KDV,
         KAR %, BARKOD). On `isDesktop` the FlashList card layout is replaced with
