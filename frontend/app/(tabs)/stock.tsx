@@ -1262,7 +1262,7 @@ const styles = StyleSheet.create({
   chipText: { fontSize: 12, fontWeight: '600' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 60, gap: 12 },
-  stockCard: { borderRadius: 10, borderWidth: 1, marginBottom: 8, overflow: 'hidden' },
+  stockCard: { borderRadius: 10, borderWidth: 1, marginBottom: 8, overflow: 'hidden', ...Platform.select({ web: { boxShadow: '0 1px 3px rgba(15,23,42,0.04), 0 1px 2px rgba(15,23,42,0.06)' }, default: {} }) },
   stockCardTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', padding: 10, gap: 10 },
   stockName: { fontSize: 13, fontWeight: '600' },
   stockCode: { fontSize: 11, marginTop: 1 },

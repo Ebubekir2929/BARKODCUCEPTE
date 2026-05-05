@@ -1826,7 +1826,10 @@ export default function ReportsScreen() {
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>{t('reports')}</Text>
       </View>
-      <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 100 }}>
+      <ScrollView contentContainerStyle={[
+        { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 100 },
+        Platform.OS === 'web' && isDesktop && { maxWidth: 1440, width: '100%', alignSelf: 'center' as const },
+      ]}>
         {/* 2026-05-05 — Reports cards in 2/3-col grid on tablet/desktop */}
         <View style={isDesktop || isXLarge ? { flexDirection: 'row', flexWrap: 'wrap', gap: 12 } : undefined}>
         {ALL_REPORTS.map(report => (
@@ -2273,7 +2276,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1 },
   headerTitle: { fontSize: 20, fontWeight: '800' },
-  reportCard: { borderRadius: 12, borderWidth: 1, padding: 14, marginBottom: 8 },
+  reportCard: { borderRadius: 12, borderWidth: 1, padding: 14, marginBottom: 8, ...Platform.select({ web: { boxShadow: '0 1px 3px rgba(15,23,42,0.04), 0 1px 2px rgba(15,23,42,0.06)', cursor: 'pointer' as any, transition: 'transform 0.15s ease, box-shadow 0.15s ease' as any }, default: {} }) },
   reportIcon: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingVertical: 60, gap: 12 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },

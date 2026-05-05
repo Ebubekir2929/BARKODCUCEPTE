@@ -669,6 +669,7 @@ export default function DashboardScreen() {
       )}
       <ScrollView
         style={styles.scrollView}
+        contentContainerStyle={Platform.OS === 'web' && isDesktop ? { maxWidth: 1440, width: '100%', alignSelf: 'center', paddingHorizontal: 8 } : undefined}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
@@ -1911,6 +1912,13 @@ const styles = StyleSheet.create({
     padding: 16,
     borderRadius: 16,
     borderWidth: 1,
+    ...Platform.select({
+      web: {
+        // SaaS-tarzı yumuşak gölge (Stripe / Linear benzeri) — sadece web
+        boxShadow: '0 1px 3px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.06)',
+      },
+      default: {},
+    }),
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -1922,6 +1930,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700',
     marginBottom: 12,
+    letterSpacing: -0.2,
   },
   bestHourBadge: {
     flexDirection: 'row',
