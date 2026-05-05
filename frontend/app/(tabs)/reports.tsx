@@ -1861,16 +1861,18 @@ export default function ReportsScreen() {
           styles.modalOverlay,
           Platform.OS === 'web' && isDesktop && { backgroundColor: 'rgba(15,23,42,0.55)', justifyContent: 'center', alignItems: 'center', padding: 24 },
         ]}>
-          <View style={[
-            styles.modalContent,
-            { backgroundColor: colors.surface, maxHeight: Platform.OS === 'web' ? '100%' : '85%' },
-            Platform.OS === 'web' && isDesktop && {
-              width: '95%', maxWidth: 760, maxHeight: '88%', borderRadius: 16,
-              borderTopLeftRadius: 16, borderTopRightRadius: 16, flex: 0,
+          <View style={
+            (Platform.OS === 'web' && isDesktop) ? {
+              backgroundColor: colors.surface,
+              width: 760, height: 640,
+              borderRadius: 16, borderWidth: 1, borderColor: colors.border,
               shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.25, shadowRadius: 30, elevation: 24,
-              borderWidth: 1, borderColor: colors.border,
-            },
-          ]}>
+              overflow: 'hidden',
+            } : [
+              styles.modalContent,
+              { backgroundColor: colors.surface, maxHeight: Platform.OS === 'web' ? '100%' : '85%' },
+            ]
+          }>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <Text style={[{ fontSize: 17, fontWeight: '700', color: colors.text, flex: 1 }]}>{selectedReport ? getReportTitle(selectedReport) : ''} - {t('filters_suffix')}</Text>
               <TouchableOpacity onPress={() => setShowFilterModal(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
