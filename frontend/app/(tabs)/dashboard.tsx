@@ -1026,9 +1026,14 @@ export default function DashboardScreen() {
           );
         })()}
 
+        {/* 2026-05-05 — On ≥1280px web, render Location Summary +
+            Lokasyon Saatlik Satışlar side-by-side as a 2-column grid so the
+            full content width of the desktop is used. On phone/tablet the
+            sections stack vertically as before. */}
+        <View style={isXLarge ? { flexDirection: 'row', gap: 14, alignItems: 'flex-start' } : undefined}>
         {/* Location Summary */}
         {(sourceData?.branchSales || []).length > 0 && (
-        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={[styles.section, isXLarge && { flex: 1, marginRight: 0 }, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('location_summary')}</Text>
           {(sourceData?.branchSales || []).map((branch, index) => {
             // Find iptal data for this location from iptal_ozet
@@ -1104,6 +1109,7 @@ export default function DashboardScreen() {
 
         {/* Lokasyon Saatlik Satışlar */}
         {(sourceData?.hourlyLocationSales || []).length > 0 && (
+          <View style={isXLarge ? { flex: 1 } : undefined}>
           <HourlyLocationSection
             data={sourceData.hourlyLocationSales}
             tenantId={activeTenantId}
@@ -1114,7 +1120,9 @@ export default function DashboardScreen() {
               return acc;
             }, {} as Record<string, number>)}
           />
+          </View>
         )}
+        </View>{/* /isXLarge row wrapper */}
 
         {/* Bottom Spacing - Reduced */}
         <View style={{ height: 20 }} />

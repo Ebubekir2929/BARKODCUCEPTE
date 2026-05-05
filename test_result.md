@@ -1198,6 +1198,25 @@ agent_communication:
 
 
 
+
+
+  -agent: "main"
+  -message: |
+      2026-05-05 — Web/Desktop layout polish (Phase 2).
+      
+      A. **Dashboard Location Summary + Hourly Sales side-by-side** on isXLarge
+         (≥1280px web). Wrapped both sections in a `flexDirection: 'row'`
+         container with `flex: 1` children so they take 50/50 of the content
+         width. On phone/tablet they stack as before.
+      
+      B. **Reports cards 2/3-column grid** on desktop:
+         - isXLarge → 3 cards per row (`flexBasis: calc(33.333% - 8px)`)
+         - isDesktop (1024-1280) → 2 cards per row (`flexBasis: calc(50% - 6px)`)
+         - phone/tablet → single column (existing).
+         Verified at 1440x900: 7 reports render in a clean 3-col grid.
+      
+      Backend: no changes.
+
 agent_communication:
   -agent: "main"
   -message: |

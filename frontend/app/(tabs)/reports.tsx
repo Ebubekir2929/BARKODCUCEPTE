@@ -12,6 +12,7 @@ import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
+import { useResponsive } from '../../src/hooks/useResponsive';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -671,6 +672,7 @@ export default function ReportsScreen() {
   const { user } = useAuthStore();
   const { activeSource } = useDataSourceStore();
   const { showWarning, showError, showInfo, showAlert, alertProps } = useAlert();
+  const { isDesktop, isXLarge } = useResponsive();
 
   // i18n helpers for report titles / descriptions / filter groups
   const getReportTitle = (report: any) => {
@@ -1870,8 +1872,20 @@ export default function ReportsScreen() {
         <Text style={[styles.headerTitle, { color: colors.text }]}>{t('reports')}</Text>
       </View>
       <ScrollView contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 100 }}>
+        {/* 2026-05-05 — Reports cards in 2/3-col grid on tablet/desktop */}
+        <View style={isDesktop || isXLarge ? { flexDirection: 'row', flexWrap: 'wrap', gap: 12 } : undefined}>
         {ALL_REPORTS.map(report => (
-          <TouchableOpacity key={report.key} style={[styles.reportCard, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => openReportFilter(report)} activeOpacity={0.7}>
+          <TouchableOpacity
+            key={report.key}
+            style={[
+              styles.reportCard,
+              isXLarge && { flexBasis: 'calc(33.333% - 8px)' as any, marginBottom: 0 },
+              isDesktop && !isXLarge && { flexBasis: 'calc(50% - 6px)' as any, marginBottom: 0 },
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+            onPress={() => openReportFilter(report)}
+            activeOpacity={0.7}
+          >
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <View style={[styles.reportIcon, { backgroundColor: colors.primary + '15' }]}><Ionicons name={report.icon} size={22} color={colors.primary} /></View>
               <View style={{ flex: 1 }}><Text style={[{ fontSize: 15, fontWeight: '700', color: colors.text }]}>{getReportTitle(report)}</Text><Text style={[{ fontSize: 12, color: colors.textSecondary }]}>{getReportDesc(report)}</Text></View>
@@ -1879,6 +1893,7 @@ export default function ReportsScreen() {
             </View>
           </TouchableOpacity>
         ))}
+        </View>
       </ScrollView>
 
       {/* FILTER MODAL */}
