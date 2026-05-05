@@ -1862,13 +1862,14 @@ export default function ReportsScreen() {
           Platform.OS === 'web' && isDesktop && { backgroundColor: 'rgba(15,23,42,0.55)', justifyContent: 'center', alignItems: 'center', padding: 24 },
         ]}>
           <View style={
-            (Platform.OS === 'web' && isDesktop) ? {
+            (Platform.OS === 'web' && isDesktop) ? ({
               backgroundColor: colors.surface,
               width: 760, height: 640,
               borderRadius: 16, borderWidth: 1, borderColor: colors.border,
-              shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.25, shadowRadius: 30, elevation: 24,
+              boxShadow: '0 12px 30px rgba(0,0,0,0.25)',
               overflow: 'hidden',
-            } : [
+              display: 'flex', flexDirection: 'column',
+            } as any) : [
               styles.modalContent,
               { backgroundColor: colors.surface, maxHeight: Platform.OS === 'web' ? '100%' : '85%' },
             ]
