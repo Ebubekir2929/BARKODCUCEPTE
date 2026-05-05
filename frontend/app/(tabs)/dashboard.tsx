@@ -232,6 +232,7 @@ export default function DashboardScreen() {
   const [highSaleFisId, setHighSaleFisId] = useState<string>('');
   const [highSaleBelgeno, setHighSaleBelgeno] = useState<string>('');
   const [highSaleAmount, setHighSaleAmount] = useState<string>('');
+  const [highSaleTenantId, setHighSaleTenantId] = useState<string>('');   // 2026-05-05 — tenant override for cross-branch deep-links
   // Use a ref to avoid re-firing on re-renders (params can persist in nav state)
   const _deepLinkProcessedRef = React.useRef<string | null>(null);
   useEffect(() => {
@@ -250,15 +251,18 @@ export default function DashboardScreen() {
       // currently-selected one. Switch active source to the matching tenant
       // so the iptal-detail call hits the right cache.
       const targetTenant = String(navParams.openIptalTenant || '');
+      let resolvedTenantId = activeTenantId;
       if (targetTenant && user?.tenants) {
         const idx = user.tenants.findIndex(t => t.tenant_id === targetTenant);
-        if (idx >= 0) setActiveSource(`data${idx + 1}`);
+        if (idx >= 0) {
+          setActiveSource(`data${idx + 1}`);
+          resolvedTenantId = targetTenant;
+        }
       }
-      // Open iptal list modal and immediately fetch detail for the requested ID.
-      setShowIptalListModal(true);
-      // Wait a tick for state to settle (esp. tenant switch), then trigger detail fetch.
+      // 2026-05-05 — Only open the DETAIL modal (not the empty list modal underneath).
+      // Stacking two RN Modals at once was causing app crashes on iOS native.
       setTimeout(() => {
-        fetchIptalDetail(iptalId, { IPTAL_ID: iptalId });
+        fetchIptalDetail(iptalId, { IPTAL_ID: iptalId }, resolvedTenantId);
       }, 600);
       // Clear params so subsequent tabs don't keep re-triggering.
       try { router.setParams({ openIptal: '', openIptalTenant: '' } as any); } catch {}
@@ -270,13 +274,18 @@ export default function DashboardScreen() {
       const tutar = String(navParams.openHighSaleAmount || '');
       // 2026-02 — switch tenant for cross-branch push deep-links
       const targetTenant = String(navParams.openHighSaleTenant || '');
+      let resolvedTenantId = activeTenantId;
       if (targetTenant && user?.tenants) {
         const idx = user.tenants.findIndex(t => t.tenant_id === targetTenant);
-        if (idx >= 0) setActiveSource(`data${idx + 1}`);
+        if (idx >= 0) {
+          setActiveSource(`data${idx + 1}`);
+          resolvedTenantId = targetTenant;
+        }
       }
       setHighSaleFisId(fisId);
       setHighSaleBelgeno(belge);
       setHighSaleAmount(tutar);
+      setHighSaleTenantId(resolvedTenantId);   // 2026-05-05 — pass tenant directly to avoid race
       setTimeout(() => setHighSaleVisible(true), 400);
       try { router.setParams({ openHighSale: '', openHighSaleFisId: '', openHighSaleBelgeno: '', openHighSaleAmount: '', openHighSaleTenant: '' } as any); } catch {}
     }
@@ -483,17 +492,22 @@ export default function DashboardScreen() {
   };
 
   // İptal detay çekme
-  const fetchIptalDetail = useCallback(async (iptalId: string, item: any) => {
+  const fetchIptalDetail = useCallback(async (iptalId: string, item: any, tenantOverride?: string) => {
     setSelectedIptalItem(item);
     setIptalDetailItems([]);
     setIptalDetailLoading(true);
     
     try {
       const { token: authToken } = useAuthStore.getState();
+      // 2026-05-05 — When triggered from a push deep-link the active tenant
+      // memo may not have caught up with setActiveSource yet. Use the
+      // explicit tenant override (passed from the deep-link handler) when
+      // available, falling back to the memoized activeTenantId otherwise.
+      const tid = tenantOverride || activeTenantId;
       const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/data/iptal-detail`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-        body: JSON.stringify({ tenant_id: activeTenantId, iptal_id: iptalId }),
+        body: JSON.stringify({ tenant_id: tid, iptal_id: iptalId }),
       });
       const data = await response.json();
       if (data.ok && data.data) setIptalDetailItems(data.data);
@@ -1865,12 +1879,12 @@ export default function DashboardScreen() {
           Pulls receipt lines from MySQL cache via /api/data/fis-detail. */}
       <HighSaleDetailModal
         visible={highSaleVisible}
-        onClose={() => setHighSaleVisible(false)}
-        tenantId={activeTenantId}
+        onClose={() => { setHighSaleVisible(false); setHighSaleTenantId(''); }}
+        tenantId={highSaleTenantId || activeTenantId}
         fisId={highSaleFisId}
         belgeno={highSaleBelgeno}
         amount={highSaleAmount}
-        tenantName={user?.tenants?.find?.(x => x.tenant_id === activeTenantId)?.tenant_name || activeSource || ''}
+        tenantName={user?.tenants?.find?.(x => x.tenant_id === (highSaleTenantId || activeTenantId))?.tenant_name || activeSource || ''}
       />
     </SafeAreaView>
   );

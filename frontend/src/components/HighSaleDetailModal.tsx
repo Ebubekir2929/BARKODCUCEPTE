@@ -119,7 +119,7 @@ export const HighSaleDetailModal: React.FC<Props> = ({
         </View>
 
         {/* Hero amount */}
-        {!!amount && (
+        {!!amount && !isNaN(parseFloat(amount)) && (
           <View style={{ paddingVertical: 16, paddingHorizontal: 16, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border }}>
             <Text style={{ fontSize: 11, color: colors.textSecondary, fontWeight: '700', marginBottom: 4, letterSpacing: 0.4 }}>TOPLAM TUTAR</Text>
             <Text style={{ fontSize: 32, color: '#10B981', fontWeight: '900' }}>

@@ -1566,3 +1566,24 @@ agent_communication:
         • /app/frontend/app/(tabs)/dashboard.tsx
 
       Backend: no changes.
+
+
+  -agent: "main"
+  -message: |
+      2026-05-05 — Push notification deep-link CRASH fixes (Iptal / High Sale / Eksi Stok)
+
+      User reported: tapping any of the 3 push types crashes the app.
+
+      Root causes & fixes:
+      1. **2 RN Modals stacked simultaneously on iptal tap** — iOS native chokes.
+         Fix: open ONLY the iptal detail modal, skip the empty list modal underneath.
+      2. **Tenant race** — `setActiveSource` async + memo not updated → calls hit wrong tenant.
+         Fix: `fetchIptalDetail(iptalId, item, tenantOverride?)` accepts explicit tenant.
+         New `highSaleTenantId` state passed directly to HighSaleDetailModal.
+      3. **Stock deep-link ignored tenant** — modal opened on wrong branch's list.
+         Fix: stock.tsx now switches active source before opening; 800ms delay so list refreshes.
+      4. **HighSaleDetailModal NaN guard** — `parseFloat('').toLocaleString()` could crash.
+         Fix: `!isNaN(parseFloat(amount))` check.
+
+      Files touched: dashboard.tsx, stock.tsx, HighSaleDetailModal.tsx
+      Backend: no changes.

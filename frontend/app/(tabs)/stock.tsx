@@ -32,7 +32,7 @@ export default function StockScreen() {
   const { t } = useLanguageStore();
   const { showError, showWarning, alertProps } = useAlert();
   const { user } = useAuthStore();
-  const { activeSource } = useDataSourceStore();
+  const { activeSource, setActiveSource } = useDataSourceStore();
   const { isDesktop } = useResponsive();
 
   const activeTenantId = useMemo(() => {
@@ -81,13 +81,20 @@ export default function StockScreen() {
   // 2026-05-03 — deep-link from notification taps (low_stock_summary push)
   // Handles `onlyNegative=1` query param → switches the filter to "negative" so
   // the user lands directly on negative-stock items.
-  const navParams = useLocalSearchParams<{ onlyNegative?: string; openLowStockSummary?: string }>();
+  const navParams = useLocalSearchParams<{ onlyNegative?: string; openLowStockSummary?: string; tenant?: string }>();
   const _stockDeepLinkRef = React.useRef<string | null>(null);
   useEffect(() => {
-    const sig = String(navParams?.onlyNegative || '') + '|' + String(navParams?.openLowStockSummary || '');
+    const sig = String(navParams?.onlyNegative || '') + '|' + String(navParams?.openLowStockSummary || '') + '|' + String(navParams?.tenant || '');
     if (sig === _stockDeepLinkRef.current) return;
     if (!navParams?.onlyNegative && !navParams?.openLowStockSummary) return;
     _stockDeepLinkRef.current = sig;
+    // 2026-05-05 — Switch tenant if the push originated from a different branch,
+    // otherwise the modal would show stock for the wrong tenant.
+    const targetTenant = String(navParams?.tenant || '');
+    if (targetTenant && user?.tenants) {
+      const idx = user.tenants.findIndex(t => t.tenant_id === targetTenant);
+      if (idx >= 0) setActiveSource(`data${idx + 1}`);
+    }
     if (navParams?.onlyNegative === '1' || navParams?.openLowStockSummary === '1') {
       setFilterQty('negative');
       setSearchQuery('');
@@ -95,10 +102,12 @@ export default function StockScreen() {
     // 2026-05-05 — when the watcher fires the low_stock_summary push, present
     // the dedicated full-screen modal instead of just toggling the filter.
     if (navParams?.openLowStockSummary === '1') {
-      setShowNegativeStockModal(true);
+      // Slight delay so the tenant switch + stock list refresh has a chance to
+      // hit the network before the modal renders an empty body.
+      setTimeout(() => setShowNegativeStockModal(true), 800);
     }
     try { router.setParams({ onlyNegative: '', openLowStockSummary: '', tenant: '' } as any); } catch {}
-  }, [navParams?.onlyNegative, navParams?.openLowStockSummary]);
+  }, [navParams?.onlyNegative, navParams?.openLowStockSummary, navParams?.tenant]);
 
   const toggleGroup = (g: string) => {
     setFilterGroups((prev) => prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]);
