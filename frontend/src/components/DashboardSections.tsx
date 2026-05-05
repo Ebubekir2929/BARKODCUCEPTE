@@ -182,7 +182,7 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
             return (
               <View key={loc}>
                 <TouchableOpacity
-                  style={[styles.groupHeader, { backgroundColor: colors.background, borderColor: colors.border, flexDirection: 'column', alignItems: 'stretch', paddingVertical: 10, gap: 6 }]}
+                  style={[styles.groupHeader, { backgroundColor: colors.background, borderColor: colors.border, flexDirection: 'column', alignItems: 'stretch', paddingVertical: Platform.OS === 'web' ? 8 : 10, gap: 6 }]}
                   onPress={() => setExpanded(expanded === loc ? null : loc)}
                 >
                   {/* Üst satır — Lokasyon adı (tam genişlik), toplam, chevron */}
@@ -897,12 +897,12 @@ export const HourlyLocationSection: React.FC<{
 };
 
 const styles = StyleSheet.create({
-  section: { borderRadius: 16, borderWidth: 1, marginHorizontal: 16, marginBottom: 12, overflow: 'hidden' },
+  section: { borderRadius: Platform.OS === 'web' ? 18 : 16, borderWidth: 1, marginHorizontal: 16, marginBottom: 12, overflow: 'hidden', ...Platform.select({ web: { boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.03)' }, default: {} }) },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 0 },
   sectionTitle: { fontSize: 16, fontWeight: '700' },
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   badgeText: { fontSize: 12, fontWeight: '700' },
-  groupHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1, marginBottom: 6, marginTop: 6, marginHorizontal: 12 },
+  groupHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: Platform.OS === 'web' ? 8 : 12, paddingHorizontal: 14, borderRadius: 12, borderWidth: 1, marginBottom: 6, marginTop: 6, marginHorizontal: 12 },
   groupName: { fontSize: 14, fontWeight: '700' },
   countBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
   countText: { fontSize: 12, fontWeight: '700' },

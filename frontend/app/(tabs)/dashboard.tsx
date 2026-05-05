@@ -1902,25 +1902,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    ...Platform.select({
-      web: {
-        backdropFilter: 'saturate(180%) blur(20px)',
-        WebkitBackdropFilter: 'saturate(180%) blur(20px)',
-      } as any,
-      default: {},
-    }),
   },
   greeting: {
-    fontSize: 12,
+    fontSize: Platform.OS === 'web' ? 12 : 13,
     marginBottom: 2,
-    fontWeight: '600',
-    letterSpacing: 0.4,
-    textTransform: 'uppercase',
+    fontWeight: Platform.OS === 'web' ? '600' : '400',
+    ...(Platform.OS === 'web' ? { letterSpacing: 0.4, textTransform: 'uppercase' as const } : {}),
   },
   userName: {
-    fontSize: 22,
-    fontWeight: '800',
-    letterSpacing: -0.5,
+    fontSize: Platform.OS === 'web' ? 22 : 20,
+    fontWeight: Platform.OS === 'web' ? '800' : '700',
+    ...(Platform.OS === 'web' ? { letterSpacing: -0.5 } : {}),
   },
   filterButton: {
     flexDirection: 'row',
