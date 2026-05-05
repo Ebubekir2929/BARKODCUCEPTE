@@ -1039,6 +1039,49 @@ agent_communication:
       4. **Karşılaştırma "Rendered more hooks" hata** (önceki turn):
          - app/(tabs)/_layout.tsx: moved the 5 tab-icon `useCallback` hooks
            ABOVE the early `return <SidebarLayout/>` so React always sees the
+
+
+  -agent: "main"
+  -message: |
+      2026-05-05 — Bildirim deep-link akışı + cache-first fiş içeriği + Eksi
+      Stok özet modali eklendi (kullanıcı isteği).
+      
+      Yeni bileşenler:
+      • /app/frontend/src/components/HighSaleDetailModal.tsx — "💰 Yüksek
+        Satış" push'una tıklayınca açılan tam-ekran modal. POST
+        /api/data/fis-detail (cache-first; fis_detay_toplam) ile fişin
+        SATIRLARINI çeker; toplam/indirim/KDV pill'leri ve ürün listesi
+        gösterir. Auth token authStore'dan okunur.
+      • /app/frontend/src/components/NegativeStockModal.tsx — full-screen
+        Eksi Stok Özeti modal. Özet kartları (eksi ürün sayısı, toplam eksi
+        miktar, tahmini maliyet TRY) + CSV indir/kopyala (web/native) +
+        ürün listesi.
+      
+      Wiring:
+      • notificationTapHandler.ts: push payload'dan `fis_id` ve `belgeno`'yu
+        AYRI ayrı param olarak geçiriyoruz (`openHighSaleFisId`,
+        `openHighSaleBelgeno`) ki belge no görünür kalsın ama
+        /fis-detail çağrısı doğru fis_id ile gitsin.
+      • dashboard.tsx: deep-link param işleyici Alert.alert yerine
+        HighSaleDetailModal'ı açıyor.
+      • stock.tsx: `openLowStockSummary=1` deep-link'i Eksi Stok modal'ını
+        açıyor (filtre arka planda yine "negative" yapılıyor ki kapatınca
+        kullanıcı listede kalsın).
+      
+      Cache-first doğrulaması (backend zaten desteklediği için yeni endpoint
+      yok):
+      • /api/data/iptal-detail → _on_demand_request ile MySQL cache (rows
+        table → blob → sync.php fallback).
+      • /api/data/fis-detail → aynı stratejiyi `fis_detay_toplam` üzerinde
+        kullanıyor.
+      
+      Görsel doğrulama (390x844 mobil):
+      ✅ Eksi Stok Özeti modal'ı /(tabs)/stock?openLowStockSummary=1 ile
+         3 negatif ürün, -1746 birim, ~₺187K tahmini maliyet ile mükemmel
+         render oldu. CSV İndir butonu görünür.
+      
+      Backend değişikliği yok.
+
            same hook count regardless of viewport breakpoint.
       
       No backend changes.

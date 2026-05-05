@@ -24,6 +24,7 @@ import { SummaryCard } from '../../src/components/SummaryCard';
 import { FilterModal } from '../../src/components/FilterModal';
 import { CompareModal } from '../../src/components/CompareModal';
 import { AcikHesapKisiDetail } from '../../src/components/AcikHesapKisiDetail';
+import { HighSaleDetailModal } from '../../src/components/HighSaleDetailModal';
 import { useLiveData } from '../../src/hooks/useLiveData';
 import { WaiterSalesSection, HourlyLocationSection } from '../../src/components/DashboardSections';
 import { BranchSales, HourlySales, OpenTable } from '../../src/types';
@@ -218,15 +219,23 @@ export default function DashboardScreen() {
     openIptal?: string;
     openIptalTenant?: string;
     openHighSale?: string;
+    openHighSaleFisId?: string;     // 2026-05-05 — separate FIS_ID for cache lookup
+    openHighSaleBelgeno?: string;
     openHighSaleAmount?: string;
     openHighSaleTenant?: string;
   }>();
+  // 2026-05-05 — High-sale receipt detail modal state (push deep-link)
+  const [highSaleVisible, setHighSaleVisible] = useState(false);
+  const [highSaleFisId, setHighSaleFisId] = useState<string>('');
+  const [highSaleBelgeno, setHighSaleBelgeno] = useState<string>('');
+  const [highSaleAmount, setHighSaleAmount] = useState<string>('');
   // Use a ref to avoid re-firing on re-renders (params can persist in nav state)
   const _deepLinkProcessedRef = React.useRef<string | null>(null);
   useEffect(() => {
     const sig = JSON.stringify({
       i: navParams?.openIptal || '',
       h: navParams?.openHighSale || '',
+      f: navParams?.openHighSaleFisId || '',
     });
     if (sig === _deepLinkProcessedRef.current) return;
     if (!navParams?.openIptal && !navParams?.openHighSale) return;
@@ -243,22 +252,18 @@ export default function DashboardScreen() {
       // Clear params so subsequent tabs don't keep re-triggering.
       try { router.setParams({ openIptal: '', openIptalTenant: '' } as any); } catch {}
     } else if (navParams?.openHighSale) {
-      const belge = String(navParams.openHighSale);
+      // 2026-05-05 — Open the rich detail modal that pulls receipt lines from
+      // MySQL cache (fis_detay_toplam) instead of the previous Alert.alert.
+      const fisId = String(navParams.openHighSaleFisId || '');
+      const belge = String(navParams.openHighSaleBelgeno || navParams.openHighSale || '');
       const tutar = String(navParams.openHighSaleAmount || '');
-      // Friendly toast / alert showing the receipt details.
-      try {
-        const { Alert } = require('react-native');
-        Alert.alert(
-          '💰 Yüksek Satış',
-          tutar
-            ? `Belge: #${belge}\nTutar: ₺${parseFloat(tutar).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}`
-            : `Belge: #${belge}`,
-          [{ text: 'Tamam', style: 'default' }],
-        );
-      } catch {}
-      try { router.setParams({ openHighSale: '', openHighSaleAmount: '', openHighSaleTenant: '' } as any); } catch {}
+      setHighSaleFisId(fisId);
+      setHighSaleBelgeno(belge);
+      setHighSaleAmount(tutar);
+      setHighSaleVisible(true);
+      try { router.setParams({ openHighSale: '', openHighSaleFisId: '', openHighSaleBelgeno: '', openHighSaleAmount: '', openHighSaleTenant: '' } as any); } catch {}
     }
-  }, [navParams?.openIptal, navParams?.openHighSale]);
+  }, [navParams?.openIptal, navParams?.openHighSale, navParams?.openHighSaleFisId]);
 
   // Check if filter is active (from live data hook)
   const isFilterActive = isDataFiltered;
@@ -1811,6 +1816,18 @@ export default function DashboardScreen() {
       </Modal>
 
       {/* Waiter Detail Modal - Handled in DashboardSections */}
+
+      {/* 2026-05-05 — Yüksek Satış Detay Modal (push deep-link target).
+          Pulls receipt lines from MySQL cache via /api/data/fis-detail. */}
+      <HighSaleDetailModal
+        visible={highSaleVisible}
+        onClose={() => setHighSaleVisible(false)}
+        tenantId={activeTenantId}
+        fisId={highSaleFisId}
+        belgeno={highSaleBelgeno}
+        amount={highSaleAmount}
+        tenantName={user?.tenants?.find?.(x => x.tenant_id === activeTenantId)?.tenant_name || activeSource || ''}
+      />
     </SafeAreaView>
   );
 }

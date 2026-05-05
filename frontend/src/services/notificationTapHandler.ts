@@ -38,6 +38,8 @@ function _route(data: Record<string, any> | null | undefined) {
         pathname: '/(tabs)/dashboard',
         params: {
           openHighSale: belgeno || fisId,
+          openHighSaleFisId: fisId,           // 2026-05-05 — separate FIS_ID for /fis-detail lookup
+          openHighSaleBelgeno: belgeno,       // 2026-05-05 — separate belge no for display
           openHighSaleAmount: String(data.amount || ''),
           openHighSaleTenant: String(data.tenant || ''),
         },

@@ -22,6 +22,7 @@ import { useFocusEffect } from 'expo-router';
 import { ScrollFab } from '../../src/components/ScrollFab';
 import { useResponsive } from '../../src/hooks/useResponsive';
 import { DataTable, TableColumn } from '../../src/components/DataTable';
+import { NegativeStockModal } from '../../src/components/NegativeStockModal';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -71,6 +72,11 @@ export default function StockScreen() {
   const [filterOzelKod1, setFilterOzelKod1] = useState<string[]>([]);
   const [filterOzelKod2, setFilterOzelKod2] = useState<string[]>([]);
 
+  // 2026-05-05 — Full-screen "Eksi Stok Özeti" modal opened by the
+  // low_stock_summary push deep-link. Local filter still flips to "negative"
+  // beneath the modal so the user can keep browsing after dismiss.
+  const [showNegativeStockModal, setShowNegativeStockModal] = useState(false);
+
   // 2026-05-03 — deep-link from notification taps (low_stock_summary push)
   // Handles `onlyNegative=1` query param → switches the filter to "negative" so
   // the user lands directly on negative-stock items.
@@ -84,6 +90,11 @@ export default function StockScreen() {
     if (navParams?.onlyNegative === '1' || navParams?.openLowStockSummary === '1') {
       setFilterQty('negative');
       setSearchQuery('');
+    }
+    // 2026-05-05 — when the watcher fires the low_stock_summary push, present
+    // the dedicated full-screen modal instead of just toggling the filter.
+    if (navParams?.openLowStockSummary === '1') {
+      setShowNegativeStockModal(true);
     }
     try { router.setParams({ onlyNegative: '', openLowStockSummary: '', tenant: '' } as any); } catch {}
   }, [navParams?.onlyNegative, navParams?.openLowStockSummary]);
@@ -1163,6 +1174,20 @@ export default function StockScreen() {
         </View>
       )}
       <CustomAlert {...alertProps} />
+
+      {/* 2026-05-05 — Eksi Stok Özeti modal (push deep-link target) */}
+      <NegativeStockModal
+        visible={showNegativeStockModal}
+        onClose={() => setShowNegativeStockModal(false)}
+        items={stockList}
+        loading={stockLoading}
+        tenantName={user?.tenants?.find?.(x => x.tenant_id === activeTenantId)?.tenant_name || activeSource || ''}
+        onItemPress={(item) => {
+          setShowNegativeStockModal(false);
+          // Tiny delay so the modal close animation completes before opening detail
+          setTimeout(() => openStockDetail(item as any), 250);
+        }}
+      />
     </SafeAreaView>
   );
 }
