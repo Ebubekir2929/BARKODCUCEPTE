@@ -13,6 +13,7 @@ import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import { useResponsive } from '../../src/hooks/useResponsive';
+import { webStyles } from '../../src/styles/webModalStyles';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -1859,21 +1860,18 @@ export default function ReportsScreen() {
       <Modal visible={showFilterModal} animationType="slide" transparent presentationStyle={Platform.OS === 'web' ? 'overFullScreen' : undefined} statusBarTranslucent>
         <View style={[
           styles.modalOverlay,
-          Platform.OS === 'web' && isDesktop && { backgroundColor: 'rgba(15,23,42,0.55)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+          Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop,
         ]}>
-          <View style={
-            (Platform.OS === 'web' && isDesktop) ? ({
-              backgroundColor: colors.surface,
-              width: 760, height: 640,
-              borderRadius: 16, borderWidth: 1, borderColor: colors.border,
-              boxShadow: '0 12px 30px rgba(0,0,0,0.25)',
+          <View style={[
+            styles.modalContent,
+            { backgroundColor: colors.surface, maxHeight: Platform.OS === 'web' ? '92%' : '85%' },
+            Platform.OS === 'web' && isDesktop && {
+              width: 760, maxWidth: 760, borderRadius: 16,
+              borderWidth: 1, borderColor: colors.border,
+              boxShadow: '0 12px 30px rgba(0,0,0,0.25)' as any,
               overflow: 'hidden',
-              display: 'flex', flexDirection: 'column',
-            } as any) : [
-              styles.modalContent,
-              { backgroundColor: colors.surface, maxHeight: Platform.OS === 'web' ? '100%' : '85%' },
-            ]
-          }>
+            },
+          ]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <Text style={[{ fontSize: 17, fontWeight: '700', color: colors.text, flex: 1 }]}>{selectedReport ? getReportTitle(selectedReport) : ''} - {t('filters_suffix')}</Text>
               <TouchableOpacity onPress={() => setShowFilterModal(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
@@ -2001,7 +1999,7 @@ export default function ReportsScreen() {
       <Modal visible={showPickerModal} animationType="slide" transparent statusBarTranslucent>
         <View style={[
           styles.modalOverlay,
-          Platform.OS === 'web' && isDesktop && { backgroundColor: 'rgba(15,23,42,0.55)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+          Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop,
         ]}>
           <View style={[
             { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%' },
@@ -2057,17 +2055,16 @@ export default function ReportsScreen() {
       <Modal visible={showResultModal} animationType="slide" transparent presentationStyle={Platform.OS === 'web' ? 'overFullScreen' : undefined} statusBarTranslucent>
         <View style={[
           styles.modalOverlay,
-          Platform.OS === 'web' && isDesktop && { backgroundColor: 'rgba(15,23,42,0.55)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+          Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop,
         ]}>
           <View style={[
             styles.modalContent,
-            { backgroundColor: colors.surface },
-            Platform.OS === 'web' && !isDesktop && { maxHeight: '100%' },
+            { backgroundColor: colors.surface, maxHeight: Platform.OS === 'web' ? '92%' : '85%' },
             Platform.OS === 'web' && isDesktop && {
-              width: '95%', maxWidth: 1200, height: '92%', maxHeight: '92%', flex: 0,
-              borderRadius: 16, borderTopLeftRadius: 16, borderTopRightRadius: 16,
-              shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.25, shadowRadius: 30, elevation: 24,
-              borderWidth: 1, borderColor: colors.border, overflow: 'hidden',
+              width: 1200, maxWidth: 1200, borderRadius: 16,
+              borderWidth: 1, borderColor: colors.border,
+              boxShadow: '0 12px 30px rgba(0,0,0,0.25)' as any,
+              overflow: 'hidden',
             },
           ]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
