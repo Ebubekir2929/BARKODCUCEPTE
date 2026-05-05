@@ -1258,6 +1258,31 @@ agent_communication:
       
       Backend: no changes.
 
+
+  -agent: "main"
+  -message: |
+      2026-05-05 — fetch_all=true → solves the 500-record bug for good.
+      
+      **Pagination strategy switch**:
+      Replaced the unreliable client-side page-by-page loop (which was
+      capping Fiyat Listeleri / Stok Envanter at 500 rows because of POS
+      Page-parameter quirks + over-aggressive dedup) with a single backend
+      call using `fetch_all: true`.
+      
+      The backend already supports this in `/api/data/report-run`:
+      it parallel-fetches up to 50 pages in 8-page batches server-side,
+      merges the results, and caches them for 3 min fresh / 15 min stale.
+      Frontend now hits this once and gets ALL rows in one response, no
+      client pagination, no dedup hash, no probe-page-2 logic.
+      
+      Reports filter/result modal desktop overrides were rolled back to
+      the default mobile bottom-sheet because the wide-web layout caused
+      a 0-height card on web. That issue requires a deeper React-Native-
+      Web Modal rebuild and is parked for a separate session.
+      
+      Backend: no changes.
+
+
       • /app/frontend/app/(tabs)/stock.tsx — added useResponsive + DataTable imports;
         defined `desktopStockColumns` (KOD, AD, MARKA, GRUP, STOK, ALIŞ, SATIŞ, KDV,
         KAR %, BARKOD). On `isDesktop` the FlashList card layout is replaced with
