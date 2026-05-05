@@ -1,0 +1,4 @@
+
+# Firebase Admin SDK service account (NEVER commit)
+secrets/
+*.firebase-admin*.json
