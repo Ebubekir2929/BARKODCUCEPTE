@@ -1298,30 +1298,69 @@ export default function ReportsScreen() {
         return;
       }
 
-      // 2026-05-05 — Some POS endpoints ignore the `Page` parameter and return
-      // the same rows for every page request. We detect this by hashing the
-      // rows we've already collected and deduplicating subsequent pages. If a
-      // batch is 100 % duplicate we stop early so we don't bloat the result
-      // (Fiyat Listesi / Stok Envanter / Perakende were duplicating to ~3-5×).
-      // Use a Set keyed by JSON.stringify(row) for content-based dedupe.
-      const seenKeys = new Set<string>();
-      const _hash = (r: any) => {
+      // 2026-05-05 v3 — Detect non-paginating POS endpoints by sampling: take
+      // a signature from the first page (first 3 + last 3 rows JSON-encoded)
+      // and compare it against page 2's signature. If they match, POS ignored
+      // the Page parameter → stop with page 1 data. Otherwise pagination is
+      // working correctly so we just append every subsequent batch with NO
+      // dedup (the previous KOD|STOK_FIYAT_AD hash dropped legitimate rows
+      // for Fiyat Listeleri / Stok Envanter where the same stock code appears
+      // across multiple LOKASYON values, capping the result at ~500 instead
+      // of the real ~2.500).
+      const _sig = (rows: any[]) => {
         try {
-          // Prefer an explicit primary-key combo when available; otherwise hash whole row
-          const k = (r.KOD ?? r.STOK_KOD ?? r.STOK_KODU ?? r.BELGENO ?? r.IPTAL_ID ?? r.FIS_ID ?? r.ID ?? '');
-          const k2 = (r.STOK_FIYAT_AD ?? r.LOKASYON ?? r.CARI_KODU ?? '');
-          if (k) return String(k) + '|' + String(k2);
-        } catch {}
-        return JSON.stringify(r);
+          const sample = [
+            ...rows.slice(0, 3),
+            ...rows.slice(Math.max(0, rows.length - 3)),
+          ];
+          return JSON.stringify(sample);
+        } catch { return ''; }
       };
-      for (const r of firstRows) seenKeys.add(_hash(r));
+      const page1Sig = _sig(firstRows);
+      // Probe page 2 first to decide
+      let page2Resp: any = null;
+      try {
+        page2Resp = await fetch(`${API_URL}/api/data/report-run`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ tenant_id: activeTenantId, dataset_key: selectedReport.datasetKey, params: { ...baseParams, Page: 2, PageSize: pageSize }, fetch_all: false }),
+          signal: controller.signal,
+        }).then(r => r.json()).catch(() => ({ ok: false, data: [] }));
+      } catch {}
+      if (runTokenRef.current !== token_id || controller.signal.aborted) return;
+      const page2Rows = (page2Resp && page2Resp.ok && Array.isArray(page2Resp.data)) ? page2Resp.data.map(indexRow) : [];
+      const page2Sig = _sig(page2Rows);
+      const posIsPaginating = page2Rows.length > 0 && page2Sig !== page1Sig;
+
+      let collected = firstRows;
+      if (!posIsPaginating) {
+        // POS returned the same rows (or nothing). Stick with page 1.
+        if (runTokenRef.current === token_id && !controller.signal.aborted) {
+          setReportData(collected);
+          resultCacheRef.current.set(cacheKey, { data: collected, pages: 1 });
+        }
+        return;
+      }
+
+      // Pagination works. Page 2 is already fetched – append it.
+      collected = collected.concat(page2Rows);
+      if (runTokenRef.current === token_id && !controller.signal.aborted) {
+        setReportData(collected);
+        setLoadedPages(2);
+      }
+
+      // If page 2 itself was a partial page, we're done.
+      if (page2Rows.length < pageSize) {
+        if (runTokenRef.current === token_id && !controller.signal.aborted) {
+          resultCacheRef.current.set(cacheKey, { data: collected, pages: 2 });
+        }
+        return;
+      }
 
       // Background: fetch remaining pages IN PARALLEL batches, append as each batch completes
       setMoreLoading(true);
-      let page = 2;
-      let collected = firstRows;
+      let page = 3;
       const maxPages = 50;
-      const batchSize = 8; // increased parallel page fetches for faster aggregation
+      const batchSize = 8;
       let done = false;
       while (!done && page <= maxPages) {
         if (runTokenRef.current !== token_id || controller.signal.aborted) return;
@@ -1338,17 +1377,7 @@ export default function ReportsScreen() {
         for (const r of results) {
           const rows = (r && r.ok && Array.isArray(r.data)) ? r.data.map(indexRow) : [];
           if (rows.length === 0) { done = true; break; }
-          // Dedupe against everything we've already seen
-          const fresh: any[] = [];
-          for (const row of rows) {
-            const k = _hash(row);
-            if (seenKeys.has(k)) continue;
-            seenKeys.add(k);
-            fresh.push(row);
-          }
-          // 100 % duplicate page → POS isn't paginating, stop the loop entirely.
-          if (fresh.length === 0) { done = true; break; }
-          batchRows.push(...fresh);
+          batchRows.push(...rows);
           if (rows.length < pageSize) { done = true; break; }
         }
         if (batchRows.length > 0) {
@@ -1898,8 +1927,8 @@ export default function ReportsScreen() {
 
       {/* FILTER MODAL */}
       <Modal visible={showFilterModal} animationType="slide" transparent statusBarTranslucent>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '85%' }]}>
+        <View style={[styles.modalOverlay, isDesktop && { justifyContent: 'center', alignItems: 'center', padding: 24 }]}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '85%' }, isDesktop && { borderRadius: 16, maxWidth: 640, width: '100%', flex: 0 }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <Text style={[{ fontSize: 17, fontWeight: '700', color: colors.text, flex: 1 }]}>{selectedReport ? getReportTitle(selectedReport) : ''} - {t('filters_suffix')}</Text>
               <TouchableOpacity onPress={() => setShowFilterModal(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
@@ -2069,8 +2098,8 @@ export default function ReportsScreen() {
 
       {/* RESULT MODAL */}
       <Modal visible={showResultModal} animationType="slide" transparent statusBarTranslucent>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+        <View style={[styles.modalOverlay, isDesktop && { justifyContent: 'center', alignItems: 'center', padding: 16 }]}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface }, isDesktop && { borderRadius: 16, maxWidth: 1280, width: '98%', height: '94%', maxHeight: '94%' }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text, flex: 1 }]}>{selectedReport ? getReportTitle(selectedReport) : ''}</Text>
               <TouchableOpacity style={{ marginRight: 8 }} onPress={() => {

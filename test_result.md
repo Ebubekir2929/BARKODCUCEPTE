@@ -1228,6 +1228,36 @@ agent_communication:
         and custom cell renderers (render prop + sortValue prop).
       
       Integration:
+
+
+  -agent: "main"
+  -message: |
+      2026-05-05 — Reports pagination v3 + filter/result modal desktop layout.
+      
+      **A. Pagination dedup → sample-based detection (Phase 3)**
+      Previous KOD|STOK_FIYAT_AD hash dropped legitimate rows for Fiyat
+      Listesi / Stok Envanter (same stock code across multiple LOKASYON
+      values), capping the result at 500. New approach:
+        1. Probe page 2 explicitly. Compare a sample (first 3 + last 3 rows
+           JSON-encoded) against page 1's signature.
+        2. If signatures match → POS isn't paginating, stop with page 1.
+        3. If they differ → pagination works correctly. Append page 2 data
+           and continue with NO row-level dedup so every page's unique rows
+           are preserved. Result count for Fiyat Listeleri / Stok Envanter
+           returns to the expected ~2.500.
+      
+      **B. Filter & Result modals — desktop/tablet ≥1024px web**
+        • Filter modal: now opens as a centred 640px card on desktop instead
+          of a full-screen bottom sheet. Mobile/tablet behaviour unchanged.
+        • Result modal: desktop uses a centred 1280-wide card (98% width,
+          94% height) so you can still see SidebarNav + filter list behind.
+      
+      Verified at 1440x900: filter modal shows mid-screen with rounded
+      corners (`borderRadius: 16`), the report list grid stays visible
+      behind a soft backdrop.
+      
+      Backend: no changes.
+
       • /app/frontend/app/(tabs)/stock.tsx — added useResponsive + DataTable imports;
         defined `desktopStockColumns` (KOD, AD, MARKA, GRUP, STOK, ALIŞ, SATIŞ, KDV,
         KAR %, BARKOD). On `isDesktop` the FlashList card layout is replaced with
