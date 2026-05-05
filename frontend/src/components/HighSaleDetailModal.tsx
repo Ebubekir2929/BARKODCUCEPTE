@@ -161,25 +161,37 @@ export const HighSaleDetailModal: React.FC<Props> = ({
                   <Text style={{ color: colors.textSecondary, marginTop: 6 }}>Detay satırı bulunamadı</Text>
                 </View>
               ) : details.map((row: any, idx: number) => {
-                const ad = row.STOK_AD || row.STOK_ADI || row.AD || row.ACIKLAMA || '-';
-                const kod = row.STOK_KOD || row.STOK_KODU || row.KOD || '';
+                // 2026-05-05 — POS gönderdiği `DETAYLAR` JSON şeması.
+                const ad = row.STOK_ADI || row.STOK_AD || row.AD || row.ACIKLAMA || '-';
+                const kod = row.STOK_KODU || row.STOK_KOD || row.KOD || '';
+                const birim = row.BIRIM_ADI || row.BIRIM || '';
+                const lokasyon = row.LOKASYON || row.LOKASYON_AD || '';
                 const miktar = parseFloat(row.MIKTAR || '0');
-                const fiyat = parseFloat(row.FIYAT || row.BIRIM_FIYAT || '0');
-                const tutar = parseFloat(row.TUTAR || row.NET_TUTAR || '0') || (miktar * fiyat);
-                const kdvOrani = String(row.KDV || row.KDV_ORANI || '').replace('.00', '');
+                const fiyat = parseFloat(row.DAHIL_FIYAT || row.FIYAT || row.BIRIM_FIYAT || '0');
+                const tutar = parseFloat(
+                  row.KDV_DAHIL_NET_TUTAR || row.DAHIL_TUTAR || row.TUTAR || row.NET_TUTAR || '0'
+                ) || (miktar * fiyat);
+                const indirim = parseFloat(
+                  row.SATIR_ISKONTO_TUTARI || row.TOPLAM_ISKONTO_TUTARI || row.ISKONTO_TUTARI || row.INDIRIM_TUTARI || '0'
+                );
                 return (
                   <View key={idx} style={[styles.lineRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }} numberOfLines={2}>{ad}</Text>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2 }}>
-                        <Text style={{ fontSize: 11, color: colors.textSecondary, fontWeight: '600' }}>{kod}</Text>
-                        <Text style={{ fontSize: 11, color: colors.textSecondary }}>•</Text>
-                        <Text style={{ fontSize: 11, color: colors.textSecondary }}>{miktar.toFixed(2)} × ₺{fiyat.toFixed(2)}</Text>
-                        {!!kdvOrani && (
-                          <>
-                            <Text style={{ fontSize: 11, color: colors.textSecondary }}>•</Text>
-                            <Text style={{ fontSize: 11, color: '#F59E0B', fontWeight: '600' }}>%{kdvOrani}</Text>
-                          </>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2, flexWrap: 'wrap' }}>
+                        {!!kod && <Text style={{ fontSize: 11, color: colors.textSecondary, fontWeight: '600' }}>{kod}</Text>}
+                        <Text style={{ fontSize: 11, color: colors.textSecondary }}>
+                          {miktar.toFixed(miktar % 1 === 0 ? 0 : 2)}{birim ? ` ${birim}` : ''} × ₺{fiyat.toFixed(2)}
+                        </Text>
+                        {!!lokasyon && (
+                          <View style={{ paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6, backgroundColor: colors.background }}>
+                            <Text style={{ fontSize: 10, color: colors.textSecondary, fontWeight: '600' }}>{lokasyon}</Text>
+                          </View>
+                        )}
+                        {indirim > 0 && (
+                          <Text style={{ fontSize: 11, color: '#F59E0B', fontWeight: '700' }}>
+                            -₺{indirim.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </Text>
                         )}
                       </View>
                     </View>

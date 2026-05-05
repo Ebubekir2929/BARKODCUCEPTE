@@ -1793,12 +1793,14 @@ async def get_high_sale_detail(
     def _flatten_urunler(row: dict) -> list:
         """Extract a flat list of product rows from a feed row.
 
-        The POS may nest the items under any of these keys: URUNLER, ITEMS,
-        LINES, KALEMLER, SATIRLAR. JSON strings are parsed; arrays-of-arrays
-        are flattened. Each item is returned as-is so the frontend can render
-        STOK_AD / MIKTAR / FIYAT / TUTAR / KDV.
+        2026-05-05 — User confirmed POS stores receipt lines under the
+        `DETAYLAR` key as a **JSON-encoded string** (not an array). Each
+        line carries DETAY_ID / STOK_KODU / STOK_ADI / BIRIM_ADI / MIKTAR
+        / FIYAT / DAHIL_FIYAT / TUTAR / DAHIL_TUTAR / SATIR_ISKONTO_TUTARI
+        / KDV_HARIC_NET_TUTAR / KDV_TUTARI / KDV_DAHIL_NET_TUTAR / LOKASYON.
+        Other keys (URUNLER, ITEMS, …) are kept as fallbacks.
         """
-        candidates = ("URUNLER", "ITEMS", "LINES", "KALEMLER", "SATIRLAR")
+        candidates = ("DETAYLAR", "URUNLER", "ITEMS", "LINES", "KALEMLER", "SATIRLAR")
         raw = None
         for k in candidates:
             if k in row:

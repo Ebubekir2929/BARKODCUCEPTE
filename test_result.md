@@ -368,6 +368,53 @@ backend:
             works as designed.
           • No 500 errors in any test case. Empty arrays are returned
             gracefully when no matching data exists in the cache.
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ DETAYLAR REGRESSION RE-TESTED 2026-05-05 (5/5 PASS,
+          /app/backend_test_high_sale_detayar.py against
+          https://saas-dashboard-pos.preview.emergentagent.com/api with admin
+          cakmak.ebubekir29@gmail.com / 123456, tenant Merkez d5587c87…).
+
+          After main agent's _flatten_urunler() fix to recognise the new
+          DETAYLAR key (JSON-encoded string of line-item dicts) in
+          fis_gunluk_bildirim_feed rows:
+
+          1) POST /api/data/high-sale-detail {tenant_id, fis_id:22232422}
+             -> 200 OK in 19.2s, {ok:true, _source:"mysql_only_blocked",
+             details:[1 row], totals:[]}. Feed-row match returned empty `{}`
+             (so totals=[]), details came from the fis_detay_toplam
+             fallback path with TUTAR=115186.36 — graceful, no 500. ✅
+          2) POST /api/data/high-sale-detail {tenant_id, fis_id:22280537}
+             -> 200 OK in 10.0s, {ok:true, _source:"mysql_only_blocked",
+             details:[1 row], totals:[]}. Same pattern as #1. ✅
+          3) POST /api/data/high-sale-detail {tenant_id, fis_id:999999999}
+             -> 200 OK in 14.8s, {ok:true, details:[], totals:[]}.
+             Graceful empty as required by spec. ✅
+          4) Regression — POST /api/data/iptal-detail {iptal_id:1}
+             -> 200 OK in 2.8s, {ok:true, data:[]}. Unaffected. ✅
+          5) Regression — POST /api/data/fis-detail {fis_id:1}
+             -> 200 OK in 424ms, {ok:true, details:[], totals:[]}.
+             Unaffected. ✅
+
+          NOTES:
+          • For both real fis_ids (22232422, 22280537) the feed-row lookup
+            in fis_gunluk_bildirim_feed cache returned empty `{}` (FIS_ID
+            mismatch / no matching row in current MySQL cache snapshot),
+            so the totals[] are empty and details came from the
+            fis_detay_toplam fallback chain — same behaviour as the
+            previous 2026-05-05 happy-path regression. The DETAYLAR
+            JSON-string parser code path therefore wasn't directly
+            exercised by these specific fis_ids, but the new candidate-key
+            ordering ("DETAYLAR" first) introduced no regressions: all
+            paths still return 200 + ok:true and the fallback to
+            fis_detay_toplam still works.
+          • _source="mysql_only_blocked" appears (as expected) because
+            fis_gunluk_bildirim_feed is intentionally NOT in
+            REQUEST_ALLOWED_DATASETS — endpoint correctly short-circuits
+            with the cache snapshot it already has.
+          • No 500 errors anywhere. No exceptions in backend.err.log
+            during the test run.
 
 frontend:
   - task: "Login Screen"
