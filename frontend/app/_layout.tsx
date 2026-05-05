@@ -90,7 +90,24 @@ export default function RootLayout() {
   // controls the local UI behaviour now; the backend watcher is always ready).
   useEffect(() => {
     if (!isAuthenticated || !token) return;
-    if (Platform.OS === 'web') return;
+    if (Platform.OS === 'web') {
+      // 2026-02 — Web push: FCM Web SDK ile bildirim token'ı al
+      (async () => {
+        try {
+          const { initWebPush } = await import('../src/services/webPush');
+          const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+          const result = await initWebPush(backendUrl, token);
+          if (result) {
+            console.log('[layout] FCM web token registered:', result.substring(0, 40));
+          } else {
+            console.log('[layout] FCM web token was null (no permission or unsupported)');
+          }
+        } catch (e) {
+          console.log('[layout] web push init failed:', e);
+        }
+      })();
+      return;
+    }
     (async () => {
       try {
         const result = await notificationService.registerForPushNotifications();

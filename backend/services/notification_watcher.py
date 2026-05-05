@@ -165,10 +165,26 @@ async def _push_many(tokens: List[str], title: str, body: str, data: dict | None
     if not tokens:
         logger.warning("[push] _push_many called with 0 tokens")
         return
+
+    # 2026-02 — Split tokens between Expo (mobile) and FCM v1 (web)
+    from services.fcm_v1_sender import send_fcm_web, is_web_push_token
+    expo_tokens: List[str] = [t for t in tokens if not is_web_push_token(t)]
+    web_tokens: List[str] = [t for t in tokens if is_web_push_token(t)]
+
+    if web_tokens:
+        try:
+            wres = await send_fcm_web(web_tokens, title, body, data)
+            logger.info(f"[push] FCM web sent={wres.get('sent')}/{len(web_tokens)} failed={wres.get('failed')}")
+        except Exception as e:
+            logger.error(f"[push] FCM web error: {e}")
+
+    if not expo_tokens:
+        return
+
     msgs = [{
         "to": t, "sound": "default", "title": title, "body": body,
         "data": data or {}, "priority": "high", "channelId": "default",
-    } for t in tokens]
+    } for t in expo_tokens]
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.post(EXPO_PUSH_URL, json=msgs, headers={
@@ -186,7 +202,7 @@ async def _push_many(tokens: List[str], title: str, body: str, data: dict | None
                 tickets = body_json.get("data") or []
                 if isinstance(tickets, list):
                     for idx, ticket in enumerate(tickets):
-                        tk = tokens[idx] if idx < len(tokens) else "?"
+                        tk = expo_tokens[idx] if idx < len(expo_tokens) else "?"
                         if isinstance(ticket, dict):
                             status = ticket.get("status")
                             if status == "error":

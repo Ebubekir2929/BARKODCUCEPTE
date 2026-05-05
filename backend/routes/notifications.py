@@ -137,12 +137,23 @@ async def register_token(body: RegisterTokenBody, current_user: dict = Depends(g
     pool = await get_patron_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            # Purge any other (stale / fake) tokens for this user so the device
-            # only has ONE valid token going forward.
-            await cur.execute(
-                "DELETE FROM user_push_tokens WHERE user_id=%s AND token<>%s",
-                (user_id, token),
-            )
+            # 2026-02 — Multi-channel push: mobile (Expo) + web (FCM) tokens
+            # MUST coexist for the same user. So we only purge tokens that share
+            # the SAME platform but have a different value (i.e. stale tokens
+            # from prior installs of the SAME channel). Tokens from another
+            # channel are left untouched.
+            platform_norm = (body.platform or "").strip().lower()
+            if platform_norm:
+                await cur.execute(
+                    "DELETE FROM user_push_tokens WHERE user_id=%s AND token<>%s AND LOWER(platform)=%s",
+                    (user_id, token, platform_norm),
+                )
+            else:
+                # Legacy clients without platform — only delete same-empty-platform stale rows
+                await cur.execute(
+                    "DELETE FROM user_push_tokens WHERE user_id=%s AND token<>%s AND (platform IS NULL OR platform='')",
+                    (user_id, token),
+                )
             deleted = cur.rowcount or 0
             await cur.execute("""
                 INSERT INTO user_push_tokens (user_id, token, platform, device_id, active, created_at, updated_at)
@@ -151,7 +162,7 @@ async def register_token(body: RegisterTokenBody, current_user: dict = Depends(g
                     device_id=VALUES(device_id), updated_at=UTC_TIMESTAMP()
             """, (user_id, token, body.platform or "", body.device_id or ""))
             await conn.commit()
-    logger.info(f"Push token registered for user {user_id}: {token[:30]}... (purged {deleted} stale tokens)")
+    logger.info(f"Push token registered for user {user_id}: {token[:30]}... (purged {deleted} stale {platform_norm or 'unspec'} tokens)")
 
     # Reset last_check_at so the watcher scans this user on its next tick
     # instead of waiting for the full interval window.
@@ -186,82 +197,108 @@ async def unregister_token(body: RegisterTokenBody, current_user: dict = Depends
 
 
 async def _send_to_expo(tokens: List[str], title: str, body: str, data: dict = None) -> dict:
-    """Send a push notification via Expo Push API to a list of expo tokens."""
+    """Send a push notification to a list of push tokens.
+
+    2026-02 — Routes Expo tokens (mobile) to Expo Push API and FCM web tokens
+    (desktop browser) to FCM HTTP v1 API. Both channels run in parallel and
+    a unified summary is returned.
+    """
     if not tokens:
         return {"ok": False, "sent": 0, "reason": "no_tokens"}
 
-    # Build one message per token
-    messages = [
-        {
-            "to": t,
-            "sound": "default",
-            "title": title,
-            "body": body,
-            "data": data or {},
-            "priority": "high",
-            "channelId": "default",
-        }
-        for t in tokens
-    ]
+    # Split tokens: Expo (mobile) vs FCM web
+    from services.fcm_v1_sender import send_fcm_web, is_web_push_token
+    expo_tokens: List[str] = []
+    web_tokens: List[str] = []
+    for t in tokens:
+        if is_web_push_token(t):
+            web_tokens.append(t)
+        else:
+            expo_tokens.append(t)
 
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                EXPO_PUSH_URL,
-                json=messages,
-                headers={
-                    "Accept": "application/json",
-                    "Accept-encoding": "gzip, deflate",
-                    "Content-Type": "application/json",
-                },
-            )
-            status_code = resp.status_code
-            try:
-                result = resp.json()
-            except Exception:
-                result = {"raw": resp.text[:500]}
-            logger.info(f"[send-test] Expo HTTP {status_code} response: {result}")
+    logger.info(f"[push] Routing tokens: expo={len(expo_tokens)}, fcm_web={len(web_tokens)}")
 
-            # Analyse tickets to find delivery errors per token
-            ticket_summary = []
-            tickets = []
-            if isinstance(result, dict):
-                tickets = result.get("data") or []
-            if isinstance(tickets, list):
-                for idx, ticket in enumerate(tickets):
-                    tk = tokens[idx] if idx < len(tokens) else "?"
-                    if isinstance(ticket, dict):
-                        status = ticket.get("status")
-                        err_code = (ticket.get("details") or {}).get("error")
-                        msg = ticket.get("message") or ""
-                        ticket_summary.append({
-                            "token_preview": tk[:30] + "..." if len(tk) > 30 else tk,
-                            "status": status,
-                            "error_code": err_code,
-                            "message": msg,
-                            "id": ticket.get("id"),
-                        })
-                        if status == "error":
-                            logger.warning(
-                                f"[send-test] ❌ Expo ERROR for token {tk[:25]}... "
-                                f"code={err_code} msg={msg}"
-                            )
-                        elif status == "ok":
-                            logger.info(
-                                f"[send-test] ✅ Expo OK for token {tk[:25]}... "
-                                f"ticket_id={ticket.get('id')}"
-                            )
+    expo_result: dict = {"ok": False, "sent": 0}
+    web_result: dict = {"ok": False, "sent": 0}
 
-            return {
-                "ok": status_code < 400,
-                "sent": len(tokens),
-                "http_status": status_code,
-                "expo_response": result,
-                "tickets": ticket_summary,
+    # ---- Expo Push API (mobile) ----
+    if expo_tokens:
+        # Build one message per token
+        messages = [
+            {
+                "to": t,
+                "sound": "default",
+                "title": title,
+                "body": body,
+                "data": data or {},
+                "priority": "high",
+                "channelId": "default",
             }
-    except Exception as e:
-        logger.error(f"[send-test] Expo push error: {e}")
-        return {"ok": False, "sent": 0, "error": str(e)}
+            for t in expo_tokens
+        ]
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                resp = await client.post(
+                    EXPO_PUSH_URL,
+                    json=messages,
+                    headers={
+                        "Accept": "application/json",
+                        "Accept-encoding": "gzip, deflate",
+                        "Content-Type": "application/json",
+                    },
+                )
+                status_code = resp.status_code
+                try:
+                    result = resp.json()
+                except Exception:
+                    result = {"raw": resp.text[:500]}
+                logger.info(f"[expo] HTTP {status_code} for {len(expo_tokens)} tokens")
+
+                # Analyse tickets to find delivery errors per token
+                ticket_summary = []
+                tickets = []
+                if isinstance(result, dict):
+                    tickets = result.get("data") or []
+                if isinstance(tickets, list):
+                    for idx, ticket in enumerate(tickets):
+                        tk = expo_tokens[idx] if idx < len(expo_tokens) else "?"
+                        if isinstance(ticket, dict):
+                            status = ticket.get("status")
+                            err_code = (ticket.get("details") or {}).get("error")
+                            msg = ticket.get("message") or ""
+                            ticket_summary.append({
+                                "token_preview": tk[:30] + "..." if len(tk) > 30 else tk,
+                                "status": status,
+                                "error_code": err_code,
+                                "message": msg,
+                                "id": ticket.get("id"),
+                            })
+                expo_result = {
+                    "ok": status_code < 400,
+                    "sent": len(expo_tokens),
+                    "http_status": status_code,
+                    "tickets": ticket_summary,
+                }
+        except Exception as e:
+            logger.error(f"[expo] push error: {e}")
+            expo_result = {"ok": False, "sent": 0, "error": str(e)}
+
+    # ---- FCM HTTP v1 API (web) ----
+    if web_tokens:
+        try:
+            web_result = await send_fcm_web(web_tokens, title, body, data)
+        except Exception as e:
+            logger.error(f"[fcm-v1] web push error: {e}")
+            web_result = {"ok": False, "sent": 0, "error": str(e)}
+
+    # Unified summary
+    total_sent = (expo_result.get("sent", 0) or 0) + (web_result.get("sent", 0) or 0)
+    return {
+        "ok": total_sent > 0,
+        "sent": total_sent,
+        "expo": expo_result,
+        "web": web_result,
+    }
 
 
 @router.post("/send-test")
