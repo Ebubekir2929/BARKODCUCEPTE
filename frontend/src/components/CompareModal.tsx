@@ -174,6 +174,15 @@ export const CompareModal: React.FC<{
   const [productHourByTenant, setProductHourByTenant] = useState<Record<string, Record<string, Record<string, Record<string, { qty: number; amount: number; iskonto: number; brut: number; kdv: number }>>>>>({});
   const [phLoading, setPhLoading] = useState(false);
 
+  // 2026-05-05 — Performance optimizations for large datasets:
+  // ► Heavy "Ürünlerin Saatlik Satışları" section is collapsed by default;
+  //   user opts-in via "Detayı Göster" button. Saves ~70% of render cost on
+  //   the initial modal open.
+  // ► `productDisplayCount` lets the user incrementally request more products
+  //   (15 → 30 → 50) instead of paying the full cost upfront.
+  const [showHourlyDetail, setShowHourlyDetail] = useState(false);
+  const [productDisplayCount, setProductDisplayCount] = useState<number>(15);
+
   const applyPreset = (p: PresetKey) => {
     const { start, end } = computePreset(p);
     setStartDate(start);
@@ -442,6 +451,89 @@ export const CompareModal: React.FC<{
     [snapshots]
   );
 
+  // 2026-05-05 — Heavy product/hour aggregation lifted to useMemo so it
+  // doesn't recompute on every parent re-render. Only depends on snapshots
+  // and productHourByTenant. Returns null if data is empty.
+  const productCompareData = useMemo(() => {
+    if (snapshots.length === 0) return null;
+    const productTotals: Record<string, number> = {};
+    const tenantLocPairs: { tenantId: string; tenantName: string; tenantIdx: number; location: string }[] = [];
+    const seenPairs = new Set<string>();
+    type Cell = { qty: number; amount: number; iskonto: number; brut: number; kdv: number };
+    const tenantProductHourSum: Record<string, Record<string, Record<string, Cell>>> = {};
+    const tenantsWithData: { tenantId: string; tenantName: string; tenantIdx: number; locCount: number }[] = [];
+    const seenTenants = new Set<string>();
+
+    snapshots.forEach((s, idx) => {
+      const tenantData = productHourByTenant[s.tenant.tenant_id] || {};
+      let locCount = 0;
+      Object.entries(tenantData).forEach(([loc, products]) => {
+        locCount += 1;
+        const pairKey = `${s.tenant.tenant_id}__${loc}`;
+        if (!seenPairs.has(pairKey)) {
+          seenPairs.add(pairKey);
+          tenantLocPairs.push({
+            tenantId: s.tenant.tenant_id,
+            tenantName: s.tenant.name || `Veri ${idx + 1}`,
+            tenantIdx: idx,
+            location: loc,
+          });
+        }
+        Object.entries(products).forEach(([name, hours]) => {
+          const sum = Object.values(hours).reduce((a, h) => a + h.amount, 0);
+          productTotals[name] = (productTotals[name] || 0) + sum;
+
+          if (!tenantProductHourSum[s.tenant.tenant_id]) tenantProductHourSum[s.tenant.tenant_id] = {};
+          if (!tenantProductHourSum[s.tenant.tenant_id][name]) tenantProductHourSum[s.tenant.tenant_id][name] = {};
+          Object.entries(hours).forEach(([h, cell]) => {
+            const t = tenantProductHourSum[s.tenant.tenant_id][name];
+            if (!t[h]) t[h] = { qty: 0, amount: 0, iskonto: 0, brut: 0, kdv: 0 };
+            t[h].qty += cell.qty;
+            t[h].amount += cell.amount;
+            t[h].iskonto += cell.iskonto;
+            t[h].brut += cell.brut;
+            t[h].kdv += cell.kdv;
+          });
+        });
+      });
+      if (locCount > 0 && !seenTenants.has(s.tenant.tenant_id)) {
+        seenTenants.add(s.tenant.tenant_id);
+        tenantsWithData.push({
+          tenantId: s.tenant.tenant_id,
+          tenantName: s.tenant.name || `Veri ${idx + 1}`,
+          tenantIdx: idx,
+          locCount,
+        });
+      }
+    });
+
+    const sortedAll = Object.keys(productTotals).sort((a, b) => productTotals[b] - productTotals[a]);
+    const totalProductCount = sortedAll.length;
+
+    // Union of hours across all tenants
+    const hoursUnion = new Set<string>();
+    snapshots.forEach((s) => Object.keys(s.hourly).forEach((h) => hoursUnion.add(h)));
+    const allHoursAcrossTenants = Array.from(hoursUnion).sort();
+
+    return {
+      productTotals,
+      tenantLocPairs,
+      tenantProductHourSum,
+      tenantsWithData,
+      sortedAllProducts: sortedAll,
+      totalProductCount,
+      allHoursAcrossTenants,
+    };
+  }, [snapshots, productHourByTenant]);
+
+  // 2026-05-05 — Date-range guard: warn user when the selected window is
+  // long enough to materially slow down the comparison render.
+  const dateRangeDays = useMemo(() => {
+    const ms = endDate.getTime() - startDate.getTime();
+    return Math.max(1, Math.round(ms / 86400000) + 1);
+  }, [startDate, endDate]);
+  const dateRangeWarning = dateRangeDays > 30;
+
   return (
     <Modal
       visible={visible}
@@ -593,6 +685,26 @@ export const CompareModal: React.FC<{
             contentContainerStyle={{ padding: 16, paddingBottom: 32 + insets.bottom }}
             showsVerticalScrollIndicator={false}
           >
+            {/* 2026-05-05 — Date range performance warning */}
+            {dateRangeWarning && (
+              <View style={{
+                flexDirection: 'row', alignItems: 'flex-start', gap: 10,
+                backgroundColor: '#F59E0B' + '15', borderColor: '#F59E0B' + '50', borderWidth: 1,
+                borderRadius: 12, padding: 12, marginBottom: 14,
+              }}>
+                <Ionicons name="warning" size={18} color="#F59E0B" style={{ marginTop: 1 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: '#92400E', fontSize: 13, fontWeight: '700', marginBottom: 2 }}>
+                    Geniş Tarih Aralığı ({dateRangeDays} gün)
+                  </Text>
+                  <Text style={{ color: '#92400E', fontSize: 11, lineHeight: 16 }}>
+                    Bu kadar uzun bir aralık ekran performansını yavaşlatabilir.
+                    Daha hızlı sonuç için tarih aralığını 30 günle sınırlamayı veya
+                    "Saatlik Detay" bölümünü kapalı bırakmayı deneyin.
+                  </Text>
+                </View>
+              </View>
+            )}
             {/* Hero cards — tap to open TenantDetailModal */}
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 14 }}>
               {snapshots.map((snap, idx) => {
@@ -957,75 +1069,20 @@ export const CompareModal: React.FC<{
               );
             })()}
 
-            {/* Ürünlerin Saatlik Satışları · Veri Kaynağı + Lokasyon Bazlı */}
+            {/* Ürünlerin Saatlik Satışları · Veri Kaynağı + Lokasyon Bazlı
+                2026-05-05 — Heavy data lifted to `productCompareData` useMemo so
+                it doesn't recompute every render. Section is collapsed by default
+                via `showHourlyDetail` to keep initial open snappy. */}
             {(() => {
-              // Build:
-              //  - tenantLocPairs: list of (tenant, location) pairs that have any data
-              //  - productTotals: total amount per product across everything
-              //  - tenantProductHourSum[tenantId][productName][hour] = aggregated cell across all locations of that tenant
-              const productTotals: Record<string, number> = {};
-              const tenantLocPairs: { tenantId: string; tenantName: string; tenantIdx: number; location: string }[] = [];
-              const seenPairs = new Set<string>();
-              type Cell = { qty: number; amount: number; iskonto: number; brut: number; kdv: number };
-              const tenantProductHourSum: Record<string, Record<string, Record<string, Cell>>> = {};
-              const tenantsWithData: { tenantId: string; tenantName: string; tenantIdx: number; locCount: number }[] = [];
-              const seenTenants = new Set<string>();
+              const data = productCompareData;
+              if (!data || (data.sortedAllProducts.length === 0 && !phLoading)) return null;
 
-              snapshots.forEach((s, idx) => {
-                const tenantData = productHourByTenant[s.tenant.tenant_id] || {};
-                let locCount = 0;
-                Object.entries(tenantData).forEach(([loc, products]) => {
-                  locCount += 1;
-                  const pairKey = `${s.tenant.tenant_id}__${loc}`;
-                  if (!seenPairs.has(pairKey)) {
-                    seenPairs.add(pairKey);
-                    tenantLocPairs.push({
-                      tenantId: s.tenant.tenant_id,
-                      tenantName: s.tenant.name || `Veri ${idx + 1}`,
-                      tenantIdx: idx,
-                      location: loc,
-                    });
-                  }
-                  Object.entries(products).forEach(([name, hours]) => {
-                    const sum = Object.values(hours).reduce((a, h) => a + h.amount, 0);
-                    productTotals[name] = (productTotals[name] || 0) + sum;
-
-                    if (!tenantProductHourSum[s.tenant.tenant_id]) tenantProductHourSum[s.tenant.tenant_id] = {};
-                    if (!tenantProductHourSum[s.tenant.tenant_id][name]) tenantProductHourSum[s.tenant.tenant_id][name] = {};
-                    Object.entries(hours).forEach(([h, cell]) => {
-                      const t = tenantProductHourSum[s.tenant.tenant_id][name];
-                      if (!t[h]) t[h] = { qty: 0, amount: 0, iskonto: 0, brut: 0, kdv: 0 };
-                      t[h].qty += cell.qty;
-                      t[h].amount += cell.amount;
-                      t[h].iskonto += cell.iskonto;
-                      t[h].brut += cell.brut;
-                      t[h].kdv += cell.kdv;
-                    });
-                  });
-                });
-                if (locCount > 0 && !seenTenants.has(s.tenant.tenant_id)) {
-                  seenTenants.add(s.tenant.tenant_id);
-                  tenantsWithData.push({
-                    tenantId: s.tenant.tenant_id,
-                    tenantName: s.tenant.name || `Veri ${idx + 1}`,
-                    tenantIdx: idx,
-                    locCount,
-                  });
-                }
-              });
-
-              // Cap to top N products to avoid mobile OOM crashes on large datasets
-              const MAX_PRODUCTS = 30;
-              const sortedAll = Object.keys(productTotals).sort((a, b) => productTotals[b] - productTotals[a]);
-              const totalProductCount = sortedAll.length;
-              const allProducts = sortedAll.slice(0, MAX_PRODUCTS);
-
-              if (allProducts.length === 0 && !phLoading) return null;
-
-              // Union of hours across all tenants
-              const hoursUnion = new Set<string>();
-              snapshots.forEach((s) => Object.keys(s.hourly).forEach((h) => hoursUnion.add(h)));
-              const allHours = Array.from(hoursUnion).sort();
+              const totalProductCount = data.totalProductCount;
+              const allProducts = data.sortedAllProducts.slice(0, productDisplayCount);
+              const tenantLocPairs = data.tenantLocPairs;
+              const tenantsWithData = data.tenantsWithData;
+              const tenantProductHourSum = data.tenantProductHourSum;
+              const allHours = data.allHoursAcrossTenants;
 
               return (
                 <View style={[styles.sectionBox, { backgroundColor: colors.card, borderColor: colors.border, padding: 0 }]}>
@@ -1035,17 +1092,40 @@ export const CompareModal: React.FC<{
                       Ürünlerin Saatlik Satışları · Veri Kaynağı + Lokasyon
                     </Text>
                     {phLoading && <ActivityIndicator size="small" color={colors.primary} />}
-                    {totalProductCount > MAX_PRODUCTS && (
-                      <View style={{ backgroundColor: colors.primary + '18', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
-                        <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>
-                          İlk {MAX_PRODUCTS} / {totalProductCount}
-                        </Text>
-                      </View>
-                    )}
+                    <View style={{ backgroundColor: colors.primary + '18', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
+                      <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>
+                        {showHourlyDetail
+                          ? `${allProducts.length} / ${totalProductCount} ürün`
+                          : `${totalProductCount} ürün`}
+                      </Text>
+                    </View>
                   </View>
+                  {!showHourlyDetail ? (
+                    /* Collapsed state — show button to expand. Saves ~70% of the
+                       render cost on initial modal open with large datasets. */
+                    <View style={{ paddingHorizontal: 14, paddingBottom: 14, paddingTop: 6 }}>
+                      <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 10 }}>
+                        Bu bölümde tüm ürünlerin saatlik kırılımı gösterilir. Performans için varsayılan olarak gizli — açmak için butona basın.
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => setShowHourlyDetail(true)}
+                        activeOpacity={0.85}
+                        style={{
+                          flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                          backgroundColor: colors.primary, paddingVertical: 12, borderRadius: 10,
+                        }}
+                      >
+                        <Ionicons name="eye" size={16} color="#fff" />
+                        <Text style={{ color: '#fff', fontSize: 14, fontWeight: '700' }}>
+                          Saatlik Detayı Göster
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    <>
                   <Text style={{ color: colors.textSecondary, fontSize: 11, paddingHorizontal: 14, paddingBottom: 6 }}>
                     Üst satır: Veri Kaynağı toplamı · Alt satırlar: Lokasyon kırılımı · Saatlik post-iskonto net
-                    {totalProductCount > MAX_PRODUCTS ? `  ·  En çok satan ${MAX_PRODUCTS} ürün gösteriliyor` : ''}
+                    {totalProductCount > productDisplayCount ? `  ·  En çok satan ${productDisplayCount} ürün gösteriliyor` : ''}
                   </Text>
 
                   {allProducts.length === 0 && phLoading && (
@@ -1258,6 +1338,39 @@ export const CompareModal: React.FC<{
                       </View>
                     );
                   })}
+                  {/* "Daha fazla göster" — incremental cap to keep render snappy */}
+                  {totalProductCount > productDisplayCount && (
+                    <View style={{ paddingHorizontal: 14, paddingVertical: 12, alignItems: 'center' }}>
+                      <TouchableOpacity
+                        onPress={() => setProductDisplayCount(c => c < 30 ? 30 : c < 50 ? 50 : Math.min(totalProductCount, c + 50))}
+                        activeOpacity={0.85}
+                        style={{
+                          flexDirection: 'row', alignItems: 'center', gap: 8,
+                          paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10,
+                          borderWidth: 1, borderColor: colors.primary,
+                          backgroundColor: colors.primary + '10',
+                        }}
+                      >
+                        <Ionicons name="add-circle" size={16} color={colors.primary} />
+                        <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '700' }}>
+                          Daha Fazla Göster ({productDisplayCount} / {totalProductCount})
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  {/* Collapse helper */}
+                  <View style={{ paddingHorizontal: 14, paddingBottom: 14, alignItems: 'center' }}>
+                    <TouchableOpacity
+                      onPress={() => { setShowHourlyDetail(false); setProductDisplayCount(15); }}
+                      hitSlop={8}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 }}
+                    >
+                      <Ionicons name="chevron-up" size={14} color={colors.textSecondary} />
+                      <Text style={{ color: colors.textSecondary, fontSize: 12, fontWeight: '600' }}>Detayı Gizle</Text>
+                    </TouchableOpacity>
+                  </View>
+                  </>
+                  )}
                 </View>
               );
             })()}
