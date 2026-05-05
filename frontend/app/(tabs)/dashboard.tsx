@@ -1159,7 +1159,10 @@ export default function DashboardScreen() {
       {/* Card Type Location Modal */}
       <Modal visible={!!selectedCardType} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent onRequestClose={() => setSelectedCardType(null)}>
         <TouchableOpacity style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]} activeOpacity={1} onPress={() => setSelectedCardType(null)}>
-          <TouchableOpacity activeOpacity={1} style={[styles.modalContent, Platform.OS === 'web' && isDesktop && [webStyles.cardDesktop, { borderColor: colors.border, maxWidth: 560, backgroundColor: colors.surface }]]}>
+          <TouchableOpacity activeOpacity={1} style={[
+            styles.modalContent,
+            ...(Platform.OS === 'web' && isDesktop ? [webStyles.cardDesktop, { borderColor: colors.border, maxWidth: 560, backgroundColor: colors.surface, alignSelf: 'center' as const }] : []),
+          ]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 {getCardTypeLabel(selectedCardType || '')} - {t('location_dist_suffix')}
@@ -2057,7 +2060,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     flexGrow: 0,
     flexShrink: 1,
-    alignSelf: 'flex-end',
+    alignSelf: Platform.OS === 'web' ? 'center' : 'flex-end',
     width: '100%',
   },
   modalHeader: {

@@ -36,9 +36,12 @@ export const webStyles = StyleSheet.create({
   },
   // Constrains the card's WIDTH (cross-axis) and adds dialog chrome.
   // Vertical sizing is left to base styles.modalContent (flex:1, maxHeight:92%).
+  // alignSelf:'auto' overrides any base modalContent alignSelf (e.g. dashboard's
+  // 'flex-end') so the centered overlay alignment is honoured.
   cardDesktop: {
     width: 720,
     maxWidth: 720,
+    alignSelf: 'center',
     borderRadius: 16,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
@@ -50,6 +53,7 @@ export const webStyles = StyleSheet.create({
   cardDesktopWide: {
     width: 1100,
     maxWidth: 1100,
+    alignSelf: 'center',
     borderRadius: 16,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
