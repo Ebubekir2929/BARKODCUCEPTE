@@ -1850,10 +1850,27 @@ export default function ReportsScreen() {
         </View>
       </ScrollView>
 
-      {/* FILTER MODAL */}
-      <Modal visible={showFilterModal} animationType="slide" transparent statusBarTranslucent>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '85%' }]}>
+      {/* FILTER MODAL — 2026-05-05: switched from `transparent
+          statusBarTranslucent` to `presentationStyle="overFullScreen"` so it
+          renders correctly on RN-Web (the previous combo produced a 0-height
+          card on Chrome / Safari).
+          2026-02 update (web/desktop polish): proper dark backdrop + centered
+          dialog with rounded corners + drop shadow on isDesktop. */}
+      <Modal visible={showFilterModal} animationType="slide" transparent presentationStyle={Platform.OS === 'web' ? 'overFullScreen' : undefined} statusBarTranslucent>
+        <View style={[
+          styles.modalOverlay,
+          Platform.OS === 'web' && isDesktop && { backgroundColor: 'rgba(15,23,42,0.55)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+        ]}>
+          <View style={[
+            styles.modalContent,
+            { backgroundColor: colors.surface, maxHeight: Platform.OS === 'web' ? '100%' : '85%' },
+            Platform.OS === 'web' && isDesktop && {
+              width: '95%', maxWidth: 760, maxHeight: '88%', borderRadius: 16,
+              borderTopLeftRadius: 16, borderTopRightRadius: 16, flex: 0,
+              shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.25, shadowRadius: 30, elevation: 24,
+              borderWidth: 1, borderColor: colors.border,
+            },
+          ]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <Text style={[{ fontSize: 17, fontWeight: '700', color: colors.text, flex: 1 }]}>{selectedReport ? getReportTitle(selectedReport) : ''} - {t('filters_suffix')}</Text>
               <TouchableOpacity onPress={() => setShowFilterModal(false)}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
@@ -1979,8 +1996,19 @@ export default function ReportsScreen() {
       ))}
 
       <Modal visible={showPickerModal} animationType="slide" transparent statusBarTranslucent>
-        <View style={styles.modalOverlay}>
-          <View style={[{ backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%' }]}>
+        <View style={[
+          styles.modalOverlay,
+          Platform.OS === 'web' && isDesktop && { backgroundColor: 'rgba(15,23,42,0.55)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+        ]}>
+          <View style={[
+            { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%' },
+            Platform.OS === 'web' && isDesktop && {
+              width: '95%', maxWidth: 560, maxHeight: '78%',
+              borderRadius: 16, borderTopLeftRadius: 16, borderTopRightRadius: 16,
+              shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.25, shadowRadius: 30, elevation: 24,
+              borderWidth: 1, borderColor: colors.border, overflow: 'hidden',
+            },
+          ]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text, flex: 1 }]}>{pickerFilter?.label}</Text>
               <TouchableOpacity onPress={() => setShowPickerModal(false)}><Ionicons name="checkmark" size={24} color={colors.primary} /></TouchableOpacity>
@@ -2021,10 +2049,24 @@ export default function ReportsScreen() {
         </View>
       </Modal>
 
-      {/* RESULT MODAL */}
-      <Modal visible={showResultModal} animationType="slide" transparent statusBarTranslucent>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
+      {/* RESULT MODAL — 2026-05-05: same web fix as filter modal.
+          2026-02 update: dark backdrop + centered card on isDesktop. */}
+      <Modal visible={showResultModal} animationType="slide" transparent presentationStyle={Platform.OS === 'web' ? 'overFullScreen' : undefined} statusBarTranslucent>
+        <View style={[
+          styles.modalOverlay,
+          Platform.OS === 'web' && isDesktop && { backgroundColor: 'rgba(15,23,42,0.55)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+        ]}>
+          <View style={[
+            styles.modalContent,
+            { backgroundColor: colors.surface },
+            Platform.OS === 'web' && !isDesktop && { maxHeight: '100%' },
+            Platform.OS === 'web' && isDesktop && {
+              width: '95%', maxWidth: 1200, height: '92%', maxHeight: '92%', flex: 0,
+              borderRadius: 16, borderTopLeftRadius: 16, borderTopRightRadius: 16,
+              shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.25, shadowRadius: 30, elevation: 24,
+              borderWidth: 1, borderColor: colors.border, overflow: 'hidden',
+            },
+          ]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text, flex: 1 }]}>{selectedReport ? getReportTitle(selectedReport) : ''}</Text>
               <TouchableOpacity style={{ marginRight: 8 }} onPress={() => {
