@@ -515,6 +515,9 @@ export default function StockScreen() {
     const miktar = parseFloat(item.MIKTAR || '0');
     const profit = price > 0 && buyPrice > 0 ? price - buyPrice : 0;
     const profitPct = buyPrice > 0 ? ((profit / buyPrice) * 100) : 0;
+    // 2026-05-05 — Stable height: only show detailRow if it has content,
+    // otherwise FlashList's recycler leaves random gaps mid-list.
+    const hasDetailRow = buyPrice > 0 || profit !== 0 || !!barcode;
 
     return (
       <TouchableOpacity
@@ -525,7 +528,7 @@ export default function StockScreen() {
         {/* Üst satır: İsim + Fiyat */}
         <View style={styles.stockCardTop}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.stockName, { color: colors.text }]} numberOfLines={2}>{name}</Text>
+            <Text style={[styles.stockName, { color: colors.text }]} numberOfLines={1}>{name}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
               {code ? <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{code}</Text> : null}
               {grup ? <View style={[{ backgroundColor: colors.primary + '15', paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 }]}><Text style={[{ fontSize: 9, color: colors.primary, fontWeight: '600' }]}>{grup}</Text></View> : null}
@@ -538,37 +541,51 @@ export default function StockScreen() {
           </View>
         </View>
 
-        {/* Alt satır: Alış + Kar + Barkod */}
-        <View style={[styles.detailRow, { borderTopColor: colors.border }]}>
-          {buyPrice > 0 ? (
-            <View style={styles.detailItem}>
-              <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Alış</Text>
-              <Text style={[{ fontSize: 12, fontWeight: '700', color: colors.warning }]}>₺{buyPrice.toFixed(2)}</Text>
-            </View>
-          ) : null}
-          {profit !== 0 ? (
-            <View style={styles.detailItem}>
-              <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('profit')}</Text>
-              <Text style={[{ fontSize: 12, fontWeight: '700', color: profit >= 0 ? colors.success : colors.error }]}>
-                {profit >= 0 ? '+' : ''}₺{profit.toFixed(2)} ({profitPct >= 0 ? '+' : ''}{profitPct.toFixed(0)}%)
-              </Text>
-            </View>
-          ) : null}
-          {barcode ? (
-            <TouchableOpacity 
-              style={[{ flexDirection: 'row', alignItems: 'center', gap: 6 }]}
-              onPress={(e) => { e.stopPropagation(); Clipboard.setStringAsync(barcode); showToast(`${barcode} kopyalandı`); }}>
-              <Ionicons name="barcode-outline" size={14} color={colors.primary} />
-              <Text style={[{ fontSize: 12, color: colors.primary, flexShrink: 1 }]} numberOfLines={1}>{barcode}</Text>
-              <View style={[{ backgroundColor: colors.primary + '20', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }]}>
-                <Ionicons name="copy-outline" size={12} color={colors.primary} />
+        {/* Alt satır: Alış + Kar + Barkod — sadece içerik varsa render edilir */}
+        {hasDetailRow && (
+          <View style={[styles.detailRow, { borderTopColor: colors.border }]}>
+            {buyPrice > 0 ? (
+              <View style={styles.detailItem}>
+                <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Alış</Text>
+                <Text style={[{ fontSize: 12, fontWeight: '700', color: colors.warning }]}>₺{buyPrice.toFixed(2)}</Text>
               </View>
-            </TouchableOpacity>
-          ) : null}
-        </View>
+            ) : null}
+            {profit !== 0 ? (
+              <View style={styles.detailItem}>
+                <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('profit')}</Text>
+                <Text style={[{ fontSize: 12, fontWeight: '700', color: profit >= 0 ? colors.success : colors.error }]}>
+                  {profit >= 0 ? '+' : ''}₺{profit.toFixed(2)} ({profitPct >= 0 ? '+' : ''}{profitPct.toFixed(0)}%)
+                </Text>
+              </View>
+            ) : null}
+            {barcode ? (
+              <TouchableOpacity 
+                style={[{ flexDirection: 'row', alignItems: 'center', gap: 6 }]}
+                onPress={(e) => { e.stopPropagation(); Clipboard.setStringAsync(barcode); showToast(`${barcode} kopyalandı`); }}>
+                <Ionicons name="barcode-outline" size={14} color={colors.primary} />
+                <Text style={[{ fontSize: 12, color: colors.primary, flexShrink: 1 }]} numberOfLines={1}>{barcode}</Text>
+                <View style={[{ backgroundColor: colors.primary + '20', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }]}>
+                  <Ionicons name="copy-outline" size={12} color={colors.primary} />
+                </View>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        )}
       </TouchableOpacity>
     );
   }, [colors, openStockDetail]);
+
+  // 2026-05-05 — getItemType: tell FlashList which "shape" each row has so
+  // its recycle pool keeps similar items together. Without this, the recycler
+  // mixes "rich" (with detailRow) and "simple" (without) cards and leaves
+  // empty gaps when their measured heights differ.
+  const getStockItemType = useCallback((item: any) => {
+    const buyPrice = parseFloat(item.SON_ALIS_FIYAT || '0');
+    const price = parseFloat(item.FIYAT || '0');
+    const profit = price > 0 && buyPrice > 0 ? price - buyPrice : 0;
+    const hasDetail = buyPrice > 0 || profit !== 0 || !!item.BARKOD;
+    return hasDetail ? 'rich' : 'simple';
+  }, []);
 
   // 2026-05-05 — Desktop Data Table columns (standard layout).
   // Used only when `isDesktop` is true; phone/tablet keeps the card layout.
@@ -803,16 +820,18 @@ export default function StockScreen() {
           data={filteredStocks}
           renderItem={renderStockItem}
           keyExtractor={(item: any, idx) => String(item?.KOD || item?.STOK_KODU || item?.ID || idx)}
-          // Stable item-size hint prevents FlashList from rendering large
-          // empty gaps when its recycler hasn't measured a card yet (the
-          // "DENEME / boşluk / DENEME 1" issue from 2026-05-03).
-          estimatedItemSize={150}
+          // 2026-05-05 — getItemType bucket keeps recycle pools homogeneous
+          // (rows with detail row vs without). Eliminates the "boşluk in
+          // middle of list" problem caused by mixing variable-height items.
+          getItemType={getStockItemType}
+          // Lower estimated size now that we have homogeneous buckets.
+          estimatedItemSize={110}
           // 2026-05-05 — extraData forces FlashList to drop its recycle pool
           // whenever search/filter state changes. Without this it kept stale
           // row offsets after typing in the search box (huge blank gaps) and
           // showed a black void after clearing the query.
           extraData={`${searchQuery}|${filterQty}|${filterProfit}|${filterGroups.length}|${filterKdvs.length}|${filterMarkalar.length}|${filterCinsler.length}|${filterOzelKod1.length}|${filterOzelKod2.length}`}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }}
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
           showsVerticalScrollIndicator={false}
           drawDistance={800}
           onScroll={(e) => {
@@ -835,12 +854,16 @@ export default function StockScreen() {
         </View>
       )}
 
-      {/* Floating scroll buttons */}
+      {/* Floating scroll buttons
+          2026-05-05 — Use animated:false on Android FlashList to avoid the
+          "siyah ekran" glitch reported when scrolling back to top. The
+          recycler briefly drops all rendered cells while it animates and
+          flashes the empty/black background. Instant jump = no glitch. */}
       <ScrollFab
         showUp={showScrollUp}
         showDown={showScrollDown && filteredStocks.length > 20}
-        onUp={() => listRef.current?.scrollToOffset?.({ offset: 0, animated: true })}
-        onDown={() => listRef.current?.scrollToEnd?.({ animated: true })}
+        onUp={() => listRef.current?.scrollToOffset?.({ offset: 0, animated: false })}
+        onDown={() => listRef.current?.scrollToEnd?.({ animated: false })}
         primaryColor={colors.primary}
         bottomOffset={100}
       />

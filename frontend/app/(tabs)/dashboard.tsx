@@ -1500,7 +1500,15 @@ export default function DashboardScreen() {
                       <Text style={[{ flex: 0.8, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>{t('quantity_short')}</Text>
                       <Text style={[{ flex: 1.8, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>{t('amount_col')}</Text>
                     </View>
-                    {hourDetailProducts.map((item: any, idx: number) => {
+                    {/* 2026-05-05 — Filter out phantom rows: payment-type rows leaking
+                        from the POS feed (LOKASYON='VERESİYE'/'NAKİT'/'KART' with empty
+                        STOK_ADI and 0 quantity). Only render real products. */}
+                    {hourDetailProducts.filter((p: any) => {
+                      const ad = (p.STOK_ADI || '').trim();
+                      const miktar = parseFloat(p.TOPLAM_MIKTAR || '0');
+                      const tutar = parseFloat(p.KDV_DAHIL_TOPLAM_TUTAR || p.TOPLAM_TUTAR || '0');
+                      return ad && (miktar !== 0 || tutar !== 0);
+                    }).map((item: any, idx: number) => {
                       const tutar = parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0');
                       const brut = parseFloat(item.BRUT_KDV_DAHIL_TOPLAM_TUTAR || '0');
                       const iskonto = parseFloat(item.GENEL_ISKONTO_TUTARI || item.ISKONTO_TUTARI || '0');
