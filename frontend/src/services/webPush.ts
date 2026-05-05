@@ -133,18 +133,40 @@ export async function initWebPush(
         });
         n.onclick = () => {
           window.focus();
-          // Deep link: tıklandığında ilgili ekranı aç
-          if (data.type === 'high_sale' || data.type === 'iptal') {
-            window.location.hash = '#dashboard';
+          // 2026-02 — Build query string so dashboard opens the right modal
+          const params = new URLSearchParams();
+          let path = '/';
+          if (data.type === 'high_sale') {
+            if (data.belgeno) params.set('openHighSale', String(data.belgeno));
+            if (data.fis_id) params.set('openHighSaleFisId', String(data.fis_id));
+            if (data.belgeno) params.set('openHighSaleBelgeno', String(data.belgeno));
+            if (data.amount) params.set('openHighSaleAmount', String(data.amount));
+            if (data.tenant_id) params.set('openHighSaleTenant', String(data.tenant_id));
+          } else if (data.type === 'iptal' || data.type === 'cancellation') {
+            if (data.iptal_id) params.set('openIptal', String(data.iptal_id));
+            if (data.tenant_id) params.set('openIptalTenant', String(data.tenant_id));
           } else if (data.type === 'low_stock') {
-            window.location.hash = '#stock';
+            path = '/stock';
           }
+          const qs = params.toString();
+          window.location.href = path + (qs ? '?' + qs : '');
           n.close();
         };
       } catch (e) {
         console.warn('[WebPush] Foreground notification gösterilemedi:', e);
       }
     });
+
+    // 6) Service worker'dan gelen NOTIFICATION_CLICK mesajlarını dinle
+    //    (kullanıcı sayfa zaten açıkken background bildirim tıkladığında SW'den gelir)
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data?.type === 'NOTIFICATION_CLICK' && event.data?.target) {
+          console.log('[WebPush] SW navigation:', event.data.target);
+          window.location.href = event.data.target;
+        }
+      });
+    }
 
     return token;
   } catch (err) {

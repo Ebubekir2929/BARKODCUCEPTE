@@ -1309,10 +1309,39 @@ async def get_iptal_detail(
             out.append(r)
         return out
 
+    def _extract_header(payload: dict) -> dict:
+        """2026-02 — push-tıklamada header bilgisi (LOKASYON, MASA, ZAMAN,
+        GENEL_TOPLAM, KULLANICI, NEDEN) için iptal_detay cache'inden
+        SATIR_MI=False olan ana kayıtı bul."""
+        rows = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(rows, list):
+            return {}
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            try:
+                if int(r.get("IPTAL_ID") or 0) != int(iptal_id):
+                    continue
+            except (TypeError, ValueError):
+                continue
+            # Header row = SATIR_MI False or no STOK_AD/STOK_ID
+            if r.get("SATIR_MI") is False or not (r.get("STOK_AD") or r.get("STOK_ADI") or r.get("STOK_ID")):
+                return r
+        # Eğer hiç header yoksa ilk eşleşen satırın metadata alanlarını döndür
+        for r in rows:
+            if isinstance(r, dict):
+                try:
+                    if int(r.get("IPTAL_ID") or 0) == int(iptal_id):
+                        return {k: v for k, v in r.items() if k not in ("STOK_AD", "STOK_ADI", "STOK_ID", "MIKTAR", "SATIR_TUTAR")}
+                except (TypeError, ValueError):
+                    pass
+        return {}
+
     try:
         # Step 1 — try cache
         result = await _on_demand_request(tenant_id, "iptal_detay", params)
         line_items = _extract_line_items(result)
+        header = _extract_header(result)
 
         # Step 2 — cache returned only headers → force fresh sync.php call
         if not line_items:
@@ -1329,12 +1358,15 @@ async def get_iptal_detail(
                     skip_mysql_cache=True,
                 )
                 line_items = _extract_line_items(result)
+                if not header:
+                    header = _extract_header(result)
             except Exception as e_fresh:
                 logger.warning(f"[iptal-detail] fresh sync.php failed: {e_fresh}")
 
-        # Return only product rows — modal renders them as line items
+        # Return product rows + header info — modal uses header for LOKASYON/MASA/etc
         if isinstance(result, dict):
-            result["data"] = line_items
+            result["data"] = _fix_large_ints(line_items)
+            result["header"] = _fix_large_ints(header) if header else {}
         return result
     except HTTPException:
         raise

@@ -246,12 +246,20 @@ export default function DashboardScreen() {
 
     if (navParams?.openIptal) {
       const iptalId = String(navParams.openIptal);
+      // 2026-02 — push notification might be for ANOTHER tenant than the
+      // currently-selected one. Switch active source to the matching tenant
+      // so the iptal-detail call hits the right cache.
+      const targetTenant = String(navParams.openIptalTenant || '');
+      if (targetTenant && user?.tenants) {
+        const idx = user.tenants.findIndex(t => t.tenant_id === targetTenant);
+        if (idx >= 0) setActiveSource(`data${idx + 1}`);
+      }
       // Open iptal list modal and immediately fetch detail for the requested ID.
       setShowIptalListModal(true);
-      // Wait a tick for state to settle, then trigger detail fetch.
+      // Wait a tick for state to settle (esp. tenant switch), then trigger detail fetch.
       setTimeout(() => {
         fetchIptalDetail(iptalId, { IPTAL_ID: iptalId });
-      }, 350);
+      }, 600);
       // Clear params so subsequent tabs don't keep re-triggering.
       try { router.setParams({ openIptal: '', openIptalTenant: '' } as any); } catch {}
     } else if (navParams?.openHighSale) {
@@ -260,10 +268,16 @@ export default function DashboardScreen() {
       const fisId = String(navParams.openHighSaleFisId || '');
       const belge = String(navParams.openHighSaleBelgeno || navParams.openHighSale || '');
       const tutar = String(navParams.openHighSaleAmount || '');
+      // 2026-02 — switch tenant for cross-branch push deep-links
+      const targetTenant = String(navParams.openHighSaleTenant || '');
+      if (targetTenant && user?.tenants) {
+        const idx = user.tenants.findIndex(t => t.tenant_id === targetTenant);
+        if (idx >= 0) setActiveSource(`data${idx + 1}`);
+      }
       setHighSaleFisId(fisId);
       setHighSaleBelgeno(belge);
       setHighSaleAmount(tutar);
-      setHighSaleVisible(true);
+      setTimeout(() => setHighSaleVisible(true), 400);
       try { router.setParams({ openHighSale: '', openHighSaleFisId: '', openHighSaleBelgeno: '', openHighSaleAmount: '', openHighSaleTenant: '' } as any); } catch {}
     }
   }, [navParams?.openIptal, navParams?.openHighSale, navParams?.openHighSaleFisId]);
@@ -483,6 +497,11 @@ export default function DashboardScreen() {
       });
       const data = await response.json();
       if (data.ok && data.data) setIptalDetailItems(data.data);
+      // 2026-02 — push-tıklamada item sadece IPTAL_ID içerir (LOKASYON/MASA/ZAMAN yok).
+      // Backend response'undaki header'ı item ile birleştirip modal'da göster.
+      if (data.header && Object.keys(data.header).length > 0) {
+        setSelectedIptalItem((prev: any) => ({ ...(data.header || {}), ...(prev || {}) }));
+      }
     } catch (err) {
       console.error('Iptal detail error:', err);
     } finally {

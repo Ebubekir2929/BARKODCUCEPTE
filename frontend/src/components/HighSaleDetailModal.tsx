@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, Modal, TouchableOpacity, ActivityIndicator, ScrollView, Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
 import { useAuthStore } from '../store/authStore';
@@ -96,7 +97,7 @@ export const HighSaleDetailModal: React.FC<Props> = ({
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'overFullScreen'} transparent={Platform.OS !== 'ios'} onRequestClose={onClose}>
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
         {/* Header */}
         <View style={[styles.header, { backgroundColor: '#10B981', paddingTop: Platform.OS === 'ios' ? 14 : 18 }]}>
           <View style={{ flex: 1 }}>
@@ -206,7 +207,7 @@ export const HighSaleDetailModal: React.FC<Props> = ({
             </View>
           </ScrollView>
         )}
-      </View>
+      </SafeAreaView>
     </Modal>
   );
 };

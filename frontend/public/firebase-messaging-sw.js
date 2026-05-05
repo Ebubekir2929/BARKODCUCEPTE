@@ -44,28 +44,47 @@ messaging.onBackgroundMessage((payload) => {
   });
 });
 
-// Notification tıklama → uygun ekranı aç (deep link)
+// Notification tıklama → uygun ekranı aç (deep link with modal params)
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   if (event.action === 'close') return;
 
   const data = event.notification.data || {};
-  let path = '/dashboard';
-  if (data.type === 'low_stock') path = '/stock';
-  else if (data.type === 'high_sale' || data.type === 'iptal') path = '/dashboard';
+  // 2026-02 — Build query params so app opens the right modal:
+  //   high_sale push  → /?openHighSale=<belgeno>&openHighSaleFisId=<fisId>&openHighSaleAmount=<amount>&openHighSaleTenant=<tenant>
+  //   iptal push      → /?openIptal=<id>&openIptalTenant=<tenant>
+  const params = new URLSearchParams();
+  let path = '/';
+  if (data.type === 'high_sale') {
+    if (data.belgeno) params.set('openHighSale', data.belgeno);
+    if (data.fis_id) params.set('openHighSaleFisId', data.fis_id);
+    if (data.belgeno) params.set('openHighSaleBelgeno', data.belgeno);
+    if (data.amount) params.set('openHighSaleAmount', data.amount);
+    if (data.tenant_id) params.set('openHighSaleTenant', data.tenant_id);
+  } else if (data.type === 'iptal' || data.type === 'cancellation') {
+    if (data.iptal_id) params.set('openIptal', data.iptal_id);
+    if (data.tenant_id) params.set('openIptalTenant', data.tenant_id);
+  } else if (data.type === 'low_stock') {
+    path = '/stock';
+  }
+  const qs = params.toString();
+  const target = path + (qs ? '?' + qs : '');
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
-      // Eğer pencere zaten açıksa ona focus ver
+      // Eğer pencere zaten açıksa ona focus ver + navigate et
       for (const client of clients) {
         if (client.url.includes(self.location.origin) && 'focus' in client) {
-          client.postMessage({ type: 'NOTIFICATION_CLICK', data });
+          client.postMessage({ type: 'NOTIFICATION_CLICK', data, target });
+          if ('navigate' in client) {
+            client.navigate(target).catch(() => {});
+          }
           return client.focus();
         }
       }
       // Yoksa yeni pencere aç
       if (self.clients.openWindow) {
-        return self.clients.openWindow(path);
+        return self.clients.openWindow(target);
       }
     }),
   );
