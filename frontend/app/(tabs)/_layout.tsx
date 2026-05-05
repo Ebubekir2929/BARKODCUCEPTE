@@ -28,6 +28,17 @@ export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
 
+  // NOTE (Rules of Hooks): ALL hooks must be called before any conditional
+  // `return`. We previously defined the `useCallback` tab-icon renderers AFTER
+  // the early `return <SidebarLayout/>`, which meant that when the viewport
+  // crossed the 768 px breakpoint React saw the hook count change and threw
+  // "Rendered more hooks than during the previous render". Keep them here.
+  const renderDashboardIcon = useCallback(({ color, size }: any) => <TabIcon name="grid" color={color} size={size} />, []);
+  const renderStockIcon = useCallback(({ color, size }: any) => <TabIcon name="cube" color={color} size={size} />, []);
+  const renderCustomersIcon = useCallback(({ color, size }: any) => <TabIcon name="people" color={color} size={size} />, []);
+  const renderReportsIcon = useCallback(({ color, size }: any) => <TabIcon name="document-text" color={color} size={size} />, []);
+  const renderSettingsIcon = useCallback(({ color, size }: any) => <TabIcon name="settings" color={color} size={size} />, []);
+
   // 2026-05-05 — On the web (≥ 768px) render a left sidebar instead of the
   // default bottom tab bar so the app feels like a desktop SaaS dashboard.
   const useSidebar = Platform.OS === 'web' && width >= 768;
@@ -40,11 +51,6 @@ export default function TabLayout() {
   }
 
   // ─── Mobile / narrow web — keep the original bottom-tab UX ────────────
-  const renderDashboardIcon = useCallback(({ color, size }: any) => <TabIcon name="grid" color={color} size={size} />, []);
-  const renderStockIcon = useCallback(({ color, size }: any) => <TabIcon name="cube" color={color} size={size} />, []);
-  const renderCustomersIcon = useCallback(({ color, size }: any) => <TabIcon name="people" color={color} size={size} />, []);
-  const renderReportsIcon = useCallback(({ color, size }: any) => <TabIcon name="document-text" color={color} size={size} />, []);
-  const renderSettingsIcon = useCallback(({ color, size }: any) => <TabIcon name="settings" color={color} size={size} />, []);
 
   return (
     <Tabs
