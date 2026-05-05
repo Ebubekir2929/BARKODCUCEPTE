@@ -1726,11 +1726,75 @@ export default function DashboardScreen() {
             </View>
             {selectedIptalItem && (
               <ScrollView style={[styles.modalBody, { backgroundColor: colors.surface }]} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
-                <View style={[{ alignItems: 'center', padding: 16, borderRadius: 12, backgroundColor: '#EF4444' + '10', gap: 4, marginBottom: 12 }]}>
-                  <Ionicons name="close-circle" size={28} color="#EF4444" />
-                  <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text }]}>{selectedIptalItem.PERSONEL_AD || t('cancel_label')}</Text>
-                  <Text style={[{ fontSize: 13, color: colors.textSecondary }]}>{selectedIptalItem.LOKASYON} · {selectedIptalItem.IPTAL_TIPI}</Text>
-                  <Text style={[{ fontSize: 20, fontWeight: '800', color: '#EF4444', marginTop: 4 }]}>₺{parseFloat(selectedIptalItem.TUTAR || '0').toFixed(2)}</Text>
+                {/* 2026-05-05 — Yeniden tasarlanmış header kartı:
+                    İptal saati · Lokasyon · Tenant · İptal eden personel · Tutar */}
+                <View style={[{ padding: 14, borderRadius: 14, backgroundColor: '#EF4444' + '0E', borderWidth: 1, borderColor: '#EF4444' + '30', marginBottom: 14 }]}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                    <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#EF4444' + '20', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="close-circle" size={22} color="#EF4444" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 11, color: '#EF4444', fontWeight: '800', letterSpacing: 0.4 }}>
+                        {(selectedIptalItem.IPTAL_TIPI || 'İPTAL').toString().toUpperCase()}
+                      </Text>
+                      <Text style={{ fontSize: 20, fontWeight: '900', color: '#EF4444', marginTop: 2 }}>
+                        ₺{parseFloat(selectedIptalItem.TUTAR || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </Text>
+                    </View>
+                  </View>
+                  {/* Bilgi grid: 4 alan — saat / lokasyon / tenant / personel */}
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                    {/* İptal Saati */}
+                    <View style={{ flexBasis: '48%', flexGrow: 1, padding: 8, borderRadius: 10, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                        <Ionicons name="time-outline" size={11} color={colors.textSecondary} />
+                        <Text style={{ fontSize: 9, color: colors.textSecondary, fontWeight: '700', letterSpacing: 0.4 }}>İPTAL SAATİ</Text>
+                      </View>
+                      <Text style={{ fontSize: 13, fontWeight: '800', color: colors.text }} numberOfLines={1}>
+                        {selectedIptalItem.IPTAL_SAATI || selectedIptalItem.SAAT || selectedIptalItem.IPTAL_TARIH || '-'}
+                      </Text>
+                    </View>
+                    {/* Lokasyon */}
+                    <View style={{ flexBasis: '48%', flexGrow: 1, padding: 8, borderRadius: 10, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                        <Ionicons name="location-outline" size={11} color={'#F59E0B'} />
+                        <Text style={{ fontSize: 9, color: colors.textSecondary, fontWeight: '700', letterSpacing: 0.4 }}>LOKASYON</Text>
+                      </View>
+                      <Text style={{ fontSize: 13, fontWeight: '800', color: colors.text }} numberOfLines={1}>
+                        {selectedIptalItem.LOKASYON || '-'}
+                      </Text>
+                    </View>
+                    {/* Veri Kaynağı / Tenant */}
+                    <View style={{ flexBasis: '48%', flexGrow: 1, padding: 8, borderRadius: 10, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                        <Ionicons name="business-outline" size={11} color={'#8B5CF6'} />
+                        <Text style={{ fontSize: 9, color: colors.textSecondary, fontWeight: '700', letterSpacing: 0.4 }}>VERİ KAYNAĞI</Text>
+                      </View>
+                      <Text style={{ fontSize: 13, fontWeight: '800', color: colors.text }} numberOfLines={1}>
+                        {user?.tenants?.find?.(x => x.tenant_id === activeTenantId)?.tenant_name || activeSource || '-'}
+                      </Text>
+                    </View>
+                    {/* İptal Eden Personel */}
+                    <View style={{ flexBasis: '48%', flexGrow: 1, padding: 8, borderRadius: 10, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                        <Ionicons name="person-outline" size={11} color={colors.primary} />
+                        <Text style={{ fontSize: 9, color: colors.textSecondary, fontWeight: '700', letterSpacing: 0.4 }}>İPTAL EDEN</Text>
+                      </View>
+                      <Text style={{ fontSize: 13, fontWeight: '800', color: colors.text }} numberOfLines={1}>
+                        {selectedIptalItem.PERSONEL_AD || selectedIptalItem.PERSONEL || '-'}
+                      </Text>
+                    </View>
+                  </View>
+                  {/* Masa info if any */}
+                  {(selectedIptalItem.MASA || selectedIptalItem.MASA_AD) && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#EF4444' + '20' }}>
+                      <Ionicons name="restaurant-outline" size={12} color={colors.textSecondary} />
+                      <Text style={{ fontSize: 11, color: colors.textSecondary }}>Masa:</Text>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>
+                        {selectedIptalItem.MASA || selectedIptalItem.MASA_AD}
+                      </Text>
+                    </View>
+                  )}
                 </View>
 
                 {iptalDetailLoading ? (

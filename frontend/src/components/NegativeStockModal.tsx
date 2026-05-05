@@ -1,7 +1,8 @@
 import React, { useMemo, useCallback, useState } from 'react';
 import {
-  View, Text, StyleSheet, Modal, TouchableOpacity, ActivityIndicator, Platform, ScrollView,
+  View, Text, StyleSheet, Modal, TouchableOpacity, ActivityIndicator, Platform, ScrollView, StatusBar,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
@@ -59,16 +60,19 @@ export const NegativeStockModal: React.FC<Props> = ({
   const stats = useMemo(() => {
     let count = 0;
     let totalQty = 0;
-    let totalLossTry = 0;
+    let totalLossTry = 0;     // alış (cost-based) loss
+    let totalSalesTry = 0;    // satış (revenue-based) loss — 2026-05-05
     for (const it of items) {
       const m = parseFloat(String(it.MIKTAR ?? '0'));
       if (!isFinite(m) || m >= 0) continue;
       count += 1;
       totalQty += m; // negative
-      const cost = parseFloat(String(it.SON_ALIS_FIYAT ?? it.FIYAT ?? '0'));
-      if (isFinite(cost) && cost > 0) totalLossTry += m * cost; // negative * cost
+      const cost = parseFloat(String(it.SON_ALIS_FIYAT ?? '0'));
+      const sale = parseFloat(String(it.FIYAT ?? '0'));
+      if (isFinite(cost) && cost > 0) totalLossTry += m * cost;   // negative * cost
+      if (isFinite(sale) && sale > 0) totalSalesTry += m * sale;  // negative * sale
     }
-    return { count, totalQty, totalLossTry };
+    return { count, totalQty, totalLossTry, totalSalesTry };
   }, [items]);
 
   const negativeOnly = useMemo(
@@ -160,10 +164,14 @@ export const NegativeStockModal: React.FC<Props> = ({
   }, [colors, onItemPress]);
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
-      <View style={[styles.container, { backgroundColor: colors.background }]}>
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose} statusBarTranslucent>
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
+        {/* Status bar styled to match the red header on Android.
+            2026-05-05 — SafeAreaView edges={['top']} ensures content starts
+            below phone clock/notch. */}
+        <StatusBar barStyle="light-content" backgroundColor={colors.error} translucent={false} />
         {/* Header */}
-        <View style={[styles.header, { backgroundColor: colors.error, paddingTop: Platform.OS === 'ios' ? 56 : 18 }]}>
+        <View style={[styles.header, { backgroundColor: colors.error }]}>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Ionicons name="warning" size={22} color="#fff" />
@@ -214,10 +222,43 @@ export const NegativeStockModal: React.FC<Props> = ({
                 color={colors.error}
                 bg={colors.error + '15'}
                 icon="cash"
-                label="Tahmini Maliyet"
+                label="Tahmini Alış Maliyeti"
                 value={`₺${Math.abs(stats.totalLossTry).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
               />
+              {/* 2026-05-05 — Satış-bazlı kayıp: kullanıcı isteği üzerine eklendi */}
+              <SummaryCard
+                color={'#10B981'}
+                bg={'#10B981' + '15'}
+                icon="trending-up"
+                label="Tahmini Satış Kaybı"
+                value={`₺${Math.abs(stats.totalSalesTry).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
+              />
             </ScrollView>
+
+            {/* 2026-05-05 — Footer toplam paneli (kullanıcı isteği) */}
+            {stats.count > 0 && (
+              <View style={{ marginHorizontal: 16, marginBottom: 12, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card }}>
+                <Text style={{ fontSize: 11, fontWeight: '800', color: colors.textSecondary, letterSpacing: 0.4, marginBottom: 8 }}>
+                  TOPLAM ÖZET
+                </Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
+                  <Text style={{ fontSize: 13, color: colors.textSecondary }}>Eksi Miktar</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '800', color: colors.error }}>{stats.totalQty.toFixed(2)}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 }}>
+                  <Text style={{ fontSize: 13, color: colors.textSecondary }}>Alış Tutarı</Text>
+                  <Text style={{ fontSize: 14, fontWeight: '800', color: colors.error }}>
+                    -₺{Math.abs(stats.totalLossTry).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4, borderTopWidth: 1, borderTopColor: colors.border, marginTop: 4, paddingTop: 8 }}>
+                  <Text style={{ fontSize: 13, color: colors.textSecondary, fontWeight: '700' }}>Satış Tutarı (Kayıp)</Text>
+                  <Text style={{ fontSize: 15, fontWeight: '900', color: '#10B981' }}>
+                    -₺{Math.abs(stats.totalSalesTry).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </Text>
+                </View>
+              </View>
+            )}
 
             {/* Action buttons */}
             <View style={{ flexDirection: 'row', gap: 10, paddingHorizontal: 16, paddingBottom: 12 }}>
@@ -257,7 +298,7 @@ export const NegativeStockModal: React.FC<Props> = ({
             </View>
           </View>
         )}
-      </View>
+      </SafeAreaView>
     </Modal>
   );
 };

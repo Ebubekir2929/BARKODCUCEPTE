@@ -95,6 +95,30 @@ export const HighSaleDetailModal: React.FC<Props> = ({
     return { TOPLAM: net, KDV_TUTAR: kdv, ISKONTO_TUTAR: indirim, KALEM_SAYISI: count };
   }, [totals, details]);
 
+  // 2026-05-05 — Header info: Tarih, Lokasyon (kullanıcı isteği üzerine eklendi)
+  const headerInfo = useMemo(() => {
+    const firstRow = details[0] || {};
+    const lokasyon = String(
+      totals?.LOKASYON || totals?.LOKASYON_AD ||
+      firstRow.LOKASYON || firstRow.LOKASYON_AD || ''
+    ).trim();
+    // TARIH from totals or row, fallback to today
+    const rawTarih = String(
+      totals?.TARIH || totals?.FIS_TARIHI || totals?.ISLEM_TARIHI ||
+      firstRow.TARIH || firstRow.FIS_TARIHI || firstRow.ISLEM_TARIHI || ''
+    );
+    const saat = String(totals?.SAAT || totals?.FIS_SAATI || firstRow.SAAT || firstRow.FIS_SAATI || '');
+    let tarihStr = rawTarih;
+    if (rawTarih) {
+      // Normalize: ISO → tr-TR
+      const d = new Date(rawTarih);
+      if (!isNaN(d.getTime())) {
+        tarihStr = d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      }
+    }
+    return { lokasyon, tarih: tarihStr, saat };
+  }, [totals, details]);
+
   return (
     <Modal visible={visible} animationType="slide" presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'overFullScreen'} transparent={Platform.OS !== 'ios'} onRequestClose={onClose}>
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
@@ -118,15 +142,42 @@ export const HighSaleDetailModal: React.FC<Props> = ({
           </TouchableOpacity>
         </View>
 
-        {/* Hero amount */}
-        {!!amount && !isNaN(parseFloat(amount)) && (
-          <View style={{ paddingVertical: 16, paddingHorizontal: 16, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border }}>
-            <Text style={{ fontSize: 11, color: colors.textSecondary, fontWeight: '700', marginBottom: 4, letterSpacing: 0.4 }}>TOPLAM TUTAR</Text>
-            <Text style={{ fontSize: 32, color: '#10B981', fontWeight: '900' }}>
-              ₺{parseFloat(amount).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </Text>
+        {/* Hero — Toplam Tutar + Tarih + Lokasyon + Veri Kaynağı */}
+        {(!!amount && !isNaN(parseFloat(amount))) || headerInfo.lokasyon || headerInfo.tarih ? (
+          <View style={{ paddingVertical: 14, paddingHorizontal: 16, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border, gap: 6 }}>
+            {!!amount && !isNaN(parseFloat(amount)) && (
+              <>
+                <Text style={{ fontSize: 11, color: colors.textSecondary, fontWeight: '700', letterSpacing: 0.4 }}>TOPLAM TUTAR</Text>
+                <Text style={{ fontSize: 32, color: '#10B981', fontWeight: '900', marginBottom: 4 }}>
+                  ₺{parseFloat(amount).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </Text>
+              </>
+            )}
+            {/* Info chips: Tarih · Lokasyon · Veri Kaynağı */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}>
+              {!!headerInfo.tarih && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: colors.primary + '15' }}>
+                  <Ionicons name="calendar-outline" size={12} color={colors.primary} />
+                  <Text style={{ fontSize: 12, color: colors.primary, fontWeight: '700' }}>
+                    {headerInfo.tarih}{headerInfo.saat ? ` ${headerInfo.saat}` : ''}
+                  </Text>
+                </View>
+              )}
+              {!!headerInfo.lokasyon && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: '#F59E0B' + '15' }}>
+                  <Ionicons name="location-outline" size={12} color={'#F59E0B'} />
+                  <Text style={{ fontSize: 12, color: '#F59E0B', fontWeight: '700' }}>{headerInfo.lokasyon}</Text>
+                </View>
+              )}
+              {!!tenantName && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: '#8B5CF6' + '15' }}>
+                  <Ionicons name="business-outline" size={12} color={'#8B5CF6'} />
+                  <Text style={{ fontSize: 12, color: '#8B5CF6', fontWeight: '700' }}>{tenantName}</Text>
+                </View>
+              )}
+            </View>
           </View>
-        )}
+        ) : null}
 
         {/* Body */}
         {loading ? (
