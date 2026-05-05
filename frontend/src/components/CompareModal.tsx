@@ -16,6 +16,8 @@ import { useThemeStore } from '../store/themeStore';
 import { useAuthStore } from '../store/authStore';
 import { useLanguageStore } from '../store/languageStore';
 import { TenantDetailModal } from './TenantDetailModal';
+import { useResponsive } from '../hooks/useResponsive';
+import { webStyles } from '../styles/webModalStyles';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -126,6 +128,7 @@ export const CompareModal: React.FC<{
 }> = ({ visible, onClose, activeTenantId }) => {
   const { colors } = useThemeStore();
   const { user, token } = useAuthStore();
+  const { isDesktop } = useResponsive();
   const { t } = useLanguageStore();
   const insets = useSafeAreaInsets();
 
@@ -445,8 +448,23 @@ export const CompareModal: React.FC<{
       onRequestClose={onClose}
       statusBarTranslucent
       presentationStyle="overFullScreen"
+      transparent
     >
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
+      <View style={[
+        { flex: 1 },
+        Platform.OS === 'web' && isDesktop ? webStyles.overlayDesktop : { backgroundColor: colors.background },
+      ]}>
+      <SafeAreaView style={[
+        styles.container,
+        { backgroundColor: colors.background },
+        Platform.OS === 'web' && isDesktop && {
+          width: '95%', maxWidth: 1400, height: '95%', maxHeight: 1000,
+          alignSelf: 'center', marginVertical: 24, borderRadius: 16,
+          borderWidth: 1, borderColor: colors.border,
+          boxShadow: '0 12px 30px rgba(0,0,0,0.25)',
+          overflow: 'hidden',
+        } as any,
+      ]} edges={Platform.OS === 'web' && isDesktop ? [] : ['top', 'left', 'right']}>
         {/* Header */}
         <View style={[styles.header, { borderBottomColor: colors.border }]}>
           <TouchableOpacity onPress={onClose} style={styles.headerBtn} hitSlop={12}>
@@ -1256,6 +1274,7 @@ export const CompareModal: React.FC<{
           filterEndDate={fmtDate(endDate)}
         />
       )}
+      </View>
     </Modal>
   );
 };
