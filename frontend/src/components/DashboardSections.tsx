@@ -630,7 +630,7 @@ export const HourlyLocationSection: React.FC<{
                     ← Yana kaydırın →
                   </Text>
                 </View>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
                   <View style={{ flexDirection: 'row', alignItems: 'flex-end', paddingVertical: 8, gap: 4, minHeight: 180 }}>
                     {hours.map((hour: any, idx: number) => {
                       const amount = parseFloat(hour.TOPLAM || '0');
@@ -711,7 +711,7 @@ export const HourlyLocationSection: React.FC<{
               <Ionicons name="swap-horizontal" size={11} color={colors.textSecondary} />
               <Text style={{ fontSize: 10, color: colors.textSecondary, fontStyle: 'italic' }}>← Yana kaydırın →</Text>
             </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
               <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingVertical: 8 }}>
                 {hourList.map((hour) => {
                   const groupBarWidth = Math.max(8, Math.floor(40 / Math.max(1, locNames.length)));

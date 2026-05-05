@@ -879,24 +879,22 @@ export default function DashboardScreen() {
             </Text>
           </View>
 
-          {/* Bar Chart — Mobilde yatay scroll, web/desktop'ta tek bakışta */}
-          {Platform.OS !== 'web' || !isDesktop ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 4, paddingBottom: 6 }}>
-              <Ionicons name="swap-horizontal" size={12} color={colors.textSecondary} />
-              <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600', fontStyle: 'italic' }}>
-                ← Yana kaydırın →
-              </Text>
-            </View>
-          ) : null}
+          {/* Bar Chart — yatay kaydırılabilir (web'de scrollbar görünür) */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 4, paddingBottom: 6 }}>
+            <Ionicons name="swap-horizontal" size={12} color={colors.textSecondary} />
+            <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600', fontStyle: 'italic' }}>
+              ← Yana kaydırın →
+            </Text>
+          </View>
           <ScrollView
-            horizontal={Platform.OS !== 'web' || !isDesktop}
-            showsHorizontalScrollIndicator={false}
+            horizontal
+            showsHorizontalScrollIndicator={Platform.OS === 'web'}
             style={styles.chartScroll}
-            contentContainerStyle={Platform.OS === 'web' && isDesktop ? { width: '100%' } : undefined}
+            contentContainerStyle={Platform.OS === 'web' && isDesktop ? { minWidth: '100%', justifyContent: 'space-between' } : undefined}
           >
             <View style={[
               styles.barChart,
-              Platform.OS === 'web' && isDesktop && { width: '100%', justifyContent: 'space-between' as const },
+              Platform.OS === 'web' && isDesktop && { flex: 1, justifyContent: 'space-between' as const },
             ]}>
               {(sourceData?.hourlySales || []).filter((h: any) => (h?.amount || 0) > 0).map((hour, index) => {
                 const amt = hour.amount || 0;

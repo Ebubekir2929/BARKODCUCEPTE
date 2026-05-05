@@ -529,7 +529,7 @@ export const CompareModal: React.FC<{
               </Text>
             </TouchableOpacity>
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingVertical: 10 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'} contentContainerStyle={{ gap: 6, paddingVertical: 10 }}>
             {PRESETS.map((p) => {
               const isActive = activePreset === p.key;
               return (
@@ -683,7 +683,7 @@ export const CompareModal: React.FC<{
                   </View>
                 </View>
                 <SwipeHint color={colors.primary} />
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
                   <View>
                     {/* Header row */}
                     <View style={{ flexDirection: 'row', borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.background }}>
@@ -752,7 +752,7 @@ export const CompareModal: React.FC<{
                 <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Metrik Karşılaştırması</Text>
               </View>
               <SwipeHint color={colors.primary} />
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
                 <View>
                   <View style={[styles.tableRow, { borderBottomColor: colors.border, backgroundColor: colors.background }]}>
                     <Text style={[styles.colMetric, { color: colors.textSecondary, fontSize: 11, fontWeight: '700' }]}>Metrik</Text>
@@ -865,7 +865,7 @@ export const CompareModal: React.FC<{
                     </View>
                   </View>
                   <SwipeHint color={colors.primary} />
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
                     <View>
                       {/* Header */}
                       <View style={{ flexDirection: 'row', borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.background }}>
@@ -1101,7 +1101,7 @@ export const CompareModal: React.FC<{
 
                         {/* Horizontal matrix: Tenant × Lokasyon as rows, Saat as cols */}
                         <SwipeHint color={colors.primary} />
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
                           <View>
                             {/* Header row */}
                             <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.background }}>

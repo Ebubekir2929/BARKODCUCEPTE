@@ -7,6 +7,7 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -322,7 +323,7 @@ export const TenantDetailModal: React.FC<{
                 }
 
                 return (
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
                     <View>
                       {/* Hour header row */}
                       <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.background }}>
@@ -457,7 +458,7 @@ export const TenantDetailModal: React.FC<{
 
                     {/* Horizontal scroll: product × hour matrix */}
                     <SwipeHint color={bColor} />
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
                       <View>
                         {/* Hour header row */}
                         <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.background }}>
@@ -565,7 +566,7 @@ export const TenantDetailModal: React.FC<{
                 <Text style={{ color, fontSize: 12, fontWeight: '700' }}>{totalFis} fiş</Text>
               </View>
               <SwipeHint color={color} />
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ padding: 12, paddingTop: 0, alignItems: 'flex-end', gap: 6 }}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'} contentContainerStyle={{ padding: 12, paddingTop: 0, alignItems: 'flex-end', gap: 6 }}>
                 {(() => {
                   const maxFis = Math.max(...allHours.map((h) => hourlyFis[h] || 0), 1);
                   return allHours.map((h) => {
@@ -604,7 +605,7 @@ export const TenantDetailModal: React.FC<{
                 </Text>
               </View>
               <SwipeHint color={color} />
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
                 <View>
                   <View style={{ flexDirection: 'row', borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.background }}>
                     <View style={{ width: 130, paddingVertical: 8, paddingHorizontal: 12 }}>
