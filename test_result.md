@@ -1088,6 +1088,43 @@ agent_communication:
       
       NON-CODE NOTE: the review spec uses `cakmak_ebubekir@hotmail.com` (user 8 "berk")
       but expects Merkez data which belongs to `cakmak.ebubekir29@gmail.com` (user 55).
+
+
+  -agent: "main"
+  -message: |
+      2026-05-05 — Reports PDF crash fix + premium warning + chunked rendering.
+      
+      Problem: Building HTML for tens of thousands of report rows caused expo-print
+      to crash on Android (memory spike) and froze the JS thread on iOS/web. Also
+      the "Zorunlu Filtre" warnings used native ugly Alert.alert.
+      
+      Fixes (all in /app/frontend/app/(tabs)/reports.tsx):
+      
+      1. **Chunked HTML body**:
+         - PDF body now built in 500-row chunks via array.push + final join (single
+           allocation) instead of one giant `processedData.map(…).join('')`.
+         - `await new Promise(res => setTimeout(res, 0))` between chunks so the
+           UI thread stays responsive and GC has time to reclaim memory.
+      
+      2. **Size guards**:
+         - PDF_HARD_LIMIT = 20.000 → refuses outright, suggests Excel.
+         - PDF_WARN_THRESHOLD = 2.000 → premium gradient warning offers four
+           buttons: "Hepsini PDF Yap", "İlk 1.000", "Excel İndir", "İptal".
+         - When user picks "İlk 1.000", a yellow notice is embedded at the top of
+           the rendered PDF: "İlk 1.000 kayıt gösterilmektedir. Toplam X için
+           Excel/CSV kullanın."
+      
+      3. **Premium gradient alerts** (replaced 5 native Alert.alert calls):
+         - "Zorunlu Filtre" — useAlert.showWarning with explanatory message.
+         - "Filtre Gerekli" — same.
+         - PDF / Excel / connection errors — useAlert.showError with action hints.
+      
+      4. **Imports**: `useAlert, CustomAlert` from `src/components/CustomAlert`.
+         `<CustomAlert {...alertProps} />` mounted at the end of the screen JSX
+         so it overlays the report modal too.
+      
+      Backend changes: none.
+
       User 8 has zero tenants attached (no primary, no user_tenants rows), so the
       endpoint correctly returns no_subscribers_for_user for berk. The happy-path
       assertions were exercised with user 55 to validate the real data flow.

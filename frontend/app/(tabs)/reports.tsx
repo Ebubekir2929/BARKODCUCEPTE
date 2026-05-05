@@ -11,6 +11,7 @@ import { useAuthStore } from '../../src/store/authStore';
 import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
+import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -669,6 +670,7 @@ export default function ReportsScreen() {
   const { t, language } = useLanguageStore();
   const { user } = useAuthStore();
   const { activeSource } = useDataSourceStore();
+  const { showWarning, showError, showInfo, showAlert, alertProps } = useAlert();
 
   // i18n helpers for report titles / descriptions / filter groups
   const getReportTitle = (report: any) => {
@@ -1054,7 +1056,12 @@ export default function ReportsScreen() {
         const val = filterValues[reqName];
         if (val === undefined || val === null || val === '') {
           const filt = selectedReport.filters.find(f => f.name === reqName);
-          Alert.alert('Zorunlu Filtre', `"${filt?.label || reqName}" seçimi zorunludur.`);
+          // 2026-05-05 — premium gradient warning instead of native Alert
+          showWarning(
+            'Zorunlu Filtre',
+            `Bu raporu çalıştırmak için "${filt?.label || reqName}" alanını seçmelisiniz.`,
+            [{ text: 'Tamam', style: 'default' }]
+          );
           return;
         }
       }
@@ -1063,7 +1070,11 @@ export default function ReportsScreen() {
         f.type === 'multiselect' && filterValues[f.name] && filterValues[f.name].length > 0
       );
       if (!hasNarrow) {
-        Alert.alert('Filtre Gerekli', 'En az bir daraltıcı filtre seçin');
+        showWarning(
+          'Filtre Gerekli',
+          'Sonucu daraltmak için en az bir filtre seçmelisiniz (örn. Stok, Cari, Lokasyon).',
+          [{ text: 'Tamam', style: 'default' }]
+        );
         return;
       }
     }
@@ -1160,7 +1171,7 @@ export default function ReportsScreen() {
       });
       const first = await firstResp.json();
       if (runTokenRef.current !== token_id || controller.signal.aborted) return; // aborted
-      if (!first.ok) { Alert.alert('Hata', first.detail || 'Rapor çalıştırılamadı'); setReportLoading(false); return; }
+      if (!first.ok) { showError('Hata', first.detail || 'Rapor çalıştırılamadı'); setReportLoading(false); return; }
       const firstRows = (first.data || []).map(indexRow);
       setReportData(firstRows);
       setLoadedPages(1);
@@ -1330,7 +1341,7 @@ export default function ReportsScreen() {
         // Silent abort
       } else {
         console.error(err);
-        if (runTokenRef.current === token_id) Alert.alert('Hata', 'Bağlantı hatası');
+        if (runTokenRef.current === token_id) showError('Hata', 'Bağlantı hatası');
       }
     } finally {
       if (runTokenRef.current === token_id) { setReportLoading(false); setMoreLoading(false); }
@@ -1466,26 +1477,33 @@ export default function ReportsScreen() {
     return String(val || '-');
   };
 
-  // PDF Export
-  const exportPdf = async () => {
+  // PDF Export — 2026-05-05 large-dataset safe (chunked, warns user, supports
+  // a graceful CSV fallback when the row count is too high to fit a single
+  // expo-print HTML buffer without crashing the JS runtime / native bridge).
+  const PDF_HARD_LIMIT = 20000;       // refuse outright above this (would crash)
+  const PDF_WARN_THRESHOLD = 2000;    // warn user above this but allow continue
+  const PDF_CHUNK_SIZE = 500;         // build HTML in 500-row chunks via array.join
+
+  const exportPdfImpl = async (limit?: number) => {
     if (!selectedReport || processedData.length === 0) return;
     setExportLoading(true);
     await new Promise(resolve => setTimeout(resolve, 0));
+    const rows = typeof limit === 'number' ? processedData.slice(0, limit) : processedData;
     const cols = selectedReport.columns;
     const fmtMoney = (n: number) => `₺${n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
     // Top banner (Personel Satış / Fiş Kalem split / Cari Ekstre hint)
     const buildTopBannerHtml = (): string => {
       if (selectedReport.key === 'personel_satis') {
-        const firstRow = processedData[0] || {};
+        const firstRow = rows[0] || {};
         let toplam = parseFloat(String(firstRow.TOPLAM_TUTAR_NET ?? '0'));
-        if (!(toplam > 0)) toplam = processedData.reduce((acc: number, r: any) => acc + (parseFloat(String(r.TUTAR_NET || '0')) || 0), 0);
-        const fisAdet = parseFloat(String(firstRow.TOPLAM_FIS_ADET ?? processedData.reduce((a: number, r: any) => a + (parseFloat(String(r.FIS_ADET || 0)) || 0), 0)));
-        return `<div style="padding:14px;background:#f0fdf4;border:2px solid #16a34a;border-radius:10px;margin-bottom:12px;display:flex;align-items:center;gap:12px"><div style="font-size:11px;font-weight:800;color:#16a34a;letter-spacing:0.5px">TOPLAM SATIŞ</div><div style="font-size:22px;font-weight:800">${fmtMoney(toplam)}</div><div style="font-size:11px;color:#666;margin-left:auto">${fisAdet.toLocaleString('tr-TR')} fiş · ${processedData.length} personel</div></div>`;
+        if (!(toplam > 0)) toplam = rows.reduce((acc: number, r: any) => acc + (parseFloat(String(r.TUTAR_NET || '0')) || 0), 0);
+        const fisAdet = parseFloat(String(firstRow.TOPLAM_FIS_ADET ?? rows.reduce((a: number, r: any) => a + (parseFloat(String(r.FIS_ADET || 0)) || 0), 0)));
+        return `<div style="padding:14px;background:#f0fdf4;border:2px solid #16a34a;border-radius:10px;margin-bottom:12px;display:flex;align-items:center;gap:12px"><div style="font-size:11px;font-weight:800;color:#16a34a;letter-spacing:0.5px">TOPLAM SATIŞ</div><div style="font-size:22px;font-weight:800">${fmtMoney(toplam)}</div><div style="font-size:11px;color:#666;margin-left:auto">${fisAdet.toLocaleString('tr-TR')} fiş · ${rows.length} personel</div></div>`;
       }
       if (selectedReport.key === 'fis_kalem') {
         let satis = 0, alis = 0, satisAd = 0, alisAd = 0;
-        for (const row of processedData as any[]) {
+        for (const row of rows as any[]) {
           if (row.__isDetail) continue;
           const tut = parseFloat(String(row.SATIR_GENEL_TOPLAM || row.DAHIL_NET_TUTAR || '0')) || 0;
           const ft = String(row.FIS_TURU || '').toLowerCase();
@@ -1497,7 +1515,7 @@ export default function ReportsScreen() {
       if (selectedReport.key === 'cari_ekstre') {
         const det = filterValues?.Detayli;
         if (det === 1 || det === '1') {
-          const detailCount = processedData.filter((r: any) => r.__isDetail).length;
+          const detailCount = rows.filter((r: any) => r.__isDetail).length;
           return `<div style="padding:10px;background:#eff6ff;border:1px solid #2563eb;border-radius:8px;margin-bottom:12px;color:#1e40af;font-size:12px">💡 Her fiş / faturanın altında <b>stok kalemleri</b> gösterilmektedir (${detailCount} stok kalemi)</div>`;
         }
       }
@@ -1508,10 +1526,10 @@ export default function ReportsScreen() {
     const buildSummaryHtml = (): string => {
       const s = selectedReport.summary;
       if (!s) return '';
-      const firstRow = processedData[0] || {};
-      const rows: Record<string, { total: number; min: number; max: number }> = {};
+      const firstRow = rows[0] || {};
+      const summaryRows: Record<string, { total: number; min: number; max: number }> = {};
       for (const c of s.cols) {
-        const vals = processedData.map((r: any) => parseFloat(String(r[c.key] ?? '0'))).filter(n => !isNaN(n));
+        const vals = rows.map((r: any) => parseFloat(String(r[c.key] ?? '0'))).filter(n => !isNaN(n));
         const totalKey = s.totalsFromRow?.[c.key];
         const computed = s.totalsComputed?.[c.key];
         let total: number;
@@ -1524,15 +1542,15 @@ export default function ReportsScreen() {
         } else {
           total = vals.reduce((a, b) => a + b, 0);
         }
-        rows[c.key] = { total, min: vals.length ? Math.min(...vals) : 0, max: vals.length ? Math.max(...vals) : 0 };
+        summaryRows[c.key] = { total, min: vals.length ? Math.min(...vals) : 0, max: vals.length ? Math.max(...vals) : 0 };
       }
       const fmtS = (v: number, t?: string) => t === 'money' ? `₺${v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : v.toLocaleString('tr-TR', { maximumFractionDigits: 2 });
       const cell = (v: number, t?: string) => `<td style="text-align:right;padding:6px;border:1px solid #e5e7eb">${fmtS(v, t)}</td>`;
       const bodyRows = s.showOnlyTotal
-        ? `<tr style="background:#eff6ff"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#1d4ed8">TOPLAM</td>${s.cols.map(c => cell(rows[c.key].total, c.type)).join('')}</tr>`
-        : `<tr style="background:#eff6ff"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#1d4ed8">TOPLAM</td>${s.cols.map(c => cell(rows[c.key].total, c.type)).join('')}</tr>
-        <tr style="background:#fef2f2"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#b91c1c">EN DÜŞÜK</td>${s.cols.map(c => cell(rows[c.key].min, c.type)).join('')}</tr>
-        <tr style="background:#f0fdf4"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#047857">EN YÜKSEK</td>${s.cols.map(c => cell(rows[c.key].max, c.type)).join('')}</tr>`;
+        ? `<tr style="background:#eff6ff"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#1d4ed8">TOPLAM</td>${s.cols.map(c => cell(summaryRows[c.key].total, c.type)).join('')}</tr>`
+        : `<tr style="background:#eff6ff"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#1d4ed8">TOPLAM</td>${s.cols.map(c => cell(summaryRows[c.key].total, c.type)).join('')}</tr>
+        <tr style="background:#fef2f2"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#b91c1c">EN DÜŞÜK</td>${s.cols.map(c => cell(summaryRows[c.key].min, c.type)).join('')}</tr>
+        <tr style="background:#f0fdf4"><td style="padding:6px;border:1px solid #e5e7eb;font-weight:700;color:#047857">EN YÜKSEK</td>${s.cols.map(c => cell(summaryRows[c.key].max, c.type)).join('')}</tr>`;
       return `<h3 style="margin:14px 0 6px">Rapor Özeti</h3><table style="width:100%;border-collapse:collapse;margin-bottom:14px;font-size:10px"><thead><tr><th style="padding:6px;background:#f3f4f6;border:1px solid #e5e7eb"></th>${s.cols.map(c => `<th style="padding:6px;background:#f3f4f6;border:1px solid #e5e7eb;text-align:right">${c.label}</th>`).join('')}</tr></thead><tbody>${bodyRows}</tbody></table>`;
     };
 
@@ -1546,9 +1564,30 @@ export default function ReportsScreen() {
       }
       return `<tr>${cols.map(c => `<td>${renderValue(r[c.key], c)}</td>`).join('')}</tr>`;
     };
+
+    // ─── Chunked HTML body builder ────────────────────────────────────
+    // Building rows.map(renderRow).join('') for very large arrays causes
+    // memory spikes that crash expo-print on Android. We chunk into 500-row
+    // batches with `await setTimeout(0)` between each so the JS runtime can
+    // breathe. Each chunk's strings are pushed onto an array and then joined
+    // once at the end (single allocation).
+    const bodyChunks: string[] = [];
+    for (let i = 0; i < rows.length; i += PDF_CHUNK_SIZE) {
+      const chunk = rows.slice(i, i + PDF_CHUNK_SIZE);
+      const chunkParts: string[] = [];
+      for (const r of chunk) chunkParts.push(renderRow(r));
+      bodyChunks.push(chunkParts.join(''));
+      // Yield to UI / GC every chunk
+      if (i + PDF_CHUNK_SIZE < rows.length) await new Promise(res => setTimeout(res, 0));
+    }
+    const bodyHtml = bodyChunks.join('');
+
     const topBannerHtml = buildTopBannerHtml();
     const summaryHtml = buildSummaryHtml();
-    const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:16px;font-size:11px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:5px;text-align:left;font-size:10px}th{background:#f5f5f5;font-weight:bold}h2{font-size:16px;margin:0 0 8px}h3{font-size:13px}</style></head><body><h2>${selectedReport.title}</h2><p style="color:#666">${processedData.length} kayıt · ${new Date().toLocaleDateString('tr-TR')}</p>${topBannerHtml}${summaryHtml}<table><thead><tr>${cols.map(c => `<th>${c.label}</th>`).join('')}</tr></thead><tbody>${processedData.map(renderRow).join('')}</tbody></table></body></html>`;
+    const truncatedNotice = (limit && rows.length < processedData.length)
+      ? `<div style="padding:8px;background:#fef3c7;border:1px solid #d97706;border-radius:6px;margin-bottom:10px;color:#92400e;font-size:11px">⚠️ İlk ${limit.toLocaleString('tr-TR')} kayıt gösterilmektedir. Toplam ${processedData.length.toLocaleString('tr-TR')} kayıt için Excel/CSV kullanın.</div>`
+      : '';
+    const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:16px;font-size:11px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:5px;text-align:left;font-size:10px}th{background:#f5f5f5;font-weight:bold}h2{font-size:16px;margin:0 0 8px}h3{font-size:13px}</style></head><body><h2>${selectedReport.title}</h2><p style="color:#666">${rows.length.toLocaleString('tr-TR')} kayıt · ${new Date().toLocaleDateString('tr-TR')}</p>${truncatedNotice}${topBannerHtml}${summaryHtml}<table><thead><tr>${cols.map(c => `<th>${c.label}</th>`).join('')}</tr></thead><tbody>${bodyHtml}</tbody></table></body></html>`;
     try {
       if (Platform.OS === 'web') {
         // Web: open in new window and trigger print dialog
@@ -1559,7 +1598,7 @@ export default function ReportsScreen() {
           // small delay so styles render, then print
           setTimeout(() => { try { w.focus(); w.print(); } catch(_){} }, 500);
         } else {
-          Alert.alert('Popup engellendi', 'Tarayıcı yeni sekme açmaya izin vermedi. Popup izni verin.');
+          showWarning('Popup engellendi', 'Tarayıcı yeni sekme açmaya izin vermedi. Popup izni verin.');
         }
       } else {
         const { uri } = await Print.printToFileAsync({ html });
@@ -1567,15 +1606,47 @@ export default function ReportsScreen() {
         if (canShare) {
           await Sharing.shareAsync(uri, { mimeType: 'application/pdf', dialogTitle: selectedReport.title });
         } else {
-          Alert.alert('PDF hazır', `Dosya: ${uri}`);
+          showInfo('PDF hazır', `Dosya: ${uri}`);
         }
       }
     } catch (err) {
       console.error('PDF export error:', err);
-      Alert.alert('Hata', 'PDF oluşturulurken bir hata oluştu.');
+      showError('PDF Hatası', 'PDF oluşturulurken bir hata oluştu. Veri çok büyükse Excel/CSV deneyin.');
     } finally {
       setExportLoading(false);
     }
+  };
+
+  // 2026-05-05 — wrapper that warns the user before generating very large PDFs.
+  // Above HARD_LIMIT we refuse and only offer Excel.
+  const exportPdf = async () => {
+    if (!selectedReport || processedData.length === 0) return;
+    const total = processedData.length;
+    if (total > PDF_HARD_LIMIT) {
+      showWarning(
+        'Veri Çok Büyük',
+        `${total.toLocaleString('tr-TR')} kayıt PDF için fazla. Uygulamanın çökmemesi için Excel/CSV kullanmanız önerilir.`,
+        [
+          { text: 'Excel İndir', style: 'default', onPress: () => exportExcel() },
+          { text: 'İptal', style: 'cancel' },
+        ],
+      );
+      return;
+    }
+    if (total > PDF_WARN_THRESHOLD) {
+      showWarning(
+        'Çok Sayıda Kayıt',
+        `${total.toLocaleString('tr-TR')} kayıt var. PDF biraz uzun sürebilir ve telefonun yavaşlamasına yol açabilir. Daha hızlı bir çıktı için ilk 1.000 kaydı veya Excel'i tercih edebilirsiniz.`,
+        [
+          { text: 'Hepsini PDF Yap', style: 'default', onPress: () => exportPdfImpl() },
+          { text: 'İlk 1.000', style: 'default', onPress: () => exportPdfImpl(1000) },
+          { text: 'Excel İndir', style: 'default', onPress: () => exportExcel() },
+          { text: 'İptal', style: 'cancel' },
+        ],
+      );
+      return;
+    }
+    await exportPdfImpl();
   };
 
   // Excel Export
@@ -1750,7 +1821,7 @@ export default function ReportsScreen() {
       }
     } catch (err) {
       console.error('Excel export error:', err);
-      Alert.alert('Hata', 'Excel oluşturulurken bir hata oluştu.');
+      showError('Excel Hatası', 'Excel oluşturulurken bir hata oluştu.');
     } finally {
       setExportLoading(false);
     }
@@ -2135,6 +2206,10 @@ export default function ReportsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* 2026-05-05 — Premium gradient alert (CustomAlert) for required-field
+          warnings, PDF size confirmations, and Excel/PDF errors. */}
+      <CustomAlert {...alertProps} />
     </SafeAreaView>
   );
 }
