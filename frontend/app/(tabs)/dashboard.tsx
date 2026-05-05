@@ -669,7 +669,7 @@ export default function DashboardScreen() {
       )}
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={Platform.OS === 'web' && isDesktop ? { maxWidth: 1440, width: '100%', alignSelf: 'center', paddingHorizontal: 8 } : undefined}
+        contentContainerStyle={Platform.OS === 'web' && isDesktop ? { maxWidth: 1680, width: '100%', alignSelf: 'center', paddingHorizontal: 0 } : undefined}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >

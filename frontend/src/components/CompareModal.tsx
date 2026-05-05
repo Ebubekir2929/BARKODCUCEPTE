@@ -447,12 +447,12 @@ export const CompareModal: React.FC<{
       animationType="slide"
       onRequestClose={onClose}
       statusBarTranslucent
-      presentationStyle="overFullScreen"
-      transparent
+      presentationStyle={Platform.OS === 'web' && isDesktop ? 'overFullScreen' : 'fullScreen'}
+      transparent={Platform.OS === 'web' && isDesktop}
     >
       <View style={[
         { flex: 1 },
-        Platform.OS === 'web' && isDesktop ? webStyles.overlayDesktop : { backgroundColor: colors.background },
+        Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop,
       ]}>
       <SafeAreaView style={[
         styles.container,
@@ -1274,6 +1274,7 @@ export const CompareModal: React.FC<{
           filterEndDate={fmtDate(endDate)}
         />
       )}
+      </SafeAreaView>
       </View>
     </Modal>
   );
