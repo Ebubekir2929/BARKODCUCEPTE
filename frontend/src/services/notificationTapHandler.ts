@@ -23,6 +23,21 @@ let Notifications: any = null;
 if (Platform.OS !== 'web') {
   try {
     Notifications = require('expo-notifications');
+    // 2026-05-06 — CRITICAL: setNotificationHandler MUST be configured at
+    // module-load time, before any notification arrives. Previously this was
+    // only set inside notificationService.ts which gets imported lazily after
+    // login → on cold-start native taps, the listener never fired.
+    if (Notifications?.setNotificationHandler) {
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldShowBanner: true,
+          shouldShowList: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+        }),
+      });
+    }
   } catch {
     Notifications = null;
   }

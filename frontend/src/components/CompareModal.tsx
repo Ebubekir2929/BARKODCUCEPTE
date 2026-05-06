@@ -976,12 +976,20 @@ export const CompareModal: React.FC<{
               // Limit to top 15 products to avoid clutter (user request)
               const allProductsRows = Object.values(productMap).sort((a, b) => b.totalAmount - a.totalAmount).slice(0, 15);
               if (allProductsRows.length === 0) return null;
+              // 2026-05-06 — Sadece veri OLAN veri kaynaklarını sütun olarak göster.
+              // Aksi halde "Tüm Veri Kaynakları" diyoruz ama bir tek tenant'tan veri geliyor.
+              const tenantIdsWithData = new Set<string>();
+              Object.values(productMap).forEach((row) => {
+                Object.keys(row.perTenant).forEach((tid) => tenantIdsWithData.add(tid));
+              });
+              const visibleSnapshots = snapshots.filter((s) => tenantIdsWithData.has(s.tenant.tenant_id));
+              if (visibleSnapshots.length === 0) return null;
               return (
                 <View style={[styles.sectionBox, { backgroundColor: colors.card, borderColor: colors.border, padding: 0 }]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14, paddingBottom: 8 }}>
                     <Ionicons name="list-outline" size={16} color={colors.primary} />
                     <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0, flex: 1 }]} numberOfLines={1}>
-                      Ürün Karşılaştırması · Tüm Veri Kaynakları
+                      Ürün Karşılaştırması · {visibleSnapshots.length === snapshots.length ? 'Tüm Veri Kaynakları' : `${visibleSnapshots.length} / ${snapshots.length} Veri Kaynağı`}
                     </Text>
                     <View style={{ backgroundColor: colors.primary + '18', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
                       <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>{allProductsRows.length} ürün</Text>
@@ -998,9 +1006,9 @@ export const CompareModal: React.FC<{
                         <View style={{ width: 180, paddingVertical: 8, paddingHorizontal: 10 }}>
                           <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700' }}>Ürün</Text>
                         </View>
-                        {snapshots.map((s, i) => (
+                        {visibleSnapshots.map((s, i) => (
                           <View key={s.tenant.tenant_id} style={{ width: 110, paddingVertical: 8, paddingHorizontal: 6, alignItems: 'flex-end' }}>
-                            <Text style={{ color: getTenantColor(i), fontSize: 11, fontWeight: '700' }} numberOfLines={1}>
+                            <Text style={{ color: getTenantColor(snapshots.findIndex(x => x.tenant.tenant_id === s.tenant.tenant_id)), fontSize: 11, fontWeight: '700' }} numberOfLines={1}>
                               {s.tenant.name || `Veri ${i + 1}`}
                             </Text>
                           </View>
@@ -1032,14 +1040,15 @@ export const CompareModal: React.FC<{
                               {row.totalQty.toFixed(0)} adet
                             </Text>
                           </View>
-                          {snapshots.map((s, i) => {
+                          {visibleSnapshots.map((s) => {
                             const val = row.perTenant[s.tenant.tenant_id];
+                            const tIdx = snapshots.findIndex(x => x.tenant.tenant_id === s.tenant.tenant_id);
                             return (
                               <View key={s.tenant.tenant_id} style={{ width: 110, paddingVertical: 10, paddingHorizontal: 6, alignItems: 'flex-end' }}>
                                 {val && val.amount > 0 ? (
                                   <>
                                     <Text
-                                      style={{ color: getTenantColor(i), fontSize: 12, fontWeight: '800' }}
+                                      style={{ color: getTenantColor(tIdx), fontSize: 12, fontWeight: '800' }}
                                       numberOfLines={1}
                                       adjustsFontSizeToFit
                                       minimumFontScale={0.7}
