@@ -993,29 +993,32 @@ export const CompareModal: React.FC<{
                   <SwipeHint color={colors.primary} />
                   <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
                     <View>
-                      {/* Header */}
+                      {/* Header
+                          2026-05-06 — Mobile-fit column widths: phone (390px) sığsın
+                          diye Ürün col 180→130, tenant/total col 110→88 düşürüldü.
+                          2 tenant için: 32 + 130 + 88×2 + 88 = 338px → 390px'e sığar. */}
                       <View style={{ flexDirection: 'row', borderTopWidth: 1, borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.background }}>
-                        <View style={{ width: 40, paddingVertical: 8, paddingHorizontal: 6, alignItems: 'center' }}>
+                        <View style={{ width: 32, paddingVertical: 8, paddingHorizontal: 4, alignItems: 'center' }}>
                           <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '700' }}>#</Text>
                         </View>
-                        <View style={{ width: 180, paddingVertical: 8, paddingHorizontal: 10 }}>
+                        <View style={{ width: 130, paddingVertical: 8, paddingHorizontal: 8 }}>
                           <Text style={{ color: colors.textSecondary, fontSize: 11, fontWeight: '700' }}>Ürün</Text>
                         </View>
                         {visibleSnapshots.map((s, i) => (
-                          <View key={s.tenant.tenant_id} style={{ width: 110, paddingVertical: 8, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                          <View key={s.tenant.tenant_id} style={{ width: 88, paddingVertical: 8, paddingHorizontal: 4, alignItems: 'flex-end' }}>
                             <Text style={{ color: getTenantColor(snapshots.findIndex(x => x.tenant.tenant_id === s.tenant.tenant_id)), fontSize: 11, fontWeight: '700' }} numberOfLines={1}>
                               {s.tenant.name || `Veri ${i + 1}`}
                             </Text>
                           </View>
                         ))}
-                        <View style={{ width: 110, paddingVertical: 8, paddingHorizontal: 10, alignItems: 'flex-end', backgroundColor: colors.primary + '10' }}>
+                        <View style={{ width: 88, paddingVertical: 8, paddingHorizontal: 6, alignItems: 'flex-end', backgroundColor: colors.primary + '10' }}>
                           <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '800' }}>TOPLAM</Text>
                         </View>
                       </View>
                       {/* Rows */}
                       {allProductsRows.map((row, idx) => (
                         <View key={row.name + idx} style={{ flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                          <View style={{ width: 40, paddingVertical: 10, paddingHorizontal: 6, alignItems: 'center' }}>
+                          <View style={{ width: 32, paddingVertical: 10, paddingHorizontal: 4, alignItems: 'center' }}>
                             <View style={{
                               minWidth: 24, height: 22, borderRadius: 11, paddingHorizontal: 6,
                               backgroundColor: idx < 3 ? colors.primary + '20' : colors.background,
@@ -1027,7 +1030,7 @@ export const CompareModal: React.FC<{
                               </Text>
                             </View>
                           </View>
-                          <View style={{ width: 180, paddingVertical: 10, paddingHorizontal: 10 }}>
+                          <View style={{ width: 130, paddingVertical: 10, paddingHorizontal: 8 }}>
                             <Text style={{ color: colors.text, fontSize: 12, fontWeight: '700' }} numberOfLines={2}>
                               {row.name}
                             </Text>
@@ -1039,7 +1042,7 @@ export const CompareModal: React.FC<{
                             const val = row.perTenant[s.tenant.tenant_id];
                             const tIdx = snapshots.findIndex(x => x.tenant.tenant_id === s.tenant.tenant_id);
                             return (
-                              <View key={s.tenant.tenant_id} style={{ width: 110, paddingVertical: 10, paddingHorizontal: 6, alignItems: 'flex-end' }}>
+                              <View key={s.tenant.tenant_id} style={{ width: 88, paddingVertical: 10, paddingHorizontal: 4, alignItems: 'flex-end' }}>
                                 {val && val.amount > 0 ? (
                                   <>
                                     <Text
@@ -1063,7 +1066,7 @@ export const CompareModal: React.FC<{
                               </View>
                             );
                           })}
-                          <View style={{ width: 110, paddingVertical: 10, paddingHorizontal: 10, alignItems: 'flex-end', backgroundColor: colors.primary + '08' }}>
+                          <View style={{ width: 88, paddingVertical: 10, paddingHorizontal: 6, alignItems: 'flex-end', backgroundColor: colors.primary + '08' }}>
                             <Text
                               style={{ color: colors.primary, fontSize: 13, fontWeight: '800' }}
                               numberOfLines={1}
