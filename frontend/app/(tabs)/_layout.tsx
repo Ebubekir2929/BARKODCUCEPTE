@@ -48,7 +48,8 @@ export default function TabLayout() {
 
   // 2026-05-05 — On the web (≥ 768px) render a left sidebar instead of the
   // default bottom tab bar so the app feels like a desktop SaaS dashboard.
-  const useSidebar = Platform.OS === 'web' && width >= 768;
+  // 2026-05-06 — Mobil-only proje. Web sidebar nav devre dışı.
+  const useSidebar = false;
 
   // ─── Desktop / Tablet web sidebar layout ──────────────────────────────
   // We use <Slot/> here because expo-router's Tabs always pins its tabBar to

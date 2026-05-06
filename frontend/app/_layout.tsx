@@ -11,7 +11,6 @@ import * as NavigationBar from 'expo-navigation-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import notificationService from '../src/services/notificationService';
 import { attachNotificationTapHandler } from '../src/services/notificationTapHandler';
-import WebDisabledScreen from '../src/components/WebDisabledScreen';
 
 function AppShell() {
   const { colors } = useThemeStore();
@@ -67,14 +66,6 @@ function AppShell() {
 }
 
 export default function RootLayout() {
-  // 2026-05-06 — KULLANICI İSTEĞİ: Web sürümü bu projede tamamen devre dışı.
-  // Web ayrı bir projede yazılacak. Burada herhangi bir mobil rendering /
-  // store / API çağrısı yapılmadan önce web'i erken döndürüyoruz ki
-  // kırılan UI veya yanlış grafikler kullanıcıya gösterilmesin.
-  if (Platform.OS === 'web') {
-    return <WebDisabledScreen />;
-  }
-
   const { colors, isDark, loadTheme } = useThemeStore();
   const { isLoading, checkAuth, isAuthenticated, token } = useAuthStore();
   const { isReady: langReady, loadLanguage } = useLanguageStore();
@@ -99,24 +90,8 @@ export default function RootLayout() {
   // controls the local UI behaviour now; the backend watcher is always ready).
   useEffect(() => {
     if (!isAuthenticated || !token) return;
-    if (Platform.OS === 'web') {
-      // 2026-02 — Web push: FCM Web SDK ile bildirim token'ı al
-      (async () => {
-        try {
-          const { initWebPush } = await import('../src/services/webPush');
-          const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || '';
-          const result = await initWebPush(backendUrl, token);
-          if (result) {
-            console.log('[layout] FCM web token registered:', result.substring(0, 40));
-          } else {
-            console.log('[layout] FCM web token was null (no permission or unsupported)');
-          }
-        } catch (e) {
-          console.log('[layout] web push init failed:', e);
-        }
-      })();
-      return;
-    }
+    // 2026-05-06 — Web push (FCM Web SDK) bu projeden kaldırıldı. Sadece native
+    // (iOS / Android) push notification kayıt akışı çalışır.
     (async () => {
       try {
         const result = await notificationService.registerForPushNotifications();

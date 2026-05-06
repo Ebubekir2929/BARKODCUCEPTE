@@ -38,8 +38,8 @@ export const AuthShell: React.FC<Props> = ({
 }) => {
   const { colors } = useThemeStore();
   const { width } = useWindowDimensions();
-  // Two-column shell only for web ≥ 768px — keeps mobile/native untouched.
-  const useTwoCol = Platform.OS === 'web' && width >= 768;
+  // 2026-05-06 — Mobil-only proje. Desktop two-column shell devre dışı bırakıldı.
+  const useTwoCol = false;
 
   if (!useTwoCol) {
     return <>{children}</>;
