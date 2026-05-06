@@ -13,6 +13,8 @@ import { useAuthStore } from '../../src/store/authStore';
 import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { useDeepLinkStore } from '../../src/store/deepLinkStore';
+import { checkPendingFromStorage, clearPendingTap } from '../../src/services/notificationTapHandler';
+import { useFocusEffect } from 'expo-router';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useLocalSearchParams, router } from 'expo-router';
@@ -79,10 +81,16 @@ export default function StockScreen() {
   // beneath the modal so the user can keep browsing after dismiss.
   const [showNegativeStockModal, setShowNegativeStockModal] = useState(false);
 
+  // 2026-05-06 — Multi-layer notification tap pickup. Re-read AsyncStorage on focus.
+  useFocusEffect(
+    React.useCallback(() => {
+      checkPendingFromStorage();
+    }, [])
+  );
+
   // 2026-05-06 — Reactive deep-link via Zustand store (Android router.push fix)
   const stockDeepLink = useDeepLinkStore((s) => s.pending);
   const stockDeepLinkSeq = useDeepLinkStore((s) => s.seq);
-  const clearStockDeepLink = useDeepLinkStore((s) => s.clear);
   useEffect(() => {
     if (!stockDeepLink) return;
     const type = String(stockDeepLink.type || '').toLowerCase();
@@ -96,7 +104,7 @@ export default function StockScreen() {
     setFilterQty('negative');
     setSearchQuery('');
     setTimeout(() => setShowNegativeStockModal(true), 800);
-    clearStockDeepLink();
+    clearPendingTap();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stockDeepLink, stockDeepLinkSeq]);
 

@@ -20,6 +20,8 @@ import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { usePrefsStore } from '../../src/store/prefsStore';
 import { useDeepLinkStore } from '../../src/store/deepLinkStore';
+import { checkPendingFromStorage, clearPendingTap } from '../../src/services/notificationTapHandler';
+import { useFocusEffect } from 'expo-router';
 import { DataSourceSelector } from '../../src/components/DataSourceSelector';
 import { SummaryCard } from '../../src/components/SummaryCard';
 import { FilterModal } from '../../src/components/FilterModal';
@@ -243,6 +245,13 @@ export default function DashboardScreen() {
   const [highSaleBelgeno, setHighSaleBelgeno] = useState<string>('');
   const [highSaleAmount, setHighSaleAmount] = useState<string>('');
   const [highSaleTenantId, setHighSaleTenantId] = useState<string>('');   // 2026-05-05 — tenant override for cross-branch deep-links
+  // 2026-05-06 — Multi-layer notification tap pickup. On every screen focus,
+  // re-read AsyncStorage so a tap delivered while we were unmounted recovers.
+  useFocusEffect(
+    React.useCallback(() => {
+      checkPendingFromStorage();
+    }, [])
+  );
   // 2026-05-06 — Subscribe to deep-link store for notification taps
   useEffect(() => {
     if (!deepLink) return;
@@ -253,7 +262,7 @@ export default function DashboardScreen() {
 
     if (isIptal) {
       const iptalId = String(deepLink.iptal_id || deepLink.id || '');
-      if (!iptalId) { clearDeepLink(); return; }
+      if (!iptalId) { clearPendingTap(); return; }
       const targetTenant = String(deepLink.tenant || '');
       let resolvedTenantId = activeTenantId;
       if (targetTenant && user?.tenants) {
@@ -283,7 +292,8 @@ export default function DashboardScreen() {
       setHighSaleTenantId(resolvedTenantId);
       setTimeout(() => setHighSaleVisible(true), 400);
     }
-    clearDeepLink();
+    // 2026-05-06 — Clear BOTH disk + store so the tap doesn't re-fire on next focus
+    clearPendingTap();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deepLink, deepLinkSeq]);
   // Use a ref to avoid re-firing on re-renders (params can persist in nav state)

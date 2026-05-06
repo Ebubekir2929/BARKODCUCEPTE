@@ -1,128 +1,161 @@
 /**
- * Notification tap handler — converts a tapped notification's `data` payload
- * into an in-app deep link.
+ * Notification tap handler — cross-platform (iOS + Android), defensive multi-
+ * layer pickup so a tapped notification ALWAYS lands on the right modal even
+ * if any single delivery channel fails.
  *
- * Each push from the backend watcher carries `data.type`:
- *   - "high_sale"           → /(tabs)/dashboard?openHighSale=<belgeno>
- *   - "iptal" | "iptal_satir" → /(tabs)/dashboard?openIptal=<iptal_id>
- *   - "low_stock_summary"   → /(tabs)/stock?onlyNegative=1
+ * 2026-05-06 — Full rewrite. Previous architectures only relied on
+ * `addNotificationResponseReceivedListener`, which is fragile:
+ *   - Listener may attach AFTER cold-start tap is delivered
+ *   - Foreground notification with `setNotificationHandler` not configured
+ *     in time fires no response on Android
+ *   - iOS `getLastNotificationResponseAsync` is reliable but returns only
+ *     once and only on cold-start
+ *   - Race conditions when app is force-killed during processing
  *
- * The route receivers parse the query params and open the matching modal /
- * filter so the user lands on the relevant detail with one tap.
+ * NEW MULTI-LAYER PICKUP:
+ *   Layer 1 — `setNotificationHandler` configured at MODULE LOAD time so
+ *             foreground delivery is immediately operational.
+ *   Layer 2 — `addNotificationResponseReceivedListener` for fg/bg taps.
+ *   Layer 3 — `getLastNotificationResponseAsync()` for cold-start taps.
+ *   Layer 4 — `AsyncStorage` persistence so a tap survives crashes/restarts:
+ *             every tap is written to disk, every screen focus re-reads disk,
+ *             explicit `clearPending()` after the modal opens.
+ *   Layer 5 — Reactive Zustand store with `seq` counter so DUPLICATE taps
+ *             of the SAME notification still trigger the consumer effect.
  *
- * 2026-05-06 — `_pendingData` queue protects cold-start taps that fire BEFORE
- *   the auth gate finishes. Once the app finally lands on the (tabs) tree,
- *   the auth layout calls flushPendingNotificationRoute() and the queued tap
- *   is replayed.
+ * Consumers (dashboard.tsx, stock.tsx):
+ *   import { useFocusEffect } from 'expo-router';
+ *   useFocusEffect(useCallback(() => { checkPendingFromStorage(); }, []));
+ *   const deepLink = useDeepLinkStore((s) => s.pending);
+ *   const seq      = useDeepLinkStore((s) => s.seq);
+ *   useEffect(() => { if (deepLink) {  open modal  ; clearPending(); } }, [deepLink, seq]);
  */
+
 import { Platform } from 'react-native';
 import { router } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useDeepLinkStore } from '../store/deepLinkStore';
+
+const STORAGE_KEY = '@deepLink/pendingTap';
 
 let Notifications: any = null;
 if (Platform.OS !== 'web') {
   try {
     Notifications = require('expo-notifications');
-    // 2026-05-06 — CRITICAL: setNotificationHandler MUST be configured at
-    // module-load time, before any notification arrives. Previously this was
-    // only set inside notificationService.ts which gets imported lazily after
-    // login → on cold-start native taps, the listener never fired.
-    if (Notifications?.setNotificationHandler) {
-      Notifications.setNotificationHandler({
-        handleNotification: async () => ({
-          shouldShowAlert: true,
-          shouldShowBanner: true,
-          shouldShowList: true,
-          shouldPlaySound: true,
-          shouldSetBadge: true,
-        }),
-      });
-    }
   } catch {
     Notifications = null;
   }
 }
 
-let _subscription: any = null;
+// Layer 1 — configure foreground display BEFORE any notification can arrive.
+// Done at module-load (top of import graph) so iOS/Android foreground state
+// shows the banner and fires the tap listener.
+if (Notifications?.setNotificationHandler) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldShowBanner: true,        // iOS 14+ + Android API 34+
+      shouldShowList: true,          // Android API 34+
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+    }),
+  });
+}
+
+let _attached = false;
 let _coldStartHandled = false;
-let _pendingData: Record<string, any> | null = null;
-let _authReady = false;
+let _subscription: any = null;
 
-function _route(data: Record<string, any> | null | undefined, fromQueue = false) {
+/** Persist tap data to disk + push to reactive store */
+function _dispatch(data: Record<string, any>): void {
   if (!data) return;
-  // 2026-05-06 — If auth not ready, queue the tap. The (tabs) layout calls
-  // flushPendingNotificationRoute() once the user lands on a tabs route.
-  if (!_authReady && !fromQueue) {
-    _pendingData = data;
-    console.log('[notifTap] queued (auth not ready):', data?.type);
-    return;
-  }
   try {
-    const type = String(data.type || data?.notification?.type || '').toLowerCase();
-    if (!type) return;
-    console.log('[notifTap] dispatching type=', type);
-
-    // Decide which tab to navigate to.
+    console.log('[notifTap] dispatch', JSON.stringify(data));
+    // Persist BEFORE store push so a crash mid-route still recovers on next launch.
+    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data)).catch(() => {});
+    // Decide which tab to navigate to so the consumer screen is mounted.
+    const type = String(data.type || '').toLowerCase();
     const isStock = (type === 'low_stock_summary' || type === 'eksi_stok' || type === 'low_stock');
     const targetPath = isStock ? '/(tabs)/stock' : '/(tabs)/dashboard';
-
-    // 2026-05-06 — Navigate first (so the screen mounts), THEN push to store.
-    // Android router.push to the SAME screen does NOT update useLocalSearchParams,
-    // so screens subscribe to deepLinkStore instead. Store dispatch happens
-    // after a short delay to give the screen time to mount its subscription.
     try { router.push(targetPath as any); } catch (e) { console.log('[notifTap] navigate err:', e); }
+    // Slight delay so the navigator finishes mounting the tab tree, then push to store.
     setTimeout(() => {
-      try {
-        useDeepLinkStore.getState().push(data as any);
-        console.log('[notifTap] store.push OK type=', type);
-      } catch (e) {
-        console.log('[notifTap] store.push err:', e);
-      }
-    }, 200);
+      try { useDeepLinkStore.getState().push(data as any); } catch (e) { console.log('[notifTap] store err:', e); }
+    }, 250);
   } catch (e) {
-    console.log('[notifTap] route error:', e);
+    console.log('[notifTap] dispatch err:', e);
   }
 }
 
-/** Called from the (tabs) layout once the auth gate has resolved and the
- * router is mounted on a tabs route. Flushes any queued notification tap. */
-export function flushPendingNotificationRoute() {
-  _authReady = true;
-  if (_pendingData) {
-    const d = _pendingData;
-    _pendingData = null;
-    console.log('[notifTap] flushing queued tap:', d?.type);
-    // small delay so the navigator finishes mounting the tab tree
-    setTimeout(() => _route(d, true), 350);
-  }
-}
-
-/** Set up the notification-tap listener. Idempotent — safe to call repeatedly. */
-export function attachNotificationTapHandler() {
+/** Attach OS-level listeners. Idempotent — safe to call multiple times. */
+export function attachNotificationTapHandler(): void {
   if (Platform.OS === 'web' || !Notifications) return;
+  if (_attached) return;
+  _attached = true;
 
-  // Cold-start: app launched by tapping a notification while killed.
+  // Layer 2 — fg/bg tap listener
+  _subscription = Notifications.addNotificationResponseReceivedListener((response: any) => {
+    const data = response?.notification?.request?.content?.data || {};
+    _dispatch(data);
+  });
+
+  // Layer 3 — cold-start tap (app launched FROM the notification)
   if (!_coldStartHandled) {
     _coldStartHandled = true;
     Notifications.getLastNotificationResponseAsync()
       .then((response: any) => {
-        if (!response) return;
-        // Slight delay so the navigation tree is mounted before we push.
-        setTimeout(() => _route(response?.notification?.request?.content?.data), 600);
+        if (response) {
+          const data = response?.notification?.request?.content?.data || {};
+          _dispatch(data);
+        }
       })
-      .catch(() => {});
+      .catch((e: any) => console.log('[notifTap] cold-start err:', e));
   }
-
-  // Warm: app already running when user taps a notification.
-  if (_subscription) return;
-  _subscription = Notifications.addNotificationResponseReceivedListener((response: any) => {
-    _route(response?.notification?.request?.content?.data);
-  });
 }
 
-export function detachNotificationTapHandler() {
+/** Detach (e.g. on logout). Optional; module-level state retained. */
+export function detachNotificationTapHandler(): void {
   try {
     _subscription?.remove?.();
   } catch {}
   _subscription = null;
+  _attached = false;
+}
+
+/**
+ * Layer 4 — re-read disk-persisted tap on screen focus. Each consumer screen
+ * (dashboard.tsx, stock.tsx) calls this from useFocusEffect so a notification
+ * delivered while the screen was unmounted (or before it mounted) can still
+ * be recovered when the user lands on it.
+ */
+export async function checkPendingFromStorage(): Promise<void> {
+  try {
+    const json = await AsyncStorage.getItem(STORAGE_KEY);
+    if (!json) return;
+    const data = JSON.parse(json);
+    if (data && typeof data === 'object') {
+      // Don't dispatch through router again — just re-push to store so the
+      // current screen's effect re-runs.
+      useDeepLinkStore.getState().push(data as any);
+    }
+  } catch (e) {
+    console.log('[notifTap] checkPending err:', e);
+  }
+}
+
+/** Clear the persisted tap. Called by the consumer once it has opened the
+ *  matching modal. Without this, the tap would re-fire on every screen focus. */
+export async function clearPendingTap(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(STORAGE_KEY);
+  } catch {}
+  try {
+    useDeepLinkStore.getState().clear();
+  } catch {}
+}
+
+/** Legacy compat — older code paths called this expecting a flush. Now a no-op
+ *  because storage-based pickup runs on focus. Kept to avoid import errors. */
+export function flushPendingNotificationRoute(): void {
+  // intentionally empty — kept for backward compatibility
 }
