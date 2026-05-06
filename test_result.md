@@ -1720,3 +1720,29 @@ agent_communication:
         keys (STOK_AD vs STOK_ADI). Will iterate after user uploads a
         fresh tap screenshot from a recent FIS.
 
+    -agent: "main"
+    -message: |
+      [2026-05-06 15:10] NegativeStockModal UI fixes
+      ────────────────────────────────────────────
+      User report: "üstten saat kısmı üstüne geliyor; altında gereksiz büyük
+      bir alan var; ürünlerin miktarını da yaz"
+
+      Fixes (`/app/frontend/src/components/NegativeStockModal.tsx`):
+      1. Status bar overlap: değiştirildi `translucent={false}` → `translucent`
+         ve header'a `paddingTop: 12` eklendi. SafeAreaView edges={['top']}
+         ile birlikte phone clock artık header'ın üzerinde görünmüyor.
+      2. Kartların altındaki büyük boşluk: 4 SummaryCard'ı taşıyan horizontal
+         ScrollView, parent `<View style={{flex:1}}>` içinde dikey olarak
+         yayılıyordu. Artık fixed `height: 92` container'a wrap edildi.
+      3. Ürün satırlarında birim: NegativeStockItem interface'ine BIRIM,
+         BIRIM_AD, BIRIM_ADI alanları eklendi. Row render'ı miktarın yanına
+         birimi (Adet/Kg) basıyor.
+
+      Bundle compile ✅, dashboard hata vermedi.
+
+      User'ın gerçek cihazda test etmesi gereken:
+      - Status bar artık üstte saat ile çakışmıyor mu?
+      - Kartlar küçük ve düzgün hizalı mı?
+      - Liste satırlarında "−811.00 Adet" / "−5.00 Kg" şeklinde birim
+        görünüyor mu?
+

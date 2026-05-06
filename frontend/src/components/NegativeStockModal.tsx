@@ -38,6 +38,9 @@ export interface NegativeStockItem {
   STOK_GRUP?: string; GRUP?: string;
   BARKOD?: string;
   LOKASYON?: string;
+  BIRIM?: string;
+  BIRIM_AD?: string;
+  BIRIM_ADI?: string;
 }
 
 interface Props {
@@ -126,6 +129,7 @@ export const NegativeStockModal: React.FC<Props> = ({
     const m = parseFloat(String(item.MIKTAR ?? '0'));
     const cost = parseFloat(String(item.SON_ALIS_FIYAT ?? item.FIYAT ?? '0'));
     const loss = isFinite(cost) && cost > 0 ? m * cost : 0;
+    const birim = (item.BIRIM_AD || item.BIRIM_ADI || item.BIRIM || '').trim();
     return (
       <TouchableOpacity
         activeOpacity={onItemPress ? 0.6 : 1}
@@ -150,9 +154,16 @@ export const NegativeStockModal: React.FC<Props> = ({
           </View>
         </View>
         <View style={{ alignItems: 'flex-end' }}>
-          <Text style={{ fontSize: 16, color: colors.error, fontWeight: '800' }}>
-            {m.toFixed(2)}
-          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
+            <Text style={{ fontSize: 16, color: colors.error, fontWeight: '800' }}>
+              {m.toFixed(2)}
+            </Text>
+            {!!birim && (
+              <Text style={{ fontSize: 11, color: colors.textSecondary, fontWeight: '700' }}>
+                {birim}
+              </Text>
+            )}
+          </View>
           {!!loss && (
             <Text style={{ fontSize: 11, color: colors.error, fontWeight: '600' }}>
               ₺{Math.abs(loss).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
@@ -166,12 +177,11 @@ export const NegativeStockModal: React.FC<Props> = ({
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose} statusBarTranslucent>
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
-        {/* Status bar styled to match the red header on Android.
-            2026-05-05 — SafeAreaView edges={['top']} ensures content starts
-            below phone clock/notch. */}
-        <StatusBar barStyle="light-content" backgroundColor={colors.error} translucent={false} />
+        {/* 2026-05-06 — translucent=true ile birlikte SafeAreaView edges={['top']}
+            phone clock'un üstüne gelmesini engelliyor. */}
+        <StatusBar barStyle="light-content" backgroundColor={colors.error} translucent />
         {/* Header */}
-        <View style={[styles.header, { backgroundColor: colors.error }]}>
+        <View style={[styles.header, { backgroundColor: colors.error, paddingTop: 12 }]}>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Ionicons name="warning" size={22} color="#fff" />
@@ -198,12 +208,14 @@ export const NegativeStockModal: React.FC<Props> = ({
           </View>
         ) : (
           <View style={{ flex: 1 }}>
-            {/* Summary cards */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 14, gap: 10 }}
-            >
+            {/* Summary cards — fixed height container so the horizontal
+                ScrollView doesn't stretch vertically (2026-05-06 fix). */}
+            <View style={{ height: 92 }}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 10, gap: 10, alignItems: 'center' }}
+              >
               <SummaryCard
                 color={colors.error}
                 bg={colors.error + '15'}
@@ -233,7 +245,8 @@ export const NegativeStockModal: React.FC<Props> = ({
                 label="Tahmini Satış Kaybı"
                 value={`₺${Math.abs(stats.totalSalesTry).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
               />
-            </ScrollView>
+              </ScrollView>
+            </View>
 
             {/* 2026-05-05 — Footer toplam paneli (kullanıcı isteği) */}
             {stats.count > 0 && (
