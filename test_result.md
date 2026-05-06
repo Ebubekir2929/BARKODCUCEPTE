@@ -1679,6 +1679,44 @@ agent_communication:
       Pending user-facing item NOT yet addressed (waiting on screenshot):
       - HighSaleDetailModal showed "-" / "0 Adet" for products. Suspected
         cause: fis_id mismatch → fis_detay_toplam fallback with different
+    -agent: "main"
+    -message: |
+      [2026-05-06 14:55] HighSaleDetailModal "-" / "0 Adet" boş satır fix
+      ────────────────────────────────────────────────────────────────────
+      Root causes (üç katmanlı):
+      1. `_on_demand_request` whitelist gate'i `fis_gunluk_bildirim_feed`
+         dataset'ini "MySQL-only mode"da BLOCKED ediyordu → endpoint boş
+         dönüp fallback'e düşüyordu.
+      2. `lookup_cached_report`'un fuzzy params eşleştirmesi başarısızdı:
+         endpoint `params={}` gönderiyor ama cache row'unun params'ı
+         `{"TARIH":"2026-05-06", "FisTuru":"", ...}` içeriyor — strip-empty
+         normalize sonrası `{"TARIH":"..."} ≠ {}`.
+      3. Fallback `fis_detay_toplam` farklı kolon adları kullanıyor:
+         STOK / MIKTAR_FIS / BIRIM / TOPLAM_SATIR_ISKONTOSU.
+
+      Fix:
+      - `high-sale-detail` artık `dataset_cache` tablosundan **direkt**
+        sorguyla en son 8 cache entry'sini çekiyor, FIS_ID dedup yaparak
+        merge ediyor (gün sınırını aşan fişleri de kapsıyor).
+      - Eğer cache miss olursa eski `_on_demand_request` yolu fallback'e
+        kalıyor.
+      - Fallback yolunda da `fis_detay_toplam` döndüğünde rows artık
+        normalize ediliyor: STOK→STOK_ADI, MIKTAR_FIS→MIKTAR, BIRIM→BIRIM_ADI,
+        TOPLAM_SATIR_ISKONTOSU→SATIR_ISKONTO_TUTARI, DAHIL_TUTAR→KDV_DAHIL_NET_TUTAR.
+
+      Doğrulama (curl ile):
+      - fis_id=22833840 → 5 satır, STOK_ADI dolu, MIKTAR=1.0, BIRIM=Adet,
+        TUTAR=1500.0, BELGENO=PRI:63348, KESEN=BERAT ✅
+      - fis_id=22885838, 22973635 da aynı şekilde başarılı ✅
+      - source=mysql_cache_direct (yeni yol)
+
+      Files touched:
+        /app/backend/routes/data.py (high-sale-detail rewrite + normalize)
+
+      Pending:
+      - Kullanıcı APK build alıp gerçek bir push notification'a tıklayarak
+        modal'da ürün isimlerinin görüldüğünü doğrulamalı.
+
         keys (STOK_AD vs STOK_ADI). Will iterate after user uploads a
         fresh tap screenshot from a recent FIS.
 

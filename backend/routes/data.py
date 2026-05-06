@@ -1888,22 +1888,81 @@ async def get_high_sale_detail(
         return out
 
     try:
-        # Step 1 — read cache (no params filter; we filter client-side)
-        result = await _on_demand_request(
-            tenant_id, "fis_gunluk_bildirim_feed", {}, raw_cache=True
-        )
-        rows = []
-        cache = result.get("cache") or {}
-        if isinstance(cache.get("data"), list):
-            rows = cache["data"]
-        elif isinstance(result.get("data"), list):
-            rows = result["data"]
+        # Step 1 — read cache. We bypass the standard `_on_demand_request`
+        # whitelist + param-matching logic and read the most recent row from
+        # `dataset_cache` directly. Reason: `fis_gunluk_bildirim_feed` is
+        # populated by the watcher with a TARIH-bearing params_json that does
+        # not match the empty `{}` params we pass here.
+        rows: list = []
+        try:
+            from services.dataset_cache import get_data_pool
+            import json as _json2
+            pool = await get_data_pool()
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    # Try newest entries first; if the FIS_ID isn't in them,
+                    # iterate through more candidates. We collect rows from
+                    # ALL recent caches and let `_match_row` pick the right
+                    # one — receipts may straddle day boundaries.
+                    await cur.execute(
+                        """
+                        SELECT data_json, row_count, synced_at FROM dataset_cache
+                        WHERE tenant_id=%s AND dataset_key=%s
+                        ORDER BY synced_at DESC LIMIT 8
+                        """,
+                        (tenant_id, "fis_gunluk_bildirim_feed"),
+                    )
+                    merged: list = []
+                    seen_fids: set = set()
+                    for cand in await cur.fetchall():
+                        try:
+                            data = _json2.loads(cand[0] or "[]")
+                        except Exception:
+                            continue
+                        if not isinstance(data, list):
+                            continue
+                        for r in data:
+                            if not isinstance(r, dict):
+                                continue
+                            fid = r.get("FIS_ID")
+                            try:
+                                fid_key = int(fid) if fid is not None else None
+                            except (TypeError, ValueError):
+                                fid_key = str(fid)
+                            if fid_key in seen_fids:
+                                continue
+                            seen_fids.add(fid_key)
+                            merged.append(r)
+                    rows = merged
+        except Exception as e_db:
+            logger.warning(f"[high-sale-detail] direct cache lookup failed: {e_db}")
+
+        # Fall back to the regular cached path (covers edge cases where the
+        # direct query failed).
+        if not rows:
+            result = await _on_demand_request(
+                tenant_id, "fis_gunluk_bildirim_feed", {}, raw_cache=True
+            )
+            cache = result.get("cache") or {}
+            if isinstance(cache.get("data"), list):
+                rows = cache["data"]
+            elif isinstance(result.get("data"), list):
+                rows = result["data"]
+        else:
+            result = {"_source": "mysql_cache_direct"}
 
         row = _match_row(rows)
         details = _flatten_urunler(row)
+        logger.info(
+            f"[high-sale-detail] tenant={tenant_id} fis_id={fis_id} "
+            f"feed_rows={len(rows)} match={'Y' if row else 'N'} "
+            f"details_from_feed={len(details)}"
+        )
 
         # Step 2 — fallback to fis_detay_toplam if URUNLER missing
+        fallback_used = False
         if not details and fis_id_int is not None:
+            fallback_used = True
             try:
                 fb = await _on_demand_request(
                     tenant_id, "fis_detay_toplam", {"FisId": fis_id_int},
@@ -1922,6 +1981,45 @@ async def get_high_sale_detail(
                         details = fb_data[0]
                     else:
                         details = fb_data
+                if details and isinstance(details, list) and isinstance(details[0], dict):
+                    # 2026-05-06 — `fis_detay_toplam` farklı kolon adları kullanır
+                    # (STOK / MIKTAR_FIS / BIRIM / TOPLAM_SATIR_ISKONTOSU). Modal'a
+                    # gitmeden önce normalize edip feed schema'ya çevir.
+                    normalized: list = []
+                    for r in details:
+                        if not isinstance(r, dict):
+                            continue
+                        nr = dict(r)
+                        # Stok adı
+                        if not nr.get("STOK_ADI"):
+                            nr["STOK_ADI"] = (
+                                nr.get("STOK") or nr.get("STOK_AD") or
+                                nr.get("AD") or nr.get("ACIKLAMA") or ""
+                            )
+                        # Stok kodu
+                        if not nr.get("STOK_KODU"):
+                            nr["STOK_KODU"] = nr.get("STOK_KOD") or nr.get("KOD") or nr.get("BARKOD") or ""
+                        # Miktar
+                        if nr.get("MIKTAR") in (None, "", 0, "0", "0.000"):
+                            mf = nr.get("MIKTAR_FIS")
+                            if mf not in (None, "", 0, "0"):
+                                nr["MIKTAR"] = mf
+                        # Birim
+                        if not nr.get("BIRIM_ADI"):
+                            nr["BIRIM_ADI"] = nr.get("BIRIM") or ""
+                        # İndirim (satır iskontosu)
+                        if not nr.get("SATIR_ISKONTO_TUTARI"):
+                            nr["SATIR_ISKONTO_TUTARI"] = (
+                                nr.get("TOPLAM_SATIR_ISKONTOSU") or
+                                nr.get("ISKONTO_TUTARI") or nr.get("INDIRIM_TUTARI") or "0"
+                            )
+                        # KDV dahil net tutar (modalin tercih ettiği)
+                        if not nr.get("KDV_DAHIL_NET_TUTAR"):
+                            nr["KDV_DAHIL_NET_TUTAR"] = (
+                                nr.get("DAHIL_TUTAR") or nr.get("TUTAR") or "0"
+                            )
+                        normalized.append(nr)
+                    details = normalized
             except Exception as e_fb:
                 logger.info(f"[high-sale-detail] fis_detay_toplam fallback failed: {e_fb}")
 
