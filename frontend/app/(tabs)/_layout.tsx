@@ -6,7 +6,9 @@ import { useLanguageStore } from '../../src/store/languageStore';
 import { Platform, useWindowDimensions, View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../src/store/authStore';
-import { flushPendingNotificationRoute } from '../../src/services/notificationTapHandler';
+// 2026-05-06 — flushPendingNotificationRoute kaldırıldı. Yeni mimari:
+// notificationTapHandler AsyncStorage'a yazar, dashboard.tsx useFocusEffect
+// içinde readPendingTap çağırarak okur. Burada hiçbir şey yapmaya gerek yok.
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -40,11 +42,9 @@ export default function TabLayout() {
   const renderReportsIcon = useCallback(({ color, size }: any) => <TabIcon name="document-text" color={color} size={size} />, []);
   const renderSettingsIcon = useCallback(({ color, size }: any) => <TabIcon name="settings" color={color} size={size} />, []);
 
-  // 2026-05-06 — When auth gate has resolved and we render the tabs tree,
-  // flush any push-notification tap that arrived BEFORE auth was ready.
-  useEffect(() => {
-    flushPendingNotificationRoute();
-  }, []);
+  // 2026-05-06 — Eski `flushPendingNotificationRoute` çağrısı kaldırıldı.
+  // Yeni mimari: dashboard.tsx useFocusEffect içinde AsyncStorage'dan
+  // pending tap'i okur. Burada hiçbir şey yapmaya gerek yok.
 
   // 2026-05-05 — On the web (≥ 768px) render a left sidebar instead of the
   // default bottom tab bar so the app feels like a desktop SaaS dashboard.

@@ -1587,3 +1587,37 @@ agent_communication:
 
       Files touched: dashboard.tsx, stock.tsx, HighSaleDetailModal.tsx
       Backend: no changes.
+
+    -agent: "main"
+    -message: |
+      [2026-05-06 12:30] Dashboard cold-start crash fix + notification flow review
+      ────────────────────────────────────────────────────────────────────────
+      Root causes (back-to-back ReferenceErrors that blocked all logins):
+      1. `setActiveSource is not defined` — dashboard.tsx line 311 referenced
+         `setActiveSource` in a useCallback dep array, but line 45 only
+         destructured `activeSource` from the data-source store.
+         Fix: `const { activeSource, setActiveSource } = useDataSourceStore();`
+      2. `flushPendingNotificationRoute is not a function` — _layout.tsx still
+         called the old export from the rewritten notificationTapHandler.
+         Fix: removed the import + the useEffect call (dashboard now reads
+         the AsyncStorage tap on its own via useFocusEffect).
+
+      Notification flow review (per user request):
+      - Found that dashboard.tsx unconditionally cleared the AsyncStorage
+        pending tap even when the type was `low_stock_summary` — meaning a
+        stock notification could be silently eaten before stock.tsx had a
+        chance to read it.
+        Fix: dashboard now only clears for iptal/high_sale/unknown types and
+        ROUTES to /(tabs)/stock for low_stock taps without clearing,
+        delegating consumption to stock.tsx.
+
+      Verified via screenshot tool:
+      - Login succeeds ✅
+      - Dashboard renders cards + chart ✅
+      - Stok tab loads product list ✅
+      - 0 Uncaught Errors
+
+      Files touched:
+        - app/(tabs)/dashboard.tsx (destructure fix + low_stock route branch)
+        - app/(tabs)/_layout.tsx (removed stale import + effect)
+      No backend changes.

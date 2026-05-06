@@ -1,161 +1,124 @@
 /**
- * Notification tap handler — cross-platform (iOS + Android), defensive multi-
- * layer pickup so a tapped notification ALWAYS lands on the right modal even
- * if any single delivery channel fails.
+ * notificationTapHandler — SADE versiyon (2026-05-06 sıfırdan yazıldı)
  *
- * 2026-05-06 — Full rewrite. Previous architectures only relied on
- * `addNotificationResponseReceivedListener`, which is fragile:
- *   - Listener may attach AFTER cold-start tap is delivered
- *   - Foreground notification with `setNotificationHandler` not configured
- *     in time fires no response on Android
- *   - iOS `getLastNotificationResponseAsync` is reliable but returns only
- *     once and only on cold-start
- *   - Race conditions when app is force-killed during processing
+ * Akış:
+ *  1) Bildirim gelir.
+ *  2) Kullanıcı banner'a tıklar.
+ *  3) Expo Notifications "responseListener" tetiklenir.
+ *  4) Payload'u (iptal_id / fis_id / tenant / type) AsyncStorage'a yazarız.
+ *  5) Dashboard mount olduğunda / focus aldığında AsyncStorage'ı okur, modal açar
+ *     ve pending tap'ı siler.
  *
- * NEW MULTI-LAYER PICKUP:
- *   Layer 1 — `setNotificationHandler` configured at MODULE LOAD time so
- *             foreground delivery is immediately operational.
- *   Layer 2 — `addNotificationResponseReceivedListener` for fg/bg taps.
- *   Layer 3 — `getLastNotificationResponseAsync()` for cold-start taps.
- *   Layer 4 — `AsyncStorage` persistence so a tap survives crashes/restarts:
- *             every tap is written to disk, every screen focus re-reads disk,
- *             explicit `clearPending()` after the modal opens.
- *   Layer 5 — Reactive Zustand store with `seq` counter so DUPLICATE taps
- *             of the SAME notification still trigger the consumer effect.
- *
- * Consumers (dashboard.tsx, stock.tsx):
- *   import { useFocusEffect } from 'expo-router';
- *   useFocusEffect(useCallback(() => { checkPendingFromStorage(); }, []));
- *   const deepLink = useDeepLinkStore((s) => s.pending);
- *   const seq      = useDeepLinkStore((s) => s.seq);
- *   useEffect(() => { if (deepLink) {  open modal  ; clearPending(); } }, [deepLink, seq]);
+ * Hiçbir Zustand store kullanmıyoruz — sadece AsyncStorage. Bu şekilde:
+ *  - Cold start ✅ (app açılırken store hidrate olmadan da AsyncStorage hazır)
+ *  - Background tap ✅ (focus effect AsyncStorage'ı yeniden okur)
+ *  - Foreground tap ✅ (aynı yol)
+ *  - Crash riski yok (state güncellemesi yok, sadece disk I/O)
  */
-
-import { Platform } from 'react-native';
-import { router } from 'expo-router';
+import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useDeepLinkStore } from '../store/deepLinkStore';
 
-const STORAGE_KEY = '@deepLink/pendingTap';
+const STORAGE_KEY = '@notification_pending_tap_v2';
 
-let Notifications: any = null;
-if (Platform.OS !== 'web') {
-  try {
-    Notifications = require('expo-notifications');
-  } catch {
-    Notifications = null;
-  }
-}
-
-// Layer 1 — configure foreground display BEFORE any notification can arrive.
-// Done at module-load (top of import graph) so iOS/Android foreground state
-// shows the banner and fires the tap listener.
-if (Notifications?.setNotificationHandler) {
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldShowBanner: true,        // iOS 14+ + Android API 34+
-      shouldShowList: true,          // Android API 34+
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
-  });
+export interface PendingTap {
+  type?: string;       // 'iptal' | 'high_sale' | ...
+  iptal_id?: string;
+  fis_id?: string;
+  belgeno?: string;
+  amount?: string;
+  tenant?: string;
+  receivedAt?: number;
 }
 
 let _attached = false;
-let _coldStartHandled = false;
-let _subscription: any = null;
+let _subscriptions: Array<{ remove?: () => void }> = [];
 
-/** Persist tap data to disk + push to reactive store */
-function _dispatch(data: Record<string, any>): void {
-  if (!data) return;
+/**
+ * Bildirim tap'ını AsyncStorage'a yazar. Aynı tap iki kere işlenmesin diye
+ * receivedAt timestamp'i ile beraber saklanır.
+ */
+async function writePendingTap(payload: any) {
   try {
-    console.log('[notifTap] dispatch', JSON.stringify(data));
-    // Persist BEFORE store push so a crash mid-route still recovers on next launch.
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data)).catch(() => {});
-    // Decide which tab to navigate to so the consumer screen is mounted.
-    const type = String(data.type || '').toLowerCase();
-    const isStock = (type === 'low_stock_summary' || type === 'eksi_stok' || type === 'low_stock');
-    const targetPath = isStock ? '/(tabs)/stock' : '/(tabs)/dashboard';
-    try { router.push(targetPath as any); } catch (e) { console.log('[notifTap] navigate err:', e); }
-    // Slight delay so the navigator finishes mounting the tab tree, then push to store.
-    setTimeout(() => {
-      try { useDeepLinkStore.getState().push(data as any); } catch (e) { console.log('[notifTap] store err:', e); }
-    }, 250);
+    if (!payload || typeof payload !== 'object') return;
+    const tap: PendingTap = {
+      type: String(payload.type || '').toLowerCase(),
+      iptal_id: payload.iptal_id ? String(payload.iptal_id) : undefined,
+      fis_id: payload.fis_id ? String(payload.fis_id) : undefined,
+      belgeno: payload.belgeno ? String(payload.belgeno) : undefined,
+      amount: payload.amount ? String(payload.amount) : undefined,
+      tenant: payload.tenant ? String(payload.tenant) : undefined,
+      receivedAt: Date.now(),
+    };
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(tap));
+    console.log('[NotifTap] wrote pending:', tap);
   } catch (e) {
-    console.log('[notifTap] dispatch err:', e);
+    console.log('[NotifTap] write failed:', e);
   }
-}
-
-/** Attach OS-level listeners. Idempotent — safe to call multiple times. */
-export function attachNotificationTapHandler(): void {
-  if (Platform.OS === 'web' || !Notifications) return;
-  if (_attached) return;
-  _attached = true;
-
-  // Layer 2 — fg/bg tap listener
-  _subscription = Notifications.addNotificationResponseReceivedListener((response: any) => {
-    const data = response?.notification?.request?.content?.data || {};
-    _dispatch(data);
-  });
-
-  // Layer 3 — cold-start tap (app launched FROM the notification)
-  if (!_coldStartHandled) {
-    _coldStartHandled = true;
-    Notifications.getLastNotificationResponseAsync()
-      .then((response: any) => {
-        if (response) {
-          const data = response?.notification?.request?.content?.data || {};
-          _dispatch(data);
-        }
-      })
-      .catch((e: any) => console.log('[notifTap] cold-start err:', e));
-  }
-}
-
-/** Detach (e.g. on logout). Optional; module-level state retained. */
-export function detachNotificationTapHandler(): void {
-  try {
-    _subscription?.remove?.();
-  } catch {}
-  _subscription = null;
-  _attached = false;
 }
 
 /**
- * Layer 4 — re-read disk-persisted tap on screen focus. Each consumer screen
- * (dashboard.tsx, stock.tsx) calls this from useFocusEffect so a notification
- * delivered while the screen was unmounted (or before it mounted) can still
- * be recovered when the user lands on it.
+ * Dashboard'dan çağrılır. Pending tap varsa döner, yoksa null.
+ * Çağrandan SONRA `clearPendingTap()` çağrılarak silinmeli.
  */
-export async function checkPendingFromStorage(): Promise<void> {
+export async function readPendingTap(): Promise<PendingTap | null> {
   try {
-    const json = await AsyncStorage.getItem(STORAGE_KEY);
-    if (!json) return;
-    const data = JSON.parse(json);
-    if (data && typeof data === 'object') {
-      // Don't dispatch through router again — just re-push to store so the
-      // current screen's effect re-runs.
-      useDeepLinkStore.getState().push(data as any);
-    }
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const tap = JSON.parse(raw) as PendingTap;
+    return tap;
   } catch (e) {
-    console.log('[notifTap] checkPending err:', e);
+    console.log('[NotifTap] read failed:', e);
+    return null;
   }
 }
 
-/** Clear the persisted tap. Called by the consumer once it has opened the
- *  matching modal. Without this, the tap would re-fire on every screen focus. */
 export async function clearPendingTap(): Promise<void> {
   try {
     await AsyncStorage.removeItem(STORAGE_KEY);
   } catch {}
-  try {
-    useDeepLinkStore.getState().clear();
-  } catch {}
 }
 
-/** Legacy compat — older code paths called this expecting a flush. Now a no-op
- *  because storage-based pickup runs on focus. Kept to avoid import errors. */
-export function flushPendingNotificationRoute(): void {
-  // intentionally empty — kept for backward compatibility
+/**
+ * Uygulamanın en başında (RootLayout) bir kez çağrılır. İdempotent.
+ * Dinleyicileri kurar:
+ *  - addNotificationResponseReceivedListener: warm tap (foreground/background)
+ *  - getLastNotificationResponseAsync:        cold start tap
+ */
+export function attachNotificationTapHandler(): void {
+  if (_attached) return;
+  _attached = true;
+
+  // 1) Cold start: app henüz mount olmadan tıklanmış olabilir
+  Notifications.getLastNotificationResponseAsync()
+    .then((resp) => {
+      if (resp) {
+        const data = resp.notification?.request?.content?.data;
+        if (data) {
+          writePendingTap(data);
+        }
+      }
+    })
+    .catch(() => {});
+
+  // 2) Warm tap: app çalışırken (foreground/background) kullanıcı banner'a tıklarsa
+  const sub = Notifications.addNotificationResponseReceivedListener((resp) => {
+    try {
+      const data = resp?.notification?.request?.content?.data;
+      if (data) writePendingTap(data);
+    } catch (e) {
+      console.log('[NotifTap] response handler failed:', e);
+    }
+  });
+  _subscriptions.push(sub);
+}
+
+export function detachNotificationTapHandler(): void {
+  _subscriptions.forEach((s) => { try { s.remove?.(); } catch {} });
+  _subscriptions = [];
+  _attached = false;
+}
+
+// Geriye dönük uyumluluk: eski kod `checkPendingFromStorage` çağırıyor olabilir.
+export async function checkPendingFromStorage(): Promise<void> {
+  // No-op — yeni akışta dashboard zaten readPendingTap ile okur.
 }

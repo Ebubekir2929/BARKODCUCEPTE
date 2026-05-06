@@ -13,14 +13,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useLocalSearchParams, router } from 'expo-router';
+import { useFocusEffect, router } from 'expo-router';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAuthStore } from '../../src/store/authStore';
 import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { usePrefsStore } from '../../src/store/prefsStore';
-import { useDeepLinkStore } from '../../src/store/deepLinkStore';
-import { checkPendingFromStorage, clearPendingTap } from '../../src/services/notificationTapHandler';
+import { readPendingTap, clearPendingTap } from '../../src/services/notificationTapHandler';
 import { DataSourceSelector } from '../../src/components/DataSourceSelector';
 import { SummaryCard } from '../../src/components/SummaryCard';
 import { FilterModal } from '../../src/components/FilterModal';
@@ -43,7 +42,7 @@ export default function DashboardScreen() {
   const { colors } = useThemeStore();
   const { user, isAuthenticated } = useAuthStore();
   const { t } = useLanguageStore();
-  const { activeSource } = useDataSourceStore();
+  const { activeSource, setActiveSource } = useDataSourceStore();
   const { isXLarge, isWideWeb, isDesktop } = useResponsive();
 
   const [showFilterModal, setShowFilterModal] = useState(false);
@@ -221,94 +220,23 @@ export default function DashboardScreen() {
   const [freshHourlySales, setFreshHourlySales] = useState<HourlySales[] | null>(null);
 
   // 2026-05-03 — deep-link from notification taps (notificationTapHandler)
-  // Picks up `openIptal=<id>` or `openHighSale=<belgeno>` from the URL params
-  // and opens the right modal automatically.
-  // 2026-05-06 — Reactive deep-link subscription via Zustand store.
-  // Reason: Android `router.push` to the SAME route does NOT update
-  // useLocalSearchParams, so notification taps were silently lost while
-  // the user was on the dashboard tab. The store dispatches every tap
-  // (with a fresh `seq`) so this useEffect always re-runs.
-  const deepLink = useDeepLinkStore((s) => s.pending);
-  const deepLinkSeq = useDeepLinkStore((s) => s.seq);
-  const clearDeepLink = useDeepLinkStore((s) => s.clear);
-  // Legacy URL-param fallback (web links / browser refresh)
-  const navParams = useLocalSearchParams<{
-    openIptal?: string;
-    openIptalTenant?: string;
-    openHighSale?: string;
-    openHighSaleFisId?: string;
-    openHighSaleBelgeno?: string;
-    openHighSaleAmount?: string;
-    openHighSaleTenant?: string;
-  }>();
+  // 2026-05-06 — SIFIRDAN YAZILDI. Eski Zustand store kaldırıldı, sade
+  // AsyncStorage tabanlı flow:
+  //   1. Bildirim tap → notificationTapHandler AsyncStorage'a yazar
+  //   2. Dashboard her odaklandığında AsyncStorage'ı kontrol eder
+  //   3. Pending tap varsa modal açar ve AsyncStorage'ı temizler
+  // Avantajları: race condition yok, store hidrate olmadan çalışır, crash yok.
+
   // 2026-05-05 — High-sale receipt detail modal state (push deep-link)
   const [highSaleVisible, setHighSaleVisible] = useState(false);
   const [highSaleFisId, setHighSaleFisId] = useState<string>('');
   const [highSaleBelgeno, setHighSaleBelgeno] = useState<string>('');
   const [highSaleAmount, setHighSaleAmount] = useState<string>('');
-  const [highSaleTenantId, setHighSaleTenantId] = useState<string>('');   // 2026-05-05 — tenant override for cross-branch deep-links
-  // 2026-05-06 — Multi-layer notification tap pickup. On every screen focus,
-  // re-read AsyncStorage so a tap delivered while we were unmounted recovers.
-  useFocusEffect(
-    React.useCallback(() => {
-      checkPendingFromStorage();
-    }, [])
-  );
-  // 2026-05-06 — Subscribe to deep-link store for notification taps.
-  // CRASH GUARD: kullanıcı oturumu hazır değilken dispatch olursa state setleri
-  // null pointer / undefined access yapabiliyor → app çöküyordu. Auth hazır
-  // olana kadar tap'lar AsyncStorage'da bekler, focus effect bunları geri okur.
-  useEffect(() => {
-    if (!deepLink) return;
-    if (!user || !isAuthenticated) return;   // auth hazır değil → bekle (cold start fix)
-    const type = String(deepLink.type || '').toLowerCase();
-    const isIptal = (type === 'iptal' || type === 'iptal_satir' || type === 'cancel' || type === 'cancellation');
-    const isHighSale = (type === 'high_sale' || type === 'yuksek_satis');
-    if (!isIptal && !isHighSale) return;   // not for this screen
+  const [highSaleTenantId, setHighSaleTenantId] = useState<string>('');
 
-    if (isIptal) {
-      const iptalId = String(deepLink.iptal_id || deepLink.id || '');
-      if (!iptalId) { clearPendingTap(); return; }
-      const targetTenant = String(deepLink.tenant || '');
-      let resolvedTenantId = activeTenantId;
-      if (targetTenant && user?.tenants) {
-        const idx = user.tenants.findIndex(t => t.tenant_id === targetTenant);
-        if (idx >= 0) {
-          setActiveSource(`data${idx + 1}`);
-          resolvedTenantId = targetTenant;
-        }
-      }
-      // Açılışı kısa bekleme ile yap — diğer modallar (highSale) kapanırken
-      // iOS'ta iki Modal aynı anda mount olursa çakışıyor.
-      setTimeout(() => openIptalDetail(iptalId, resolvedTenantId), 350);
-    } else if (isHighSale) {
-      const fisId = String(deepLink.fis_id || '');
-      const belge = String(deepLink.belgeno || '');
-      const tutar = String(deepLink.amount || '');
-      const targetTenant = String(deepLink.tenant || '');
-      let resolvedTenantId = activeTenantId;
-      if (targetTenant && user?.tenants) {
-        const idx = user.tenants.findIndex(t => t.tenant_id === targetTenant);
-        if (idx >= 0) {
-          setActiveSource(`data${idx + 1}`);
-          resolvedTenantId = targetTenant;
-        }
-      }
-      setHighSaleFisId(fisId);
-      setHighSaleBelgeno(belge);
-      setHighSaleAmount(tutar);
-      setHighSaleTenantId(resolvedTenantId);
-      setTimeout(() => setHighSaleVisible(true), 350);
-    }
-    // 2026-05-06 — Clear BOTH disk + store so the tap doesn't re-fire on next focus
-    clearPendingTap();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLink, deepLinkSeq, user, isAuthenticated]);
-
-  // 2026-05-06 — Eski URL-param (navParams) deep-link useEffect'i tamamen silindi.
-  // Sebep: Push bildirimler Zustand+AsyncStorage üzerinden yönlendiriliyor;
-  // URL-param fallback'i web-only senaryo içindi ve ikili akış crash riskine
-  // yol açıyordu (iki Modal aynı anda mount). Tek kaynak: useDeepLinkStore.
+  // 2026-05-06 — processPendingTap ve diğer notification-tap helper'ları
+  // `activeTenantId` tanımlandıktan sonra (aşağıda) kuruluyor — aksi halde
+  // TDZ ("Cannot access 'activeTenantId' before initialization") çöker.
 
   // Check if filter is active (from live data hook)
   const isFilterActive = isDataFiltered;
@@ -323,6 +251,82 @@ export default function DashboardScreen() {
     }
     return user.tenants[0]?.tenant_id || '';
   }, [user?.tenants, activeSource]);
+
+  // 2026-05-06 — Pending notification tap işleme — sade AsyncStorage flow.
+  // activeTenantId'nin TANIMLANMASI bekleniyor (TDZ fix). Eğer auth hazır
+  // değilse return — cold start race condition'ı önler.
+  const _processingTapRef = React.useRef(false);
+  const processPendingTap = React.useCallback(async () => {
+    if (_processingTapRef.current) return;
+    if (!user || !isAuthenticated) return;
+    _processingTapRef.current = true;
+    try {
+      const tap = await readPendingTap();
+      if (!tap) return;
+      // Eski tap'lar (1 saatten eski) → temizle, açma
+      if (tap.receivedAt && Date.now() - tap.receivedAt > 60 * 60 * 1000) {
+        await clearPendingTap();
+        return;
+      }
+      const type = String(tap.type || '').toLowerCase();
+      const isIptal = (type === 'iptal' || type === 'iptal_satir' || type === 'cancel' || type === 'cancellation');
+      const isHighSale = (type === 'high_sale' || type === 'yuksek_satis');
+      const isLowStock = (type === 'low_stock_summary' || type === 'eksi_stok' || type === 'low_stock');
+      let resolvedTenantId = activeTenantId;
+      const targetTenant = String(tap.tenant || '');
+      if (targetTenant && user?.tenants) {
+        const idx = user.tenants.findIndex((t: any) => t.tenant_id === targetTenant);
+        if (idx >= 0) {
+          try { setActiveSource(`data${idx + 1}`); } catch {}
+          resolvedTenantId = targetTenant;
+        }
+      }
+      if (isIptal) {
+        const iptalId = String(tap.iptal_id || '');
+        if (iptalId) {
+          setTimeout(() => {
+            try { openIptalDetail(iptalId, resolvedTenantId); } catch (e) { console.log('[deepLink] openIptalDetail failed:', e); }
+          }, 250);
+        }
+        await clearPendingTap();
+      } else if (isHighSale) {
+        const fisId = String(tap.fis_id || '');
+        const belge = String(tap.belgeno || '');
+        const tutar = String(tap.amount || '');
+        try {
+          setHighSaleFisId(fisId);
+          setHighSaleBelgeno(belge);
+          setHighSaleAmount(tutar);
+          setHighSaleTenantId(resolvedTenantId);
+          setTimeout(() => setHighSaleVisible(true), 250);
+        } catch (e) { console.log('[deepLink] setHighSale failed:', e); }
+        await clearPendingTap();
+      } else if (isLowStock) {
+        // Stock tab will pick this up via its own readPendingTap.
+        // We DO NOT clear here — only navigate.
+        try { router.replace('/(tabs)/stock' as any); } catch (e) { console.log('[deepLink] stock nav failed:', e); }
+      } else {
+        // Unknown type — clear so it doesn't linger.
+        await clearPendingTap();
+      }
+    } catch (e) {
+      console.log('[deepLink] processPendingTap failed:', e);
+    } finally {
+      _processingTapRef.current = false;
+    }
+    // openIptalDetail intentionally not in deps to avoid stale-closure churn;
+    // it's stable thanks to its own useCallback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, isAuthenticated, activeTenantId, setActiveSource]);
+
+  useFocusEffect(
+    React.useCallback(() => { processPendingTap(); }, [processPendingTap])
+  );
+
+  useEffect(() => {
+    if (!user || !isAuthenticated) return;
+    processPendingTap();
+  }, [user, isAuthenticated, processPendingTap]);
 
   const clearFilters = () => {
     const today = new Date();

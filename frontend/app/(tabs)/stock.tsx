@@ -12,8 +12,7 @@ import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import { useAuthStore } from '../../src/store/authStore';
 import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
-import { useDeepLinkStore } from '../../src/store/deepLinkStore';
-import { checkPendingFromStorage, clearPendingTap } from '../../src/services/notificationTapHandler';
+import { readPendingTap, clearPendingTap } from '../../src/services/notificationTapHandler';
 import { useFocusEffect } from 'expo-router';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -80,32 +79,39 @@ export default function StockScreen() {
   // beneath the modal so the user can keep browsing after dismiss.
   const [showNegativeStockModal, setShowNegativeStockModal] = useState(false);
 
-  // 2026-05-06 — Multi-layer notification tap pickup. Re-read AsyncStorage on focus.
+  // 2026-05-06 — Notification tap (negative stock summary) — sade AsyncStorage
+  // tabanlı flow, useDeepLinkStore kaldırıldı.
+  const _stockTapProcessing = React.useRef(false);
+  const processStockTap = React.useCallback(async () => {
+    if (_stockTapProcessing.current) return;
+    _stockTapProcessing.current = true;
+    try {
+      const tap = await readPendingTap();
+      if (!tap) return;
+      const type = String(tap.type || '').toLowerCase();
+      const isStock = (type === 'low_stock_summary' || type === 'eksi_stok' || type === 'low_stock');
+      if (!isStock) return;
+      const targetTenant = String(tap.tenant || '');
+      if (targetTenant && user?.tenants) {
+        const idx = user.tenants.findIndex((t: any) => t.tenant_id === targetTenant);
+        if (idx >= 0) { try { setActiveSource(`data${idx + 1}`); } catch {} }
+      }
+      setFilterQty('negative');
+      setSearchQuery('');
+      setTimeout(() => setShowNegativeStockModal(true), 400);
+      await clearPendingTap();
+    } catch (e) {
+      console.log('[stock tap] failed:', e);
+    } finally {
+      _stockTapProcessing.current = false;
+    }
+  }, [user, setActiveSource]);
+
   useFocusEffect(
     React.useCallback(() => {
-      checkPendingFromStorage();
-    }, [])
+      processStockTap();
+    }, [processStockTap])
   );
-
-  // 2026-05-06 — Reactive deep-link via Zustand store (Android router.push fix)
-  const stockDeepLink = useDeepLinkStore((s) => s.pending);
-  const stockDeepLinkSeq = useDeepLinkStore((s) => s.seq);
-  useEffect(() => {
-    if (!stockDeepLink) return;
-    const type = String(stockDeepLink.type || '').toLowerCase();
-    const isStock = (type === 'low_stock_summary' || type === 'eksi_stok' || type === 'low_stock');
-    if (!isStock) return;
-    const targetTenant = String(stockDeepLink.tenant || '');
-    if (targetTenant && user?.tenants) {
-      const idx = user.tenants.findIndex(t => t.tenant_id === targetTenant);
-      if (idx >= 0) setActiveSource(`data${idx + 1}`);
-    }
-    setFilterQty('negative');
-    setSearchQuery('');
-    setTimeout(() => setShowNegativeStockModal(true), 800);
-    clearPendingTap();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stockDeepLink, stockDeepLinkSeq]);
 
   // 2026-05-03 — deep-link from notification taps (low_stock_summary push)
   // Handles `onlyNegative=1` query param → switches the filter to "negative" so
