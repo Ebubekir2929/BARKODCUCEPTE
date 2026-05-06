@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
 import { useLanguageStore } from '../store/languageStore';
@@ -41,10 +41,10 @@ export const SummaryCard: React.FC<SummaryCardProps> = ({
         </View>
         {changePercent !== undefined && (
           <View style={[styles.changeBadge, { backgroundColor: isPositive ? colors.success + '15' : colors.error + '15' }]}>
-            <Ionicons 
-              name={isPositive ? 'trending-up' : 'trending-down'} 
-              size={12} 
-              color={isPositive ? colors.success : colors.error} 
+            <Ionicons
+              name={isPositive ? 'trending-up' : 'trending-down'}
+              size={12}
+              color={isPositive ? colors.success : colors.error}
             />
             <Text style={[styles.changeText, { color: isPositive ? colors.success : colors.error }]}>
               %{Math.abs(changePercent).toFixed(1)}
@@ -71,32 +71,27 @@ export const SummaryCard: React.FC<SummaryCardProps> = ({
   );
 };
 
+// 2026-05-06 — Mobil-only proje. Web-spesifik büyük font/padding değerleri kaldırıldı.
+// Tüm platformlarda mobil değerler (14 padding, 16 font, 10 borderRadius, vb.) kullanılır.
 const styles = StyleSheet.create({
   card: {
     flex: 1,
-    padding: Platform.OS === 'web' ? 16 : 14,
-    borderRadius: Platform.OS === 'web' ? 18 : 16,
+    padding: 14,
+    borderRadius: 16,
     marginHorizontal: 4,
     borderWidth: 1,
     minWidth: 150,
-    ...Platform.select({
-      web: {
-        boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04), 0 4px 12px rgba(15, 23, 42, 0.04), 0 8px 24px rgba(15, 23, 42, 0.03)',
-        transition: 'transform 160ms ease, box-shadow 160ms ease',
-      },
-      default: {},
-    }),
   },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: Platform.OS === 'web' ? 12 : 10,
+    marginBottom: 10,
   },
   iconContainer: {
-    width: Platform.OS === 'web' ? 42 : 40,
-    height: Platform.OS === 'web' ? 42 : 40,
-    borderRadius: Platform.OS === 'web' ? 12 : 10,
+    width: 40,
+    height: 40,
+    borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -114,14 +109,12 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 12,
-    fontWeight: Platform.OS === 'web' ? '600' : '500',
+    fontWeight: '500',
     marginBottom: 3,
-    ...(Platform.OS === 'web' ? { letterSpacing: 0.4, textTransform: 'uppercase' as const } : {}),
   },
   amount: {
-    fontSize: Platform.OS === 'web' ? 20 : 16,
-    fontWeight: Platform.OS === 'web' ? '800' : '700',
-    ...(Platform.OS === 'web' ? { letterSpacing: -0.5 } : {}),
+    fontSize: 16,
+    fontWeight: '700',
   },
   lastWeekRow: {
     flexDirection: 'row',
