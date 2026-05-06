@@ -12,6 +12,7 @@ import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import { useAuthStore } from '../../src/store/authStore';
 import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
+import { useDeepLinkStore } from '../../src/store/deepLinkStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useLocalSearchParams, router } from 'expo-router';
@@ -77,6 +78,27 @@ export default function StockScreen() {
   // low_stock_summary push deep-link. Local filter still flips to "negative"
   // beneath the modal so the user can keep browsing after dismiss.
   const [showNegativeStockModal, setShowNegativeStockModal] = useState(false);
+
+  // 2026-05-06 — Reactive deep-link via Zustand store (Android router.push fix)
+  const stockDeepLink = useDeepLinkStore((s) => s.pending);
+  const stockDeepLinkSeq = useDeepLinkStore((s) => s.seq);
+  const clearStockDeepLink = useDeepLinkStore((s) => s.clear);
+  useEffect(() => {
+    if (!stockDeepLink) return;
+    const type = String(stockDeepLink.type || '').toLowerCase();
+    const isStock = (type === 'low_stock_summary' || type === 'eksi_stok' || type === 'low_stock');
+    if (!isStock) return;
+    const targetTenant = String(stockDeepLink.tenant || '');
+    if (targetTenant && user?.tenants) {
+      const idx = user.tenants.findIndex(t => t.tenant_id === targetTenant);
+      if (idx >= 0) setActiveSource(`data${idx + 1}`);
+    }
+    setFilterQty('negative');
+    setSearchQuery('');
+    setTimeout(() => setShowNegativeStockModal(true), 800);
+    clearStockDeepLink();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stockDeepLink, stockDeepLinkSeq]);
 
   // 2026-05-03 — deep-link from notification taps (low_stock_summary push)
   // Handles `onlyNegative=1` query param → switches the filter to "negative" so

@@ -17,6 +17,7 @@
  */
 import { Platform } from 'react-native';
 import { router } from 'expo-router';
+import { useDeepLinkStore } from '../store/deepLinkStore';
 
 let Notifications: any = null;
 if (Platform.OS !== 'web') {
@@ -44,49 +45,25 @@ function _route(data: Record<string, any> | null | undefined, fromQueue = false)
   try {
     const type = String(data.type || data?.notification?.type || '').toLowerCase();
     if (!type) return;
-    console.log('[notifTap] routing type=', type, 'data=', JSON.stringify(data));
+    console.log('[notifTap] dispatching type=', type);
 
-    if (type === 'high_sale' || type === 'yuksek_satis') {
-      const belgeno = String(data.belgeno || '');
-      const fisId = String(data.fis_id || '');
-      router.push({
-        pathname: '/(tabs)/dashboard',
-        params: {
-          openHighSale: belgeno || fisId,
-          openHighSaleFisId: fisId,
-          openHighSaleBelgeno: belgeno,
-          openHighSaleAmount: String(data.amount || ''),
-          openHighSaleTenant: String(data.tenant || ''),
-        },
-      });
-      return;
-    }
+    // Decide which tab to navigate to.
+    const isStock = (type === 'low_stock_summary' || type === 'eksi_stok' || type === 'low_stock');
+    const targetPath = isStock ? '/(tabs)/stock' : '/(tabs)/dashboard';
 
-    if (type === 'iptal' || type === 'iptal_satir' || type === 'cancel' || type === 'cancellation') {
-      router.push({
-        pathname: '/(tabs)/dashboard',
-        params: {
-          openIptal: String(data.iptal_id || data.id || ''),
-          openIptalTenant: String(data.tenant || ''),
-        },
-      });
-      return;
-    }
-
-    if (type === 'low_stock_summary' || type === 'eksi_stok' || type === 'low_stock') {
-      router.push({
-        pathname: '/(tabs)/stock',
-        params: {
-          onlyNegative: '1',
-          openLowStockSummary: '1',
-          tenant: String(data.tenant || ''),
-        },
-      });
-      return;
-    }
-
-    // Unknown type — at least bring the user to the dashboard
-    router.push('/(tabs)/dashboard');
+    // 2026-05-06 — Navigate first (so the screen mounts), THEN push to store.
+    // Android router.push to the SAME screen does NOT update useLocalSearchParams,
+    // so screens subscribe to deepLinkStore instead. Store dispatch happens
+    // after a short delay to give the screen time to mount its subscription.
+    try { router.push(targetPath as any); } catch (e) { console.log('[notifTap] navigate err:', e); }
+    setTimeout(() => {
+      try {
+        useDeepLinkStore.getState().push(data as any);
+        console.log('[notifTap] store.push OK type=', type);
+      } catch (e) {
+        console.log('[notifTap] store.push err:', e);
+      }
+    }, 200);
   } catch (e) {
     console.log('[notifTap] route error:', e);
   }

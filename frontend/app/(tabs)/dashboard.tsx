@@ -19,6 +19,7 @@ import { useAuthStore } from '../../src/store/authStore';
 import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { usePrefsStore } from '../../src/store/prefsStore';
+import { useDeepLinkStore } from '../../src/store/deepLinkStore';
 import { DataSourceSelector } from '../../src/components/DataSourceSelector';
 import { SummaryCard } from '../../src/components/SummaryCard';
 import { FilterModal } from '../../src/components/FilterModal';
@@ -218,11 +219,20 @@ export default function DashboardScreen() {
   // 2026-05-03 — deep-link from notification taps (notificationTapHandler)
   // Picks up `openIptal=<id>` or `openHighSale=<belgeno>` from the URL params
   // and opens the right modal automatically.
+  // 2026-05-06 — Reactive deep-link subscription via Zustand store.
+  // Reason: Android `router.push` to the SAME route does NOT update
+  // useLocalSearchParams, so notification taps were silently lost while
+  // the user was on the dashboard tab. The store dispatches every tap
+  // (with a fresh `seq`) so this useEffect always re-runs.
+  const deepLink = useDeepLinkStore((s) => s.pending);
+  const deepLinkSeq = useDeepLinkStore((s) => s.seq);
+  const clearDeepLink = useDeepLinkStore((s) => s.clear);
+  // Legacy URL-param fallback (web links / browser refresh)
   const navParams = useLocalSearchParams<{
     openIptal?: string;
     openIptalTenant?: string;
     openHighSale?: string;
-    openHighSaleFisId?: string;     // 2026-05-05 — separate FIS_ID for cache lookup
+    openHighSaleFisId?: string;
     openHighSaleBelgeno?: string;
     openHighSaleAmount?: string;
     openHighSaleTenant?: string;
@@ -233,6 +243,49 @@ export default function DashboardScreen() {
   const [highSaleBelgeno, setHighSaleBelgeno] = useState<string>('');
   const [highSaleAmount, setHighSaleAmount] = useState<string>('');
   const [highSaleTenantId, setHighSaleTenantId] = useState<string>('');   // 2026-05-05 — tenant override for cross-branch deep-links
+  // 2026-05-06 — Subscribe to deep-link store for notification taps
+  useEffect(() => {
+    if (!deepLink) return;
+    const type = String(deepLink.type || '').toLowerCase();
+    const isIptal = (type === 'iptal' || type === 'iptal_satir' || type === 'cancel' || type === 'cancellation');
+    const isHighSale = (type === 'high_sale' || type === 'yuksek_satis');
+    if (!isIptal && !isHighSale) return;   // not for this screen
+
+    if (isIptal) {
+      const iptalId = String(deepLink.iptal_id || deepLink.id || '');
+      if (!iptalId) { clearDeepLink(); return; }
+      const targetTenant = String(deepLink.tenant || '');
+      let resolvedTenantId = activeTenantId;
+      if (targetTenant && user?.tenants) {
+        const idx = user.tenants.findIndex(t => t.tenant_id === targetTenant);
+        if (idx >= 0) {
+          setActiveSource(`data${idx + 1}`);
+          resolvedTenantId = targetTenant;
+        }
+      }
+      setTimeout(() => fetchIptalDetail(iptalId, { IPTAL_ID: iptalId }, resolvedTenantId), 600);
+    } else if (isHighSale) {
+      const fisId = String(deepLink.fis_id || '');
+      const belge = String(deepLink.belgeno || '');
+      const tutar = String(deepLink.amount || '');
+      const targetTenant = String(deepLink.tenant || '');
+      let resolvedTenantId = activeTenantId;
+      if (targetTenant && user?.tenants) {
+        const idx = user.tenants.findIndex(t => t.tenant_id === targetTenant);
+        if (idx >= 0) {
+          setActiveSource(`data${idx + 1}`);
+          resolvedTenantId = targetTenant;
+        }
+      }
+      setHighSaleFisId(fisId);
+      setHighSaleBelgeno(belge);
+      setHighSaleAmount(tutar);
+      setHighSaleTenantId(resolvedTenantId);
+      setTimeout(() => setHighSaleVisible(true), 400);
+    }
+    clearDeepLink();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLink, deepLinkSeq]);
   // Use a ref to avoid re-firing on re-renders (params can persist in nav state)
   const _deepLinkProcessedRef = React.useRef<string | null>(null);
   useEffect(() => {
