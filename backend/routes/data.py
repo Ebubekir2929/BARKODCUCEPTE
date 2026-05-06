@@ -1149,6 +1149,33 @@ async def get_hourly_stock_detail_full(
         # URUN-level so the chart AND the product-detail modal render correctly.
         # Totals remain consistent because parent fields == sum of children.
         rows_inner = _flatten_hourly_urunler(rows_inner)
+        # 2026-05-06 — POS bazen sorgulanan tarih dışındaki (önceki gün, vs.)
+        # satırları da döndürebiliyor (örn. "DENEME 2" 2026-05-05 tarihli satır
+        # 2026-05-06 sorgusuyla geliyordu → ₺114K hayalet ciro). Burada
+        # sdate <= TARIH <= edate olmayan kayıtları kesin olarak filtreliyoruz.
+        # NOTE: params'ta sdate "YYYY-MM-DD HH:MM:SS" formatında olabilir,
+        # her iki tarafı da YYYY-MM-DD'ye normalize ediyoruz.
+        try:
+            _sd_raw = str(params.get("sdate") or "").strip()
+            _ed_raw = str(params.get("edate") or _sd_raw).strip()
+            _sd = _sd_raw.split(" ")[0].split("T")[0] if _sd_raw else ""
+            _ed = _ed_raw.split(" ")[0].split("T")[0] if _ed_raw else _sd
+            if _sd:
+                def _row_in_range(_r: Dict[str, Any]) -> bool:
+                    rd_raw = _r.get("TARIH") or _r.get("TARIH_ADI") or _r.get("TARIH_KAYIT")
+                    if not rd_raw:
+                        return True  # tarih alanı yoksa kabul et
+                    rd = str(rd_raw).strip().split(" ")[0].split("T")[0]
+                    if not rd:
+                        return True
+                    return _sd <= rd <= (_ed or _sd)
+                _before = len(rows_inner)
+                rows_inner = [r for r in rows_inner if _row_in_range(r)]
+                _filtered = _before - len(rows_inner)
+                if _filtered > 0:
+                    logger.info(f"[hourly-detail-full] tenant={tenant_id} date={_sd}..{_ed} filtered {_filtered} stale rows (kept {len(rows_inner)})")
+        except Exception as _e:
+            logger.warning(f"[hourly-detail-full] date filter failed: {_e}")
         # Bucket raw rows by hour (preserve ALL fields — STOK_ADI, MIKTAR,
         # KDV_DAHIL_BIRIM_FIYAT, LOKASYON, LOKASYON_ID, …)
         by_hour_inner: Dict[str, List[Any]] = {}

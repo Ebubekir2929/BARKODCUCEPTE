@@ -399,11 +399,23 @@ export const CompareModal: React.FC<{
             const j = await resp.json();
             const byHour: Record<string, any[]> = j?.by_hour || {};
 
+            // 2026-05-06 — Backend'in `hourly-detail-full` endpoint'i bazı durumlarda
+            // tarih filtresi dışındaki (dünkü, vs.) kayıtları da döndürüyor (örn.
+            // Merkez tenant'ında 2026-05-05 tarihli "DENEME 2" satırı bugünkü
+            // sorguda görünüyordu → ₺114K hayalet ciro). Frontend'te TARIH alanını
+            // sıkı filtreliyoruz: sadece sdate <= TARIH <= edate olan satırlar geçer.
+            const inDateRange = (rowDate: any): boolean => {
+              if (!rowDate) return true; // tarih alanı yoksa kabul et (eski format)
+              const d = String(rowDate).split(' ')[0].split('T')[0];
+              return d >= sdate && d <= edate;
+            };
+
             // tenant -> location -> product -> hour -> {qty, amount, iskonto, brut, kdv, birim}
             // 2026-05-06 — BIRIM_ADI eklendi: "70 ad" yerine "70 Kg" gibi göstermek için
             const tMap: Record<string, Record<string, Record<string, { qty: number; amount: number; iskonto: number; brut: number; kdv: number; birim: string }>>> = {};
             Object.entries(byHour).forEach(([hour, rows]) => {
               rows.forEach((r: any) => {
+                if (!inDateRange(r?.TARIH || r?.TARIH_ADI || r?.TARIH_KAYIT)) return;
                 const name = r?.STOK_ADI || r?.STOK_AD || r?.URUN_ADI || '-';
                 const loc = r?.LOKASYON || r?.LOKASYON_ADI || '-';
                 const qty = parseFloat(r?.TOPLAM_MIKTAR || r?.MIKTAR || '0');
