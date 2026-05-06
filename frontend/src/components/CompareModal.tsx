@@ -12,6 +12,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
+import { ProductHourlyDetailModal } from './ProductHourlyDetailModal';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useThemeStore } from '../store/themeStore';
 import { useAuthStore } from '../store/authStore';
@@ -186,6 +187,12 @@ export const CompareModal: React.FC<{
   const [showHourlyDetail, setShowHourlyDetail] = useState(false);
   const [productDisplayCount, setProductDisplayCount] = useState<number>(15);
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null);
+  // 2026-05-06 — Tamamen yeni düzen: tıklanan ürünün saatlik detayı AYRI BİR
+  // MODAL'DA açılır. Ana CompareModal artık sadece ranking listesi gösterir,
+  // hiçbir nested matrix render etmez. Önceki tap-to-expand bile crash'e yol
+  // açıyordu çünkü matrix toplamda hala ana ScrollView'a inline render
+  // ediliyordu — şimdi tamamen ayrı modala taşındı.
+  const [selectedDetailProduct, setSelectedDetailProduct] = useState<string | null>(null);
 
   const applyPreset = (p: PresetKey) => {
     const { start, end } = computePreset(p);
@@ -1083,6 +1090,7 @@ export const CompareModal: React.FC<{
 
               const totalProductCount = data.totalProductCount;
               const allProducts = data.sortedAllProducts.slice(0, productDisplayCount);
+              const productTotals = data.productTotals;
               const tenantLocPairs = data.tenantLocPairs;
               const tenantsWithData = data.tenantsWithData;
               const tenantProductHourSum = data.tenantProductHourSum;
@@ -1141,218 +1149,44 @@ export const CompareModal: React.FC<{
                   )}
 
                   {allProducts.map((productName, pIdx) => {
-                    const productTotal = productTotals[productName];
-                    // Collect rows for this product: each row is a (tenant, location) pair
-                    // where this product has any sale
-                    const rowsForProduct = tenantLocPairs.filter((pair) => {
-                      const data = productHourByTenant[pair.tenantId]?.[pair.location]?.[productName];
-                      if (!data) return false;
-                      return Object.values(data).some((c) => c.qty > 0 || c.amount > 0);
-                    });
-                    if (rowsForProduct.length === 0) return null;
-
-                    // Hours where this product had sales anywhere
-                    const productHours = allHours.filter((h) =>
-                      rowsForProduct.some((pair) => {
-                        const c = productHourByTenant[pair.tenantId]?.[pair.location]?.[productName]?.[h];
-                        return c && (c.qty > 0 || c.amount > 0);
-                      })
-                    );
-
+                    const productTotal = data.productTotals[productName];
+                    // 2026-05-06 — Yeni düzen: her ürün satırı SADECE basit bir
+                    // TouchableOpacity. Tıklayınca ProductHourlyDetailModal açılır.
+                    // Hiçbir nested matrix burada render edilmez → crash yok.
                     return (
-                      <View key={productName + pIdx} style={{ marginBottom: 4, borderTopWidth: 1, borderTopColor: colors.border }}>
-                        {/* 2026-05-06 — Tap-to-expand: only ONE product's heavy
-                            matrix renders at a time. Without this, 30 products
-                            × 5 rows × 24 hours = 10K Text nodes crashed Android. */}
-                        <TouchableOpacity
-                          activeOpacity={0.75}
-                          onPress={() => setExpandedProduct(expandedProduct === productName ? null : productName)}
-                          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 10, backgroundColor: expandedProduct === productName ? colors.primary + '14' : colors.primary + '06' }}
-                        >
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                            <View style={{
-                              minWidth: 22, height: 20, borderRadius: 10, paddingHorizontal: 5,
-                              backgroundColor: pIdx < 3 ? colors.primary + '22' : colors.background,
-                              borderWidth: 1, borderColor: pIdx < 3 ? colors.primary : colors.border,
-                              alignItems: 'center', justifyContent: 'center',
-                            }}>
-                              <Text style={{ color: pIdx < 3 ? colors.primary : colors.textSecondary, fontSize: 10, fontWeight: '800' }}>
-                                #{pIdx + 1}
-                              </Text>
-                            </View>
-                            <Text style={{ color: colors.text, fontSize: 13, fontWeight: '800', flex: 1 }} numberOfLines={2}>
-                              {productName}
+                      <TouchableOpacity
+                        key={productName + pIdx}
+                        activeOpacity={0.7}
+                        onPress={() => setSelectedDetailProduct(productName)}
+                        style={{
+                          flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                          paddingHorizontal: 14, paddingVertical: 12,
+                          borderTopWidth: 1, borderTopColor: colors.border,
+                          backgroundColor: colors.card,
+                        }}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                          <View style={{
+                            minWidth: 26, height: 22, borderRadius: 11, paddingHorizontal: 6,
+                            backgroundColor: pIdx < 3 ? colors.primary + '22' : colors.background,
+                            borderWidth: 1, borderColor: pIdx < 3 ? colors.primary : colors.border,
+                            alignItems: 'center', justifyContent: 'center',
+                          }}>
+                            <Text style={{ color: pIdx < 3 ? colors.primary : colors.textSecondary, fontSize: 11, fontWeight: '900' }}>
+                              #{pIdx + 1}
                             </Text>
                           </View>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                            <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                              ₺{fmtTL(productTotal)}
-                            </Text>
-                            <Ionicons name={expandedProduct === productName ? 'chevron-up' : 'chevron-down'} size={16} color={colors.primary} />
-                          </View>
-                        </TouchableOpacity>
-
-                        {/* Heavy matrix renders ONLY when this product is the expanded one */}
-                        {expandedProduct === productName && (
-                          <>
-                        <SwipeHint color={colors.primary} />
-                        <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
-                          <View>
-                            {/* Header row */}
-                            <View style={{ flexDirection: 'row', borderBottomWidth: 1, borderColor: colors.border, backgroundColor: colors.background }}>
-                              <View style={{ width: 180, paddingVertical: 6, paddingHorizontal: 8 }}>
-                                <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '700' }}>Veri · Lokasyon</Text>
-                              </View>
-                              {productHours.map((h) => (
-                                <View key={h} style={{ width: 72, paddingVertical: 6, paddingHorizontal: 4, alignItems: 'center' }}>
-                                  <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '700' }}>{String(h).slice(0, 5)}</Text>
-                                </View>
-                              ))}
-                              <View style={{ width: 90, paddingVertical: 6, paddingHorizontal: 8, alignItems: 'flex-end', backgroundColor: colors.primary + '10' }}>
-                                <Text style={{ color: colors.primary, fontSize: 10, fontWeight: '800' }}>TOPLAM</Text>
-                              </View>
-                            </View>
-
-                            {/* Tenant-aggregate rows (sum across all locations of that tenant) */}
-                            {tenantsWithData
-                              .filter((t) => {
-                                const data = tenantProductHourSum[t.tenantId]?.[productName];
-                                if (!data) return false;
-                                return Object.values(data).some((c) => c.qty > 0 || c.amount > 0);
-                              })
-                              .map((t) => {
-                                const tenantColor = getTenantColor(t.tenantIdx);
-                                const cellData = tenantProductHourSum[t.tenantId]?.[productName] || {};
-                                let rowQty = 0;
-                                let rowAmount = 0;
-                                let rowIskonto = 0;
-                                Object.values(cellData).forEach((c) => { rowQty += c.qty; rowAmount += c.amount; rowIskonto += c.iskonto; });
-                                return (
-                                  <View key={'tnt-' + t.tenantId} style={{ flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: tenantColor + '0E' }}>
-                                    <View style={{ width: 180, paddingVertical: 8, paddingHorizontal: 8 }}>
-                                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                                        <Ionicons name="business-outline" size={11} color={tenantColor} />
-                                        <Text style={{ color: tenantColor, fontSize: 11, fontWeight: '900' }} numberOfLines={1}>
-                                          {t.tenantName}
-                                        </Text>
-                                      </View>
-                                      <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '700', marginTop: 1 }} numberOfLines={1}>
-                                        ⭐ Tüm Lokasyonlar ({t.locCount})
-                                      </Text>
-                                    </View>
-                                    {productHours.map((h) => {
-                                      const c = cellData[h];
-                                      const qty = c?.qty || 0;
-                                      const amount = c?.amount || 0;
-                                      const isk = c?.iskonto || 0;
-                                      return (
-                                        <View key={h} style={{ width: 72, paddingVertical: 6, paddingHorizontal: 2, alignItems: 'center' }}>
-                                          {qty > 0 ? (
-                                            <>
-                                              <Text style={{ color: tenantColor, fontSize: 10, fontWeight: '900' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                                                ₺{fmtTL(amount)}
-                                              </Text>
-                                              <Text style={{ color: colors.textSecondary, fontSize: 9, fontWeight: '700' }}>
-                                                {qty.toFixed(0)} ad
-                                              </Text>
-                                              {isk > 0 && (
-                                                <Text style={{ color: colors.warning, fontSize: 8, fontWeight: '700' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
-                                                  -₺{fmtTL(isk)}
-                                                </Text>
-                                              )}
-                                            </>
-                                          ) : (
-                                            <Text style={{ color: colors.border, fontSize: 11 }}>—</Text>
-                                          )}
-                                        </View>
-                                      );
-                                    })}
-                                    <View style={{ width: 90, paddingVertical: 6, paddingHorizontal: 8, alignItems: 'flex-end', backgroundColor: tenantColor + '15' }}>
-                                      <Text style={{ color: tenantColor, fontSize: 11, fontWeight: '900' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                                        ₺{fmtTL(rowAmount)}
-                                      </Text>
-                                      <Text style={{ color: colors.textSecondary, fontSize: 9, fontWeight: '700' }}>
-                                        {rowQty.toFixed(0)} ad
-                                      </Text>
-                                      {rowIskonto > 0 && (
-                                        <Text style={{ color: colors.warning, fontSize: 8, fontWeight: '700' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
-                                          -₺{fmtTL(rowIskonto)}
-                                        </Text>
-                                      )}
-                                    </View>
-                                  </View>
-                                );
-                              })}
-
-                            {/* Rows — one per (tenant, location) */}
-                            {rowsForProduct.map((pair, rIdx) => {
-                              const tenantColor = getTenantColor(pair.tenantIdx);
-                              const cellData = productHourByTenant[pair.tenantId]?.[pair.location]?.[productName] || {};
-                              let rowQty = 0;
-                              let rowAmount = 0;
-                              let rowIskonto = 0;
-                              Object.values(cellData).forEach((c) => { rowQty += c.qty; rowAmount += c.amount; rowIskonto += c.iskonto; });
-                              return (
-                                <View key={pair.tenantId + pair.location + rIdx} style={{ flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                                  <View style={{ width: 180, paddingVertical: 8, paddingHorizontal: 8 }}>
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-                                      <View style={{ width: 7, height: 7, borderRadius: 3.5, backgroundColor: tenantColor }} />
-                                      <Text style={{ color: tenantColor, fontSize: 11, fontWeight: '800' }} numberOfLines={1}>
-                                        {pair.tenantName}
-                                      </Text>
-                                    </View>
-                                    <Text style={{ color: colors.text, fontSize: 11, fontWeight: '600', marginTop: 1 }} numberOfLines={1}>
-                                      📍 {pair.location}
-                                    </Text>
-                                  </View>
-                                  {productHours.map((h) => {
-                                    const c = cellData[h];
-                                    const qty = c?.qty || 0;
-                                    const amount = c?.amount || 0;
-                                    const isk = c?.iskonto || 0;
-                                    return (
-                                      <View key={h} style={{ width: 72, paddingVertical: 6, paddingHorizontal: 2, alignItems: 'center' }}>
-                                        {qty > 0 ? (
-                                          <>
-                                            <Text style={{ color: tenantColor, fontSize: 10, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                                              ₺{fmtTL(amount)}
-                                            </Text>
-                                            <Text style={{ color: colors.textSecondary, fontSize: 9 }}>
-                                              {qty.toFixed(0)} ad
-                                            </Text>
-                                            {isk > 0 && (
-                                              <Text style={{ color: colors.warning, fontSize: 8 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
-                                                -₺{fmtTL(isk)}
-                                              </Text>
-                                            )}
-                                          </>
-                                        ) : (
-                                          <Text style={{ color: colors.border, fontSize: 11 }}>—</Text>
-                                        )}
-                                      </View>
-                                    );
-                                  })}
-                                  <View style={{ width: 90, paddingVertical: 6, paddingHorizontal: 8, alignItems: 'flex-end', backgroundColor: colors.primary + '06' }}>
-                                    <Text style={{ color: tenantColor, fontSize: 11, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                                      ₺{fmtTL(rowAmount)}
-                                    </Text>
-                                    <Text style={{ color: colors.textSecondary, fontSize: 9 }}>
-                                      {rowQty.toFixed(0)} ad
-                                    </Text>
-                                    {rowIskonto > 0 && (
-                                      <Text style={{ color: colors.warning, fontSize: 8 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
-                                        -₺{fmtTL(rowIskonto)}
-                                      </Text>
-                                    )}
-                                  </View>
-                                </View>
-                              );
-                            })}
-                          </View>
-                        </ScrollView>
-                          </>
-                        )}
-                      </View>
+                          <Text style={{ color: colors.text, fontSize: 14, fontWeight: '700', flex: 1 }} numberOfLines={2}>
+                            {productName}
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Text style={{ color: colors.primary, fontSize: 14, fontWeight: '900' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                            ₺{fmtTL(productTotal)}
+                          </Text>
+                          <Ionicons name="chevron-forward" size={18} color={colors.primary} />
+                        </View>
+                      </TouchableOpacity>
                     );
                   })}
                   {/* "Daha fazla göster" — incremental cap to keep render snappy */}
@@ -1417,6 +1251,17 @@ export const CompareModal: React.FC<{
           filterEndDate={fmtDate(endDate)}
         />
       )}
+      {/* 2026-05-06 — Product Hourly Detail Modal — opens on product row tap.
+          Heavy matrix is RENDERED INSIDE this modal only, never inline. */}
+      <ProductHourlyDetailModal
+        visible={!!selectedDetailProduct}
+        onClose={() => setSelectedDetailProduct(null)}
+        productName={selectedDetailProduct}
+        snapshots={snapshots as any}
+        productHourByTenant={productHourByTenant}
+        getTenantColor={getTenantColor}
+        fmtTL={fmtTL}
+      />
       </View>
     </Modal>
   );
