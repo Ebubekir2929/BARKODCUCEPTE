@@ -21,7 +21,6 @@ import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { usePrefsStore } from '../../src/store/prefsStore';
 import { useDeepLinkStore } from '../../src/store/deepLinkStore';
 import { checkPendingFromStorage, clearPendingTap } from '../../src/services/notificationTapHandler';
-import { useFocusEffect } from 'expo-router';
 import { DataSourceSelector } from '../../src/components/DataSourceSelector';
 import { SummaryCard } from '../../src/components/SummaryCard';
 import { FilterModal } from '../../src/components/FilterModal';
