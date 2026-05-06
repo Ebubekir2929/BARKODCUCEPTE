@@ -1833,7 +1833,12 @@ export default function DashboardScreen() {
                         <Text style={{ fontSize: 9, color: colors.textSecondary, fontWeight: '700', letterSpacing: 0.4 }}>VERİ KAYNAĞI</Text>
                       </View>
                       <Text style={{ fontSize: 13, fontWeight: '800', color: colors.text }} numberOfLines={1}>
-                        {user?.tenants?.find?.(x => x.tenant_id === activeTenantId)?.tenant_name || activeSource || '-'}
+                        {(() => {
+                          // Önce iptal kaydında tenant_id varsa onu kullan
+                          const tid = selectedIptalItem?.tenant_id || selectedIptalItem?.TENANT_ID || activeTenantId;
+                          const t = user?.tenants?.find?.((x: any) => x.tenant_id === tid);
+                          return t?.name || t?.tenant_name || selectedIptalItem?.tenant_name || '-';
+                        })()}
                       </Text>
                     </View>
                     {/* İptal Eden Personel */}
