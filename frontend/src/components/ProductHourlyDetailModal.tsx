@@ -83,18 +83,19 @@ export const ProductHourlyDetailModal: React.FC<Props> = ({
         }
       });
 
-      if (tenantAmount > 0 || tenantQty > 0) {
-        tenantRows.push({
-          tenantIdx: idx,
-          tenantId: s.tenant.tenant_id,
-          tenantName: s.tenant.name || `Veri ${idx + 1}`,
-          cellByHour: tenantByHour,
-          rowQty: tenantQty,
-          rowAmount: tenantAmount,
-          rowIskonto: tenantIskonto,
-          locCount,
-        });
-      }
+      // 2026-05-06 — Kullanıcı isteği: bu ürün için satışı OLMASA bile her veri
+      // kaynağı (tenant) tabloda satır olarak gösterilsin. "—" gösterilir,
+      // toplamı ₺0 olur. Filtreleme yok → her zaman tüm tenants görünür.
+      tenantRows.push({
+        tenantIdx: idx,
+        tenantId: s.tenant.tenant_id,
+        tenantName: s.tenant.name || `Veri ${idx + 1}`,
+        cellByHour: tenantByHour,
+        rowQty: tenantQty,
+        rowAmount: tenantAmount,
+        rowIskonto: tenantIskonto,
+        locCount,
+      });
     });
 
     const allHours = Array.from(hoursSet).sort();
@@ -263,7 +264,7 @@ export const ProductHourlyDetailModal: React.FC<Props> = ({
                 );
               })}
 
-              {(!data || (data.tenantRows.length === 0 && data.locRows.length === 0)) && (
+              {(!data || data.grandQty === 0) && (
                 <View style={{ padding: 32, alignItems: 'center' }}>
                   <Ionicons name="information-circle-outline" size={32} color={colors.textSecondary} />
                   <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 8 }}>

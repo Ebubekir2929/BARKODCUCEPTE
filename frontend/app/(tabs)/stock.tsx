@@ -2,9 +2,9 @@ import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, Modal,
   ScrollView, ActivityIndicator, Alert, RefreshControl, Platform,
+  FlatList,
 } from 'react-native';
 import { webStyles } from '../../src/styles/webModalStyles';
-import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
@@ -22,7 +22,6 @@ import * as Clipboard from 'expo-clipboard';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
-import { useFocusEffect } from 'expo-router';
 import { ScrollFab } from '../../src/components/ScrollFab';
 import { useResponsive } from '../../src/hooks/useResponsive';
 import { DataTable, TableColumn } from '../../src/components/DataTable';
@@ -605,17 +604,9 @@ export default function StockScreen() {
     );
   }, [colors, openStockDetail]);
 
-  // 2026-05-05 — getItemType: tell FlashList which "shape" each row has so
-  // its recycle pool keeps similar items together. Without this, the recycler
-  // mixes "rich" (with detailRow) and "simple" (without) cards and leaves
-  // empty gaps when their measured heights differ.
-  const getStockItemType = useCallback((item: any) => {
-    const buyPrice = parseFloat(item.SON_ALIS_FIYAT || '0');
-    const price = parseFloat(item.FIYAT || '0');
-    const profit = price > 0 && buyPrice > 0 ? price - buyPrice : 0;
-    const hasDetail = buyPrice > 0 || profit !== 0 || !!item.BARKOD;
-    return hasDetail ? 'rich' : 'simple';
-  }, []);
+  // 2026-05-06 — Removed FlashList getItemType helper after migrating to FlatList.
+  // FlatList renders variable-height rows natively, eliminating the recycler
+  // gap bug that plagued FlashList during dynamic search/filter mutations.
 
   // 2026-05-05 — Desktop Data Table columns (standard layout).
   // Used only when `isDesktop` is true; phone/tablet keeps the card layout.
@@ -845,25 +836,23 @@ export default function StockScreen() {
         </View>
       ) : (
         <View style={{ flex: 1 }}>
-          <FlashList
+          {/* 2026-05-06 — Switched FlashList → FlatList to eliminate the recycler
+              "boşluk" bug that left empty vertical gaps after dynamic filtering /
+              search. FlatList handles variable-height items natively and is
+              perfectly fast for this dataset size. */}
+          <FlatList
           ref={listRef as any}
           data={filteredStocks}
           renderItem={renderStockItem}
           keyExtractor={(item: any, idx) => String(item?.KOD || item?.STOK_KODU || item?.ID || idx)}
-          // 2026-05-05 — getItemType bucket keeps recycle pools homogeneous
-          // (rows with detail row vs without). Eliminates the "boşluk in
-          // middle of list" problem caused by mixing variable-height items.
-          getItemType={getStockItemType}
-          // Lower estimated size now that we have homogeneous buckets.
-          estimatedItemSize={110}
-          // 2026-05-05 — extraData forces FlashList to drop its recycle pool
-          // whenever search/filter state changes. Without this it kept stale
-          // row offsets after typing in the search box (huge blank gaps) and
-          // showed a black void after clearing the query.
           extraData={`${searchQuery}|${filterQty}|${filterProfit}|${filterGroups.length}|${filterKdvs.length}|${filterMarkalar.length}|${filterCinsler.length}|${filterOzelKod1.length}|${filterOzelKod2.length}`}
           contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 24 }}
           showsVerticalScrollIndicator={false}
-          drawDistance={800}
+          initialNumToRender={15}
+          maxToRenderPerBatch={12}
+          windowSize={11}
+          removeClippedSubviews={Platform.OS === 'android'}
+          updateCellsBatchingPeriod={40}
           onScroll={(e) => {
             const y = e.nativeEvent.contentOffset.y;
             const layoutH = e.nativeEvent.layoutMeasurement.height;

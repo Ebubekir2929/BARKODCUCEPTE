@@ -976,20 +976,15 @@ export const CompareModal: React.FC<{
               // Limit to top 15 products to avoid clutter (user request)
               const allProductsRows = Object.values(productMap).sort((a, b) => b.totalAmount - a.totalAmount).slice(0, 15);
               if (allProductsRows.length === 0) return null;
-              // 2026-05-06 — Sadece veri OLAN veri kaynaklarını sütun olarak göster.
-              // Aksi halde "Tüm Veri Kaynakları" diyoruz ama bir tek tenant'tan veri geliyor.
-              const tenantIdsWithData = new Set<string>();
-              Object.values(productMap).forEach((row) => {
-                Object.keys(row.perTenant).forEach((tid) => tenantIdsWithData.add(tid));
-              });
-              const visibleSnapshots = snapshots.filter((s) => tenantIdsWithData.has(s.tenant.tenant_id));
-              if (visibleSnapshots.length === 0) return null;
+              // 2026-05-06 — Kullanıcı isteği: TÜM veri kaynaklarını her zaman sütun olarak göster.
+              // Veri olmayan hücrelerde "—" ile boş gösterilir, kaynak gizlenmez.
+              const visibleSnapshots = snapshots;
               return (
                 <View style={[styles.sectionBox, { backgroundColor: colors.card, borderColor: colors.border, padding: 0 }]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14, paddingBottom: 8 }}>
                     <Ionicons name="list-outline" size={16} color={colors.primary} />
                     <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0, flex: 1 }]} numberOfLines={1}>
-                      Ürün Karşılaştırması · {visibleSnapshots.length === snapshots.length ? 'Tüm Veri Kaynakları' : `${visibleSnapshots.length} / ${snapshots.length} Veri Kaynağı`}
+                      Ürün Karşılaştırması · Tüm Veri Kaynakları
                     </Text>
                     <View style={{ backgroundColor: colors.primary + '18', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
                       <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>{allProductsRows.length} ürün</Text>
