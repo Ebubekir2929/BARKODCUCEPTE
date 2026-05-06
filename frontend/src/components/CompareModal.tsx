@@ -172,7 +172,7 @@ export const CompareModal: React.FC<{
   const isFetchingRef = useRef(false);
   // productHourByTenant[tenantId][location][productName][hour] = { qty, amount, iskonto, brut, kdv }
   // amount = KDV_DAHIL_TOPLAM_TUTAR (iskonto sonrası net), brut = iskontosuz toplam, iskonto = indirim, kdv = KDV tutarı
-  const [productHourByTenant, setProductHourByTenant] = useState<Record<string, Record<string, Record<string, Record<string, { qty: number; amount: number; iskonto: number; brut: number; kdv: number }>>>>>({});
+  const [productHourByTenant, setProductHourByTenant] = useState<Record<string, Record<string, Record<string, Record<string, { qty: number; amount: number; iskonto: number; brut: number; kdv: number; birim: string }>>>>>({});
   const [phLoading, setPhLoading] = useState(false);
 
   // 2026-05-05 — Performance optimizations for large datasets:
@@ -186,6 +186,8 @@ export const CompareModal: React.FC<{
   //   hour cells produced ~10K Text nodes and crashed Android on big datasets.
   const [showHourlyDetail, setShowHourlyDetail] = useState(false);
   const [productDisplayCount, setProductDisplayCount] = useState<number>(15);
+  // 2026-05-06 — Ürün Karşılaştırması tablosunda "Daha Fazla Göster" desteği
+  const [compareDisplayCount, setCompareDisplayCount] = useState<number>(15);
   const [expandedProduct, setExpandedProduct] = useState<string | null>(null);
   // 2026-05-06 — Tamamen yeni düzen: tıklanan ürünün saatlik detayı AYRI BİR
   // MODAL'DA açılır. Ana CompareModal artık sadece ranking listesi gösterir,
@@ -397,8 +399,9 @@ export const CompareModal: React.FC<{
             const j = await resp.json();
             const byHour: Record<string, any[]> = j?.by_hour || {};
 
-            // tenant -> location -> product -> hour -> {qty, amount, iskonto, brut, kdv}
-            const tMap: Record<string, Record<string, Record<string, { qty: number; amount: number; iskonto: number; brut: number; kdv: number }>>> = {};
+            // tenant -> location -> product -> hour -> {qty, amount, iskonto, brut, kdv, birim}
+            // 2026-05-06 — BIRIM_ADI eklendi: "70 ad" yerine "70 Kg" gibi göstermek için
+            const tMap: Record<string, Record<string, Record<string, { qty: number; amount: number; iskonto: number; brut: number; kdv: number; birim: string }>>> = {};
             Object.entries(byHour).forEach(([hour, rows]) => {
               rows.forEach((r: any) => {
                 const name = r?.STOK_ADI || r?.STOK_AD || r?.URUN_ADI || '-';
@@ -409,15 +412,17 @@ export const CompareModal: React.FC<{
                 // brut = iskonto öncesi toplam (varsa); aksi halde amount + iskonto
                 const brut = parseFloat(r?.BRUT_TUTAR || r?.ISKONTOSUZ_TUTAR || '0') || (amount + iskonto);
                 const kdv = parseFloat(r?.KDV_TUTARI || r?.TOPLAM_KDV || '0');
+                const birim = String(r?.BIRIM_ADI || r?.BIRIM || '').trim() || 'ad';
                 if (!tMap[loc]) tMap[loc] = {};
                 if (!tMap[loc][name]) tMap[loc][name] = {};
-                if (!tMap[loc][name][hour]) tMap[loc][name][hour] = { qty: 0, amount: 0, iskonto: 0, brut: 0, kdv: 0 };
+                if (!tMap[loc][name][hour]) tMap[loc][name][hour] = { qty: 0, amount: 0, iskonto: 0, brut: 0, kdv: 0, birim };
                 const cell = tMap[loc][name][hour];
                 cell.qty += qty;
                 cell.amount += amount;
                 cell.iskonto += iskonto;
                 cell.brut += brut;
                 cell.kdv += kdv;
+                if (birim && birim !== 'ad') cell.birim = birim;
               });
             });
             fresh[s.tenant.tenant_id] = tMap;
@@ -470,7 +475,7 @@ export const CompareModal: React.FC<{
     const productTotals: Record<string, number> = {};
     const tenantLocPairs: { tenantId: string; tenantName: string; tenantIdx: number; location: string }[] = [];
     const seenPairs = new Set<string>();
-    type Cell = { qty: number; amount: number; iskonto: number; brut: number; kdv: number };
+    type Cell = { qty: number; amount: number; iskonto: number; brut: number; kdv: number; birim: string };
     const tenantProductHourSum: Record<string, Record<string, Record<string, Cell>>> = {};
     const tenantsWithData: { tenantId: string; tenantName: string; tenantIdx: number; locCount: number }[] = [];
     const seenTenants = new Set<string>();
@@ -955,7 +960,7 @@ export const CompareModal: React.FC<{
                 olarak "ürünler eksik" diyordu. Şimdi tüm tenants'ın TÜM ürünleri
                 aggregate edilip ilk 15'i sıralanıp gösteriliyor. */}
             {(() => {
-              type PerTenant = { amount: number; qty: number; locations: Set<string> };
+              type PerTenant = { amount: number; qty: number; locations: Set<string>; birim: string };
               const productMap: Record<string, { name: string; totalAmount: number; totalQty: number; perTenant: Record<string, PerTenant> }> = {};
 
               snapshots.forEach((snap) => {
@@ -963,9 +968,12 @@ export const CompareModal: React.FC<{
                 Object.entries(tenantData).forEach(([loc, products]) => {
                   Object.entries(products).forEach(([name, hours]) => {
                     let amount = 0; let qty = 0;
+                    let lastBirim = '';
                     Object.values(hours).forEach((h: any) => {
                       amount += h.amount || 0;
                       qty += h.qty || 0;
+                      if (h.birim && h.birim !== 'ad') lastBirim = h.birim;
+                      else if (h.birim && !lastBirim) lastBirim = h.birim;
                     });
                     if (amount <= 0 && qty <= 0) return;
                     if (!productMap[name]) {
@@ -974,25 +982,35 @@ export const CompareModal: React.FC<{
                     productMap[name].totalAmount += amount;
                     productMap[name].totalQty += qty;
                     if (!productMap[name].perTenant[snap.tenant.tenant_id]) {
-                      productMap[name].perTenant[snap.tenant.tenant_id] = { amount: 0, qty: 0, locations: new Set<string>() };
+                      productMap[name].perTenant[snap.tenant.tenant_id] = { amount: 0, qty: 0, locations: new Set<string>(), birim: lastBirim || 'ad' };
                     }
                     const pt = productMap[name].perTenant[snap.tenant.tenant_id];
                     pt.amount += amount;
                     pt.qty += qty;
                     if (loc) pt.locations.add(loc);
+                    if (lastBirim && lastBirim !== 'ad') pt.birim = lastBirim;
                   });
                 });
               });
 
-              // Top 15 products by total sales amount across all tenants
-              const allProductsRows = Object.values(productMap)
-                .sort((a, b) => b.totalAmount - a.totalAmount)
-                .slice(0, 15);
+              // 2026-05-06 — Daha Fazla Göster: kullanıcı tüm ürünleri görmek isterse
+              // compareDisplayCount artırılır ve slice ona göre yapılır.
+              const sortedProducts = Object.values(productMap).sort((a, b) => b.totalAmount - a.totalAmount);
+              const allProductsRows = sortedProducts.slice(0, compareDisplayCount);
 
               if (allProductsRows.length === 0) return null;
-              const totalAvailable = Object.keys(productMap).length;
+              const totalAvailable = sortedProducts.length;
               // Kullanıcı isteği: TÜM veri kaynaklarını her zaman sütun olarak göster.
               const visibleSnapshots = snapshots;
+              // Her ürün için "ana birimi" bul (en çok hangi birim kullanılıyor)
+              const getProductPrimaryBirim = (row: typeof allProductsRows[number]): string => {
+                const counts: Record<string, number> = {};
+                Object.values(row.perTenant).forEach((pt) => {
+                  if (pt.birim) counts[pt.birim] = (counts[pt.birim] || 0) + 1;
+                });
+                const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+                return sorted[0]?.[0] || 'ad';
+              };
               return (
                 <View style={[styles.sectionBox, { backgroundColor: colors.card, borderColor: colors.border, padding: 0 }]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14, paddingBottom: 8 }}>
@@ -1032,7 +1050,10 @@ export const CompareModal: React.FC<{
                         </View>
                       </View>
                       {/* Rows */}
-                      {allProductsRows.map((row, idx) => (
+                      {allProductsRows.map((row, idx) => {
+                        const rowBirim = getProductPrimaryBirim(row);
+                        const fmtQty = (q: number, b: string) => (b === 'Kg' || b === 'Lt' || b.toLowerCase() === 'kg' || b.toLowerCase() === 'lt') ? q.toFixed(2) : q.toFixed(0);
+                        return (
                         <View key={row.name + idx} style={{ flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: colors.border }}>
                           <View style={{ width: 32, paddingVertical: 10, paddingHorizontal: 4, alignItems: 'center' }}>
                             <View style={{
@@ -1051,12 +1072,13 @@ export const CompareModal: React.FC<{
                               {row.name}
                             </Text>
                             <Text style={{ color: colors.textSecondary, fontSize: 10, marginTop: 1 }}>
-                              {row.totalQty.toFixed(0)} adet
+                              {fmtQty(row.totalQty, rowBirim)} {rowBirim}
                             </Text>
                           </View>
                           {visibleSnapshots.map((s) => {
                             const val = row.perTenant[s.tenant.tenant_id];
                             const tIdx = snapshots.findIndex(x => x.tenant.tenant_id === s.tenant.tenant_id);
+                            const cellBirim = val?.birim || rowBirim;
                             return (
                               <View key={s.tenant.tenant_id} style={{ width: 88, paddingVertical: 10, paddingHorizontal: 4, alignItems: 'flex-end' }}>
                                 {val && val.amount > 0 ? (
@@ -1070,7 +1092,7 @@ export const CompareModal: React.FC<{
                                       ₺{fmtTL(val.amount)}
                                     </Text>
                                     <Text style={{ color: colors.textSecondary, fontSize: 9 }}>
-                                      {val.qty.toFixed(0)} ad
+                                      {fmtQty(val.qty, cellBirim)} {cellBirim}
                                     </Text>
                                     {val.locations && val.locations.size > 0 && (
                                       <Text style={{ color: colors.textSecondary, fontSize: 8, marginTop: 1 }} numberOfLines={1}>
@@ -1094,13 +1116,50 @@ export const CompareModal: React.FC<{
                               ₺{fmtTL(row.totalAmount)}
                             </Text>
                             <Text style={{ color: colors.textSecondary, fontSize: 9 }}>
-                              {row.totalQty.toFixed(0)} ad
+                              {fmtQty(row.totalQty, rowBirim)} {rowBirim}
                             </Text>
                           </View>
                         </View>
-                      ))}
+                        );
+                      })}
                     </View>
                   </ScrollView>
+
+                  {/* Daha Fazla Göster — kullanıcı isteği: tüm ürünleri kademeli görüntüle */}
+                  {totalAvailable > compareDisplayCount && (
+                    <View style={{ padding: 14, paddingTop: 10, alignItems: 'center' }}>
+                      <TouchableOpacity
+                        onPress={() => setCompareDisplayCount(c =>
+                          c < 30 ? 30 : c < 50 ? 50 : c < 100 ? 100 : Math.min(totalAvailable, c + 100)
+                        )}
+                        style={{
+                          backgroundColor: colors.primary + '15',
+                          borderWidth: 1,
+                          borderColor: colors.primary + '40',
+                          paddingHorizontal: 16,
+                          paddingVertical: 9,
+                          borderRadius: 10,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 6,
+                        }}
+                      >
+                        <Ionicons name="chevron-down" size={14} color={colors.primary} />
+                        <Text style={{ color: colors.primary, fontSize: 12, fontWeight: '700' }}>
+                          Daha Fazla Göster ({compareDisplayCount} / {totalAvailable})
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                  {compareDisplayCount > 15 && (
+                    <View style={{ paddingHorizontal: 14, paddingBottom: 12, alignItems: 'center' }}>
+                      <TouchableOpacity onPress={() => setCompareDisplayCount(15)}>
+                        <Text style={{ color: colors.textSecondary, fontSize: 11, textDecorationLine: 'underline' }}>
+                          İlk 15'e dön
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
               );
             })()}

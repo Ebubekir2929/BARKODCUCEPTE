@@ -17,7 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
 
-type Cell = { qty: number; amount: number; iskonto: number; brut: number; kdv: number };
+type Cell = { qty: number; amount: number; iskonto: number; brut: number; kdv: number; birim: string };
 
 interface Snapshot {
   tenant: { tenant_id: string; name?: string };
@@ -45,33 +45,43 @@ export const ProductHourlyDetailModal: React.FC<Props> = ({
   const data = useMemo(() => {
     if (!productName) return null;
     const hoursSet = new Set<string>();
-    type LocRow = { tenantIdx: number; tenantId: string; tenantName: string; location: string; cellByHour: Record<string, Cell>; rowQty: number; rowAmount: number; rowIskonto: number };
-    type TenantRow = { tenantIdx: number; tenantId: string; tenantName: string; cellByHour: Record<string, Cell>; rowQty: number; rowAmount: number; rowIskonto: number; locCount: number };
+    type LocRow = { tenantIdx: number; tenantId: string; tenantName: string; location: string; cellByHour: Record<string, Cell>; rowQty: number; rowAmount: number; rowIskonto: number; birim: string };
+    type TenantRow = { tenantIdx: number; tenantId: string; tenantName: string; cellByHour: Record<string, Cell>; rowQty: number; rowAmount: number; rowIskonto: number; locCount: number; birim: string };
 
     const tenantRows: TenantRow[] = [];
     const locRows: LocRow[] = [];
+    // 2026-05-06 — Ürünün ana birimi: tüm satırlardan toplanır, "Kg/Lt" gibi
+    // birim varsa "ad" yerine onu kullanırız.
+    let productBirim = 'ad';
 
     snapshots.forEach((s, idx) => {
       const tenantData = productHourByTenant[s.tenant.tenant_id] || {};
       let tenantQty = 0; let tenantAmount = 0; let tenantIskonto = 0; let locCount = 0;
+      let tenantBirim = '';
       const tenantByHour: Record<string, Cell> = {};
 
       Object.entries(tenantData).forEach(([loc, products]) => {
         const cellByHour = products[productName];
         if (!cellByHour) return;
         let rowQty = 0; let rowAmount = 0; let rowIskonto = 0;
+        let rowBirim = '';
         Object.entries(cellByHour).forEach(([h, c]) => {
           if (c.qty <= 0 && c.amount <= 0) return;
           hoursSet.add(h);
           rowQty += c.qty; rowAmount += c.amount; rowIskonto += c.iskonto;
-          if (!tenantByHour[h]) tenantByHour[h] = { qty: 0, amount: 0, iskonto: 0, brut: 0, kdv: 0 };
+          if (c.birim && c.birim !== 'ad') { rowBirim = c.birim; productBirim = c.birim; }
+          else if (c.birim && !rowBirim) rowBirim = c.birim;
+          if (!tenantByHour[h]) tenantByHour[h] = { qty: 0, amount: 0, iskonto: 0, brut: 0, kdv: 0, birim: c.birim || 'ad' };
           tenantByHour[h].qty += c.qty;
           tenantByHour[h].amount += c.amount;
           tenantByHour[h].iskonto += c.iskonto;
+          if (c.birim && c.birim !== 'ad') tenantByHour[h].birim = c.birim;
         });
         if (rowQty > 0 || rowAmount > 0) {
           locCount += 1;
           tenantQty += rowQty; tenantAmount += rowAmount; tenantIskonto += rowIskonto;
+          if (rowBirim && rowBirim !== 'ad') tenantBirim = rowBirim;
+          else if (rowBirim && !tenantBirim) tenantBirim = rowBirim;
           locRows.push({
             tenantIdx: idx,
             tenantId: s.tenant.tenant_id,
@@ -79,6 +89,7 @@ export const ProductHourlyDetailModal: React.FC<Props> = ({
             location: loc,
             cellByHour,
             rowQty, rowAmount, rowIskonto,
+            birim: rowBirim || 'ad',
           });
         }
       });
@@ -95,13 +106,14 @@ export const ProductHourlyDetailModal: React.FC<Props> = ({
         rowAmount: tenantAmount,
         rowIskonto: tenantIskonto,
         locCount,
+        birim: tenantBirim || productBirim || 'ad',
       });
     });
 
     const allHours = Array.from(hoursSet).sort();
     const grandAmount = tenantRows.reduce((s, r) => s + r.rowAmount, 0);
     const grandQty = tenantRows.reduce((s, r) => s + r.rowQty, 0);
-    return { allHours, tenantRows, locRows, grandAmount, grandQty };
+    return { allHours, tenantRows, locRows, grandAmount, grandQty, productBirim };
   }, [productName, snapshots, productHourByTenant]);
 
   if (!productName) return null;
@@ -134,7 +146,7 @@ export const ProductHourlyDetailModal: React.FC<Props> = ({
               ₺{fmt2(data.grandAmount)}
             </Text>
             <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>
-              {data.grandQty.toFixed(0)} adet · {data.tenantRows.length} veri kaynağı · {data.locRows.length} lokasyon
+              {((data.productBirim === 'Kg' || data.productBirim === 'Lt' || data.productBirim?.toLowerCase?.() === 'kg' || data.productBirim?.toLowerCase?.() === 'lt') ? data.grandQty.toFixed(2) : data.grandQty.toFixed(0))} {data.productBirim} · {data.tenantRows.length} veri kaynağı · {data.locRows.length} lokasyon
             </Text>
           </View>
         )}
@@ -188,6 +200,8 @@ export const ProductHourlyDetailModal: React.FC<Props> = ({
                       const c = t.cellByHour[h];
                       const qty = c?.qty || 0;
                       const amount = c?.amount || 0;
+                      const cellBirim = c?.birim || t.birim;
+                      const fmtQ = (cellBirim === 'Kg' || cellBirim === 'Lt' || cellBirim?.toLowerCase?.() === 'kg' || cellBirim?.toLowerCase?.() === 'lt') ? qty.toFixed(2) : qty.toFixed(0);
                       return (
                         <View key={h} style={styles.hourCol}>
                           {qty > 0 ? (
@@ -196,7 +210,7 @@ export const ProductHourlyDetailModal: React.FC<Props> = ({
                                 ₺{fmtTL(amount)}
                               </Text>
                               <Text style={{ color: colors.textSecondary, fontSize: 9, fontWeight: '700' }}>
-                                {qty.toFixed(0)} ad
+                                {fmtQ} {cellBirim}
                               </Text>
                             </>
                           ) : (
@@ -210,7 +224,7 @@ export const ProductHourlyDetailModal: React.FC<Props> = ({
                         ₺{fmtTL(t.rowAmount)}
                       </Text>
                       <Text style={{ color: colors.textSecondary, fontSize: 9, fontWeight: '700' }}>
-                        {t.rowQty.toFixed(0)} ad
+                        {(t.birim === 'Kg' || t.birim === 'Lt' || t.birim?.toLowerCase?.() === 'kg' || t.birim?.toLowerCase?.() === 'lt') ? t.rowQty.toFixed(2) : t.rowQty.toFixed(0)} {t.birim}
                       </Text>
                     </View>
                   </View>
@@ -235,6 +249,8 @@ export const ProductHourlyDetailModal: React.FC<Props> = ({
                       const c = row.cellByHour[h];
                       const qty = c?.qty || 0;
                       const amount = c?.amount || 0;
+                      const cellBirim = c?.birim || row.birim;
+                      const fmtQ = (cellBirim === 'Kg' || cellBirim === 'Lt' || cellBirim?.toLowerCase?.() === 'kg' || cellBirim?.toLowerCase?.() === 'lt') ? qty.toFixed(2) : qty.toFixed(0);
                       return (
                         <View key={h} style={styles.hourCol}>
                           {qty > 0 ? (
@@ -243,7 +259,7 @@ export const ProductHourlyDetailModal: React.FC<Props> = ({
                                 ₺{fmtTL(amount)}
                               </Text>
                               <Text style={{ color: colors.textSecondary, fontSize: 9 }}>
-                                {qty.toFixed(0)} ad
+                                {fmtQ} {cellBirim}
                               </Text>
                             </>
                           ) : (
@@ -257,7 +273,7 @@ export const ProductHourlyDetailModal: React.FC<Props> = ({
                         ₺{fmtTL(row.rowAmount)}
                       </Text>
                       <Text style={{ color: colors.textSecondary, fontSize: 9 }}>
-                        {row.rowQty.toFixed(0)} ad
+                        {(row.birim === 'Kg' || row.birim === 'Lt' || row.birim?.toLowerCase?.() === 'kg' || row.birim?.toLowerCase?.() === 'lt') ? row.rowQty.toFixed(2) : row.rowQty.toFixed(0)} {row.birim}
                       </Text>
                     </View>
                   </View>
