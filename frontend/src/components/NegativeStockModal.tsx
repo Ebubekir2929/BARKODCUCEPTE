@@ -41,6 +41,9 @@ export interface NegativeStockItem {
   BIRIM?: string;
   BIRIM_AD?: string;
   BIRIM_ADI?: string;
+  // 2026-05-06 — POS `stock_list` bu garip isimde tutuyor: `STOK_BIRIM_FIYAT`
+  // değer "Adet" / "Kg" gibi birim adıdır, fiyat değil.
+  STOK_BIRIM_FIYAT?: string;
 }
 
 interface Props {

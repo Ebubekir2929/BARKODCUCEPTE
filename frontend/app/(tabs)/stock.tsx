@@ -1303,7 +1303,11 @@ export default function StockScreen() {
         onClose={() => setShowNegativeStockModal(false)}
         items={stockList}
         loading={stockLoading}
-        tenantName={user?.tenants?.find?.(x => x.tenant_id === activeTenantId)?.tenant_name || activeSource || ''}
+        tenantName={
+          user?.tenants?.find?.((x: any) => x.tenant_id === activeTenantId)?.name
+          || user?.tenants?.find?.((x: any) => x.tenant_id === activeTenantId)?.tenant_name
+          || ''
+        }
         onItemPress={(item) => {
           setShowNegativeStockModal(false);
           // Tiny delay so the modal close animation completes before opening detail
