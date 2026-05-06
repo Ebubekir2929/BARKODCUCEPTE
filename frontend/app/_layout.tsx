@@ -11,6 +11,7 @@ import * as NavigationBar from 'expo-navigation-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import notificationService from '../src/services/notificationService';
 import { attachNotificationTapHandler } from '../src/services/notificationTapHandler';
+import WebDisabledScreen from '../src/components/WebDisabledScreen';
 
 function AppShell() {
   const { colors } = useThemeStore();
@@ -66,6 +67,14 @@ function AppShell() {
 }
 
 export default function RootLayout() {
+  // 2026-05-06 — KULLANICI İSTEĞİ: Web sürümü bu projede tamamen devre dışı.
+  // Web ayrı bir projede yazılacak. Burada herhangi bir mobil rendering /
+  // store / API çağrısı yapılmadan önce web'i erken döndürüyoruz ki
+  // kırılan UI veya yanlış grafikler kullanıcıya gösterilmesin.
+  if (Platform.OS === 'web') {
+    return <WebDisabledScreen />;
+  }
+
   const { colors, isDark, loadTheme } = useThemeStore();
   const { isLoading, checkAuth, isAuthenticated, token } = useAuthStore();
   const { isReady: langReady, loadLanguage } = useLanguageStore();
