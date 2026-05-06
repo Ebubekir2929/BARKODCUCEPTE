@@ -48,6 +48,9 @@ async def ensure_tokens_table():
                     high_sales_threshold DECIMAL(18,2) DEFAULT 5000.00,
                     notify_low_stock TINYINT(1) DEFAULT 1,
                     check_interval_minutes INT DEFAULT 15,
+                    low_stock_mode VARCHAR(16) DEFAULT 'daily',
+                    low_stock_daily_hour TINYINT DEFAULT 13,
+                    low_stock_interval_hours TINYINT DEFAULT 6,
                     last_check_at DATETIME NULL,
                     updated_at DATETIME NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -57,6 +60,15 @@ async def ensure_tokens_table():
                 await cur.execute("ALTER TABLE user_notification_settings ADD COLUMN notify_line_cancellations TINYINT(1) DEFAULT 1 AFTER notify_cancellations")
             except Exception:
                 pass  # column already exists
+            for _alter in (
+                "ALTER TABLE user_notification_settings ADD COLUMN low_stock_mode VARCHAR(16) DEFAULT 'daily'",
+                "ALTER TABLE user_notification_settings ADD COLUMN low_stock_daily_hour TINYINT DEFAULT 13",
+                "ALTER TABLE user_notification_settings ADD COLUMN low_stock_interval_hours TINYINT DEFAULT 6",
+            ):
+                try:
+                    await cur.execute(_alter)
+                except Exception:
+                    pass
             # De-duplication table: remember which (type, key) events we already pushed
             await cur.execute("""
                 CREATE TABLE IF NOT EXISTS notification_events_seen (
@@ -358,6 +370,10 @@ class NotificationSettings(BaseModel):
     high_sales_threshold: Optional[float] = 5000.0
     notify_low_stock: Optional[bool] = True
     check_interval_minutes: Optional[int] = 15
+    # 2026-05-06 — Eksi stok bildirimi için kullanıcı bazında zamanlama
+    low_stock_mode: Optional[str] = "daily"           # "daily" | "interval"
+    low_stock_daily_hour: Optional[int] = 13          # 0..23 (TR saati, daily mode)
+    low_stock_interval_hours: Optional[int] = 6       # 1..24 (interval mode)
 
 
 @router.post("/reset-dedup")
@@ -428,7 +444,8 @@ async def get_settings(current_user: dict = Depends(get_current_user)):
         async with conn.cursor() as cur:
             await cur.execute("""
                 SELECT notify_cancellations, notify_line_cancellations, notify_high_sales,
-                       high_sales_threshold, notify_low_stock, check_interval_minutes, last_check_at
+                       high_sales_threshold, notify_low_stock, check_interval_minutes, last_check_at,
+                       low_stock_mode, low_stock_daily_hour, low_stock_interval_hours
                 FROM user_notification_settings WHERE user_id=%s
             """, (user_id,))
             row = await cur.fetchone()
@@ -436,8 +453,9 @@ async def get_settings(current_user: dict = Depends(get_current_user)):
                 await cur.execute("""
                     INSERT INTO user_notification_settings
                         (user_id, notify_cancellations, notify_line_cancellations, notify_high_sales,
-                         high_sales_threshold, notify_low_stock, check_interval_minutes, updated_at)
-                    VALUES (%s, 1, 1, 1, 5000.00, 1, 15, UTC_TIMESTAMP())
+                         high_sales_threshold, notify_low_stock, check_interval_minutes,
+                         low_stock_mode, low_stock_daily_hour, low_stock_interval_hours, updated_at)
+                    VALUES (%s, 1, 1, 1, 5000.00, 1, 15, 'daily', 13, 6, UTC_TIMESTAMP())
                 """, (user_id,))
                 await conn.commit()
                 return {
@@ -449,6 +467,9 @@ async def get_settings(current_user: dict = Depends(get_current_user)):
                         "high_sales_threshold": 5000.0,
                         "notify_low_stock": True,
                         "check_interval_minutes": 15,
+                        "low_stock_mode": "daily",
+                        "low_stock_daily_hour": 13,
+                        "low_stock_interval_hours": 6,
                         "last_check_at": None,
                     }
                 }
@@ -462,6 +483,9 @@ async def get_settings(current_user: dict = Depends(get_current_user)):
             "notify_low_stock": bool(row[4]),
             "check_interval_minutes": int(row[5]) if row[5] is not None else 15,
             "last_check_at": row[6].isoformat() if row[6] else None,
+            "low_stock_mode": str(row[7] or "daily"),
+            "low_stock_daily_hour": int(row[8]) if row[8] is not None else 13,
+            "low_stock_interval_hours": int(row[9]) if row[9] is not None else 6,
         }
     }
 
@@ -831,14 +855,25 @@ async def scan_now_eksi_stok(current_user: dict = Depends(get_current_user)):
 @router.post("/settings")
 async def set_settings(body: NotificationSettings, current_user: dict = Depends(get_current_user)):
     user_id = current_user["user_id"]
+    # Sanitize values
+    mode = (body.low_stock_mode or "daily").strip().lower()
+    if mode not in ("daily", "interval"):
+        mode = "daily"
+    daily_hour = max(0, min(23, int(body.low_stock_daily_hour or 13)))
+    interval_hours = int(body.low_stock_interval_hours or 6)
+    if interval_hours < 1: interval_hours = 1
+    if interval_hours > 24: interval_hours = 24
+
     pool = await get_patron_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute("""
                 INSERT INTO user_notification_settings
                     (user_id, notify_cancellations, notify_line_cancellations, notify_high_sales,
-                     high_sales_threshold, notify_low_stock, check_interval_minutes, last_check_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NULL, UTC_TIMESTAMP())
+                     high_sales_threshold, notify_low_stock, check_interval_minutes,
+                     low_stock_mode, low_stock_daily_hour, low_stock_interval_hours,
+                     last_check_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, UTC_TIMESTAMP())
                 ON DUPLICATE KEY UPDATE
                     notify_cancellations=VALUES(notify_cancellations),
                     notify_line_cancellations=VALUES(notify_line_cancellations),
@@ -846,6 +881,9 @@ async def set_settings(body: NotificationSettings, current_user: dict = Depends(
                     high_sales_threshold=VALUES(high_sales_threshold),
                     notify_low_stock=VALUES(notify_low_stock),
                     check_interval_minutes=VALUES(check_interval_minutes),
+                    low_stock_mode=VALUES(low_stock_mode),
+                    low_stock_daily_hour=VALUES(low_stock_daily_hour),
+                    low_stock_interval_hours=VALUES(low_stock_interval_hours),
                     last_check_at=NULL,
                     updated_at=UTC_TIMESTAMP()
             """, (
@@ -856,10 +894,11 @@ async def set_settings(body: NotificationSettings, current_user: dict = Depends(
                 float(body.high_sales_threshold or 0),
                 1 if body.notify_low_stock else 0,
                 max(1, int(body.check_interval_minutes or 15)),
+                mode,
+                daily_hour,
+                interval_hours,
             ))
             # Re-activate all push tokens so the watcher can deliver events.
-            # Prevents the "user toggled Push off then on, but tokens stayed
-            # active=0" situation from blocking notifications.
             await cur.execute(
                 "UPDATE user_push_tokens SET active=1, updated_at=UTC_TIMESTAMP() WHERE user_id=%s",
                 (user_id,),

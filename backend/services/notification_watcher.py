@@ -14,7 +14,7 @@ De-duplication via `notification_events_seen` table (tenant_id, event_type, even
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 import httpx
 
@@ -1062,9 +1062,8 @@ async def _scan_cancellations_for_tenant(tenant: Dict[str, Any]) -> int:
 async def _collect_low_stock_subscribers() -> List[Dict[str, Any]]:
     """Return all (user, tenant) pairs with notify_low_stock=1 and ≥1 active push token.
 
-    Unlike `_get_users_to_check`, this ignores the `check_interval_minutes` throttle
-    and `last_check_at` because we fire on a fixed schedule (13:00 & 20:00 TR),
-    not on a polling interval.
+    Includes the user's per-schedule preferences (mode, daily_hour, interval_hours)
+    so the negative-stock summary loop can decide WHEN to fire for each user.
     """
     try:
         from server import db as mongo_db  # type: ignore
@@ -1076,7 +1075,10 @@ async def _collect_low_stock_subscribers() -> List[Dict[str, Any]]:
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute("""
-                SELECT s.user_id, u.tenant_id
+                SELECT s.user_id, u.tenant_id,
+                       COALESCE(s.low_stock_mode,'daily'),
+                       COALESCE(s.low_stock_daily_hour,13),
+                       COALESCE(s.low_stock_interval_hours,6)
                 FROM user_notification_settings s
                 JOIN users u ON u.user_id = s.user_id
                 WHERE u.active = 1 AND s.notify_low_stock = 1
@@ -1086,6 +1088,12 @@ async def _collect_low_stock_subscribers() -> List[Dict[str, Any]]:
             for r in rows:
                 user_id = r[0]
                 primary_tid = r[1]
+                mode = str(r[2] or "daily").lower()
+                daily_hour = int(r[3] if r[3] is not None else 13)
+                interval_hours = int(r[4] if r[4] is not None else 6)
+                if interval_hours < 1: interval_hours = 1
+                if interval_hours > 24: interval_hours = 24
+                if mode not in ("daily", "interval"): mode = "daily"
                 # Active tokens
                 await cur.execute(
                     "SELECT token FROM user_push_tokens WHERE user_id=%s AND active=1",
@@ -1131,20 +1139,44 @@ async def _collect_low_stock_subscribers() -> List[Dict[str, Any]]:
                         "tenant_id": t["tenant_id"],
                         "tenant_name": t["name"],
                         "tokens": tokens,
+                        "low_stock_mode": mode,
+                        "low_stock_daily_hour": daily_hour,
+                        "low_stock_interval_hours": interval_hours,
                     })
     return out
 
 
-async def _run_negative_stock_summary_scan(slot_label: str):
-    """Fire a single round of eksi-stok özet bildirimleri.
+def _user_low_stock_should_fire(sub: Dict[str, Any], tr_now) -> Optional[str]:
+    """Return a slot_label string when the user is due NOW, else None.
 
-    For each (user, tenant) with notify_low_stock=1:
-      - Load stock_list from kasacepteweb via services.dataset_cache.get_dataset_items
-      - Count MIKTAR < 0 items
-      - If count>0 and (tenant_id, 'eksi_stok_ozet', f'{date}:h{hour}') is new → push ONE summary
-
-    slot_label = e.g. "2026-05-01:h13"
+    - daily mode: fire once per day at the configured hour (within first 10 min)
+    - interval mode: fire every N hours (slot resets at hour boundary)
+    The slot label is used as a dedup key (per user+tenant).
     """
+    mode = sub.get("low_stock_mode") or "daily"
+    if mode == "daily":
+        target_h = int(sub.get("low_stock_daily_hour") or 13)
+        if tr_now.hour == target_h and tr_now.minute < 10:
+            return f"{tr_now.strftime('%Y-%m-%d')}:dh{target_h:02d}"
+        return None
+    # interval mode
+    iv = int(sub.get("low_stock_interval_hours") or 6)
+    if iv < 1: iv = 1
+    if iv > 24: iv = 24
+    # Fire when current hour is a multiple of iv, within first 10 minutes
+    if tr_now.hour % iv != 0:
+        return None
+    if tr_now.minute >= 10:
+        return None
+    return f"{tr_now.strftime('%Y-%m-%d')}:i{iv}h{tr_now.hour:02d}"
+
+
+async def _run_negative_stock_summary_scan(slot_label_unused: str = ""):
+    """Per-user schedule: each user with notify_low_stock=1 fires according to
+    their own schedule (daily-at-hour OR every-N-hours).
+
+    Stock list is fetched once per tenant (cache) to avoid duplicate POS load
+    when multiple users share a tenant; dedup is per (user, tenant, slot)."""
     try:
         from services.dataset_cache import get_dataset_items
     except Exception as e:
@@ -1153,28 +1185,32 @@ async def _run_negative_stock_summary_scan(slot_label: str):
 
     subs = await _collect_low_stock_subscribers()
     if not subs:
-        logger.info(f"[neg_stock_summary] slot={slot_label} no subscribers with notify_low_stock")
         return
 
-    # Group by tenant_id so we only load each tenant's stock list once, even if
-    # multiple users want it.
-    tenant_info: Dict[str, Dict[str, Any]] = {}
-    for s in subs:
-        tid = s["tenant_id"]
-        if tid not in tenant_info:
-            tenant_info[tid] = {
-                "tenant_name": s["tenant_name"],
-                "recipients": [],  # list of (user_id, tokens)
-            }
-        tenant_info[tid]["recipients"].append({
-            "user_id": s["user_id"],
-            "tokens": s["tokens"],
-        })
+    tr_now = _tr_now()
 
+    # Filter to subs that are due NOW
+    due: List[Dict[str, Any]] = []
+    for s in subs:
+        slot = _user_low_stock_should_fire(s, tr_now)
+        if slot:
+            s2 = dict(s)
+            s2["slot_label"] = slot
+            due.append(s2)
+    if not due:
+        return
+
+    logger.info(f"[neg_stock_summary] tr_now={tr_now.strftime('%H:%M')} due={len(due)} of {len(subs)} subs")
+
+    # Group by tenant for fetching
+    tenant_items_cache: Dict[str, List[Dict[str, Any]]] = {}
     total_pushed = 0
-    for tid, info in tenant_info.items():
+    for sub in due:
+        tid = sub["tenant_id"]
         try:
-            items = await get_dataset_items(tid, "stock_list")
+            if tid not in tenant_items_cache:
+                tenant_items_cache[tid] = await get_dataset_items(tid, "stock_list")
+            items = tenant_items_cache[tid] or []
             negative_items = []
             for it in items:
                 try:
@@ -1187,18 +1223,10 @@ async def _run_negative_stock_summary_scan(slot_label: str):
                         "kod": it.get("KOD") or it.get("STOK_KOD") or "",
                         "miktar": m,
                     })
-
             cnt = len(negative_items)
-            logger.info(f"[neg_stock_summary] slot={slot_label} tenant={tid} ({info['tenant_name']}) negative={cnt}")
-
-            # Compose body: number + up to 3 example items so users get useful signal
             if cnt == 0:
-                # Still mark seen so we don't keep re-checking; actually skip mark
-                # because we want a fresh chance if data updates later in the same slot.
                 continue
-
             total_abs = sum(abs(x["miktar"]) for x in negative_items)
-            # Top 3 most-negative for teaser
             sorted_items = sorted(negative_items, key=lambda x: x["miktar"])[:3]
             teaser = "; ".join(
                 f"{(x['ad'] or x['kod'])[:28]} ({x['miktar']:.0f})"
@@ -1208,67 +1236,46 @@ async def _run_negative_stock_summary_scan(slot_label: str):
             if teaser:
                 body = f"{body}\n{teaser}"
 
-            # Dedup per tenant+slot
-            dedup_key = f"eksi_stok_ozet:{slot_label}"
+            slot = sub["slot_label"]
+            # Dedup per (tenant, user, slot) — different users with different
+            # schedules must not collide.
+            dedup_key = f"eksi_stok_ozet:u{sub['user_id']}:{slot}"
             if not await _mark_event_seen(tid, "eksi_stok_ozet", dedup_key):
-                logger.info(f"[neg_stock_summary] slot={slot_label} tenant={tid} already pushed this slot — skip")
-                continue
-
-            # Collect all tokens for all users of this tenant (deduped)
-            all_tokens: List[str] = []
-            seen_tokens = set()
-            for rcp in info["recipients"]:
-                for tok in rcp["tokens"]:
-                    if tok not in seen_tokens:
-                        seen_tokens.add(tok)
-                        all_tokens.append(tok)
-
-            if not all_tokens:
                 continue
 
             await _push_many(
-                all_tokens,
-                f"📦 Eksi Stok · {info['tenant_name']}",
+                sub["tokens"],
+                f"📦 Eksi Stok · {sub['tenant_name']}",
                 body,
                 {
                     "type": "low_stock_summary",
                     "tenant": tid,
-                    "tenant_name": info["tenant_name"],
+                    "tenant_name": sub["tenant_name"],
                     "count": cnt,
-                    "slot": slot_label,
+                    "slot": slot,
                 },
             )
             total_pushed += 1
             logger.info(
-                f"[neg_stock_summary] ✅ PUSHED tenant={tid} ({info['tenant_name']}) "
-                f"count={cnt} tokens={len(all_tokens)} slot={slot_label}"
+                f"[neg_stock_summary] ✅ PUSHED user={sub['user_id']} tenant={tid} "
+                f"({sub['tenant_name']}) count={cnt} slot={slot}"
             )
         except Exception as e:
-            logger.warning(f"[neg_stock_summary] tenant={tid} failed: {e}")
+            logger.warning(f"[neg_stock_summary] user={sub.get('user_id')} tenant={tid} failed: {e}")
 
-    logger.info(f"[neg_stock_summary] slot={slot_label} complete — total_tenants_pushed={total_pushed}")
+    if total_pushed:
+        logger.info(f"[neg_stock_summary] tr_now={tr_now.strftime('%H:%M')} total_pushed={total_pushed}")
 
 
 async def _negative_stock_summary_loop():
-    """Runs forever; fires `_run_negative_stock_summary_scan` at TR 13:00 and 20:00.
-
-    Check minute-by-minute; dedup via notification_events_seen so even if we
-    overlap several minutes at the top of the hour we still push exactly once
-    per slot per tenant.
+    """Runs forever; calls `_run_negative_stock_summary_scan()` every minute.
+    The scan itself decides — per-user — whether each subscriber is due now
+    based on their `low_stock_mode` (daily-at-hour OR every-N-hours).
     """
-    logger.info(
-        f"📦 Negative-stock summary watcher started — fires daily at TR "
-        f"{_NEGATIVE_STOCK_TARGET_HOURS_TR}:00"
-    )
+    logger.info("📦 Negative-stock summary watcher started — per-user schedule (daily / interval)")
     while True:
         try:
-            tr_now = _tr_now()
-            if tr_now.hour in _NEGATIVE_STOCK_TARGET_HOURS_TR:
-                # Run anywhere in the first 10 minutes of the target hour.
-                # Dedup prevents duplicate pushes.
-                if tr_now.minute < 10:
-                    slot_label = f"{tr_now.strftime('%Y-%m-%d')}:h{tr_now.hour:02d}"
-                    await _run_negative_stock_summary_scan(slot_label)
+            await _run_negative_stock_summary_scan()
         except Exception as e:
             logger.error(f"[neg_stock_summary] loop error: {e}")
         await asyncio.sleep(_NEGATIVE_STOCK_CHECK_INTERVAL_SEC)

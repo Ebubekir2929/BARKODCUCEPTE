@@ -17,8 +17,13 @@
  */
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { DeviceEventEmitter } from 'react-native';
 
 const STORAGE_KEY = '@notification_pending_tap_v2';
+/** Event fired immediately after a tap is persisted. Dashboard/Stock subscribe
+ *  to it so they can process the tap even while already focused (foreground
+ *  scenario — useFocusEffect would not re-fire in that case). */
+export const NOTIFICATION_TAP_EVENT = 'notification_tap_received_v2';
 
 export interface PendingTap {
   type?: string;       // 'iptal' | 'high_sale' | ...
@@ -51,6 +56,9 @@ async function writePendingTap(payload: any) {
     };
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(tap));
     console.log('[NotifTap] wrote pending:', tap);
+    // Emit in-app event so screens already focused can immediately react
+    // (foreground tap scenario — useFocusEffect wouldn't fire again).
+    try { DeviceEventEmitter.emit(NOTIFICATION_TAP_EVENT, tap); } catch {}
   } catch (e) {
     console.log('[NotifTap] write failed:', e);
   }

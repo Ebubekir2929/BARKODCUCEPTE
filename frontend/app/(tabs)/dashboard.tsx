@@ -10,6 +10,7 @@ import {
   RefreshControl,
   Platform,
   ActivityIndicator,
+  DeviceEventEmitter,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
@@ -19,7 +20,7 @@ import { useAuthStore } from '../../src/store/authStore';
 import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { usePrefsStore } from '../../src/store/prefsStore';
-import { readPendingTap, clearPendingTap } from '../../src/services/notificationTapHandler';
+import { readPendingTap, clearPendingTap, NOTIFICATION_TAP_EVENT } from '../../src/services/notificationTapHandler';
 import { DataSourceSelector } from '../../src/components/DataSourceSelector';
 import { SummaryCard } from '../../src/components/SummaryCard';
 import { FilterModal } from '../../src/components/FilterModal';
@@ -327,6 +328,16 @@ export default function DashboardScreen() {
     if (!user || !isAuthenticated) return;
     processPendingTap();
   }, [user, isAuthenticated, processPendingTap]);
+
+  // 2026-05-06 — Foreground tap fix: uygulama açıkken (dashboard zaten focus'ta)
+  // bildirime tıklanırsa useFocusEffect tekrar tetiklenmez. DeviceEventEmitter
+  // üzerinden notificationTapHandler'ın yaydığı event'i dinleyerek anında işler.
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(NOTIFICATION_TAP_EVENT, () => {
+      processPendingTap();
+    });
+    return () => { try { sub.remove(); } catch {} };
+  }, [processPendingTap]);
 
   const clearFilters = () => {
     const today = new Date();

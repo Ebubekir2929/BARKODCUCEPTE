@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, Modal,
   ScrollView, ActivityIndicator, Alert, RefreshControl, Platform,
-  FlatList,
+  FlatList, DeviceEventEmitter,
 } from 'react-native';
 import { webStyles } from '../../src/styles/webModalStyles';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -12,7 +12,7 @@ import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import { useAuthStore } from '../../src/store/authStore';
 import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
-import { readPendingTap, clearPendingTap } from '../../src/services/notificationTapHandler';
+import { readPendingTap, clearPendingTap, NOTIFICATION_TAP_EVENT } from '../../src/services/notificationTapHandler';
 import { useFocusEffect } from 'expo-router';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -112,6 +112,16 @@ export default function StockScreen() {
       processStockTap();
     }, [processStockTap])
   );
+
+  // 2026-05-06 — Foreground tap: bildirim banner'ına tıklama olduğunda
+  // notificationTapHandler emit eder, biz hemen okuruz (focus zaten bizdeyse
+  // useFocusEffect tetiklenmediği için bu ek dinleyiciye ihtiyacımız var).
+  useEffect(() => {
+    const sub = DeviceEventEmitter.addListener(NOTIFICATION_TAP_EVENT, () => {
+      processStockTap();
+    });
+    return () => { try { sub.remove(); } catch {} };
+  }, [processStockTap]);
 
   // 2026-05-03 — deep-link from notification taps (low_stock_summary push)
   // Handles `onlyNegative=1` query param → switches the filter to "negative" so

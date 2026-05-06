@@ -1621,3 +1621,64 @@ agent_communication:
         - app/(tabs)/dashboard.tsx (destructure fix + low_stock route branch)
         - app/(tabs)/_layout.tsx (removed stale import + effect)
       No backend changes.
+    -agent: "main"
+    -message: |
+      [2026-05-06 13:55] Foreground tap fix + per-user low-stock schedule
+      ────────────────────────────────────────────────────────────────────
+      User report: "uygulama açıkken bildirime tıklayınca açmıyor; kapatıp
+      açınca modal geliyor". Cause: dashboard's `useFocusEffect` only fires
+      on focus *change*. When the app is already focused on the dashboard,
+      a tap simply writes to AsyncStorage but no consumer reads it.
+
+      Fix:
+      - notificationTapHandler now `DeviceEventEmitter.emit(NOTIFICATION_TAP_EVENT)`
+        immediately after persisting to AsyncStorage.
+      - dashboard.tsx + stock.tsx subscribe to that event with addListener
+        and re-run their pending-tap processor on every emit.
+      Result: both cold-start (focus) and live-foreground (event) paths now
+      consume taps reliably without exposing useLocalSearchParams.
+
+      User request 2: "eksi stok bildirim saatini ben ayarlıyabileyim
+      ayarlardan, onunda ekranında değişiklik yapacaz" — Mode C selected
+      (mode toggle: daily-at-hour OR every-N-hours).
+
+      Backend:
+      - Added 3 columns to user_notification_settings:
+          low_stock_mode VARCHAR(16) DEFAULT 'daily',
+          low_stock_daily_hour TINYINT DEFAULT 13,
+          low_stock_interval_hours TINYINT DEFAULT 6.
+      - GET/POST /api/notifications/settings now reads/writes them.
+      - notification_watcher: `_collect_low_stock_subscribers` returns each
+        sub's mode/daily_hour/interval_hours; new helper
+        `_user_low_stock_should_fire(sub, tr_now)` decides per-user when to
+        push. Loop runs every 60s.
+      - Dedup key now includes user_id (different users on same tenant
+        with different schedules don't collide).
+
+      Frontend (Settings):
+      - New "EKSİ STOK BİLDİRİM ZAMANLAMASI" section under low-stock toggle.
+      - Mode toggle (Günde Bir Saatte | Her N Saatte Bir).
+      - Daily mode: tap to open hour picker modal (00..23).
+      - Interval mode: chip row (1, 2, 3, 6, 12, Günde 1).
+      - Description text under "Eksi Stok Uyarısı" updates dynamically
+        ("Her gün 13:00'da bildirim" / "Her 6 saatte bir bildirim").
+
+      Verified via screenshot tool:
+      - Settings page renders both modes.
+      - Toggle between modes preserves selection.
+      - 0 Uncaught Errors.
+
+      Files touched:
+        /app/frontend/src/services/notificationTapHandler.ts (event emit)
+        /app/frontend/app/(tabs)/dashboard.tsx (event listener)
+        /app/frontend/app/(tabs)/stock.tsx (event listener)
+        /app/frontend/app/(tabs)/settings.tsx (schedule UI + sync)
+        /app/backend/routes/notifications.py (settings model + alters + GET/POST)
+        /app/backend/services/notification_watcher.py (per-user schedule)
+
+      Pending user-facing item NOT yet addressed (waiting on screenshot):
+      - HighSaleDetailModal showed "-" / "0 Adet" for products. Suspected
+        cause: fis_id mismatch → fis_detay_toplam fallback with different
+        keys (STOK_AD vs STOK_ADI). Will iterate after user uploads a
+        fresh tap screenshot from a recent FIS.
+

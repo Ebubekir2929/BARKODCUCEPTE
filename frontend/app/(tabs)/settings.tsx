@@ -43,6 +43,11 @@ export default function SettingsScreen() {
   const [lineCancellationAlert, setLineCancellationAlert] = useState(true);
   const [highSalesThreshold, setHighSalesThreshold] = useState('5000');
   const [checkIntervalMinutes, setCheckIntervalMinutes] = useState('15');
+  // 2026-05-06 — Eksi stok bildirim zamanlaması (Mod C: ya günlük belirli saat, ya da N saatlik)
+  const [lowStockMode, setLowStockMode] = useState<'daily' | 'interval'>('daily');
+  const [lowStockDailyHour, setLowStockDailyHour] = useState<number>(13);
+  const [lowStockIntervalHours, setLowStockIntervalHours] = useState<number>(6);
+  const [showHourPicker, setShowHourPicker] = useState(false);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
 
   // Scan-now (manual trigger) state
@@ -85,6 +90,7 @@ export default function SettingsScreen() {
   const syncSettingsToBackend = async (overrides?: Partial<{
     notify_cancellations: boolean; notify_high_sales: boolean; high_sales_threshold: number;
     notify_low_stock: boolean; check_interval_minutes: number;
+    low_stock_mode: 'daily' | 'interval'; low_stock_daily_hour: number; low_stock_interval_hours: number;
   }>) => {
     try {
       const { token } = useAuthStore.getState();
@@ -96,6 +102,9 @@ export default function SettingsScreen() {
         high_sales_threshold: parseFloat(highSalesThreshold) || 5000,
         notify_low_stock: lowStockAlert,
         check_interval_minutes: Math.max(1, parseInt(checkIntervalMinutes, 10) || 15),
+        low_stock_mode: lowStockMode,
+        low_stock_daily_hour: lowStockDailyHour,
+        low_stock_interval_hours: lowStockIntervalHours,
         ...overrides,
       };
       await fetch(`${API_URL}/api/notifications/settings`, {
@@ -128,6 +137,10 @@ export default function SettingsScreen() {
             setLowStockAlert(!!s.notify_low_stock);
             setHighSalesThreshold(String(s.high_sales_threshold ?? 5000));
             setCheckIntervalMinutes(String(s.check_interval_minutes ?? 15));
+            const m = (s.low_stock_mode === 'interval') ? 'interval' : 'daily';
+            setLowStockMode(m);
+            setLowStockDailyHour(Number(s.low_stock_daily_hour ?? 13));
+            setLowStockIntervalHours(Number(s.low_stock_interval_hours ?? 6));
             return;
           }
         } catch {}
@@ -604,7 +617,13 @@ export default function SettingsScreen() {
                     <Ionicons name="cube-outline" size={22} color={colors.warning} />
                     <View>
                       <Text style={[styles.menuItemLabel, { color: colors.text }]}>{t('low_stock_alert')}</Text>
-                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>{t('low_stock_desc')}</Text>
+                      <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>
+                        {lowStockMode === 'daily'
+                          ? `Her gün ${String(lowStockDailyHour).padStart(2, '0')}:00'da bildirim`
+                          : (lowStockIntervalHours === 24
+                              ? 'Günde bir bildirim'
+                              : `Her ${lowStockIntervalHours} saatte bir bildirim`)}
+                      </Text>
                     </View>
                   </View>
                   <Switch
@@ -614,6 +633,158 @@ export default function SettingsScreen() {
                     thumbColor="#FFF"
                   />
                 </View>
+
+                {lowStockAlert && (
+                  <>
+                    {/* 2026-05-06 — Eksi stok bildirim zamanlaması: kullanıcı seçer */}
+                    <View style={{ paddingHorizontal: 16, paddingVertical: 8, borderBottomColor: colors.border, borderBottomWidth: 1 }}>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: colors.textSecondary, marginBottom: 8, letterSpacing: 0.3 }}>
+                        EKSİ STOK BİLDİRİM ZAMANLAMASI
+                      </Text>
+                      {/* Mode toggle */}
+                      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+                        <TouchableOpacity
+                          onPress={async () => {
+                            setLowStockMode('daily');
+                            await syncSettingsToBackend({ low_stock_mode: 'daily' });
+                          }}
+                          style={{
+                            flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center',
+                            backgroundColor: lowStockMode === 'daily' ? colors.primary : colors.background,
+                            borderWidth: 1, borderColor: lowStockMode === 'daily' ? colors.primary : colors.border,
+                          }}
+                        >
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: lowStockMode === 'daily' ? '#fff' : colors.text }}>
+                            Günde Bir Saatte
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={async () => {
+                            setLowStockMode('interval');
+                            await syncSettingsToBackend({ low_stock_mode: 'interval' });
+                          }}
+                          style={{
+                            flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center',
+                            backgroundColor: lowStockMode === 'interval' ? colors.primary : colors.background,
+                            borderWidth: 1, borderColor: lowStockMode === 'interval' ? colors.primary : colors.border,
+                          }}
+                        >
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: lowStockMode === 'interval' ? '#fff' : colors.text }}>
+                            Her N Saatte Bir
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {lowStockMode === 'daily' ? (
+                        <TouchableOpacity
+                          onPress={() => setShowHourPicker(true)}
+                          style={{
+                            paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10,
+                            backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border,
+                            flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                          }}
+                        >
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <Ionicons name="time-outline" size={18} color={colors.warning} />
+                            <Text style={{ fontSize: 13, color: colors.text, fontWeight: '600' }}>
+                              Bildirim Saati
+                            </Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Text style={{ fontSize: 16, fontWeight: '800', color: colors.primary }}>
+                              {String(lowStockDailyHour).padStart(2, '0')}:00
+                            </Text>
+                            <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
+                          </View>
+                        </TouchableOpacity>
+                      ) : (
+                        <View>
+                          <Text style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 6 }}>
+                            Sıklık seçin:
+                          </Text>
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                            {[1, 2, 3, 6, 12, 24].map((iv) => {
+                              const sel = lowStockIntervalHours === iv;
+                              return (
+                                <TouchableOpacity
+                                  key={iv}
+                                  onPress={async () => {
+                                    setLowStockIntervalHours(iv);
+                                    await syncSettingsToBackend({ low_stock_interval_hours: iv });
+                                  }}
+                                  style={{
+                                    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18,
+                                    backgroundColor: sel ? colors.primary : colors.background,
+                                    borderWidth: 1, borderColor: sel ? colors.primary : colors.border,
+                                  }}
+                                >
+                                  <Text style={{ fontSize: 12, fontWeight: '700', color: sel ? '#fff' : colors.text }}>
+                                    {iv === 24 ? 'Günde 1' : `${iv} saat`}
+                                  </Text>
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        </View>
+                      )}
+                    </View>
+
+                    {/* Hour picker modal */}
+                    <Modal
+                      visible={showHourPicker}
+                      transparent
+                      animationType="fade"
+                      onRequestClose={() => setShowHourPicker(false)}
+                    >
+                      <TouchableOpacity
+                        style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}
+                        activeOpacity={1}
+                        onPress={() => setShowHourPicker(false)}
+                      >
+                        <View style={{
+                          width: '85%', maxHeight: '70%',
+                          backgroundColor: colors.surface, borderRadius: 14, padding: 16,
+                        }}>
+                          <Text style={{ fontSize: 16, fontWeight: '800', color: colors.text, marginBottom: 12, textAlign: 'center' }}>
+                            Bildirim Saati Seçin
+                          </Text>
+                          <ScrollView style={{ maxHeight: 360 }}>
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+                              {Array.from({ length: 24 }, (_, h) => h).map((h) => {
+                                const sel = lowStockDailyHour === h;
+                                return (
+                                  <TouchableOpacity
+                                    key={h}
+                                    onPress={async () => {
+                                      setLowStockDailyHour(h);
+                                      setShowHourPicker(false);
+                                      await syncSettingsToBackend({ low_stock_daily_hour: h });
+                                    }}
+                                    style={{
+                                      width: 64, paddingVertical: 12, borderRadius: 10, alignItems: 'center',
+                                      backgroundColor: sel ? colors.primary : colors.background,
+                                      borderWidth: 1, borderColor: sel ? colors.primary : colors.border,
+                                    }}
+                                  >
+                                    <Text style={{ fontSize: 14, fontWeight: '700', color: sel ? '#fff' : colors.text }}>
+                                      {String(h).padStart(2, '0')}:00
+                                    </Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </View>
+                          </ScrollView>
+                          <TouchableOpacity
+                            onPress={() => setShowHourPicker(false)}
+                            style={{ marginTop: 12, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: colors.background }}
+                          >
+                            <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>Kapat</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </TouchableOpacity>
+                    </Modal>
+                  </>
+                )}
                 
                 <View style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}>
                   <View style={styles.menuItemLeft}>
