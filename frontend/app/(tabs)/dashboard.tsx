@@ -27,6 +27,7 @@ import { FilterModal } from '../../src/components/FilterModal';
 import { CompareModal } from '../../src/components/CompareModal';
 import { AcikHesapKisiDetail } from '../../src/components/AcikHesapKisiDetail';
 import { HighSaleDetailModal } from '../../src/components/HighSaleDetailModal';
+import { IptalDetailModal } from '../../src/components/IptalDetailModal';
 import { useLiveData } from '../../src/hooks/useLiveData';
 import { useResponsive } from '../../src/hooks/useResponsive';
 import { webStyles } from '../../src/styles/webModalStyles';
@@ -40,7 +41,7 @@ const screenHeight = Dimensions.get('window').height;
 
 export default function DashboardScreen() {
   const { colors } = useThemeStore();
-  const { user } = useAuthStore();
+  const { user, isAuthenticated } = useAuthStore();
   const { t } = useLanguageStore();
   const { activeSource } = useDataSourceStore();
   const { isXLarge, isWideWeb, isDesktop } = useResponsive();
@@ -199,10 +200,12 @@ export default function DashboardScreen() {
   const [hourDetailProducts, setHourDetailProducts] = useState<any[]>([]);
   const [hourDetailLoading, setHourDetailLoading] = useState(false);
 
-  // İptal detail state (POS fetch)
-  const [selectedIptalItem, setSelectedIptalItem] = useState<any | null>(null);
-  const [iptalDetailItems, setIptalDetailItems] = useState<any[]>([]);
-  const [iptalDetailLoading, setIptalDetailLoading] = useState(false);
+  // İptal detail state — 2026-05-06 yenilendi: artık standalone IptalDetailModal kullanılıyor
+  // (eski selectedIptalItem/iptalDetailItems/iptalDetailLoading/fetchIptalDetail silindi).
+  const [iptalDetailVisible, setIptalDetailVisible] = useState(false);
+  const [iptalDetailIptalId, setIptalDetailIptalId] = useState<string>('');
+  const [iptalDetailTenantId, setIptalDetailTenantId] = useState<string>('');
+  const [iptalDetailTenantName, setIptalDetailTenantName] = useState<string>('');
   const [showIptalListModal, setShowIptalListModal] = useState(false);
   const [iptalListLocation, setIptalListLocation] = useState<string>('');
   const [iptalListItems, setIptalListItems] = useState<any[]>([]);
@@ -251,9 +254,13 @@ export default function DashboardScreen() {
       checkPendingFromStorage();
     }, [])
   );
-  // 2026-05-06 — Subscribe to deep-link store for notification taps
+  // 2026-05-06 — Subscribe to deep-link store for notification taps.
+  // CRASH GUARD: kullanıcı oturumu hazır değilken dispatch olursa state setleri
+  // null pointer / undefined access yapabiliyor → app çöküyordu. Auth hazır
+  // olana kadar tap'lar AsyncStorage'da bekler, focus effect bunları geri okur.
   useEffect(() => {
     if (!deepLink) return;
+    if (!user || !isAuthenticated) return;   // auth hazır değil → bekle (cold start fix)
     const type = String(deepLink.type || '').toLowerCase();
     const isIptal = (type === 'iptal' || type === 'iptal_satir' || type === 'cancel' || type === 'cancellation');
     const isHighSale = (type === 'high_sale' || type === 'yuksek_satis');
@@ -271,7 +278,9 @@ export default function DashboardScreen() {
           resolvedTenantId = targetTenant;
         }
       }
-      setTimeout(() => fetchIptalDetail(iptalId, { IPTAL_ID: iptalId }, resolvedTenantId), 600);
+      // Açılışı kısa bekleme ile yap — diğer modallar (highSale) kapanırken
+      // iOS'ta iki Modal aynı anda mount olursa çakışıyor.
+      setTimeout(() => openIptalDetail(iptalId, resolvedTenantId), 350);
     } else if (isHighSale) {
       const fisId = String(deepLink.fis_id || '');
       const belge = String(deepLink.belgeno || '');
@@ -289,69 +298,17 @@ export default function DashboardScreen() {
       setHighSaleBelgeno(belge);
       setHighSaleAmount(tutar);
       setHighSaleTenantId(resolvedTenantId);
-      setTimeout(() => setHighSaleVisible(true), 400);
+      setTimeout(() => setHighSaleVisible(true), 350);
     }
     // 2026-05-06 — Clear BOTH disk + store so the tap doesn't re-fire on next focus
     clearPendingTap();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLink, deepLinkSeq]);
-  // Use a ref to avoid re-firing on re-renders (params can persist in nav state)
-  const _deepLinkProcessedRef = React.useRef<string | null>(null);
-  useEffect(() => {
-    const sig = JSON.stringify({
-      i: navParams?.openIptal || '',
-      h: navParams?.openHighSale || '',
-      f: navParams?.openHighSaleFisId || '',
-    });
-    if (sig === _deepLinkProcessedRef.current) return;
-    if (!navParams?.openIptal && !navParams?.openHighSale) return;
-    _deepLinkProcessedRef.current = sig;
+  }, [deepLink, deepLinkSeq, user, isAuthenticated]);
 
-    if (navParams?.openIptal) {
-      const iptalId = String(navParams.openIptal);
-      // 2026-02 — push notification might be for ANOTHER tenant than the
-      // currently-selected one. Switch active source to the matching tenant
-      // so the iptal-detail call hits the right cache.
-      const targetTenant = String(navParams.openIptalTenant || '');
-      let resolvedTenantId = activeTenantId;
-      if (targetTenant && user?.tenants) {
-        const idx = user.tenants.findIndex(t => t.tenant_id === targetTenant);
-        if (idx >= 0) {
-          setActiveSource(`data${idx + 1}`);
-          resolvedTenantId = targetTenant;
-        }
-      }
-      // 2026-05-05 — Only open the DETAIL modal (not the empty list modal underneath).
-      // Stacking two RN Modals at once was causing app crashes on iOS native.
-      setTimeout(() => {
-        fetchIptalDetail(iptalId, { IPTAL_ID: iptalId }, resolvedTenantId);
-      }, 600);
-      // Clear params so subsequent tabs don't keep re-triggering.
-      try { router.setParams({ openIptal: '', openIptalTenant: '' } as any); } catch {}
-    } else if (navParams?.openHighSale) {
-      // 2026-05-05 — Open the rich detail modal that pulls receipt lines from
-      // MySQL cache (fis_detay_toplam) instead of the previous Alert.alert.
-      const fisId = String(navParams.openHighSaleFisId || '');
-      const belge = String(navParams.openHighSaleBelgeno || navParams.openHighSale || '');
-      const tutar = String(navParams.openHighSaleAmount || '');
-      // 2026-02 — switch tenant for cross-branch push deep-links
-      const targetTenant = String(navParams.openHighSaleTenant || '');
-      let resolvedTenantId = activeTenantId;
-      if (targetTenant && user?.tenants) {
-        const idx = user.tenants.findIndex(t => t.tenant_id === targetTenant);
-        if (idx >= 0) {
-          setActiveSource(`data${idx + 1}`);
-          resolvedTenantId = targetTenant;
-        }
-      }
-      setHighSaleFisId(fisId);
-      setHighSaleBelgeno(belge);
-      setHighSaleAmount(tutar);
-      setHighSaleTenantId(resolvedTenantId);   // 2026-05-05 — pass tenant directly to avoid race
-      setTimeout(() => setHighSaleVisible(true), 400);
-      try { router.setParams({ openHighSale: '', openHighSaleFisId: '', openHighSaleBelgeno: '', openHighSaleAmount: '', openHighSaleTenant: '' } as any); } catch {}
-    }
-  }, [navParams?.openIptal, navParams?.openHighSale, navParams?.openHighSaleFisId]);
+  // 2026-05-06 — Eski URL-param (navParams) deep-link useEffect'i tamamen silindi.
+  // Sebep: Push bildirimler Zustand+AsyncStorage üzerinden yönlendiriliyor;
+  // URL-param fallback'i web-only senaryo içindi ve ikili akış crash riskine
+  // yol açıyordu (iki Modal aynı anda mount). Tek kaynak: useDeepLinkStore.
 
   // Check if filter is active (from live data hook)
   const isFilterActive = isDataFiltered;
@@ -553,37 +510,17 @@ export default function DashboardScreen() {
     else setHourDetailLoading(false);
   };
 
-  // İptal detay çekme
-  const fetchIptalDetail = useCallback(async (iptalId: string, item: any, tenantOverride?: string) => {
-    setSelectedIptalItem(item);
-    setIptalDetailItems([]);
-    setIptalDetailLoading(true);
-    
-    try {
-      const { token: authToken } = useAuthStore.getState();
-      // 2026-05-05 — When triggered from a push deep-link the active tenant
-      // memo may not have caught up with setActiveSource yet. Use the
-      // explicit tenant override (passed from the deep-link handler) when
-      // available, falling back to the memoized activeTenantId otherwise.
-      const tid = tenantOverride || activeTenantId;
-      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/data/iptal-detail`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-        body: JSON.stringify({ tenant_id: tid, iptal_id: iptalId }),
-      });
-      const data = await response.json();
-      if (data.ok && data.data) setIptalDetailItems(data.data);
-      // 2026-02 — push-tıklamada item sadece IPTAL_ID içerir (LOKASYON/MASA/ZAMAN yok).
-      // Backend response'undaki header'ı item ile birleştirip modal'da göster.
-      if (data.header && Object.keys(data.header).length > 0) {
-        setSelectedIptalItem((prev: any) => ({ ...(data.header || {}), ...(prev || {}) }));
-      }
-    } catch (err) {
-      console.error('Iptal detail error:', err);
-    } finally {
-      setIptalDetailLoading(false);
-    }
-  }, [activeTenantId]);
+  // İptal detay açma helper'ı — yeni standalone IptalDetailModal'ı tetikler.
+  // 2026-05-06 — Eski fetchIptalDetail (POS API + state mutation karmaşası) tamamen silindi.
+  const openIptalDetail = useCallback((iptalId: string, tenantOverride?: string) => {
+    if (!iptalId) return;
+    const tid = tenantOverride || activeTenantId;
+    const t = user?.tenants?.find?.((x: any) => x.tenant_id === tid);
+    setIptalDetailIptalId(String(iptalId));
+    setIptalDetailTenantId(String(tid || ''));
+    setIptalDetailTenantName(String(t?.name || ''));
+    setIptalDetailVisible(true);
+  }, [activeTenantId, user]);
 
   // Lokasyon bazlı iptal listesini aç ve POS'tan tam listeyi çek
   const openLocationIptalList = useCallback(async (locationName: string) => {
@@ -1734,7 +1671,7 @@ export default function DashboardScreen() {
                   <TouchableOpacity
                     key={idx}
                     style={[styles.receiptCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-                    onPress={() => fetchIptalDetail(String(item.IPTAL_ID), item)}
+                    onPress={() => openIptalDetail(String(item.IPTAL_ID))}
                   >
                     <View style={styles.receiptCardHeader}>
                       <View style={{ flex: 1 }}>
@@ -1775,148 +1712,9 @@ export default function DashboardScreen() {
         </View>
       </Modal>
 
-      {/* İptal Detay Modal (POS'tan çekilmiş) */}
-      <Modal visible={!!selectedIptalItem} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent onRequestClose={() => { setSelectedIptalItem(null); setIptalDetailItems([]); }}>
-        <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
-          <View style={[styles.modalContent, Platform.OS === 'web' && isDesktop && [webStyles.cardDesktop, { borderColor: colors.border, maxWidth: 720, backgroundColor: colors.surface }]]}>
-            <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
-              <TouchableOpacity onPress={() => { setSelectedIptalItem(null); setIptalDetailItems([]); }}>
-                <Ionicons name="arrow-back" size={24} color={colors.text} />
-              </TouchableOpacity>
-              <Text style={[styles.modalTitle, { color: colors.text, flex: 1, textAlign: 'center' }]}>{t('iptal_detail_title')}</Text>
-              <View style={{ width: 24 }} />
-            </View>
-            {selectedIptalItem && (
-              <ScrollView style={[styles.modalBody, { backgroundColor: colors.surface }]} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
-                {/* 2026-05-05 — Yeniden tasarlanmış header kartı:
-                    İptal saati · Lokasyon · Tenant · İptal eden personel · Tutar */}
-                <View style={[{ padding: 14, borderRadius: 14, backgroundColor: '#EF4444' + '0E', borderWidth: 1, borderColor: '#EF4444' + '30', marginBottom: 14 }]}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                    <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: '#EF4444' + '20', alignItems: 'center', justifyContent: 'center' }}>
-                      <Ionicons name="close-circle" size={22} color="#EF4444" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 11, color: '#EF4444', fontWeight: '800', letterSpacing: 0.4 }}>
-                        {(selectedIptalItem.IPTAL_TIPI || 'İPTAL').toString().toUpperCase()}
-                      </Text>
-                      <Text style={{ fontSize: 20, fontWeight: '900', color: '#EF4444', marginTop: 2 }}>
-                        ₺{parseFloat(selectedIptalItem.TUTAR || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </Text>
-                    </View>
-                  </View>
-                  {/* Bilgi grid: 4 alan — saat / lokasyon / tenant / personel */}
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                    {/* İptal Saati */}
-                    <View style={{ flexBasis: '48%', flexGrow: 1, padding: 8, borderRadius: 10, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                        <Ionicons name="time-outline" size={11} color={colors.textSecondary} />
-                        <Text style={{ fontSize: 9, color: colors.textSecondary, fontWeight: '700', letterSpacing: 0.4 }}>İPTAL SAATİ</Text>
-                      </View>
-                      <Text style={{ fontSize: 13, fontWeight: '800', color: colors.text }} numberOfLines={1}>
-                        {selectedIptalItem.IPTAL_SAATI || selectedIptalItem.SAAT || selectedIptalItem.IPTAL_TARIH || '-'}
-                      </Text>
-                    </View>
-                    {/* Lokasyon */}
-                    <View style={{ flexBasis: '48%', flexGrow: 1, padding: 8, borderRadius: 10, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                        <Ionicons name="location-outline" size={11} color={'#F59E0B'} />
-                        <Text style={{ fontSize: 9, color: colors.textSecondary, fontWeight: '700', letterSpacing: 0.4 }}>LOKASYON</Text>
-                      </View>
-                      <Text style={{ fontSize: 13, fontWeight: '800', color: colors.text }} numberOfLines={1}>
-                        {selectedIptalItem.LOKASYON || '-'}
-                      </Text>
-                    </View>
-                    {/* Veri Kaynağı / Tenant */}
-                    <View style={{ flexBasis: '48%', flexGrow: 1, padding: 8, borderRadius: 10, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                        <Ionicons name="business-outline" size={11} color={'#8B5CF6'} />
-                        <Text style={{ fontSize: 9, color: colors.textSecondary, fontWeight: '700', letterSpacing: 0.4 }}>VERİ KAYNAĞI</Text>
-                      </View>
-                      <Text style={{ fontSize: 13, fontWeight: '800', color: colors.text }} numberOfLines={1}>
-                        {(() => {
-                          // Önce iptal kaydında tenant_id varsa onu kullan
-                          const tid = selectedIptalItem?.tenant_id || selectedIptalItem?.TENANT_ID || activeTenantId;
-                          const t = user?.tenants?.find?.((x: any) => x.tenant_id === tid);
-                          return t?.name || t?.tenant_name || selectedIptalItem?.tenant_name || '-';
-                        })()}
-                      </Text>
-                    </View>
-                    {/* İptal Eden Personel */}
-                    <View style={{ flexBasis: '48%', flexGrow: 1, padding: 8, borderRadius: 10, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                        <Ionicons name="person-outline" size={11} color={colors.primary} />
-                        <Text style={{ fontSize: 9, color: colors.textSecondary, fontWeight: '700', letterSpacing: 0.4 }}>İPTAL EDEN</Text>
-                      </View>
-                      <Text style={{ fontSize: 13, fontWeight: '800', color: colors.text }} numberOfLines={1}>
-                        {selectedIptalItem.PERSONEL_AD || selectedIptalItem.PERSONEL || '-'}
-                      </Text>
-                    </View>
-                  </View>
-                  {/* Masa info if any */}
-                  {(selectedIptalItem.MASA || selectedIptalItem.MASA_AD) && (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#EF4444' + '20' }}>
-                      <Ionicons name="restaurant-outline" size={12} color={colors.textSecondary} />
-                      <Text style={{ fontSize: 11, color: colors.textSecondary }}>Masa:</Text>
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>
-                        {selectedIptalItem.MASA || selectedIptalItem.MASA_AD}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-
-                {iptalDetailLoading ? (
-                  <View style={{ alignItems: 'center', paddingVertical: 30 }}>
-                    <ActivityIndicator size="large" color={colors.primary} />
-                    <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('fetching_pos')}</Text>
-                  </View>
-                ) : iptalDetailItems.length > 0 ? (
-                  <View style={[{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }]}>
-                    <View style={[{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 12, backgroundColor: colors.background }]}>
-                      <Text style={[{ flex: 3, fontSize: 12, fontWeight: '700', color: colors.textSecondary }]}>{t('product')}</Text>
-                      <Text style={[{ flex: 1, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>{t('quantity_short')}</Text>
-                      <Text style={[{ flex: 1.5, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>{t('amount_col')}</Text>
-                    </View>
-                    {iptalDetailItems.map((item: any, idx: number) => (
-                      <View key={idx} style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: colors.border, alignItems: 'center' }]}>
-                        <View style={{ flex: 2.4, paddingRight: 6 }}>
-                          <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]} numberOfLines={1}>{item.STOK_ADI || t('product')}</Text>
-                          <Text style={[{ fontSize: 11, color: colors.textSecondary }]} numberOfLines={1}>{t('table_short')}: {item.MASA || '-'} · {item.SAAT || ''}</Text>
-                        </View>
-                        <Text style={[{ flex: 0.8, fontSize: 14, color: colors.text, textAlign: 'center' }]}>{parseFloat(item.MIKTAR || '0').toFixed(0)}</Text>
-                        <Text
-                          style={[{ flex: 1.8, fontSize: 13, fontWeight: '700', color: '#EF4444', textAlign: 'right' }]}
-                          numberOfLines={1}
-                          adjustsFontSizeToFit
-                          minimumFontScale={0.7}
-                        >
-                          ₺{parseFloat(item.SATIR_TUTAR || '0').toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </Text>
-                      </View>
-                    ))}
-                    {/* Total row */}
-                    <View style={[{ flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 12, borderTopWidth: 2, borderTopColor: colors.border, backgroundColor: colors.background, alignItems: 'center' }]}>
-                      <Text style={[{ flex: 3.2, fontSize: 14, fontWeight: '800', color: colors.text, textAlign: 'right', paddingRight: 12 }]}>{t('total_short')}</Text>
-                      <Text
-                        style={[{ flex: 1.8, fontSize: 15, fontWeight: '800', color: '#EF4444', textAlign: 'right' }]}
-                        numberOfLines={1}
-                        adjustsFontSizeToFit
-                        minimumFontScale={0.6}
-                      >
-                        ₺{iptalDetailItems.reduce((sum: number, item: any) => sum + parseFloat(item.SATIR_TUTAR || '0'), 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </Text>
-                    </View>
-                  </View>
-                ) : (
-                  <View style={{ alignItems: 'center', paddingVertical: 20 }}>
-                    <Ionicons name="document-outline" size={32} color={colors.textSecondary} />
-                    <Text style={[{ color: colors.textSecondary, marginTop: 8 }]}>{t('no_detail_info')}</Text>
-                  </View>
-                )}
-              </ScrollView>
-            )}
-          </View>
-        </View>
-      </Modal>
+      {/* 2026-05-06 — Eski inline iptal Modal (Modal+ScrollView+iptalDetailItems)
+          tamamen silindi. Artık standalone IptalDetailModal komponenti kullanılıyor.
+          Render'ı return'in en altında, HighSaleDetailModal'ın yanında yapılıyor. */}
 
       {/* Open Table Detail Modal */}
       <Modal visible={!!selectedOpenTable} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent onRequestClose={() => { setSelectedOpenTable(null); setTableDetailItems([]); }}>
@@ -2015,7 +1813,7 @@ export default function DashboardScreen() {
       {/* Waiter Detail Modal - Handled in DashboardSections */}
 
       {/* 2026-05-05 — Yüksek Satış Detay Modal (push deep-link target).
-          Pulls receipt lines from MySQL cache via /api/data/fis-detail. */}
+          Pulls receipt lines from MySQL cache via /api/data/high-sale-detail. */}
       <HighSaleDetailModal
         visible={highSaleVisible}
         onClose={() => { setHighSaleVisible(false); setHighSaleTenantId(''); }}
@@ -2023,7 +1821,18 @@ export default function DashboardScreen() {
         fisId={highSaleFisId}
         belgeno={highSaleBelgeno}
         amount={highSaleAmount}
-        tenantName={user?.tenants?.find?.(x => x.tenant_id === (highSaleTenantId || activeTenantId))?.tenant_name || activeSource || ''}
+        tenantName={user?.tenants?.find?.((x: any) => x.tenant_id === (highSaleTenantId || activeTenantId))?.name || ''}
+      />
+
+      {/* 2026-05-06 — Fiş İptal Detay Modal (push deep-link target + iptal listesi).
+          Pulls header (LOKASYON/PERSONEL_AD/TARIH_IPTAL/TUTAR) and line items
+          from MySQL cache via /api/data/iptal-detail (iptal_detay dataset). */}
+      <IptalDetailModal
+        visible={iptalDetailVisible}
+        onClose={() => { setIptalDetailVisible(false); setIptalDetailIptalId(''); setIptalDetailTenantId(''); setIptalDetailTenantName(''); }}
+        tenantId={iptalDetailTenantId || activeTenantId}
+        iptalId={iptalDetailIptalId}
+        tenantName={iptalDetailTenantName || user?.tenants?.find?.((x: any) => x.tenant_id === (iptalDetailTenantId || activeTenantId))?.name || ''}
       />
     </SafeAreaView>
   );

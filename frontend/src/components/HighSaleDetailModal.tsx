@@ -102,21 +102,39 @@ export const HighSaleDetailModal: React.FC<Props> = ({
       totals?.LOKASYON || totals?.LOKASYON_AD ||
       firstRow.LOKASYON || firstRow.LOKASYON_AD || ''
     ).trim();
+    // 2026-05-06 — fis_gunluk_bildirim_feed: KESEN_PERSONEL alanı (örn. "GENEL KULLANICI")
+    const personel = String(
+      totals?.KESEN_PERSONEL || totals?.PERSONEL_AD || totals?.PERSONEL ||
+      firstRow.KESEN_PERSONEL || firstRow.PERSONEL_AD || ''
+    ).trim();
+    // FIS_TURU_AD - "Perakende satış fişi" gibi
+    const fisTuru = String(totals?.FIS_TURU_AD || firstRow.FIS_TURU_AD || '').trim();
     // TARIH from totals or row, fallback to today
     const rawTarih = String(
       totals?.TARIH || totals?.FIS_TARIHI || totals?.ISLEM_TARIHI ||
       firstRow.TARIH || firstRow.FIS_TARIHI || firstRow.ISLEM_TARIHI || ''
     );
-    const saat = String(totals?.SAAT || totals?.FIS_SAATI || firstRow.SAAT || firstRow.FIS_SAATI || '');
+    let saat = String(totals?.SAAT || totals?.FIS_SAATI || firstRow.SAAT || firstRow.FIS_SAATI || '');
     let tarihStr = rawTarih;
     if (rawTarih) {
-      // Normalize: ISO → tr-TR
-      const d = new Date(rawTarih);
-      if (!isNaN(d.getTime())) {
-        tarihStr = d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      // FIS_TARIHI "2026-05-02 18:13:49" → tarih + saat ayır
+      if (rawTarih.includes(' ')) {
+        const [d, t] = rawTarih.split(' ');
+        const dd = new Date(d);
+        if (!isNaN(dd.getTime())) {
+          tarihStr = dd.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        } else {
+          tarihStr = d;
+        }
+        if (t && !saat) saat = t.substring(0, 5); // "18:13"
+      } else {
+        const d = new Date(rawTarih);
+        if (!isNaN(d.getTime())) {
+          tarihStr = d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        }
       }
     }
-    return { lokasyon, tarih: tarihStr, saat };
+    return { lokasyon, tarih: tarihStr, saat, personel, fisTuru };
   }, [totals, details]);
 
   return (
@@ -173,6 +191,18 @@ export const HighSaleDetailModal: React.FC<Props> = ({
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: '#8B5CF6' + '15' }}>
                   <Ionicons name="business-outline" size={12} color={'#8B5CF6'} />
                   <Text style={{ fontSize: 12, color: '#8B5CF6', fontWeight: '700' }}>{tenantName}</Text>
+                </View>
+              )}
+              {!!headerInfo.personel && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: '#10B981' + '15' }}>
+                  <Ionicons name="person-outline" size={12} color={'#10B981'} />
+                  <Text style={{ fontSize: 12, color: '#10B981', fontWeight: '700' }} numberOfLines={1}>{headerInfo.personel}</Text>
+                </View>
+              )}
+              {!!headerInfo.fisTuru && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: '#6366F1' + '15' }}>
+                  <Ionicons name="receipt-outline" size={12} color={'#6366F1'} />
+                  <Text style={{ fontSize: 12, color: '#6366F1', fontWeight: '700' }} numberOfLines={1}>{headerInfo.fisTuru}</Text>
                 </View>
               )}
             </View>
