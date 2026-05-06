@@ -180,8 +180,12 @@ export const CompareModal: React.FC<{
   //   the initial modal open.
   // ► `productDisplayCount` lets the user incrementally request more products
   //   (15 → 30 → 50) instead of paying the full cost upfront.
+  // ► `expandedProduct` 2026-05-06 — tap-to-expand: only ONE product's heavy
+  //   matrix is rendered at a time. Without this, 30 products × 5 rows × 24
+  //   hour cells produced ~10K Text nodes and crashed Android on big datasets.
   const [showHourlyDetail, setShowHourlyDetail] = useState(false);
   const [productDisplayCount, setProductDisplayCount] = useState<number>(15);
+  const [expandedProduct, setExpandedProduct] = useState<string | null>(null);
 
   const applyPreset = (p: PresetKey) => {
     const { start, end } = computePreset(p);
@@ -1157,8 +1161,14 @@ export const CompareModal: React.FC<{
 
                     return (
                       <View key={productName + pIdx} style={{ marginBottom: 4, borderTopWidth: 1, borderTopColor: colors.border }}>
-                        {/* Product header */}
-                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 10, backgroundColor: colors.primary + '06' }}>
+                        {/* 2026-05-06 — Tap-to-expand: only ONE product's heavy
+                            matrix renders at a time. Without this, 30 products
+                            × 5 rows × 24 hours = 10K Text nodes crashed Android. */}
+                        <TouchableOpacity
+                          activeOpacity={0.75}
+                          onPress={() => setExpandedProduct(expandedProduct === productName ? null : productName)}
+                          style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 10, backgroundColor: expandedProduct === productName ? colors.primary + '14' : colors.primary + '06' }}
+                        >
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
                             <View style={{
                               minWidth: 22, height: 20, borderRadius: 10, paddingHorizontal: 5,
@@ -1174,12 +1184,17 @@ export const CompareModal: React.FC<{
                               {productName}
                             </Text>
                           </View>
-                          <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                            ₺{fmtTL(productTotal)}
-                          </Text>
-                        </View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Text style={{ color: colors.primary, fontSize: 13, fontWeight: '800' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                              ₺{fmtTL(productTotal)}
+                            </Text>
+                            <Ionicons name={expandedProduct === productName ? 'chevron-up' : 'chevron-down'} size={16} color={colors.primary} />
+                          </View>
+                        </TouchableOpacity>
 
-                        {/* Horizontal matrix: Tenant × Lokasyon as rows, Saat as cols */}
+                        {/* Heavy matrix renders ONLY when this product is the expanded one */}
+                        {expandedProduct === productName && (
+                          <>
                         <SwipeHint color={colors.primary} />
                         <ScrollView horizontal showsHorizontalScrollIndicator={Platform.OS === 'web'}>
                           <View>
@@ -1335,6 +1350,8 @@ export const CompareModal: React.FC<{
                             })}
                           </View>
                         </ScrollView>
+                          </>
+                        )}
                       </View>
                     );
                   })}

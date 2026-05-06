@@ -169,6 +169,13 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
                 ? parseFloat(r.PERAKENDE_SATIS_TUTARI || r.KAPANAN_SATIS_TUTARI || '0')
                 : parseFloat(r.ERP12_SATIS_TUTARI || r.PERSONEL_NET_SATIS_TUTARI || r.KAPANAN_SATIS_TUTARI || '0')),
               0);
+            const locFisAll = kisiler.reduce((s: number, r: any) =>
+              s + (tab === 'garson' ? parseInt(r.PERAKENDE_FIS_SAYISI || '0') : parseInt(r.ERP12_FIS_SAYISI || '0')), 0);
+            // 2026-05-06 — Hide locations with NO sales today.
+            // Backend sometimes returns rows for locations that have stale
+            // shift data (e.g. F ŞUBESİ showing "10 saat - ₺111.903" when no
+            // receipts have been written today).
+            if (locTutar <= 0 && locFisAll <= 0) return null;
             const locIskonto = kisiler.reduce(
               (s: number, r: any) =>
                 s +

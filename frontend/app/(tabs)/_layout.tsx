@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { Tabs, Slot, useSegments, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
@@ -6,6 +6,7 @@ import { useLanguageStore } from '../../src/store/languageStore';
 import { Platform, useWindowDimensions, View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../src/store/authStore';
+import { flushPendingNotificationRoute } from '../../src/services/notificationTapHandler';
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
@@ -38,6 +39,12 @@ export default function TabLayout() {
   const renderCustomersIcon = useCallback(({ color, size }: any) => <TabIcon name="people" color={color} size={size} />, []);
   const renderReportsIcon = useCallback(({ color, size }: any) => <TabIcon name="document-text" color={color} size={size} />, []);
   const renderSettingsIcon = useCallback(({ color, size }: any) => <TabIcon name="settings" color={color} size={size} />, []);
+
+  // 2026-05-06 — When auth gate has resolved and we render the tabs tree,
+  // flush any push-notification tap that arrived BEFORE auth was ready.
+  useEffect(() => {
+    flushPendingNotificationRoute();
+  }, []);
 
   // 2026-05-05 — On the web (≥ 768px) render a left sidebar instead of the
   // default bottom tab bar so the app feels like a desktop SaaS dashboard.

@@ -9,6 +9,11 @@
  *
  * The route receivers parse the query params and open the matching modal /
  * filter so the user lands on the relevant detail with one tap.
+ *
+ * 2026-05-06 — `_pendingData` queue protects cold-start taps that fire BEFORE
+ *   the auth gate finishes. Once the app finally lands on the (tabs) tree,
+ *   the auth layout calls flushPendingNotificationRoute() and the queued tap
+ *   is replayed.
  */
 import { Platform } from 'react-native';
 import { router } from 'expo-router';
@@ -24,12 +29,22 @@ if (Platform.OS !== 'web') {
 
 let _subscription: any = null;
 let _coldStartHandled = false;
+let _pendingData: Record<string, any> | null = null;
+let _authReady = false;
 
-function _route(data: Record<string, any> | null | undefined) {
+function _route(data: Record<string, any> | null | undefined, fromQueue = false) {
   if (!data) return;
+  // 2026-05-06 — If auth not ready, queue the tap. The (tabs) layout calls
+  // flushPendingNotificationRoute() once the user lands on a tabs route.
+  if (!_authReady && !fromQueue) {
+    _pendingData = data;
+    console.log('[notifTap] queued (auth not ready):', data?.type);
+    return;
+  }
   try {
     const type = String(data.type || data?.notification?.type || '').toLowerCase();
     if (!type) return;
+    console.log('[notifTap] routing type=', type, 'data=', JSON.stringify(data));
 
     if (type === 'high_sale' || type === 'yuksek_satis') {
       const belgeno = String(data.belgeno || '');
@@ -38,8 +53,8 @@ function _route(data: Record<string, any> | null | undefined) {
         pathname: '/(tabs)/dashboard',
         params: {
           openHighSale: belgeno || fisId,
-          openHighSaleFisId: fisId,           // 2026-05-05 — separate FIS_ID for /fis-detail lookup
-          openHighSaleBelgeno: belgeno,       // 2026-05-05 — separate belge no for display
+          openHighSaleFisId: fisId,
+          openHighSaleBelgeno: belgeno,
           openHighSaleAmount: String(data.amount || ''),
           openHighSaleTenant: String(data.tenant || ''),
         },
@@ -74,6 +89,19 @@ function _route(data: Record<string, any> | null | undefined) {
     router.push('/(tabs)/dashboard');
   } catch (e) {
     console.log('[notifTap] route error:', e);
+  }
+}
+
+/** Called from the (tabs) layout once the auth gate has resolved and the
+ * router is mounted on a tabs route. Flushes any queued notification tap. */
+export function flushPendingNotificationRoute() {
+  _authReady = true;
+  if (_pendingData) {
+    const d = _pendingData;
+    _pendingData = null;
+    console.log('[notifTap] flushing queued tap:', d?.type);
+    // small delay so the navigator finishes mounting the tab tree
+    setTimeout(() => _route(d, true), 350);
   }
 }
 
