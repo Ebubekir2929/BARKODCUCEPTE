@@ -948,36 +948,50 @@ export const CompareModal: React.FC<{
               </ScrollView>
             </View>
 
-            {/* Product Comparison — ALL tenants × ALL products (sorted desc) */}
+            {/* Product Comparison — ALL tenants × ALL products (sorted desc)
+                2026-05-06 — Veri kaynağı `productHourByTenant` (hourly-detail-full)
+                olarak değiştirildi. Önceki `top10_stock_movements` kaynağı bazı
+                tenants için 0 ürün dönüyordu (Gümüşhane gibi) — kullanıcı haklı
+                olarak "ürünler eksik" diyordu. Şimdi tüm tenants'ın TÜM ürünleri
+                aggregate edilip ilk 15'i sıralanıp gösteriliyor. */}
             {(() => {
-              // Build aggregated product map: productName -> { [tenantId]: {qty, amount} }
-              const productMap: Record<string, { name: string; totalAmount: number; totalQty: number; perTenant: Record<string, { amount: number; qty: number; location: string }> }> = {};
+              type PerTenant = { amount: number; qty: number; locations: Set<string> };
+              const productMap: Record<string, { name: string; totalAmount: number; totalQty: number; perTenant: Record<string, PerTenant> }> = {};
+
               snapshots.forEach((snap) => {
-                snap.topProducts.forEach((p) => {
-                  const key = p.name;
-                  if (!productMap[key]) {
-                    productMap[key] = { name: p.name, totalAmount: 0, totalQty: 0, perTenant: {} };
-                  }
-                  productMap[key].totalAmount += p.amount;
-                  productMap[key].totalQty += p.qty;
-                  const existing = productMap[key].perTenant[snap.tenant.tenant_id];
-                  if (existing) {
-                    existing.amount += p.amount;
-                    existing.qty += p.qty;
-                  } else {
-                    productMap[key].perTenant[snap.tenant.tenant_id] = {
-                      amount: p.amount,
-                      qty: p.qty,
-                      location: p.location,
-                    };
-                  }
+                const tenantData = productHourByTenant[snap.tenant.tenant_id] || {};
+                Object.entries(tenantData).forEach(([loc, products]) => {
+                  Object.entries(products).forEach(([name, hours]) => {
+                    let amount = 0; let qty = 0;
+                    Object.values(hours).forEach((h: any) => {
+                      amount += h.amount || 0;
+                      qty += h.qty || 0;
+                    });
+                    if (amount <= 0 && qty <= 0) return;
+                    if (!productMap[name]) {
+                      productMap[name] = { name, totalAmount: 0, totalQty: 0, perTenant: {} };
+                    }
+                    productMap[name].totalAmount += amount;
+                    productMap[name].totalQty += qty;
+                    if (!productMap[name].perTenant[snap.tenant.tenant_id]) {
+                      productMap[name].perTenant[snap.tenant.tenant_id] = { amount: 0, qty: 0, locations: new Set<string>() };
+                    }
+                    const pt = productMap[name].perTenant[snap.tenant.tenant_id];
+                    pt.amount += amount;
+                    pt.qty += qty;
+                    if (loc) pt.locations.add(loc);
+                  });
                 });
               });
-              // Limit to top 15 products to avoid clutter (user request)
-              const allProductsRows = Object.values(productMap).sort((a, b) => b.totalAmount - a.totalAmount).slice(0, 15);
+
+              // Top 15 products by total sales amount across all tenants
+              const allProductsRows = Object.values(productMap)
+                .sort((a, b) => b.totalAmount - a.totalAmount)
+                .slice(0, 15);
+
               if (allProductsRows.length === 0) return null;
-              // 2026-05-06 — Kullanıcı isteği: TÜM veri kaynaklarını her zaman sütun olarak göster.
-              // Veri olmayan hücrelerde "—" ile boş gösterilir, kaynak gizlenmez.
+              const totalAvailable = Object.keys(productMap).length;
+              // Kullanıcı isteği: TÜM veri kaynaklarını her zaman sütun olarak göster.
               const visibleSnapshots = snapshots;
               return (
                 <View style={[styles.sectionBox, { backgroundColor: colors.card, borderColor: colors.border, padding: 0 }]}>
@@ -987,7 +1001,9 @@ export const CompareModal: React.FC<{
                       Ürün Karşılaştırması · Tüm Veri Kaynakları
                     </Text>
                     <View style={{ backgroundColor: colors.primary + '18', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
-                      <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>{allProductsRows.length} ürün</Text>
+                      <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>
+                        {totalAvailable > allProductsRows.length ? `${allProductsRows.length}/${totalAvailable}` : `${allProductsRows.length}`} ürün
+                      </Text>
                     </View>
                   </View>
                   <SwipeHint color={colors.primary} />
@@ -1056,9 +1072,11 @@ export const CompareModal: React.FC<{
                                     <Text style={{ color: colors.textSecondary, fontSize: 9 }}>
                                       {val.qty.toFixed(0)} ad
                                     </Text>
-                                    <Text style={{ color: colors.textSecondary, fontSize: 8, marginTop: 1 }} numberOfLines={1}>
-                                      {val.location}
-                                    </Text>
+                                    {val.locations && val.locations.size > 0 && (
+                                      <Text style={{ color: colors.textSecondary, fontSize: 8, marginTop: 1 }} numberOfLines={1}>
+                                        {val.locations.size > 1 ? `${val.locations.size} lok` : Array.from(val.locations)[0]}
+                                      </Text>
+                                    )}
                                   </>
                                 ) : (
                                   <Text style={{ color: colors.border, fontSize: 12 }}>—</Text>
