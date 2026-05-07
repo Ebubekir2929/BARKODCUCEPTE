@@ -11,6 +11,7 @@ import {
   Platform,
   ActivityIndicator,
   DeviceEventEmitter,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
@@ -1214,8 +1215,9 @@ export default function DashboardScreen() {
 
       {/* Card Type Location Modal */}
       <Modal visible={!!selectedCardType} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent onRequestClose={() => setSelectedCardType(null)}>
-        <TouchableOpacity style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]} activeOpacity={1} onPress={() => setSelectedCardType(null)}>
-          <TouchableOpacity activeOpacity={1} style={[
+        <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setSelectedCardType(null)} />
+          <View style={[
             styles.modalContent,
             ...(Platform.OS === 'web' && isDesktop ? [webStyles.cardDesktop, { borderColor: colors.border, maxWidth: 560, backgroundColor: colors.surface, alignSelf: 'center' as const }] : []),
           ]}>
@@ -1400,8 +1402,8 @@ export default function DashboardScreen() {
                 ) : null;
               })()}
             </ScrollView>
-          </TouchableOpacity>
-        </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
       {/* Hour Detail Modal */}
