@@ -1093,6 +1093,107 @@ export default function DashboardScreen() {
         {(sourceData?.branchSales || []).length > 0 && (
         <View style={[styles.section, isXLarge && { flex: 1, marginRight: 0 }, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('location_summary')}</Text>
+
+          {/* Comparison Chart - sorted by Total desc */}
+          {(() => {
+            const sorted = [...(sourceData?.branchSales || [])]
+              .filter(b => (b?.sales?.total || 0) > 0 || (b?.sales?.cash || 0) > 0 || (b?.sales?.card || 0) > 0)
+              .sort((a, b) => (b?.sales?.total || 0) - (a?.sales?.total || 0));
+            if (sorted.length < 1) return null;
+            const maxVal = Math.max(
+              ...sorted.map(b => Math.max(b?.sales?.cash || 0, b?.sales?.card || 0, b?.sales?.total || 0)),
+              1
+            );
+            const fmt = (v: number) => {
+              if (v >= 1000000) return `₺${(v / 1000000).toFixed(1)}M`;
+              if (v >= 1000) return `₺${(v / 1000).toFixed(1)}K`;
+              return `₺${v.toFixed(0)}`;
+            };
+            const cashColor = colors.cash || '#10B981';
+            const cardColor = colors.primary || '#3B82F6';
+            const totalColor = colors.total || '#8B5CF6';
+            return (
+              <View style={{
+                backgroundColor: colors.background,
+                borderRadius: 12,
+                padding: 12,
+                marginBottom: 14,
+                borderWidth: 1,
+                borderColor: colors.border,
+              }}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Ionicons name="bar-chart" size={14} color={colors.textSecondary} />
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: colors.textSecondary }}>
+                      Şube Karşılaştırma
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: cashColor }} />
+                      <Text style={{ fontSize: 10, color: colors.textSecondary, fontWeight: '600' }}>Nakit</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: cardColor }} />
+                      <Text style={{ fontSize: 10, color: colors.textSecondary, fontWeight: '600' }}>Kart</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: totalColor }} />
+                      <Text style={{ fontSize: 10, color: colors.textSecondary, fontWeight: '600' }}>Toplam</Text>
+                    </View>
+                  </View>
+                </View>
+                {sorted.map((b, i) => {
+                  const cashVal = b?.sales?.cash || 0;
+                  const cardVal = b?.sales?.card || 0;
+                  const totalVal = b?.sales?.total || 0;
+                  const cashW = Math.max((cashVal / maxVal) * 100, cashVal > 0 ? 2 : 0);
+                  const cardW = Math.max((cardVal / maxVal) * 100, cardVal > 0 ? 2 : 0);
+                  const totalW = Math.max((totalVal / maxVal) * 100, totalVal > 0 ? 2 : 0);
+                  return (
+                    <View key={b.branchId} style={{ marginBottom: i === sorted.length - 1 ? 0 : 10 }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text, flex: 1 }} numberOfLines={1}>
+                          {b.branchName}
+                        </Text>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: totalColor }}>
+                          {fmt(totalVal)}
+                        </Text>
+                      </View>
+                      {/* Three bars stacked */}
+                      <View style={{ gap: 3 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <View style={{ flex: 1, height: 6, backgroundColor: cashColor + '20', borderRadius: 3, overflow: 'hidden' }}>
+                            <View style={{ width: `${cashW}%`, height: '100%', backgroundColor: cashColor, borderRadius: 3 }} />
+                          </View>
+                          <Text style={{ fontSize: 9, color: colors.textSecondary, fontWeight: '600', minWidth: 50, textAlign: 'right' }}>
+                            {fmt(cashVal)}
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <View style={{ flex: 1, height: 6, backgroundColor: cardColor + '20', borderRadius: 3, overflow: 'hidden' }}>
+                            <View style={{ width: `${cardW}%`, height: '100%', backgroundColor: cardColor, borderRadius: 3 }} />
+                          </View>
+                          <Text style={{ fontSize: 9, color: colors.textSecondary, fontWeight: '600', minWidth: 50, textAlign: 'right' }}>
+                            {fmt(cardVal)}
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <View style={{ flex: 1, height: 6, backgroundColor: totalColor + '20', borderRadius: 3, overflow: 'hidden' }}>
+                            <View style={{ width: `${totalW}%`, height: '100%', backgroundColor: totalColor, borderRadius: 3 }} />
+                          </View>
+                          <Text style={{ fontSize: 9, color: colors.textSecondary, fontWeight: '700', minWidth: 50, textAlign: 'right' }}>
+                            {fmt(totalVal)}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            );
+          })()}
+
           {(sourceData?.branchSales || []).map((branch, index) => {
             // Find iptal data for this location from iptal_ozet
             const locOzetRows = (sourceData?.iptalOzet || []).filter(
