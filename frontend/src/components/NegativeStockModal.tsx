@@ -132,7 +132,7 @@ export const NegativeStockModal: React.FC<Props> = ({
     const m = parseFloat(String(item.MIKTAR ?? '0'));
     const cost = parseFloat(String(item.SON_ALIS_FIYAT ?? item.FIYAT ?? '0'));
     const loss = isFinite(cost) && cost > 0 ? m * cost : 0;
-    const birim = (item.BIRIM_AD || item.BIRIM_ADI || item.BIRIM || '').trim();
+    const birim = (item.STOK_BIRIM_FIYAT || item.BIRIM_AD || item.BIRIM_ADI || item.BIRIM || '').trim();
     return (
       <TouchableOpacity
         activeOpacity={onItemPress ? 0.6 : 1}
