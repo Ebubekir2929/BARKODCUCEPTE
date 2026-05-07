@@ -63,6 +63,7 @@ async def ensure_tokens_table():
             for _alter in (
                 "ALTER TABLE user_notification_settings ADD COLUMN low_stock_mode VARCHAR(16) DEFAULT 'daily'",
                 "ALTER TABLE user_notification_settings ADD COLUMN low_stock_daily_hour TINYINT DEFAULT 13",
+                "ALTER TABLE user_notification_settings ADD COLUMN low_stock_daily_minute TINYINT DEFAULT 0",
                 "ALTER TABLE user_notification_settings ADD COLUMN low_stock_interval_hours TINYINT DEFAULT 6",
             ):
                 try:
@@ -373,6 +374,7 @@ class NotificationSettings(BaseModel):
     # 2026-05-06 — Eksi stok bildirimi için kullanıcı bazında zamanlama
     low_stock_mode: Optional[str] = "daily"           # "daily" | "interval"
     low_stock_daily_hour: Optional[int] = 13          # 0..23 (TR saati, daily mode)
+    low_stock_daily_minute: Optional[int] = 0         # 0..59 (TR dakika, daily mode)
     low_stock_interval_hours: Optional[int] = 6       # 1..24 (interval mode)
 
 
@@ -445,7 +447,8 @@ async def get_settings(current_user: dict = Depends(get_current_user)):
             await cur.execute("""
                 SELECT notify_cancellations, notify_line_cancellations, notify_high_sales,
                        high_sales_threshold, notify_low_stock, check_interval_minutes, last_check_at,
-                       low_stock_mode, low_stock_daily_hour, low_stock_interval_hours
+                       low_stock_mode, low_stock_daily_hour, low_stock_interval_hours,
+                       COALESCE(low_stock_daily_minute, 0)
                 FROM user_notification_settings WHERE user_id=%s
             """, (user_id,))
             row = await cur.fetchone()
@@ -469,6 +472,7 @@ async def get_settings(current_user: dict = Depends(get_current_user)):
                         "check_interval_minutes": 15,
                         "low_stock_mode": "daily",
                         "low_stock_daily_hour": 13,
+                        "low_stock_daily_minute": 0,
                         "low_stock_interval_hours": 6,
                         "last_check_at": None,
                     }
@@ -486,6 +490,7 @@ async def get_settings(current_user: dict = Depends(get_current_user)):
             "low_stock_mode": str(row[7] or "daily"),
             "low_stock_daily_hour": int(row[8]) if row[8] is not None else 13,
             "low_stock_interval_hours": int(row[9]) if row[9] is not None else 6,
+            "low_stock_daily_minute": int(row[10]) if row[10] is not None else 0,
         }
     }
 
@@ -871,9 +876,9 @@ async def set_settings(body: NotificationSettings, current_user: dict = Depends(
                 INSERT INTO user_notification_settings
                     (user_id, notify_cancellations, notify_line_cancellations, notify_high_sales,
                      high_sales_threshold, notify_low_stock, check_interval_minutes,
-                     low_stock_mode, low_stock_daily_hour, low_stock_interval_hours,
+                     low_stock_mode, low_stock_daily_hour, low_stock_daily_minute, low_stock_interval_hours,
                      last_check_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, UTC_TIMESTAMP())
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, UTC_TIMESTAMP())
                 ON DUPLICATE KEY UPDATE
                     notify_cancellations=VALUES(notify_cancellations),
                     notify_line_cancellations=VALUES(notify_line_cancellations),
@@ -883,6 +888,7 @@ async def set_settings(body: NotificationSettings, current_user: dict = Depends(
                     check_interval_minutes=VALUES(check_interval_minutes),
                     low_stock_mode=VALUES(low_stock_mode),
                     low_stock_daily_hour=VALUES(low_stock_daily_hour),
+                    low_stock_daily_minute=VALUES(low_stock_daily_minute),
                     low_stock_interval_hours=VALUES(low_stock_interval_hours),
                     last_check_at=NULL,
                     updated_at=UTC_TIMESTAMP()
@@ -896,6 +902,7 @@ async def set_settings(body: NotificationSettings, current_user: dict = Depends(
                 max(1, int(body.check_interval_minutes or 15)),
                 mode,
                 daily_hour,
+                daily_minute,
                 interval_hours,
             ))
             # Re-activate all push tokens so the watcher can deliver events.

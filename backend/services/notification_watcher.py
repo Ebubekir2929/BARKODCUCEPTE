@@ -1078,7 +1078,8 @@ async def _collect_low_stock_subscribers() -> List[Dict[str, Any]]:
                 SELECT s.user_id, u.tenant_id,
                        COALESCE(s.low_stock_mode,'daily'),
                        COALESCE(s.low_stock_daily_hour,13),
-                       COALESCE(s.low_stock_interval_hours,6)
+                       COALESCE(s.low_stock_interval_hours,6),
+                       COALESCE(s.low_stock_daily_minute,0)
                 FROM user_notification_settings s
                 JOIN users u ON u.user_id = s.user_id
                 WHERE u.active = 1 AND s.notify_low_stock = 1
@@ -1091,6 +1092,7 @@ async def _collect_low_stock_subscribers() -> List[Dict[str, Any]]:
                 mode = str(r[2] or "daily").lower()
                 daily_hour = int(r[3] if r[3] is not None else 13)
                 interval_hours = int(r[4] if r[4] is not None else 6)
+                daily_minute = int(r[5] if r[5] is not None else 0)
                 if interval_hours < 1: interval_hours = 1
                 if interval_hours > 24: interval_hours = 24
                 if mode not in ("daily", "interval"): mode = "daily"
@@ -1141,6 +1143,7 @@ async def _collect_low_stock_subscribers() -> List[Dict[str, Any]]:
                         "tokens": tokens,
                         "low_stock_mode": mode,
                         "low_stock_daily_hour": daily_hour,
+                        "low_stock_daily_minute": daily_minute,
                         "low_stock_interval_hours": interval_hours,
                     })
     return out
@@ -1156,8 +1159,10 @@ def _user_low_stock_should_fire(sub: Dict[str, Any], tr_now) -> Optional[str]:
     mode = sub.get("low_stock_mode") or "daily"
     if mode == "daily":
         target_h = int(sub.get("low_stock_daily_hour") or 13)
-        if tr_now.hour == target_h and tr_now.minute < 10:
-            return f"{tr_now.strftime('%Y-%m-%d')}:dh{target_h:02d}"
+        target_m = int(sub.get("low_stock_daily_minute") or 0)
+        # Fire within a 5-minute window starting at target time
+        if tr_now.hour == target_h and target_m <= tr_now.minute < target_m + 5:
+            return f"{tr_now.strftime('%Y-%m-%d')}:dh{target_h:02d}:{target_m:02d}"
         return None
     # interval mode
     iv = int(sub.get("low_stock_interval_hours") or 6)

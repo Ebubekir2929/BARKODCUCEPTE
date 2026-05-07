@@ -918,10 +918,17 @@ export default function SettingsScreen() {
                 }}
                 value={String(refreshInterval)}
                 onChangeText={(txt) => {
+                  // 2026-05-07 — Yazarken sadece sayıya temizle, clamp YAPMA
+                  // (clamp blur'da). Aksi halde "10" yazmak için önce "1" iken
+                  // 5'e zıplıyordu.
                   const n = parseInt(txt.replace(/[^0-9]/g, '') || '0', 10);
-                  // Clamp: 0 (manual) or 5..3600 (5sn..1hr)
+                  setRefreshInterval(n as any);
+                }}
+                onBlur={() => {
+                  // Final clamp on blur
+                  const n = Number(refreshInterval) || 0;
                   const clamped = n === 0 ? 0 : Math.max(5, Math.min(3600, n));
-                  setRefreshInterval(clamped as any);
+                  if (clamped !== refreshInterval) setRefreshInterval(clamped as any);
                 }}
                 keyboardType="numeric"
                 placeholder="60"
