@@ -1227,7 +1227,14 @@ export default function DashboardScreen() {
                 <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-            <View style={[styles.modalBody, { backgroundColor: colors.surface }]}>
+            <ScrollView
+              style={[styles.modalBody, { backgroundColor: colors.surface }]}
+              contentContainerStyle={styles.modalBodyContent}
+              nestedScrollEnabled
+              bounces
+              showsVerticalScrollIndicator
+              keyboardShouldPersistTaps="handled"
+            >
               {(sourceData?.branchSales || []).map((branch) => {
                 const value = selectedCardType === 'cash' ? branch.sales.cash
                   : selectedCardType === 'card' ? branch.sales.card
@@ -1392,7 +1399,7 @@ export default function DashboardScreen() {
                   </View>
                 ) : null;
               })()}
-            </View>
+            </ScrollView>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
