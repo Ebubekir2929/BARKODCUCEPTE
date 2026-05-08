@@ -62,11 +62,17 @@ export interface DashboardData {
     toplam_fis: number;
   }>;
   // NEW: KDV / Matrah breakdown by KDV rate (from financial_data_location cache).
-  // Tenant total ile tutarlı (nakit+kart+veresiye birlikte).
+  // Şube bazında ayrı + genel toplam. Tenant total ile tutarlı.
   kdvBreakdown: {
-    rates: Array<{ rate: number; matrah: number; kdv: number; total: number }>;
-    totalMatrah: number;
-    totalKdv: number;
+    branches: Array<{
+      branchName: string;
+      rates: Array<{ rate: number; matrah: number; kdv: number; total: number }>;
+      totalMatrah: number;
+      totalKdv: number;
+    }>;
+    grandRates: Array<{ rate: number; matrah: number; kdv: number; total: number }>;
+    grandTotalMatrah: number;
+    grandTotalKdv: number;
   };
 }
 
@@ -97,7 +103,7 @@ const EMPTY_DATA: DashboardData = {
     fisSayisi: { total: 0, perakende: 0, erp12: 0 },
   },
   branchBreakdowns: [],
-  kdvBreakdown: { rates: [], totalMatrah: 0, totalKdv: 0 },
+  kdvBreakdown: { branches: [], grandRates: [], grandTotalMatrah: 0, grandTotalKdv: 0 },
 };
 
 function formatDateParam(d: Date): string {
@@ -235,8 +241,7 @@ function transformApiData(apiData: any): DashboardData {
     }));
 
   // KDV / Matrah breakdown by rate from financial_data_location cache.
-  // Cache supplies fields like KDV_0/KDV_1/KDV_8/KDV_10/KDV_18/KDV_20 and
-  // matching MATRAH_x. Sum across all locations.
+  // Şube bazında ayrı + genel toplam.
   const kdvRateKeys: Array<{ rate: number; matrahField: string; kdvField: string }> = [
     { rate: 0, matrahField: 'MATRAH_0', kdvField: 'KDV_0' },
     { rate: 1, matrahField: 'MATRAH_1', kdvField: 'KDV_1' },
@@ -245,22 +250,45 @@ function transformApiData(apiData: any): DashboardData {
     { rate: 18, matrahField: 'MATRAH_18', kdvField: 'KDV_18' },
     { rate: 20, matrahField: 'MATRAH_20', kdvField: 'KDV_20' },
   ];
-  const kdvRatesAgg: Array<{ rate: number; matrah: number; kdv: number; total: number }> = [];
-  let totalMatrahAll = 0;
-  let totalKdvAll = 0;
-  for (const def of kdvRateKeys) {
-    let matrahSum = 0;
-    let kdvSum = 0;
-    for (const loc of locationData as any[]) {
-      matrahSum += parseFloat(loc?.[def.matrahField] || '0');
-      kdvSum += parseFloat(loc?.[def.kdvField] || '0');
+  const kdvBranches: Array<{
+    branchName: string;
+    rates: Array<{ rate: number; matrah: number; kdv: number; total: number }>;
+    totalMatrah: number;
+    totalKdv: number;
+  }> = [];
+  // Grand totals for ALL branches combined
+  const grandPerRate: Record<number, { matrah: number; kdv: number }> = {};
+  let grandTotalMatrahAll = 0;
+  let grandTotalKdvAll = 0;
+
+  for (const loc of locationData as any[]) {
+    const branchName = loc?.LOKASYON || 'Bilinmeyen';
+    const branchRates: Array<{ rate: number; matrah: number; kdv: number; total: number }> = [];
+    let bMatrah = 0;
+    let bKdv = 0;
+    for (const def of kdvRateKeys) {
+      const matrah = parseFloat(loc?.[def.matrahField] || '0');
+      const kdv = parseFloat(loc?.[def.kdvField] || '0');
+      if (matrah > 0 || kdv > 0) {
+        branchRates.push({ rate: def.rate, matrah, kdv, total: matrah + kdv });
+        bMatrah += matrah;
+        bKdv += kdv;
+        if (!grandPerRate[def.rate]) grandPerRate[def.rate] = { matrah: 0, kdv: 0 };
+        grandPerRate[def.rate].matrah += matrah;
+        grandPerRate[def.rate].kdv += kdv;
+        grandTotalMatrahAll += matrah;
+        grandTotalKdvAll += kdv;
+      }
     }
-    if (matrahSum > 0 || kdvSum > 0) {
-      kdvRatesAgg.push({ rate: def.rate, matrah: matrahSum, kdv: kdvSum, total: matrahSum + kdvSum });
-      totalMatrahAll += matrahSum;
-      totalKdvAll += kdvSum;
+    if (branchRates.length > 0) {
+      kdvBranches.push({ branchName, rates: branchRates, totalMatrah: bMatrah, totalKdv: bKdv });
     }
   }
+  // Sort branches by total desc
+  kdvBranches.sort((a, b) => (b.totalMatrah + b.totalKdv) - (a.totalMatrah + a.totalKdv));
+  const grandRates = Object.entries(grandPerRate)
+    .map(([r, v]) => ({ rate: parseInt(r, 10), matrah: v.matrah, kdv: v.kdv, total: v.matrah + v.kdv }))
+    .sort((a, b) => a.rate - b.rate);
 
   return {
     branchSales,
@@ -284,9 +312,10 @@ function transformApiData(apiData: any): DashboardData {
     financialBreakdown,
     branchBreakdowns,
     kdvBreakdown: {
-      rates: kdvRatesAgg,
-      totalMatrah: totalMatrahAll,
-      totalKdv: totalKdvAll,
+      branches: kdvBranches,
+      grandRates,
+      grandTotalMatrah: grandTotalMatrahAll,
+      grandTotalKdv: grandTotalKdvAll,
     },
   };
 }
