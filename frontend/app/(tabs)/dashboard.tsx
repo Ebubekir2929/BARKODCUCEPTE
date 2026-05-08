@@ -1132,38 +1132,47 @@ export default function DashboardScreen() {
                 flexDirection: 'row', gap: 8, marginTop: 14, marginBottom: 16,
               }}>
                 <View style={{
-                  flex: 1, padding: 12, borderRadius: 12,
+                  flex: 1, padding: 10, borderRadius: 12,
                   backgroundColor: colors.background,
                   borderWidth: 1, borderColor: colors.border,
                 }}>
-                  <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase' }}>
+                  <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
                     Matrah
                   </Text>
-                  <Text style={{ fontSize: 16, fontWeight: '900', color: colors.text, marginTop: 4 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+                  <Text style={{ fontSize: 17, fontWeight: '900', color: colors.text, marginTop: 4 }} numberOfLines={1}>
+                    ₺{fmtShort(grandMatrah)}
+                  </Text>
+                  <Text style={{ fontSize: 9, color: colors.textSecondary, marginTop: 1 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
                     ₺{fmt(grandMatrah)}
                   </Text>
                 </View>
                 <View style={{
-                  flex: 1, padding: 12, borderRadius: 12,
+                  flex: 1, padding: 10, borderRadius: 12,
                   backgroundColor: '#F59E0B' + '12',
                   borderWidth: 1, borderColor: '#F59E0B' + '40',
                 }}>
-                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#F59E0B', textTransform: 'uppercase' }}>
+                  <Text style={{ fontSize: 9, fontWeight: '700', color: '#F59E0B', textTransform: 'uppercase', letterSpacing: 0.5 }}>
                     KDV
                   </Text>
-                  <Text style={{ fontSize: 16, fontWeight: '900', color: '#F59E0B', marginTop: 4 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+                  <Text style={{ fontSize: 17, fontWeight: '900', color: '#F59E0B', marginTop: 4 }} numberOfLines={1}>
+                    ₺{fmtShort(grandKdv)}
+                  </Text>
+                  <Text style={{ fontSize: 9, color: '#F59E0B', opacity: 0.7, marginTop: 1 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
                     ₺{fmt(grandKdv)}
                   </Text>
                 </View>
                 <View style={{
-                  flex: 1, padding: 12, borderRadius: 12,
+                  flex: 1, padding: 10, borderRadius: 12,
                   backgroundColor: colors.primary + '15',
                   borderWidth: 1.5, borderColor: colors.primary + '50',
                 }}>
-                  <Text style={{ fontSize: 10, fontWeight: '700', color: colors.primary, textTransform: 'uppercase' }}>
+                  <Text style={{ fontSize: 9, fontWeight: '700', color: colors.primary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
                     Toplam
                   </Text>
-                  <Text style={{ fontSize: 16, fontWeight: '900', color: colors.primary, marginTop: 4 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+                  <Text style={{ fontSize: 17, fontWeight: '900', color: colors.primary, marginTop: 4 }} numberOfLines={1}>
+                    ₺{fmtShort(grandTotal)}
+                  </Text>
+                  <Text style={{ fontSize: 9, color: colors.primary, opacity: 0.7, marginTop: 1 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
                     ₺{fmt(grandTotal)}
                   </Text>
                 </View>
