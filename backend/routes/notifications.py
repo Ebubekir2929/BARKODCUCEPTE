@@ -865,6 +865,7 @@ async def set_settings(body: NotificationSettings, current_user: dict = Depends(
     if mode not in ("daily", "interval"):
         mode = "daily"
     daily_hour = max(0, min(23, int(body.low_stock_daily_hour or 13)))
+    daily_minute = max(0, min(59, int(body.low_stock_daily_minute or 0)))
     interval_hours = int(body.low_stock_interval_hours or 6)
     if interval_hours < 1: interval_hours = 1
     if interval_hours > 24: interval_hours = 24

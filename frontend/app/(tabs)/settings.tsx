@@ -46,6 +46,7 @@ export default function SettingsScreen() {
   // 2026-05-06 — Eksi stok bildirim zamanlaması (Mod C: ya günlük belirli saat, ya da N saatlik)
   const [lowStockMode, setLowStockMode] = useState<'daily' | 'interval'>('daily');
   const [lowStockDailyHour, setLowStockDailyHour] = useState<number>(13);
+  const [lowStockDailyMinute, setLowStockDailyMinute] = useState<number>(0);
   const [lowStockIntervalHours, setLowStockIntervalHours] = useState<number>(6);
   const [showHourPicker, setShowHourPicker] = useState(false);
   const [showLanguageModal, setShowLanguageModal] = useState(false);
@@ -90,7 +91,7 @@ export default function SettingsScreen() {
   const syncSettingsToBackend = async (overrides?: Partial<{
     notify_cancellations: boolean; notify_high_sales: boolean; high_sales_threshold: number;
     notify_low_stock: boolean; check_interval_minutes: number;
-    low_stock_mode: 'daily' | 'interval'; low_stock_daily_hour: number; low_stock_interval_hours: number;
+    low_stock_mode: 'daily' | 'interval'; low_stock_daily_hour: number; low_stock_daily_minute: number; low_stock_interval_hours: number;
   }>) => {
     try {
       const { token } = useAuthStore.getState();
@@ -104,6 +105,7 @@ export default function SettingsScreen() {
         check_interval_minutes: Math.max(1, parseInt(checkIntervalMinutes, 10) || 15),
         low_stock_mode: lowStockMode,
         low_stock_daily_hour: lowStockDailyHour,
+        low_stock_daily_minute: lowStockDailyMinute,
         low_stock_interval_hours: lowStockIntervalHours,
         ...overrides,
       };
@@ -140,6 +142,7 @@ export default function SettingsScreen() {
             const m = (s.low_stock_mode === 'interval') ? 'interval' : 'daily';
             setLowStockMode(m);
             setLowStockDailyHour(Number(s.low_stock_daily_hour ?? 13));
+            setLowStockDailyMinute(Number(s.low_stock_daily_minute ?? 0));
             setLowStockIntervalHours(Number(s.low_stock_interval_hours ?? 6));
             return;
           }
@@ -692,7 +695,7 @@ export default function SettingsScreen() {
                           </View>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                             <Text style={{ fontSize: 16, fontWeight: '800', color: colors.primary }}>
-                              {String(lowStockDailyHour).padStart(2, '0')}:00
+                              {String(lowStockDailyHour).padStart(2, '0')}:{String(lowStockDailyMinute).padStart(2, '0')}
                             </Text>
                             <Ionicons name="chevron-forward" size={16} color={colors.textSecondary} />
                           </View>
@@ -742,14 +745,18 @@ export default function SettingsScreen() {
                         onPress={() => setShowHourPicker(false)}
                       >
                         <View style={{
-                          width: '85%', maxHeight: '70%',
+                          width: '90%', maxHeight: '80%',
                           backgroundColor: colors.surface, borderRadius: 14, padding: 16,
                         }}>
                           <Text style={{ fontSize: 16, fontWeight: '800', color: colors.text, marginBottom: 12, textAlign: 'center' }}>
                             Bildirim Saati Seçin
                           </Text>
-                          <ScrollView style={{ maxHeight: 360 }}>
-                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+                          <Text style={{ fontSize: 24, fontWeight: '900', color: colors.primary, marginBottom: 14, textAlign: 'center' }}>
+                            {String(lowStockDailyHour).padStart(2, '0')}:{String(lowStockDailyMinute).padStart(2, '0')}
+                          </Text>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: colors.textSecondary, marginBottom: 6 }}>Saat</Text>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                            <View style={{ flexDirection: 'row', gap: 6 }}>
                               {Array.from({ length: 24 }, (_, h) => h).map((h) => {
                                 const sel = lowStockDailyHour === h;
                                 return (
@@ -757,17 +764,42 @@ export default function SettingsScreen() {
                                     key={h}
                                     onPress={async () => {
                                       setLowStockDailyHour(h);
-                                      setShowHourPicker(false);
                                       await syncSettingsToBackend({ low_stock_daily_hour: h });
                                     }}
                                     style={{
-                                      width: 64, paddingVertical: 12, borderRadius: 10, alignItems: 'center',
+                                      width: 52, paddingVertical: 10, borderRadius: 10, alignItems: 'center',
                                       backgroundColor: sel ? colors.primary : colors.background,
                                       borderWidth: 1, borderColor: sel ? colors.primary : colors.border,
                                     }}
                                   >
-                                    <Text style={{ fontSize: 14, fontWeight: '700', color: sel ? '#fff' : colors.text }}>
-                                      {String(h).padStart(2, '0')}:00
+                                    <Text style={{ fontSize: 13, fontWeight: '700', color: sel ? '#fff' : colors.text }}>
+                                      {String(h).padStart(2, '0')}
+                                    </Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </View>
+                          </ScrollView>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: colors.textSecondary, marginBottom: 6 }}>Dakika</Text>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+                            <View style={{ flexDirection: 'row', gap: 6 }}>
+                              {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map((m) => {
+                                const sel = lowStockDailyMinute === m;
+                                return (
+                                  <TouchableOpacity
+                                    key={m}
+                                    onPress={async () => {
+                                      setLowStockDailyMinute(m);
+                                      await syncSettingsToBackend({ low_stock_daily_minute: m });
+                                    }}
+                                    style={{
+                                      width: 52, paddingVertical: 10, borderRadius: 10, alignItems: 'center',
+                                      backgroundColor: sel ? colors.primary : colors.background,
+                                      borderWidth: 1, borderColor: sel ? colors.primary : colors.border,
+                                    }}
+                                  >
+                                    <Text style={{ fontSize: 13, fontWeight: '700', color: sel ? '#fff' : colors.text }}>
+                                      {String(m).padStart(2, '0')}
                                     </Text>
                                   </TouchableOpacity>
                                 );
@@ -776,9 +808,9 @@ export default function SettingsScreen() {
                           </ScrollView>
                           <TouchableOpacity
                             onPress={() => setShowHourPicker(false)}
-                            style={{ marginTop: 12, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: colors.background }}
+                            style={{ marginTop: 4, paddingVertical: 12, borderRadius: 10, alignItems: 'center', backgroundColor: colors.primary }}
                           >
-                            <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>Kapat</Text>
+                            <Text style={{ fontSize: 14, fontWeight: '800', color: '#fff' }}>Tamam</Text>
                           </TouchableOpacity>
                         </View>
                       </TouchableOpacity>
