@@ -1084,124 +1084,66 @@ export default function DashboardScreen() {
           );
         })()}
 
-        {/* KDV / Matrah Kırılımı (financial_data_location cache'den; şube bazında + genel toplam) */}
-        {(sourceData?.kdvBreakdown?.branches || []).length > 0 && (() => {
-          const branches = sourceData.kdvBreakdown.branches;
-          const grandRates = sourceData.kdvBreakdown.grandRates || [];
+        {/* KDV / Matrah Detayı — sade, genel toplam */}
+        {(sourceData?.kdvBreakdown?.grandRates || []).length > 0 && (() => {
+          const grandRates = sourceData.kdvBreakdown.grandRates;
           const grandMatrah = sourceData.kdvBreakdown.grandTotalMatrah;
           const grandKdv = sourceData.kdvBreakdown.grandTotalKdv;
           const grandTotal = grandMatrah + grandKdv;
           const fmt = (v: number) => v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-          const renderRow = (g: { rate: number; matrah: number; kdv: number; total: number }, key: string | number) => (
-            <View key={key} style={{ flexDirection: 'row', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center' }}>
-              <View style={{ flex: 0.7, flexDirection: 'row', alignItems: 'center' }}>
-                <View style={{ backgroundColor: colors.primary + '20', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 7 }}>
-                  <Text style={{ fontSize: 11, fontWeight: '800', color: colors.primary }}>%{g.rate}</Text>
-                </View>
-              </View>
-              <Text style={{ flex: 1.4, fontSize: 12, fontWeight: '700', color: colors.text, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                ₺{fmt(g.matrah)}
-              </Text>
-              <Text style={{ flex: 1.2, fontSize: 12, fontWeight: '700', color: colors.warning, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                ₺{fmt(g.kdv)}
-              </Text>
-              <Text style={{ flex: 1.4, fontSize: 12, fontWeight: '800', color: colors.primary, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                ₺{fmt(g.total)}
-              </Text>
-            </View>
-          );
-          const renderHeader = () => (
-            <View style={{ flexDirection: 'row', paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-              <Text style={{ flex: 0.7, fontSize: 10, fontWeight: '700', color: colors.textSecondary }}>Oran</Text>
-              <Text style={{ flex: 1.4, fontSize: 10, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }}>Matrah</Text>
-              <Text style={{ flex: 1.2, fontSize: 10, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }}>KDV</Text>
-              <Text style={{ flex: 1.4, fontSize: 10, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }}>Toplam</Text>
-            </View>
-          );
           return (
             <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                 <Ionicons name="calculator-outline" size={18} color={colors.primary} />
                 <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
                   KDV / Matrah Detayı
                 </Text>
               </View>
-
-              {/* Per-branch sections */}
-              {branches.map((b, idx) => {
-                const bTotal = b.totalMatrah + b.totalKdv;
-                return (
-                  <View
-                    key={`${b.branchName}-${idx}`}
-                    style={{
-                      marginBottom: 14,
-                      padding: 12,
-                      borderRadius: 12,
-                      backgroundColor: colors.background,
-                      borderWidth: 1,
-                      borderColor: colors.border,
-                    }}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                        <Ionicons name="storefront" size={14} color={colors.primary} />
-                        <Text style={{ fontSize: 13, fontWeight: '800', color: colors.text, flex: 1 }} numberOfLines={1}>
-                          {b.branchName}
-                        </Text>
-                      </View>
-                      <Text style={{ fontSize: 13, fontWeight: '800', color: colors.primary }}>
-                        ₺{fmt(bTotal)}
-                      </Text>
-                    </View>
-                    {renderHeader()}
-                    {b.rates.map((g) => renderRow(g, g.rate))}
-                    <View style={{ flexDirection: 'row', paddingTop: 8, alignItems: 'center' }}>
-                      <Text style={{ flex: 0.7, fontSize: 11, fontWeight: '800', color: colors.text }}>Toplam</Text>
-                      <Text style={{ flex: 1.4, fontSize: 12, fontWeight: '800', color: colors.text, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                        ₺{fmt(b.totalMatrah)}
-                      </Text>
-                      <Text style={{ flex: 1.2, fontSize: 12, fontWeight: '800', color: colors.warning, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                        ₺{fmt(b.totalKdv)}
-                      </Text>
-                      <Text style={{ flex: 1.4, fontSize: 13, fontWeight: '900', color: colors.primary, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                        ₺{fmt(bTotal)}
-                      </Text>
+              <Text style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 12 }}>
+                KDV oranı bazında matrah ve KDV tutarları
+              </Text>
+              {/* Header */}
+              <View style={{ flexDirection: 'row', paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                <Text style={{ flex: 0.7, fontSize: 11, fontWeight: '700', color: colors.textSecondary }}>Oran</Text>
+                <Text style={{ flex: 1.4, fontSize: 11, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }}>Matrah</Text>
+                <Text style={{ flex: 1.2, fontSize: 11, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }}>KDV</Text>
+                <Text style={{ flex: 1.4, fontSize: 11, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }}>Toplam</Text>
+              </View>
+              {/* Rate rows */}
+              {grandRates.map((g) => (
+                <View
+                  key={g.rate}
+                  style={{ flexDirection: 'row', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center' }}
+                >
+                  <View style={{ flex: 0.7, flexDirection: 'row', alignItems: 'center' }}>
+                    <View style={{ backgroundColor: colors.primary + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
+                      <Text style={{ fontSize: 12, fontWeight: '800', color: colors.primary }}>%{g.rate}</Text>
                     </View>
                   </View>
-                );
-              })}
-
-              {/* Grand Total - only if more than 1 branch */}
-              {branches.length > 1 && (
-                <View style={{
-                  padding: 12,
-                  borderRadius: 12,
-                  backgroundColor: colors.primary + '12',
-                  borderWidth: 1.5,
-                  borderColor: colors.primary + '50',
-                }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                    <Ionicons name="layers" size={14} color={colors.primary} />
-                    <Text style={{ fontSize: 13, fontWeight: '900', color: colors.primary }}>
-                      GENEL TOPLAM
-                    </Text>
-                  </View>
-                  {renderHeader()}
-                  {grandRates.map((g) => renderRow(g, `g-${g.rate}`))}
-                  <View style={{ flexDirection: 'row', paddingTop: 10, alignItems: 'center' }}>
-                    <Text style={{ flex: 0.7, fontSize: 12, fontWeight: '900', color: colors.text }}>Toplam</Text>
-                    <Text style={{ flex: 1.4, fontSize: 13, fontWeight: '900', color: colors.text, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                      ₺{fmt(grandMatrah)}
-                    </Text>
-                    <Text style={{ flex: 1.2, fontSize: 13, fontWeight: '900', color: colors.warning, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                      ₺{fmt(grandKdv)}
-                    </Text>
-                    <Text style={{ flex: 1.4, fontSize: 14, fontWeight: '900', color: colors.primary, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                      ₺{fmt(grandTotal)}
-                    </Text>
-                  </View>
+                  <Text style={{ flex: 1.4, fontSize: 13, fontWeight: '700', color: colors.text, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                    ₺{fmt(g.matrah)}
+                  </Text>
+                  <Text style={{ flex: 1.2, fontSize: 13, fontWeight: '700', color: colors.warning, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                    ₺{fmt(g.kdv)}
+                  </Text>
+                  <Text style={{ flex: 1.4, fontSize: 13, fontWeight: '800', color: colors.primary, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                    ₺{fmt(g.total)}
+                  </Text>
                 </View>
-              )}
+              ))}
+              {/* Total row */}
+              <View style={{ flexDirection: 'row', paddingTop: 12, paddingBottom: 12, paddingHorizontal: 8, alignItems: 'center', backgroundColor: colors.primary + '10', borderRadius: 8, marginTop: 6 }}>
+                <Text style={{ flex: 0.7, fontSize: 12, fontWeight: '900', color: colors.primary }}>TOPLAM</Text>
+                <Text style={{ flex: 1.4, fontSize: 13, fontWeight: '900', color: colors.text, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                  ₺{fmt(grandMatrah)}
+                </Text>
+                <Text style={{ flex: 1.2, fontSize: 13, fontWeight: '900', color: colors.warning, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                  ₺{fmt(grandKdv)}
+                </Text>
+                <Text style={{ flex: 1.4, fontSize: 14, fontWeight: '900', color: colors.primary, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                  ₺{fmt(grandTotal)}
+                </Text>
+              </View>
             </View>
           );
         })()}

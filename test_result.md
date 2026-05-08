@@ -567,11 +567,77 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Report Filter Options API"
-    - "Report Run API"
+    - "Dashboard KDV/Matrah breakdown aggregation"
+    - "Notification settings low_stock_daily_minute persistence + clamp"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
+
+  # === 2026-05-08 KDV/Matrah breakdown regression ===
+  # backend tasks tested by /app/backend_test_kdv.py — all 21 assertions PASS
+  # Detailed per-task entries appended below.
+backend_extras_2026_05_08:
+  - task: "Dashboard KDV/Matrah breakdown aggregation"
+    implemented: true
+    working: true
+    file: "routes/data.py (aggregate_dataset financial_data_location)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ TESTED 2026-05-08 (/app/backend_test_kdv.py against
+          https://notify-deep-link.preview.emergentagent.com/api with admin
+          cakmak.ebubekir29@gmail.com / 123456, tenant Gümüşhane
+          4d9b503a96f5430aad34c430301a8aa1).
+
+          1) GET /api/data/dashboard?tenant_id=…&sdate=2026-05-08&edate=2026-05-08
+             → HTTP 200 in 2959ms.
+             • financial_data_location.data: 4 rows (one per LOKASYON).
+             • Every row has LOKASYON, TOPLAM_MATRAH, TOPLAM_KDV.
+             • Per-rate fields populated: MATRAH_0, MATRAH_1, MATRAH_10,
+               MATRAH_20, KDV_1, KDV_10, KDV_20.
+             • Aggregate identity: sum(TOPLAM_MATRAH+TOPLAM_KDV) =
+               sum(MATRAH_*+KDV_*) = ₺286,186.43, diff=0.00. ✅
+          2) GET /api/data/dashboard?tenant_id=… (no sdate/edate)
+             → HTTP 200 in 2460ms; financial_data_location list returned with
+             4 rows in same shape. ✅
+          3) GET /api/data/dashboard?…&sdate=2026-05-06&edate=2026-05-08
+             (multi-day aggregation)
+             → HTTP 200 in 2826ms.
+             • 4 rows, LOKASYON values unique (per-day per-location merged
+               into single LOKASYON entry as designed).
+             • sum(TOPLAM_MATRAH+TOPLAM_KDV) = sum(MATRAH_*+KDV_*) =
+               ₺2,415,467.73, diff=0.00 → numeric_fields list correctly
+               includes all KDV/MATRAH keys (MATRAH_0/1/8/10/18/20,
+               KDV_0/1/8/10/18/20, TOPLAM_MATRAH, TOPLAM_KDV). ✅
+
+          No 500 errors. No regression in dashboard structure (still 13 keys,
+          last_week + all_locations populated as before).
+
+  - task: "Notification settings low_stock_daily_minute persistence + clamp"
+    implemented: true
+    working: true
+    file: "routes/notifications.py (GET/POST /settings)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ TESTED 2026-05-08 (/app/backend_test_kdv.py).
+          1) GET /api/notifications/settings → 200 OK; settings payload
+             includes `low_stock_daily_minute` (int, default 0). ✅
+          2) POST /api/notifications/settings { low_stock_daily_minute: 30 }
+             → 200; subsequent GET returns 30. Persistence working. ✅
+          3) POST { low_stock_daily_minute: 75 } → 200; GET returns 59.
+             Server-side clamp `max(0, min(59, value))` confirmed. ✅
+          4) POST { low_stock_daily_minute: -5 } → 200; GET returns 0.
+             Negative clamp confirmed. ✅
+          Original value restored after test run. No backend errors.
 
 agent_communication:
   - agent: "testing"
@@ -851,6 +917,26 @@ agent_communication:
           and unregistered the ExponentPushToken[TEST_STUB] push token from both.
 
 agent_communication:
+  - agent: "testing"
+    message: |
+      ✅ KDV/MATRAH BREAKDOWN + low_stock_daily_minute REGRESSION (2026-05-08, 21/21 PASS, /app/backend_test_kdv.py against https://notify-deep-link.preview.emergentagent.com/api).
+
+      Dashboard endpoint (tenant Gümüşhane 4d9b503a…):
+      • GET /api/data/dashboard?sdate=2026-05-08&edate=2026-05-08 → 200 in 2959ms; financial_data_location.data has 4 rows.
+      • Row keys include MATRAH_0/1/10/20, KDV_1/10/20, TOPLAM_MATRAH, TOPLAM_KDV (also ERP12_*, PERAKENDE_*, iskonto, fiş sayıları). LOKASYON, TOPLAM_MATRAH, TOPLAM_KDV present on every row.
+      • Aggregate identity check: sum(TOPLAM_MATRAH+TOPLAM_KDV) == sum(MATRAH_0+1+8+10+18+20 + KDV_0+1+8+10+18+20) = ₺286,186.43 (diff 0.00) → numeric_fields list is correctly summing all KDV/MATRAH keys.
+      • GET /api/data/dashboard (no date params) → 200 in 2460ms, same shape (4 rows).
+      • Multi-day GET sdate=2026-05-06&edate=2026-05-08 → 200 in 2826ms; 4 unique LOKASYONs (per-day per-location merged correctly via aggregate_dataset). Aggregate identity check: ₺2,415,467.73 (diff 0.00) → multi-day aggregation also correct.
+
+      Notification settings (POST/GET /api/notifications/settings):
+      • GET returns settings.low_stock_daily_minute (int, default 0).
+      • POST { low_stock_daily_minute: 30 } → GET returns 30. ✅
+      • POST { low_stock_daily_minute: 75 } → GET returns 59 (clamped via max(0,min(59,…))). ✅
+      • POST { low_stock_daily_minute: -5 } → GET returns 0. ✅
+      • Original value restored after test.
+
+      No 500s. No regressions in dashboard last_week/all_locations. Backend logs clean.
+
   - agent: "main"
     message: |
       🚫 REQUEST_CREATE WHITELIST (2026-05-01 19:35 TR) — user request to "completely cancel request events on the dashboard".
