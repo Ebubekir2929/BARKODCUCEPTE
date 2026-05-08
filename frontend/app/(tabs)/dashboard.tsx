@@ -1084,66 +1084,163 @@ export default function DashboardScreen() {
           );
         })()}
 
-        {/* KDV / Matrah Detayı — sade, genel toplam */}
+        {/* KDV / Matrah Detayı — modern kart tasarımı */}
         {(sourceData?.kdvBreakdown?.grandRates || []).length > 0 && (() => {
           const grandRates = sourceData.kdvBreakdown.grandRates;
           const grandMatrah = sourceData.kdvBreakdown.grandTotalMatrah;
           const grandKdv = sourceData.kdvBreakdown.grandTotalKdv;
           const grandTotal = grandMatrah + grandKdv;
           const fmt = (v: number) => v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+          const fmtShort = (v: number) => {
+            if (v >= 1000000) return `${(v / 1000000).toFixed(2)}M`;
+            if (v >= 1000) return `${(v / 1000).toFixed(1)}K`;
+            return v.toFixed(0);
+          };
+          // Renkler oran bazında — her oran farklı bir hue
+          const rateColor = (rate: number): string => {
+            if (rate === 0) return '#10B981';     // yeşil
+            if (rate === 1) return '#3B82F6';     // mavi
+            if (rate === 8) return '#F59E0B';     // amber
+            if (rate === 10) return '#EC4899';    // pembe
+            if (rate === 18) return '#EF4444';    // kırmızı
+            if (rate === 20) return '#8B5CF6';    // mor
+            return colors.primary;
+          };
           return (
             <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <Ionicons name="calculator-outline" size={18} color={colors.primary} />
-                <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
-                  KDV / Matrah Detayı
-                </Text>
-              </View>
-              <Text style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 12 }}>
-                KDV oranı bazında matrah ve KDV tutarları
-              </Text>
-              {/* Header */}
-              <View style={{ flexDirection: 'row', paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: colors.border }}>
-                <Text style={{ flex: 0.7, fontSize: 11, fontWeight: '700', color: colors.textSecondary }}>Oran</Text>
-                <Text style={{ flex: 1.4, fontSize: 11, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }}>Matrah</Text>
-                <Text style={{ flex: 1.2, fontSize: 11, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }}>KDV</Text>
-                <Text style={{ flex: 1.4, fontSize: 11, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }}>Toplam</Text>
-              </View>
-              {/* Rate rows */}
-              {grandRates.map((g) => (
-                <View
-                  key={g.rate}
-                  style={{ flexDirection: 'row', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border, alignItems: 'center' }}
-                >
-                  <View style={{ flex: 0.7, flexDirection: 'row', alignItems: 'center' }}>
-                    <View style={{ backgroundColor: colors.primary + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
-                      <Text style={{ fontSize: 12, fontWeight: '800', color: colors.primary }}>%{g.rate}</Text>
-                    </View>
-                  </View>
-                  <Text style={{ flex: 1.4, fontSize: 13, fontWeight: '700', color: colors.text, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                    ₺{fmt(g.matrah)}
+              {/* Başlık + KPI özet */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+                <View style={{
+                  width: 36, height: 36, borderRadius: 10,
+                  backgroundColor: colors.primary + '18',
+                  justifyContent: 'center', alignItems: 'center',
+                }}>
+                  <Ionicons name="calculator" size={18} color={colors.primary} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: colors.text }}>
+                    KDV / Matrah Detayı
                   </Text>
-                  <Text style={{ flex: 1.2, fontSize: 13, fontWeight: '700', color: colors.warning, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                    ₺{fmt(g.kdv)}
-                  </Text>
-                  <Text style={{ flex: 1.4, fontSize: 13, fontWeight: '800', color: colors.primary, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                    ₺{fmt(g.total)}
+                  <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>
+                    KDV oranı bazında dağılım
                   </Text>
                 </View>
-              ))}
-              {/* Total row */}
-              <View style={{ flexDirection: 'row', paddingTop: 12, paddingBottom: 12, paddingHorizontal: 8, alignItems: 'center', backgroundColor: colors.primary + '10', borderRadius: 8, marginTop: 6 }}>
-                <Text style={{ flex: 0.7, fontSize: 12, fontWeight: '900', color: colors.primary }}>TOPLAM</Text>
-                <Text style={{ flex: 1.4, fontSize: 13, fontWeight: '900', color: colors.text, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                  ₺{fmt(grandMatrah)}
-                </Text>
-                <Text style={{ flex: 1.2, fontSize: 13, fontWeight: '900', color: colors.warning, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                  ₺{fmt(grandKdv)}
-                </Text>
-                <Text style={{ flex: 1.4, fontSize: 14, fontWeight: '900', color: colors.primary, textAlign: 'right' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-                  ₺{fmt(grandTotal)}
-                </Text>
               </View>
+
+              {/* Üst KPI Şeridi: Matrah / KDV / Toplam */}
+              <View style={{
+                flexDirection: 'row', gap: 8, marginTop: 14, marginBottom: 16,
+              }}>
+                <View style={{
+                  flex: 1, padding: 12, borderRadius: 12,
+                  backgroundColor: colors.background,
+                  borderWidth: 1, borderColor: colors.border,
+                }}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase' }}>
+                    Matrah
+                  </Text>
+                  <Text style={{ fontSize: 16, fontWeight: '900', color: colors.text, marginTop: 4 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+                    ₺{fmt(grandMatrah)}
+                  </Text>
+                </View>
+                <View style={{
+                  flex: 1, padding: 12, borderRadius: 12,
+                  backgroundColor: '#F59E0B' + '12',
+                  borderWidth: 1, borderColor: '#F59E0B' + '40',
+                }}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#F59E0B', textTransform: 'uppercase' }}>
+                    KDV
+                  </Text>
+                  <Text style={{ fontSize: 16, fontWeight: '900', color: '#F59E0B', marginTop: 4 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+                    ₺{fmt(grandKdv)}
+                  </Text>
+                </View>
+                <View style={{
+                  flex: 1, padding: 12, borderRadius: 12,
+                  backgroundColor: colors.primary + '15',
+                  borderWidth: 1.5, borderColor: colors.primary + '50',
+                }}>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: colors.primary, textTransform: 'uppercase' }}>
+                    Toplam
+                  </Text>
+                  <Text style={{ fontSize: 16, fontWeight: '900', color: colors.primary, marginTop: 4 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+                    ₺{fmt(grandTotal)}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Oran kartları */}
+              {grandRates.map((g) => {
+                const c = rateColor(g.rate);
+                const sharePct = grandTotal > 0 ? (g.total / grandTotal) * 100 : 0;
+                return (
+                  <View
+                    key={g.rate}
+                    style={{
+                      marginBottom: 10,
+                      padding: 12,
+                      borderRadius: 12,
+                      backgroundColor: colors.background,
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      borderLeftWidth: 4,
+                      borderLeftColor: c,
+                    }}
+                  >
+                    {/* Üst satır: Rate chip + Toplam */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <View style={{
+                          backgroundColor: c + '20',
+                          paddingHorizontal: 10, paddingVertical: 5,
+                          borderRadius: 8,
+                        }}>
+                          <Text style={{ fontSize: 13, fontWeight: '900', color: c }}>%{g.rate} KDV</Text>
+                        </View>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: colors.textSecondary }}>
+                          {sharePct.toFixed(1)}% pay
+                        </Text>
+                      </View>
+                      <Text style={{ fontSize: 15, fontWeight: '900', color: c }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                        ₺{fmt(g.total)}
+                      </Text>
+                    </View>
+
+                    {/* Pay barı */}
+                    <View style={{
+                      height: 4, backgroundColor: c + '15', borderRadius: 2, overflow: 'hidden', marginBottom: 10,
+                    }}>
+                      <View style={{
+                        width: `${Math.max(sharePct, 1)}%`,
+                        height: '100%',
+                        backgroundColor: c,
+                        borderRadius: 2,
+                      }} />
+                    </View>
+
+                    {/* Alt satır: Matrah / KDV ayrı ayrı */}
+                    <View style={{ flexDirection: 'row', gap: 10 }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', marginBottom: 2 }}>
+                          Matrah
+                        </Text>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: colors.text }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                          ₺{fmt(g.matrah)}
+                        </Text>
+                      </View>
+                      <View style={{ width: 1, backgroundColor: colors.border, marginHorizontal: 4 }} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#F59E0B', textTransform: 'uppercase', marginBottom: 2 }}>
+                          KDV
+                        </Text>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: '#F59E0B' }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                          ₺{fmt(g.kdv)}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
             </View>
           );
         })()}
