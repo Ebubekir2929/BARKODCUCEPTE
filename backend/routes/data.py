@@ -176,9 +176,9 @@ def aggregate_dataset(key: str, raw_items: list) -> list:
             'PERAKENDE_TOPLAM_ISKONTO', 'ERP12_TOPLAM_ISKONTO',
             # Fiş sayıları
             'TOPLAM_FIS_SAYISI', 'PERAKENDE_FIS_SAYISI', 'ERP12_FIS_SAYISI',
-            # Matrah/KDV
-            'MATRAH_1', 'MATRAH_0', 'MATRAH_10', 'MATRAH_20',
-            'KDV_1', 'KDV_10', 'KDV_20',
+            # Matrah/KDV - all standard Turkish KDV rates
+            'MATRAH_0', 'MATRAH_1', 'MATRAH_8', 'MATRAH_10', 'MATRAH_18', 'MATRAH_20',
+            'KDV_0', 'KDV_1', 'KDV_8', 'KDV_10', 'KDV_18', 'KDV_20',
             'TOPLAM_MATRAH', 'TOPLAM_KDV',
         ]
         for item in raw_items:

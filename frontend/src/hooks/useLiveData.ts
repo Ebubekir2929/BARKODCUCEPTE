@@ -61,6 +61,13 @@ export interface DashboardData {
     erp12_fis: number;
     toplam_fis: number;
   }>;
+  // NEW: KDV / Matrah breakdown by KDV rate (from financial_data_location cache).
+  // Tenant total ile tutarlı (nakit+kart+veresiye birlikte).
+  kdvBreakdown: {
+    rates: Array<{ rate: number; matrah: number; kdv: number; total: number }>;
+    totalMatrah: number;
+    totalKdv: number;
+  };
 }
 
 const EMPTY_DATA: DashboardData = {
@@ -90,6 +97,7 @@ const EMPTY_DATA: DashboardData = {
     fisSayisi: { total: 0, perakende: 0, erp12: 0 },
   },
   branchBreakdowns: [],
+  kdvBreakdown: { rates: [], totalMatrah: 0, totalKdv: 0 },
 };
 
 function formatDateParam(d: Date): string {
@@ -226,6 +234,34 @@ function transformApiData(apiData: any): DashboardData {
       items: [],
     }));
 
+  // KDV / Matrah breakdown by rate from financial_data_location cache.
+  // Cache supplies fields like KDV_0/KDV_1/KDV_8/KDV_10/KDV_18/KDV_20 and
+  // matching MATRAH_x. Sum across all locations.
+  const kdvRateKeys: Array<{ rate: number; matrahField: string; kdvField: string }> = [
+    { rate: 0, matrahField: 'MATRAH_0', kdvField: 'KDV_0' },
+    { rate: 1, matrahField: 'MATRAH_1', kdvField: 'KDV_1' },
+    { rate: 8, matrahField: 'MATRAH_8', kdvField: 'KDV_8' },
+    { rate: 10, matrahField: 'MATRAH_10', kdvField: 'KDV_10' },
+    { rate: 18, matrahField: 'MATRAH_18', kdvField: 'KDV_18' },
+    { rate: 20, matrahField: 'MATRAH_20', kdvField: 'KDV_20' },
+  ];
+  const kdvRatesAgg: Array<{ rate: number; matrah: number; kdv: number; total: number }> = [];
+  let totalMatrahAll = 0;
+  let totalKdvAll = 0;
+  for (const def of kdvRateKeys) {
+    let matrahSum = 0;
+    let kdvSum = 0;
+    for (const loc of locationData as any[]) {
+      matrahSum += parseFloat(loc?.[def.matrahField] || '0');
+      kdvSum += parseFloat(loc?.[def.kdvField] || '0');
+    }
+    if (matrahSum > 0 || kdvSum > 0) {
+      kdvRatesAgg.push({ rate: def.rate, matrah: matrahSum, kdv: kdvSum, total: matrahSum + kdvSum });
+      totalMatrahAll += matrahSum;
+      totalKdvAll += kdvSum;
+    }
+  }
+
   return {
     branchSales,
     hourlySales,
@@ -247,6 +283,11 @@ function transformApiData(apiData: any): DashboardData {
     allLocations: apiData?.all_locations || [],
     financialBreakdown,
     branchBreakdowns,
+    kdvBreakdown: {
+      rates: kdvRatesAgg,
+      totalMatrah: totalMatrahAll,
+      totalKdv: totalKdvAll,
+    },
   };
 }
 

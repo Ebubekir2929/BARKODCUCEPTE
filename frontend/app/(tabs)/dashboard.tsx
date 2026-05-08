@@ -374,46 +374,6 @@ export default function DashboardScreen() {
     return sourceData?.hourlySales || [];
   }, [freshHourlySales, sourceData?.hourlySales]);
 
-  // 2026-05-08 — Tüm günün ürünlerini /hourly-detail-full üzerinden çekip
-  // dashboard'da KDV oranı bazında Matrah/KDV kırılımı için kullanıyoruz.
-  const [dashboardProducts, setDashboardProducts] = useState<any[]>([]);
-  useEffect(() => {
-    if (!activeTenantId) { setDashboardProducts([]); return; }
-    let cancelled = false;
-    (async () => {
-      try {
-        const { token: authToken } = useAuthStore.getState();
-        if (!authToken) return;
-        const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        const sd = filters?.startDate ? fmt(filters.startDate) : undefined;
-        const ed = filters?.endDate ? fmt(filters.endDate) : undefined;
-        const lokasyonId = filters?.branchId ? parseInt(filters.branchId) : null;
-        const resp = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/data/hourly-detail-full`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` },
-          body: JSON.stringify({
-            tenant_id: activeTenantId,
-            ...(sd ? { sdate: sd, date: sd } : {}),
-            ...(ed ? { edate: ed } : {}),
-            ...(lokasyonId ? { lokasyon_id: lokasyonId } : {}),
-          }),
-        });
-        const data = await resp.json();
-        if (cancelled) return;
-        if (data?.ok && data?.by_hour) {
-          const all: any[] = [];
-          Object.values(data.by_hour as Record<string, any[]>).forEach((arr) => {
-            if (Array.isArray(arr)) all.push(...arr);
-          });
-          setDashboardProducts(all);
-        }
-      } catch {
-        if (!cancelled) setDashboardProducts([]);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [activeTenantId, filters?.startDate?.getTime(), filters?.endDate?.getTime(), filters?.branchId]);
-
   // Fetch table detail from POS via sync
   const fetchTableDetail = useCallback(async (table: OpenTable) => {
     setSelectedOpenTable(table);
@@ -1124,49 +1084,13 @@ export default function DashboardScreen() {
           );
         })()}
 
-        {/* KDV / Matrah Kırılımı (hourly-detail cache'den) */}
-        {dashboardProducts.length > 0 && (() => {
-          const groups: Record<string, { rate: number; matrah: number; kdv: number; total: number }> = {};
-          let totalMatrah = 0;
-          let totalKdvAll = 0;
-          for (const p of dashboardProducts as any[]) {
-            const dahil = parseFloat(p.KDV_DAHIL_TOPLAM_TUTAR || p.TOPLAM_TUTAR || '0');
-            const kdv = parseFloat(p.KDV_TUTARI || p.TOPLAM_KDV || '0');
-            let matrah = parseFloat(
-              p.KDV_HARIC_TOPLAM_TUTAR || p.KDV_HARIC_NET_TUTAR || p.MATRAH || p.NET_TUTAR || '0'
-            );
-            if (matrah <= 0) matrah = Math.max(dahil - kdv, 0);
-            if (dahil <= 0 && kdv <= 0 && matrah <= 0) continue;
-            let rateRaw: any = p.KDV_ORANI ?? p.KDV_RATE ?? p.KDV_YUZDESI ?? p.VERGI_ORANI;
-            let rate: number;
-            if (rateRaw !== undefined && rateRaw !== null && rateRaw !== '') {
-              rate = parseFloat(String(rateRaw).replace(',', '.'));
-            } else if (matrah > 0 && kdv > 0) {
-              rate = (kdv / matrah) * 100;
-              const candidates = [0, 1, 8, 10, 18, 20];
-              let best = candidates[0]; let bestDiff = Math.abs(rate - candidates[0]);
-              for (const c of candidates) {
-                const d = Math.abs(rate - c);
-                if (d < bestDiff) { best = c; bestDiff = d; }
-              }
-              if (bestDiff <= 1.5) rate = best;
-              else rate = Math.round(rate);
-            } else {
-              rate = 0;
-            }
-            if (isNaN(rate) || rate < 0) rate = 0;
-            const key = String(rate);
-            if (!groups[key]) groups[key] = { rate, matrah: 0, kdv: 0, total: 0 };
-            groups[key].matrah += matrah;
-            groups[key].kdv += kdv;
-            groups[key].total += (matrah + kdv);
-            totalMatrah += matrah;
-            totalKdvAll += kdv;
-          }
-          const list = Object.values(groups).sort((a, b) => a.rate - b.rate);
-          if (list.length === 0 || (totalMatrah <= 0 && totalKdvAll <= 0)) return null;
-          const fmt = (v: number) => v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        {/* KDV / Matrah Kırılımı (financial_data_location cache'den; tenant toplamıyla tutarlı) */}
+        {(sourceData?.kdvBreakdown?.rates || []).length > 0 && (() => {
+          const list = sourceData.kdvBreakdown.rates;
+          const totalMatrah = sourceData.kdvBreakdown.totalMatrah;
+          const totalKdvAll = sourceData.kdvBreakdown.totalKdv;
           const grandTotal = totalMatrah + totalKdvAll;
+          const fmt = (v: number) => v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
           return (
             <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
