@@ -691,11 +691,19 @@ export default function CustomersScreen() {
                   // 2026-05-12 — POS sürümüne göre fiş id alanı farklı geliyor; hepsini kontrol et.
                   const fisIdVal = row.BELGE_ID || row.FIS_ID || row.KAYIT_ID || row.ID || row.BELGEID;
                   // 2026-05-12 — Sadece GERÇEK fiş satırları tıklanabilir.
-                  // FIS_TURU/BELGE_TIP "Devir", "Açılış" gibi bilgi satırlarında detay açılmaz.
-                  const turuStr = String(row.BELGE_TIP || row.FIS_TURU || row.ISLEM_TIP || '').toLowerCase();
-                  const isInfoRow = turuStr.includes('devir') || turuStr.includes('açılış')
-                    || turuStr.includes('acilis') || turuStr.includes('düzeltme')
-                    || turuStr.includes('duzeltme');
+                  // Tahsilat/Ödeme/Tediye/Çek/Senet/Havale/Devir/Açılış/Düzeltme
+                  // satırlarında detay AÇILMAZ (bunlar fiş değil bilgi satırı).
+                  const turuStr = String(row.BELGE_TIP || row.FIS_TURU || row.ISLEM_TIP || row.ACIKLAMA || '').toLowerCase();
+                  const isInfoRow = turuStr.includes('devir')
+                    || turuStr.includes('açılış') || turuStr.includes('acilis')
+                    || turuStr.includes('düzeltme') || turuStr.includes('duzeltme')
+                    || turuStr.includes('tahsilat') || turuStr.includes('tahsilât')
+                    || turuStr.includes('ödeme') || turuStr.includes('odeme')
+                    || turuStr.includes('tediye')
+                    || turuStr.includes('çek') || turuStr.includes('cek ')
+                    || turuStr.includes('senet')
+                    || turuStr.includes('havale') || turuStr.includes('eft')
+                    || turuStr.includes('virman') || turuStr.includes('mahsup');
                   const hasFis = !isInfoRow && !!fisIdVal && String(fisIdVal).trim() !== '' && String(fisIdVal) !== '0' && String(fisIdVal).toLowerCase() !== 'null';
                   return (
                     <TouchableOpacity key={idx} style={[styles.extreRow, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => hasFis ? openFisDetail(row) : null} disabled={!hasFis} activeOpacity={hasFis ? 0.7 : 1}>

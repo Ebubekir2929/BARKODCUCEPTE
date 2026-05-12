@@ -1838,30 +1838,49 @@ async def get_fis_detail(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Fetch fis detail + totals via dataset_key='fis_detay_toplam'.
+    """Fetch fis detail + totals — DOĞRUDAN MySQL dataset_cache'den okur.
     
-    PHP sync config:
-      dataset_key: fis_detay_toplam
-      sql: dbo.GetFisDetayVeToplam (yeni procedure)
-      params_order: [FisId]
-      multi_result: true  → İki result set: [details], [totals]
+    PHP sync zaten aylık fişlerin detayını arka planda dataset_cache'e basar
+    (dataset_key='fis_detay_toplam', params_json={FisId: X}). Bu endpoint
+    POS'a istek atmaz — cache MISS olursa 404 döner.
     
-    2026-05-12 — Aylık fişler dataset_cache'e otomatik basılır; sadece
-    geçmiş/eski fişler request_create ile canlı sorgulanır (POS'a fallback).
+    2026-05-12 — User isteği: "DİREK CACHEDEN SORGULA, ZATEN ORDA AYLIK VERİYİ TUTUYORUZ"
     """
+    import json as _json
+    import hashlib as _hashlib
+    
     tenant_id = body.get("tenant_id", "")
     fis_id = body.get("fis_id")
     
     if not tenant_id or fis_id is None:
         raise HTTPException(status_code=400, detail="tenant_id ve fis_id gerekli")
     
+    # Params hash (kasaceptetransfer.dataset_cache.params_hash ile aynı algoritma)
+    params = {"FisId": int(fis_id)}
+    params_canon = _json.dumps(params, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    params_hash = _hashlib.sha1(params_canon.encode("utf-8")).hexdigest()
+    
     try:
-        result = await _on_demand_request(tenant_id, "fis_detay_toplam", {
-            "FisId": int(fis_id),
-        }, timeout_sec=35, raw_cache=True)
+        pool = await get_data_pool()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("""
+                    SELECT data_json, updated_at FROM dataset_cache
+                    WHERE tenant_id=%s AND dataset_key='fis_detay_toplam' AND params_hash=%s
+                    LIMIT 1
+                """, (tenant_id, params_hash))
+                row = await cur.fetchone()
         
-        cache = result.get("cache", {})
-        data = cache.get("data", [])
+        if not row:
+            raise HTTPException(
+                status_code=404,
+                detail="Bu fişin detayı henüz cache'de yok (POS sync henüz basmamış olabilir)"
+            )
+        
+        try:
+            data = _json.loads(row[0]) if isinstance(row[0], (str, bytes)) else row[0]
+        except Exception:
+            data = []
         
         detail_rows = []
         total_row = {}
@@ -1887,15 +1906,15 @@ async def get_fis_detail(
         
         return {
             "ok": True,
-            "request_uid": result.get("request_uid", ""),
-            "from_cache": bool(result.get("_cache_hit")),
+            "from_cache": True,
+            "cached_at": str(row[1]) if row[1] else None,
             "details": _fix_large_ints(detail_rows) if isinstance(detail_rows, list) else [],
             "totals": _fix_large_ints([total_row]) if total_row else [],
         }
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Fis detail error: {e}")
+        logger.error(f"Fis detail cache error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

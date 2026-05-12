@@ -1369,12 +1369,19 @@ export default function StockScreen() {
                   filteredExtre.map((row: any, idx: number) => {
                     const fisIdVal = row.BELGE_ID || row.FIS_ID || row.KAYIT_ID || row.ID || row.BELGEID || row.FIS;
                     // 2026-05-12 — Sadece GERÇEK fiş satırları tıklanabilir.
-                    // FIS_TURU içinde "Devir", "Açılış", "Düzeltme" geçen satırlarda
-                    // detay açılmaz çünkü bunlar fiş değil bilgi satırı.
+                    // Devir/Açılış/Düzeltme + Nakit Tahsilat/Ödeme/Tediye/Çek/Senet/Havale
+                    // gibi tahsilat-ödeme satırlarında detay AÇILMAZ (sadece bilgilendirme).
                     const fisTuruStr = String(row.FIS_TURU || '').toLowerCase();
-                    const isInfoRow = fisTuruStr.includes('devir') || fisTuruStr.includes('açılış')
-                      || fisTuruStr.includes('acilis') || fisTuruStr.includes('düzeltme')
-                      || fisTuruStr.includes('duzeltme');
+                    const isInfoRow = fisTuruStr.includes('devir')
+                      || fisTuruStr.includes('açılış') || fisTuruStr.includes('acilis')
+                      || fisTuruStr.includes('düzeltme') || fisTuruStr.includes('duzeltme')
+                      || fisTuruStr.includes('tahsilat') || fisTuruStr.includes('tahsilât')
+                      || fisTuruStr.includes('ödeme') || fisTuruStr.includes('odeme')
+                      || fisTuruStr.includes('tediye')
+                      || fisTuruStr.includes('çek') || fisTuruStr.includes('cek ')
+                      || fisTuruStr.includes('senet')
+                      || fisTuruStr.includes('havale') || fisTuruStr.includes('eft')
+                      || fisTuruStr.includes('virman') || fisTuruStr.includes('mahsup');
                     const hasFis = !isInfoRow && !!fisIdVal
                       && String(fisIdVal).trim() !== '' && String(fisIdVal) !== '0'
                       && String(fisIdVal).toLowerCase() !== 'null';
