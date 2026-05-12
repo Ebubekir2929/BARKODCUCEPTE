@@ -1467,12 +1467,18 @@ export default function StockScreen() {
                         <Text style={[{ color: colors.textSecondary, fontSize: 12 }]}>Satır Toplam</Text>
                         <Text style={[{ fontWeight: '600', color: colors.text, fontSize: 12 }]}>₺{parseFloat(fisTotals.SATIR_TOPLAM || '0').toFixed(2)}</Text>
                       </View>
-                      {parseFloat(fisTotals.FIS_ISKONTO_TOPLAM || '0') > 0 && (
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                          <Text style={[{ color: colors.textSecondary, fontSize: 12 }]}>Fiş İskonto</Text>
-                          <Text style={[{ fontWeight: '600', color: colors.warning, fontSize: 12 }]}>₺{parseFloat(fisTotals.FIS_ISKONTO_TOPLAM).toFixed(2)}</Text>
-                        </View>
-                      )}
+                      {(() => {
+                        const satirIsk = parseFloat(fisTotals.SATIR_ISKONTO_TOPLAM || '0');
+                        const fisIsk = parseFloat(fisTotals.FIS_ISKONTO_TOPLAM || '0');
+                        const totalIsk = satirIsk + fisIsk;
+                        if (totalIsk <= 0) return null;
+                        return (
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                            <Text style={[{ color: colors.textSecondary, fontSize: 12 }]}>İskonto Toplamı</Text>
+                            <Text style={[{ fontWeight: '600', color: colors.warning, fontSize: 12 }]}>-₺{totalIsk.toFixed(2)}</Text>
+                          </View>
+                        );
+                      })()}
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                         <Text style={[{ color: colors.textSecondary, fontSize: 12 }]}>KDV</Text>
                         <Text style={[{ fontWeight: '600', color: colors.text, fontSize: 12 }]}>₺{parseFloat(fisTotals.KDV_TOPLAM || '0').toFixed(2)}</Text>

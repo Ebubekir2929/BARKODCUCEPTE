@@ -24,16 +24,13 @@ import DateField from '../../src/components/DateField';
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 const getDefDates = () => {
-  // 2026-05-12 — Cari ekstre default tarih aralığı: 1 ay önceki ayın 1'i → bugün.
-  // Kullanıcı tarihi DateField ile serbestçe değiştirebilir.
+  // 2026-05-12 — Cari ekstre default tarih aralığı: BU AYIN 1'i → bugün.
+  // (Kullanıcı tarihi DateField ile başka aralık seçebilir.)
   const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
-  const sy = start.getFullYear();
-  const sm = String(start.getMonth() + 1).padStart(2, '0');
-  return { start: `${sy}-${sm}-01`, end: `${y}-${m}-${d}` };
+  return { start: `${y}-${m}-01`, end: `${y}-${m}-${d}` };
 };
 
 export default function CustomersScreen() {
@@ -784,6 +781,18 @@ export default function CustomersScreen() {
                   {fisTotals && (
                     <View style={[styles.fisTotals, { backgroundColor: colors.primary + '10', borderColor: colors.border }]}>
                       <View style={styles.fisTotalRow}><Text style={[{ color: colors.textSecondary }]}>{t('line_total')}</Text><Text style={[{ fontWeight: '600', color: colors.text }]}>₺{parseFloat(fisTotals.SATIR_TOPLAM || '0').toFixed(2)}</Text></View>
+                      {(() => {
+                        const satirIsk = parseFloat(fisTotals.SATIR_ISKONTO_TOPLAM || '0');
+                        const fisIsk = parseFloat(fisTotals.FIS_ISKONTO_TOPLAM || '0');
+                        const totalIsk = satirIsk + fisIsk;
+                        if (totalIsk <= 0) return null;
+                        return (
+                          <View style={styles.fisTotalRow}>
+                            <Text style={[{ color: colors.textSecondary }]}>İskonto Toplamı</Text>
+                            <Text style={[{ fontWeight: '600', color: colors.warning || '#f59e0b' }]}>-₺{totalIsk.toFixed(2)}</Text>
+                          </View>
+                        );
+                      })()}
                       <View style={styles.fisTotalRow}><Text style={[{ color: colors.textSecondary }]}>KDV</Text><Text style={[{ fontWeight: '600', color: colors.text }]}>₺{parseFloat(fisTotals.KDV_TOPLAM || '0').toFixed(2)}</Text></View>
                       <View style={[styles.fisTotalRow, { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 6 }]}><Text style={[{ fontSize: 15, fontWeight: '800', color: colors.text }]}>{t('grand_total')}</Text><Text style={[{ fontSize: 16, fontWeight: '800', color: colors.primary }]}>₺{parseFloat(fisTotals.GENELTOPLAM || '0').toFixed(2)}</Text></View>
                     </View>
