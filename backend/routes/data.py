@@ -1671,6 +1671,15 @@ async def get_cari_list_sync(
         items = await get_dataset_items(tenant_id, "cari_bakiye_liste", force_refresh=force_refresh)
         load_ms = int((time.time() - t0) * 1000)
 
+        # 2026-05-12 — Boş cari satırlarını dışla. POS'tan bazen
+        # AD/KOD'u olmayan veya placeholder satırlar gelebiliyor; bunlar UI'da
+        # boş kart olarak görünüp kafa karıştırıyor.
+        def _is_empty_cari(c: dict) -> bool:
+            ad = str(c.get("AD") or c.get("CARI_ADI") or "").strip()
+            kod = str(c.get("KOD") or c.get("CARI_KODU") or "").strip()
+            return not ad and not kod
+        items = [c for c in (items or []) if not _is_empty_cari(c)]
+
         has_filter = any(k in body for k in (
             "search", "groups", "aktif", "bakiye", "bakiye_min", "bakiye_max"
         ))

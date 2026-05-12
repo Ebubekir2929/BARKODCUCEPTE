@@ -23,11 +23,13 @@ import { DataTable, TableColumn } from '../../src/components/DataTable';
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 const getDefDates = () => {
+  // 2026-05-12 — Cari ekstre default tarih aralığı: içinde bulunulan ayın 1'i → bugün.
+  // Önceden Ocak 1 → bugün idi; kullanıcı isteği üzerine güncel aydan başlatılıyor.
   const now = new Date();
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
-  return { start: `${y}-01-01`, end: `${y}-${m}-${d}` };
+  return { start: `${y}-${m}-01`, end: `${y}-${m}-${d}` };
 };
 
 export default function CustomersScreen() {
@@ -332,8 +334,13 @@ export default function CustomersScreen() {
 
   // Open fiş detail
   const openFisDetail = useCallback(async (row: any) => {
-    const fisId = row.BELGE_ID;
-    if (!fisId || !activeTenantId) return;
+    // 2026-05-12 — kart_extre_cari farklı POS sürümlerinde belge id'sini farklı
+    // alan adlarıyla döndürebiliyor: BELGE_ID, FIS_ID, KAYIT_ID, ID. Hepsini sırasıyla dene.
+    const fisId = row.BELGE_ID || row.FIS_ID || row.KAYIT_ID || row.ID || row.BELGEID;
+    if (!fisId || !activeTenantId) {
+      showToast('Bu satırın fiş detayı bulunamadı');
+      return;
+    }
     setSelectedFis(row); setFisDetail([]); setFisTotals(null); setFisLoading(true);
     try {
       const { token } = useAuthStore.getState();
@@ -343,11 +350,18 @@ export default function CustomersScreen() {
       });
       const data = await resp.json();
       if (data.ok) {
-        // New response: {details: [...], totals: [...]}
         setFisDetail(data.details || []);
         setFisTotals(data.totals && data.totals.length > 0 ? data.totals[0] : null);
+        if (!data.details || data.details.length === 0) {
+          showToast('Fiş detayı boş döndü');
+        }
+      } else {
+        showToast(data.detail || 'Fiş detayı yüklenemedi');
       }
-    } catch (err) { console.error('Fis detail error:', err); }
+    } catch (err) {
+      console.error('Fis detail error:', err);
+      showToast('Fiş detayı yüklenirken hata oluştu');
+    }
     finally { setFisLoading(false); }
   }, [activeTenantId]);
 
@@ -384,14 +398,17 @@ export default function CustomersScreen() {
   };
 
   const renderCariItem = useCallback(({ item }: { item: any }) => {
-    const name = item.AD || item.CARI_ADI || t('customer');
-    const code = item.KOD || item.CARI_KODU || '';
+    const name = (item.AD || item.CARI_ADI || '').trim();
+    const code = (item.KOD || item.CARI_KODU || '').trim();
+    // 2026-05-12 — Boş satır guard'ı. POS'tan ara sıra ad/kod'u boş kayıt
+    // gelebiliyor; bunlar UI'da boş kart olarak görünmemeli.
+    if (!name && !code) return null;
     const bakiye = parseFloat(item.BAKIYE || '0');
     return (
       <TouchableOpacity style={[styles.cariCard, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => { setExtreStart(getDefDates().start); setExtreEnd(getDefDates().end); openCariDetail(item, getDefDates().start, getDefDates().end); }} activeOpacity={0.7}>
         <View style={styles.cariCardTop}>
           <View style={{ flex: 1 }}>
-            <Text style={[styles.cariName, { color: colors.text }]} numberOfLines={1}>{name}</Text>
+            <Text style={[styles.cariName, { color: colors.text }]} numberOfLines={1}>{name || t('customer')}</Text>
             <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{code}</Text>
           </View>
           <View style={{ alignItems: 'flex-end' }}>
@@ -401,7 +418,7 @@ export default function CustomersScreen() {
         </View>
       </TouchableOpacity>
     );
-  }, [colors, openCariDetail]);
+  }, [colors, openCariDetail, t]);
 
   // 2026-05-05 — Desktop Data Table columns (standard layout).
   // Used only when `isDesktop` is true; phone/tablet keeps the card layout.
@@ -671,7 +688,9 @@ export default function CustomersScreen() {
                   const borc = parseFloat(row.BORC || '0');
                   const alacak = parseFloat(row.ALACAK || '0');
                   const bakiye = parseFloat(row.BAKIYE || '0');
-                  const hasFis = row.BELGE_ID && String(row.BELGE_ID).trim() !== '' && String(row.BELGE_ID) !== '0' && String(row.BELGE_ID) !== 'null';
+                  // 2026-05-12 — POS sürümüne göre fiş id alanı farklı geliyor; hepsini kontrol et.
+                  const fisIdVal = row.BELGE_ID || row.FIS_ID || row.KAYIT_ID || row.ID || row.BELGEID;
+                  const hasFis = !!fisIdVal && String(fisIdVal).trim() !== '' && String(fisIdVal) !== '0' && String(fisIdVal).toLowerCase() !== 'null';
                   return (
                     <TouchableOpacity key={idx} style={[styles.extreRow, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => hasFis ? openFisDetail(row) : null} disabled={!hasFis} activeOpacity={hasFis ? 0.7 : 1}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
