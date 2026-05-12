@@ -1717,13 +1717,19 @@ async def get_cari_extre(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Fetch kart_extre_cari for a specific customer"""
+    """Fetch kart_extre_cari for a specific customer.
+    
+    2026-05-12 — _on_demand_request zaten Step 0b'de MySQL dataset_cache'i
+    direkt okur (lookup_cached_report). Cache HIT olduğunda POS'a gitmez ve
+    çok hızlı yanıt verir. Burada sadece parametre düzenleme + cache yaş limiti.
+    """
     tenant_id = body.get("tenant_id", "")
     cari_id = body.get("cari_id")
     doviz_ad = body.get("doviz_ad", 1)
     tarih_baslangic = body.get("tarih_baslangic", "")
     tarih_bitis = body.get("tarih_bitis", "")
     devir = body.get("devir", "Devreden")
+    force_refresh = bool(body.get("force_refresh", False))
     
     if not tenant_id or cari_id is None:
         raise HTTPException(status_code=400, detail="tenant_id ve cari_id gerekli")
@@ -1736,13 +1742,21 @@ async def get_cari_extre(
         tarih_bitis = date_cls.today().strftime("%Y-%m-%d")
     
     try:
-        return await _on_demand_request(tenant_id, "kart_extre_cari", {
-            "ID": int(cari_id),
-            "DOVIZ_AD": int(doviz_ad),
-            "TARIH_BASLANGIC": tarih_baslangic,
-            "TARIH_BITIS": tarih_bitis,
-            "DEVIR": devir,
-        }, timeout_sec=45)
+        result = await _on_demand_request(
+            tenant_id, "kart_extre_cari", {
+                "ID": int(cari_id),
+                "DOVIZ_AD": int(doviz_ad),
+                "TARIH_BASLANGIC": tarih_baslangic,
+                "TARIH_BITIS": tarih_bitis,
+                "DEVIR": devir,
+            },
+            timeout_sec=45,
+            skip_mysql_cache=force_refresh,
+        )
+        # Surface cache hit info to frontend
+        if isinstance(result, dict):
+            result["from_cache"] = bool(result.get("_cache_hit"))
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -1750,64 +1764,145 @@ async def get_cari_extre(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/stock-extre")
+async def get_stock_extre(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """Fetch stok_extre (stock movement history) for a specific product.
+    
+    2026-05-12 — Cache'den okuyup (params: {ID: stok_id}) tarih filtresini
+    backend tarafında uygular. Frontend tarih_baslangic / tarih_bitis gönderir.
+    """
+    tenant_id = body.get("tenant_id", "")
+    stok_id = body.get("stok_id")
+    tarih_baslangic = body.get("tarih_baslangic", "")
+    tarih_bitis = body.get("tarih_bitis", "")
+    force_refresh = bool(body.get("force_refresh", False))
+
+    if not tenant_id or stok_id is None:
+        raise HTTPException(status_code=400, detail="tenant_id ve stok_id gerekli")
+
+    if not tarih_baslangic:
+        from datetime import date as date_cls
+        tarih_baslangic = date_cls.today().replace(day=1).strftime("%Y-%m-%d")
+    if not tarih_bitis:
+        from datetime import date as date_cls
+        tarih_bitis = date_cls.today().strftime("%Y-%m-%d")
+
+    rows: list = []
+    from_cache = False
+    try:
+        result = await _on_demand_request(
+            tenant_id, "stok_extre", {"ID": int(stok_id)},
+            timeout_sec=35, raw_cache=True,
+            skip_mysql_cache=force_refresh,
+        )
+        from_cache = bool(result.get("_cache_hit"))
+        cache_data = (result or {}).get("cache", {})
+        rows = cache_data.get("data", []) or []
+        if isinstance(rows, dict):
+            if "result_sets" in rows and isinstance(rows["result_sets"], list) and rows["result_sets"]:
+                rows = rows["result_sets"][0] if isinstance(rows["result_sets"][0], list) else []
+            else:
+                rows = []
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Stock extre fetch error: {e}")
+        rows = []
+
+    # Apply date filter (TARIH ISO YYYY-MM-DD)
+    def _row_date(r: dict) -> str:
+        for k in ("TARIH", "TARIHI", "ISLEM_TARIHI", "FIS_TARIHI", "TARIH_STR"):
+            v = r.get(k)
+            if v:
+                return str(v)[:10]
+        return ""
+
+    filtered = [r for r in rows if (not _row_date(r)) or (_row_date(r) >= tarih_baslangic and _row_date(r) <= tarih_bitis)]
+
+    return {
+        "ok": True,
+        "data": _fix_large_ints(filtered),
+        "total_rows": len(rows),
+        "filtered_rows": len(filtered),
+        "from_cache": from_cache,
+        "tarih_baslangic": tarih_baslangic,
+        "tarih_bitis": tarih_bitis,
+    }
+
+
 @router.post("/fis-detail")
 async def get_fis_detail(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Fetch fis_detay_toplam for a specific receipt - handles result_sets structure"""
+    """Fetch GetFisDetayVeToplam procedure for a specific receipt.
+    
+    2026-05-12 — Yeni procedure `GetFisDetayVeToplam @FisId`. Sync tarafında
+    dataset_key='fis_detay_ve_toplam' bu procedure'ı çağırır.
+    İki result set döner: [details], [totals].
+    
+    Fallback: eski dataset_key='fis_detay_toplam' (geriye uyumluluk).
+    """
     tenant_id = body.get("tenant_id", "")
     fis_id = body.get("fis_id")
     
     if not tenant_id or fis_id is None:
         raise HTTPException(status_code=400, detail="tenant_id ve fis_id gerekli")
     
-    try:
-        result = await _on_demand_request(tenant_id, "fis_detay_toplam", {
-            "FisId": int(fis_id),
-        }, timeout_sec=35, raw_cache=True)
-        
-        cache = result.get("cache", {})
-        data = cache.get("data", [])
-        
-        detail_rows = []
-        total_row = {}
-        
-        # Handle multiple response structures (like PHP normalize_fis_multi_result)
-        if isinstance(data, dict):
-            # Structure: {"result_sets": [[details], [totals]]}
-            if "result_sets" in data:
-                rs = data["result_sets"]
-                if isinstance(rs, list) and len(rs) >= 1:
-                    detail_rows = rs[0] if isinstance(rs[0], list) else []
-                if isinstance(rs, list) and len(rs) >= 2:
-                    totals = rs[1] if isinstance(rs[1], list) else []
-                    total_row = totals[0] if totals else {}
-            # Structure: {"details": [...], "totals": [...]}
-            elif "details" in data:
-                detail_rows = data.get("details", [])
-                totals = data.get("totals", data.get("summary", []))
-                total_row = totals[0] if isinstance(totals, list) and totals else {}
-        elif isinstance(data, list):
-            if len(data) >= 2 and isinstance(data[0], list):
-                # Structure: [[details], [totals]]
-                detail_rows = data[0]
-                total_row = data[1][0] if isinstance(data[1], list) and data[1] else {}
-            else:
-                # Flat list - all rows are details
-                detail_rows = data
-        
-        return {
-            "ok": True,
-            "request_uid": result.get("request_uid", ""),
-            "details": _fix_large_ints(detail_rows) if isinstance(detail_rows, list) else [],
-            "totals": _fix_large_ints([total_row]) if total_row else [],
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Fis detail error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    last_error = None
+    for dataset_key in ("fis_detay_ve_toplam", "fis_detay_toplam"):
+        try:
+            result = await _on_demand_request(tenant_id, dataset_key, {
+                "FisId": int(fis_id),
+            }, timeout_sec=35, raw_cache=True)
+            
+            cache = result.get("cache", {})
+            data = cache.get("data", [])
+            
+            detail_rows = []
+            total_row = {}
+            
+            if isinstance(data, dict):
+                if "result_sets" in data:
+                    rs = data["result_sets"]
+                    if isinstance(rs, list) and len(rs) >= 1:
+                        detail_rows = rs[0] if isinstance(rs[0], list) else []
+                    if isinstance(rs, list) and len(rs) >= 2:
+                        totals = rs[1] if isinstance(rs[1], list) else []
+                        total_row = totals[0] if totals else {}
+                elif "details" in data:
+                    detail_rows = data.get("details", [])
+                    totals = data.get("totals", data.get("summary", []))
+                    total_row = totals[0] if isinstance(totals, list) and totals else {}
+            elif isinstance(data, list):
+                if len(data) >= 2 and isinstance(data[0], list):
+                    detail_rows = data[0]
+                    total_row = data[1][0] if isinstance(data[1], list) and data[1] else {}
+                else:
+                    detail_rows = data
+            
+            if detail_rows or total_row:
+                return {
+                    "ok": True,
+                    "request_uid": result.get("request_uid", ""),
+                    "dataset_key_used": dataset_key,
+                    "details": _fix_large_ints(detail_rows) if isinstance(detail_rows, list) else [],
+                    "totals": _fix_large_ints([total_row]) if total_row else [],
+                }
+        except HTTPException as he:
+            last_error = he
+            continue
+        except Exception as e:
+            logger.error(f"Fis detail error ({dataset_key}): {e}")
+            last_error = e
+            continue
+    
+    if isinstance(last_error, HTTPException):
+        raise last_error
+    raise HTTPException(status_code=500, detail=str(last_error) if last_error else "fis_detail_failed")
 
 
 @router.post("/high-sale-detail")

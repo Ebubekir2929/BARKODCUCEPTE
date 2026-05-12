@@ -169,6 +169,70 @@ export default function StockScreen() {
   const [detailTab, setDetailTab] = useState<'miktar' | 'extre'>('miktar');
   const [exportLoading, setExportLoading] = useState(false);
 
+  // 2026-05-12 — Stok ekstre tarih filtresi (varsayılan: bu ayın 1'i → bugün)
+  const _initExtreDates = (() => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const d = String(now.getDate()).padStart(2, '0');
+    return { start: `${y}-${m}-01`, end: `${y}-${m}-${d}` };
+  })();
+  const [extreStart, setExtreStart] = useState<string>(_initExtreDates.start);
+  const [extreEnd, setExtreEnd] = useState<string>(_initExtreDates.end);
+  const [showDatePicker, setShowDatePicker] = useState<null | 'start' | 'end'>(null);
+
+  // Fiş detay modal (cari ile aynı yapı)
+  const [selectedFis, setSelectedFis] = useState<any | null>(null);
+  const [fisDetail, setFisDetail] = useState<any[]>([]);
+  const [fisTotals, setFisTotals] = useState<any | null>(null);
+  const [fisLoading, setFisLoading] = useState(false);
+
+  // Ekstre satırlarını tarih aralığına göre filtrele (client-side)
+  const filteredExtre = React.useMemo(() => {
+    if (!detailExtre || detailExtre.length === 0) return [];
+    return detailExtre.filter((row: any) => {
+      const t = (row.TARIH || row.TARIHI || row.ISLEM_TARIHI || '').toString().slice(0, 10);
+      if (!t) return true; // tarihi olmayanları gizleme
+      return t >= extreStart && t <= extreEnd;
+    });
+  }, [detailExtre, extreStart, extreEnd]);
+
+  // Fiş detayını aç
+  const openFisDetail = useCallback(async (row: any) => {
+    const fisId = row.BELGE_ID || row.FIS_ID || row.KAYIT_ID || row.ID || row.BELGEID || row.FIS;
+    if (!fisId || !activeTenantId) {
+      showToast('Bu satırın fiş detayı bulunamadı');
+      return;
+    }
+    setSelectedFis(row);
+    setFisDetail([]);
+    setFisTotals(null);
+    setFisLoading(true);
+    try {
+      const { token } = useAuthStore.getState();
+      const resp = await fetch(`${API_URL}/api/data/fis-detail`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ tenant_id: activeTenantId, fis_id: fisId }),
+      });
+      const data = await resp.json();
+      if (data.ok) {
+        setFisDetail(data.details || []);
+        setFisTotals(data.totals && data.totals.length > 0 ? data.totals[0] : null);
+        if (!data.details || data.details.length === 0) {
+          showToast('Fiş detayı boş döndü');
+        }
+      } else {
+        showToast(data.detail || 'Fiş detayı yüklenemedi');
+      }
+    } catch (err) {
+      console.error('Fis detail error:', err);
+      showToast('Fiş detayı yüklenirken hata oluştu');
+    } finally {
+      setFisLoading(false);
+    }
+  }, [activeTenantId]);
+
   // Fetch price names
   useEffect(() => {
     if (!activeTenantId) return;
@@ -1243,12 +1307,53 @@ export default function StockScreen() {
                 ))}</View> : <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>Miktar bilgisi bulunamadı</Text></View>
               ) : (
                 detailExtre.length > 0 ? <View style={{ padding: 12 }}>
+                  {/* 2026-05-12 — Tarih filtresi (Aylık seçim) */}
+                  <View style={{
+                    flexDirection: 'row', gap: 8, marginBottom: 10,
+                    padding: 10, backgroundColor: colors.background,
+                    borderRadius: 10, borderWidth: 1, borderColor: colors.border,
+                  }}>
+                    <TouchableOpacity
+                      onPress={() => setShowDatePicker('start')}
+                      style={{ flex: 1, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: colors.card, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}
+                    >
+                      <Text style={[{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase' }]}>Başlangıç</Text>
+                      <Text style={[{ fontSize: 12, fontWeight: '700', color: colors.text, marginTop: 2 }]}>{extreStart}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => setShowDatePicker('end')}
+                      style={{ flex: 1, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: colors.card, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}
+                    >
+                      <Text style={[{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase' }]}>Bitiş</Text>
+                      <Text style={[{ fontSize: 12, fontWeight: '700', color: colors.text, marginTop: 2 }]}>{extreEnd}</Text>
+                    </TouchableOpacity>
+                    {/* Hızlı: Bu Ay / Geçen Ay */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        const now = new Date();
+                        const y = now.getFullYear();
+                        const m = String(now.getMonth() + 1).padStart(2, '0');
+                        const d = String(now.getDate()).padStart(2, '0');
+                        setExtreStart(`${y}-${m}-01`);
+                        setExtreEnd(`${y}-${m}-${d}`);
+                      }}
+                      style={{ paddingVertical: 8, paddingHorizontal: 10, backgroundColor: colors.primary + '20', borderRadius: 8 }}
+                    >
+                      <Text style={[{ fontSize: 11, fontWeight: '700', color: colors.primary }]}>Bu Ay</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Sayım özet */}
+                  <Text style={[{ fontSize: 10, color: colors.textSecondary, marginBottom: 6 }]}>
+                    {filteredExtre.length} / {detailExtre.length} hareket
+                  </Text>
+
                   {/* Export buttons for ekstre */}
                   <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
                     <TouchableOpacity disabled={exportLoading} style={[{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.error + '15', opacity: exportLoading ? 0.5 : 1 }]} onPress={async () => {
                       setExportLoading(true); showToast('PDF hazırlanıyor...');
                       const name = selectedStock?.AD || t('stock_label');
-                      const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:6px;font-size:11px}th{background:#f5f5f5}</style></head><body><h2>${name} - Stok Ekstre</h2><table><thead><tr><th>Tarih</th><th>Belge No</th><th>Lokasyon</th><th>Cari</th><th>Fiş Türü</th><th>Giriş</th><th>Çıkış</th><th>Bakiye</th></tr></thead><tbody>${detailExtre.map((r:any) => `<tr><td>${r.TARIH||''}</td><td>${r.BELGENO||''}</td><td>${r.LOKASYON_AD||''}</td><td>${r.CARI_AD||''}</td><td>${r.FIS_TURU||''}</td><td>${parseFloat(r.MIKTAR_GIRIS||'0').toFixed(2)}</td><td>${parseFloat(r.MIKTAR_CIKIS||'0').toFixed(2)}</td><td>${parseFloat(r.BAKIYE||'0').toFixed(2)}</td></tr>`).join('')}</tbody></table></body></html>`;
+                      const html = `<html><head><meta charset="utf-8"><style>body{font-family:sans-serif;padding:20px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ddd;padding:6px;font-size:11px}th{background:#f5f5f5}</style></head><body><h2>${name} - Stok Ekstre (${extreStart} → ${extreEnd})</h2><table><thead><tr><th>Tarih</th><th>Belge No</th><th>Lokasyon</th><th>Cari</th><th>Fiş Türü</th><th>Giriş</th><th>Çıkış</th><th>Bakiye</th></tr></thead><tbody>${filteredExtre.map((r:any) => `<tr><td>${r.TARIH||''}</td><td>${r.BELGENO||''}</td><td>${r.LOKASYON_AD||''}</td><td>${r.CARI_AD||''}</td><td>${r.FIS_TURU||''}</td><td>${parseFloat(r.MIKTAR_GIRIS||'0').toFixed(2)}</td><td>${parseFloat(r.MIKTAR_CIKIS||'0').toFixed(2)}</td><td>${parseFloat(r.BAKIYE||'0').toFixed(2)}</td></tr>`).join('')}</tbody></table></body></html>`;
                       try { const { uri } = await Print.printToFileAsync({ html }); await Sharing.shareAsync(uri, { mimeType: 'application/pdf' }); showToast('PDF oluşturuldu'); } catch(e) { console.error('PDF error:', e); showToast('PDF oluşturulamadı'); }
                       finally { setExportLoading(false); }
                     }}>
@@ -1256,13 +1361,29 @@ export default function StockScreen() {
                       <Text style={[{ fontSize: 11, color: colors.error, fontWeight: '600' }]}>PDF</Text>
                     </TouchableOpacity>
                   </View>
-                  {detailExtre.map((row: any, idx: number) => (
-                  <View key={idx} style={[styles.extreRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                  {filteredExtre.length === 0 ? (
+                    <View style={{ alignItems: 'center', paddingVertical: 24 }}>
+                      <Text style={[{ color: colors.textSecondary, fontSize: 12 }]}>Bu tarih aralığında hareket yok</Text>
+                    </View>
+                  ) : (
+                  filteredExtre.map((row: any, idx: number) => {
+                    const fisIdVal = row.BELGE_ID || row.FIS_ID || row.KAYIT_ID || row.ID || row.BELGEID || row.FIS;
+                    const hasFis = !!fisIdVal && String(fisIdVal).trim() !== '' && String(fisIdVal) !== '0' && String(fisIdVal).toLowerCase() !== 'null';
+                    return (
+                  <TouchableOpacity
+                    key={idx}
+                    style={[styles.extreRow, { backgroundColor: colors.card, borderColor: colors.border, opacity: hasFis ? 1 : 0.85 }]}
+                    onPress={() => { if (hasFis) openFisDetail(row); }}
+                    activeOpacity={hasFis ? 0.7 : 1}
+                  >
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
                       <Text style={[{ fontSize: 11, fontWeight: '600', color: colors.text }]}>{row.TARIH || ''}</Text>
-                      <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{row.FIS_TURU || ''}</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{row.FIS_TURU || ''}</Text>
+                        {hasFis && <Ionicons name="chevron-forward" size={12} color={colors.primary} />}
+                      </View>
                     </View>
-                    <Text style={[{ fontSize: 11, color: colors.textSecondary, marginBottom: 3 }]} numberOfLines={1}>{row.CARI_AD || row.ACIKLAMA || '-'}</Text>
+                    <Text style={[{ fontSize: 11, color: colors.textSecondary, marginBottom: 3 }]} numberOfLines={1}>{row.CARI_AD || row.ACIKLAMA || row.LOKASYON_AD || '-'}</Text>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                       <View style={{ flexDirection: 'row', gap: 10 }}>
                         {parseFloat(row.MIKTAR_GIRIS || '0') > 0 && <Text style={[{ fontSize: 11, color: colors.success }]}>+{parseFloat(row.MIKTAR_GIRIS).toFixed(2)}</Text>}
@@ -1270,10 +1391,153 @@ export default function StockScreen() {
                       </View>
                       <Text style={[{ fontSize: 11, fontWeight: '700', color: colors.text }]}>Bakiye: {parseFloat(row.BAKIYE || '0').toFixed(2)}</Text>
                     </View>
-                  </View>
-                ))}</View> : <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>Ekstre bulunamadı</Text></View>
+                  </TouchableOpacity>
+                    );
+                  })
+                  )}
+                </View> : <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>Ekstre bulunamadı</Text></View>
               )}
             </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 2026-05-12 — Fiş Detay Modal (Stok ekstre satırına tıklayınca açılır) */}
+      <Modal visible={!!selectedFis} animationType="slide" transparent statusBarTranslucent onRequestClose={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }}>
+        <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
+          <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '85%' }]}>
+            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>
+                  Fiş Detayı
+                </Text>
+                {selectedFis && (
+                  <Text style={[{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }]} numberOfLines={1}>
+                    {selectedFis.TARIH || ''} · {selectedFis.FIS_TURU || ''} · {selectedFis.BELGENO || ''}
+                  </Text>
+                )}
+              </View>
+              <TouchableOpacity onPress={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }}>
+                <Ionicons name="close" size={24} color={colors.text} />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
+              {fisLoading ? (
+                <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                  <ActivityIndicator size="large" color={colors.primary} />
+                  <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>POS'tan veri alınıyor...</Text>
+                </View>
+              ) : fisDetail.length > 0 ? (
+                <View style={{ padding: 12 }}>
+                  {fisDetail.map((item: any, idx: number) => (
+                    <View key={idx} style={{
+                      padding: 10, marginBottom: 6, borderRadius: 8,
+                      backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border,
+                    }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
+                        <Text style={[{ fontSize: 12, fontWeight: '600', color: colors.text, flex: 1 }]} numberOfLines={1}>
+                          {item.STOK || 'Ürün'}
+                        </Text>
+                        <Text style={[{ fontSize: 12, fontWeight: '700', color: colors.primary }]}>
+                          ₺{parseFloat(item.DAHIL_TUTAR || item.TUTAR || '0').toFixed(2)}
+                        </Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
+                        {item.BIRIM ? <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{item.BIRIM}</Text> : null}
+                        <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Miktar: {parseFloat(item.MIKTAR_FIS || '0').toFixed(2)}</Text>
+                        <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Fiyat: ₺{parseFloat(item.DAHIL_FIYAT || item.FIYAT || '0').toFixed(2)}</Text>
+                        {parseFloat(item.ISKONTO || '0') > 0 && <Text style={[{ fontSize: 10, color: colors.warning }]}>İsk: %{parseFloat(item.ISKONTO).toFixed(1)}</Text>}
+                      </View>
+                    </View>
+                  ))}
+                  {fisTotals && (
+                    <View style={{
+                      margin: 4, borderRadius: 10, borderWidth: 1, borderColor: colors.border,
+                      padding: 12, gap: 4, backgroundColor: colors.primary + '10',
+                    }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                        <Text style={[{ color: colors.textSecondary, fontSize: 12 }]}>Satır Toplam</Text>
+                        <Text style={[{ fontWeight: '600', color: colors.text, fontSize: 12 }]}>₺{parseFloat(fisTotals.SATIR_TOPLAM || '0').toFixed(2)}</Text>
+                      </View>
+                      {parseFloat(fisTotals.FIS_ISKONTO_TOPLAM || '0') > 0 && (
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                          <Text style={[{ color: colors.textSecondary, fontSize: 12 }]}>Fiş İskonto</Text>
+                          <Text style={[{ fontWeight: '600', color: colors.warning, fontSize: 12 }]}>₺{parseFloat(fisTotals.FIS_ISKONTO_TOPLAM).toFixed(2)}</Text>
+                        </View>
+                      )}
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                        <Text style={[{ color: colors.textSecondary, fontSize: 12 }]}>KDV</Text>
+                        <Text style={[{ fontWeight: '600', color: colors.text, fontSize: 12 }]}>₺{parseFloat(fisTotals.KDV_TOPLAM || '0').toFixed(2)}</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 6, marginTop: 4 }}>
+                        <Text style={[{ fontSize: 15, fontWeight: '800', color: colors.text }]}>Genel Toplam</Text>
+                        <Text style={[{ fontSize: 16, fontWeight: '800', color: colors.primary }]}>₺{parseFloat(fisTotals.GENELTOPLAM || '0').toFixed(2)}</Text>
+                      </View>
+                    </View>
+                  )}
+                </View>
+              ) : (
+                <View style={{ alignItems: 'center', paddingVertical: 30 }}>
+                  <Text style={[{ color: colors.textSecondary }]}>Fiş detayı bulunamadı</Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 2026-05-12 — Tarih Seçici Modal (Stok Ekstre) — Basit yıl/ay listesi */}
+      <Modal visible={!!showDatePicker} animationType="fade" transparent statusBarTranslucent onRequestClose={() => setShowDatePicker(null)}>
+        <View style={[styles.modalOverlay, { justifyContent: 'center' }]}>
+          <View style={{
+            margin: 24, padding: 16, borderRadius: 14,
+            backgroundColor: colors.surface, maxHeight: '70%',
+          }}>
+            <Text style={{ fontSize: 16, fontWeight: '800', color: colors.text, marginBottom: 12, textAlign: 'center' }}>
+              {showDatePicker === 'start' ? 'Başlangıç Tarihi' : 'Bitiş Tarihi'}
+            </Text>
+            <ScrollView showsVerticalScrollIndicator>
+              {(() => {
+                const now = new Date();
+                const months: { y: number; m: number; label: string }[] = [];
+                for (let i = 0; i < 12; i++) {
+                  const dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
+                  const y = dt.getFullYear();
+                  const m = dt.getMonth() + 1;
+                  const names = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+                  months.push({ y, m, label: `${names[m-1]} ${y}` });
+                }
+                return months.map((mo) => (
+                  <TouchableOpacity
+                    key={`${mo.y}-${mo.m}`}
+                    onPress={() => {
+                      const mmStr = String(mo.m).padStart(2, '0');
+                      if (showDatePicker === 'start') {
+                        setExtreStart(`${mo.y}-${mmStr}-01`);
+                      } else {
+                        // Ayın son günü
+                        const last = new Date(mo.y, mo.m, 0).getDate();
+                        setExtreEnd(`${mo.y}-${mmStr}-${String(last).padStart(2, '0')}`);
+                      }
+                      setShowDatePicker(null);
+                    }}
+                    style={{
+                      paddingVertical: 12, paddingHorizontal: 14, borderRadius: 8,
+                      backgroundColor: colors.background, marginBottom: 6,
+                      borderWidth: 1, borderColor: colors.border,
+                    }}
+                  >
+                    <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]}>{mo.label}</Text>
+                  </TouchableOpacity>
+                ));
+              })()}
+            </ScrollView>
+            <TouchableOpacity
+              onPress={() => setShowDatePicker(null)}
+              style={{ marginTop: 8, paddingVertical: 10, borderRadius: 8, alignItems: 'center', backgroundColor: colors.background }}
+            >
+              <Text style={[{ fontSize: 14, fontWeight: '700', color: colors.text }]}>İptal</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
