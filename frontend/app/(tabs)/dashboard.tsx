@@ -1569,12 +1569,12 @@ export default function DashboardScreen() {
                         <View style={{ width: `${Math.max(perakendePct, 1)}%`, height: '100%', backgroundColor: '#10B981', borderRadius: 2 }} />
                       </View>
                     </View>
-                    {/* ERP12 */}
+                    {/* Fiş Fatura Satışı (eski adı: ERP12) */}
                     <View>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                           <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#8B5CF6' }} />
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>ERP12</Text>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }}>Fiş Fatura Satışı</Text>
                           <Text style={{ fontSize: 11, color: colors.textSecondary }}>%{erp12Pct.toFixed(1)}</Text>
                         </View>
                         <Text style={{ fontSize: 13, fontWeight: '800', color: '#8B5CF6' }}>
@@ -1593,10 +1593,10 @@ export default function DashboardScreen() {
                         <Text style={{ fontSize: 11, fontWeight: '700', color: ckColor }}>{fb.fisSayisi.total} fiş</Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: '#10B98115' }}>
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#10B981' }}>P: {fb.fisSayisi.perakende}</Text>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#10B981' }}>Perakende: {fb.fisSayisi.perakende}</Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8, backgroundColor: '#8B5CF615' }}>
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6' }}>E: {fb.fisSayisi.erp12}</Text>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6' }}>Fiş Fatura: {fb.fisSayisi.erp12}</Text>
                       </View>
                     </View>
                     {fb.iskonto.total > 0 && (
@@ -1743,7 +1743,7 @@ export default function DashboardScreen() {
                               )}
                               {erp12Iskonto > 0 && (
                                 <View style={{ paddingHorizontal: 5, paddingVertical: 1, borderRadius: 5, backgroundColor: '#8B5CF620' }}>
-                                  <Text style={{ fontSize: 9, color: '#8B5CF6', fontWeight: '700' }}>E12: ₺{fmt(erp12Iskonto)}</Text>
+                                  <Text style={{ fontSize: 9, color: '#8B5CF6', fontWeight: '700' }}>FF: ₺{fmt(erp12Iskonto)}</Text>
                                 </View>
                               )}
                             </View>
@@ -1768,7 +1768,7 @@ export default function DashboardScreen() {
                               )}
                               {erp12Kdv > 0 && (
                                 <View style={{ paddingHorizontal: 5, paddingVertical: 1, borderRadius: 5, backgroundColor: '#8B5CF620' }}>
-                                  <Text style={{ fontSize: 9, color: '#8B5CF6', fontWeight: '700' }}>E12: ₺{fmt(erp12Kdv)}</Text>
+                                  <Text style={{ fontSize: 9, color: '#8B5CF6', fontWeight: '700' }}>FF: ₺{fmt(erp12Kdv)}</Text>
                                 </View>
                               )}
                             </View>
@@ -1970,7 +1970,7 @@ export default function DashboardScreen() {
                               )}
                               {erp12 > 0 && (
                                 <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: '#8B5CF620' }}>
-                                  <Text style={{ fontSize: 10, color: '#8B5CF6', fontWeight: '700' }}>E12: ₺{fmtTL(erp12)}</Text>
+                                  <Text style={{ fontSize: 10, color: '#8B5CF6', fontWeight: '700' }}>FF: ₺{fmtTL(erp12)}</Text>
                                 </View>
                               )}
                             </View>
