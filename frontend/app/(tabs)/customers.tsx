@@ -837,8 +837,22 @@ export default function CustomersScreen() {
 
             {/* Export buttons */}
             <View style={[{ flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 6, gap: 8 }]}>
-              <TouchableOpacity style={[styles.exportBtn, { backgroundColor: colors.error + '15' }]} onPress={exportExtrePdf}>
-                <Ionicons name="document-text-outline" size={14} color={colors.error} /><Text style={[{ fontSize: 11, color: colors.error, fontWeight: '600' }]}>PDF</Text>
+              <TouchableOpacity
+                style={[styles.exportBtn, { backgroundColor: colors.error + '15', opacity: exportLoading ? 0.6 : 1 }]}
+                onPress={exportExtrePdf}
+                disabled={exportLoading}
+              >
+                {exportLoading ? (
+                  <>
+                    <ActivityIndicator size="small" color={colors.error} />
+                    <Text style={[{ fontSize: 11, color: colors.error, fontWeight: '600' }]}>PDF hazırlanıyor…</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="document-text-outline" size={14} color={colors.error} />
+                    <Text style={[{ fontSize: 11, color: colors.error, fontWeight: '600' }]}>PDF</Text>
+                  </>
+                )}
               </TouchableOpacity>
             </View>
 
