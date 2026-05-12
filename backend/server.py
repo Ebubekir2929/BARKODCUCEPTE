@@ -73,6 +73,20 @@ api_router.include_router(notifications_router)
 app.include_router(api_router)
 
 
+# 2026-05-12 — Gizlilik Politikası (Play Store zorunluluğu, /api PREFIX'siz)
+from fastapi.responses import FileResponse, HTMLResponse  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+@app.get("/privacy-policy", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/api/privacy-policy", response_class=HTMLResponse, include_in_schema=False)
+async def privacy_policy():
+    """Public privacy policy page for Google Play / App Store compliance."""
+    path = Path("/app/docs/privacy-policy.html")
+    if path.exists():
+        return FileResponse(str(path), media_type="text/html")
+    return HTMLResponse("<h1>Gizlilik Politikası</h1><p>Yakında.</p>")
+
+
 @app.on_event("startup")
 async def startup():
     # MySQL pool init'leri ARKA PLANDA başlasın ki uygulama port'a anında bağlansın
