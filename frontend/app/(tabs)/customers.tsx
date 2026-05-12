@@ -34,7 +34,7 @@ const getDefDates = () => {
 };
 
 export default function CustomersScreen() {
-  const { colors } = useThemeStore();
+  const { colors, isDark } = useThemeStore();
   const { t } = useLanguageStore();
   const { user } = useAuthStore();
   const { activeSource } = useDataSourceStore();
@@ -978,9 +978,9 @@ export default function CustomersScreen() {
 
       {/* Toast */}
       {toastVisible && (
-        <View style={[styles.toast, { backgroundColor: colors.text }]}>
-          <Ionicons name="checkmark-circle" size={16} color="#fff" />
-          <Text style={[{ color: '#fff', fontSize: 13, fontWeight: '600' }]}>{toastMsg}</Text>
+        <View style={[styles.toast, { backgroundColor: isDark ? '#374151' : '#111827', borderWidth: isDark ? 1 : 0, borderColor: '#4B5563' }]}>
+          <Ionicons name="checkmark-circle" size={16} color="#34D399" />
+          <Text style={[{ color: '#FFFFFF', fontSize: 13, fontWeight: '600' }]}>{toastMsg}</Text>
         </View>
       )}
 

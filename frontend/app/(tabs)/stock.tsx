@@ -30,7 +30,7 @@ import DateField from '../../src/components/DateField';
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 export default function StockScreen() {
-  const { colors } = useThemeStore();
+  const { colors, isDark } = useThemeStore();
   const { t } = useLanguageStore();
   const { showError, showWarning, alertProps } = useAlert();
   const { user } = useAuthStore();
@@ -1332,16 +1332,71 @@ export default function StockScreen() {
               {detailLoading ? (
                 <View style={{ alignItems: 'center', paddingVertical: 40 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>POS'tan veri alınıyor...</Text></View>
               ) : detailTab === 'miktar' ? (
-                detailMiktar.length > 0 ? <View style={{ padding: 16 }}>{detailMiktar.map((loc: any, idx: number) => (
-                  <View key={idx} style={[styles.miktarCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <Text style={[{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 8 }]}>{loc.AD || t('location_label')}</Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                      {[{ k: 'MIKTAR', l: t('available'), c: colors.text }, { k: 'MIKTAR_GIRIS', l: t('in'), c: colors.success }, { k: 'MIKTAR_CIKIS', l: t('out'), c: colors.error }, { k: 'SATIS', l: t('sales_short'), c: colors.primary }].map(f => (
-                        <View key={f.k} style={{ minWidth: 70 }}><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{f.l}</Text><Text style={[{ fontSize: 14, fontWeight: '700', color: f.c }]}>{parseFloat(loc[f.k] || '0').toFixed(2)}</Text></View>
-                      ))}
+                detailMiktar.length > 0 ? <View style={{ padding: 12 }}>{detailMiktar.map((loc: any, idx: number) => {
+                  const mevcut = parseFloat(loc.MIKTAR || '0');
+                  const giris = parseFloat(loc.MIKTAR_GIRIS || '0');
+                  const cikis = parseFloat(loc.MIKTAR_CIKIS || '0');
+                  const satis = parseFloat(loc.SATIS || '0');
+                  const fmt = (n: number) => n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+                  const mevcutColor = mevcut > 0 ? colors.success : mevcut < 0 ? colors.error : colors.textSecondary;
+                  return (
+                    <View key={idx} style={{
+                      marginBottom: 10, borderRadius: 12, overflow: 'hidden',
+                      borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card,
+                    }}>
+                      {/* Lokasyon başlık + Mevcut */}
+                      <View style={{
+                        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                        paddingHorizontal: 12, paddingVertical: 10,
+                        backgroundColor: mevcutColor + '12',
+                        borderBottomWidth: 1, borderBottomColor: colors.border,
+                      }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                          <View style={{ width: 30, height: 30, borderRadius: 15, backgroundColor: mevcutColor + '22', alignItems: 'center', justifyContent: 'center' }}>
+                            <Ionicons name="business-outline" size={16} color={mevcutColor} />
+                          </View>
+                          <Text style={{ fontSize: 14, fontWeight: '800', color: colors.text, flex: 1 }} numberOfLines={1}>
+                            {loc.AD || t('location_label')}
+                          </Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                          <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.3 }}>Mevcut</Text>
+                          <Text style={{ fontSize: 17, fontWeight: '800', color: mevcutColor }}>{fmt(mevcut)}</Text>
+                        </View>
+                      </View>
+                      {/* 3 mini-card grid: Giriş / Çıkış / Satış */}
+                      <View style={{ flexDirection: 'row', padding: 10, gap: 8 }}>
+                        <View style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 8, backgroundColor: colors.success + '10', borderWidth: 1, borderColor: colors.success + '20' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                            <Ionicons name="arrow-up" size={11} color={colors.success} />
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase' }}>{t('in')}</Text>
+                          </View>
+                          <Text style={{ fontSize: 13, fontWeight: '800', color: colors.success, marginTop: 2 }} numberOfLines={1} adjustsFontSizeToFit>
+                            {fmt(giris)}
+                          </Text>
+                        </View>
+                        <View style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 8, backgroundColor: colors.error + '10', borderWidth: 1, borderColor: colors.error + '20' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                            <Ionicons name="arrow-down" size={11} color={colors.error} />
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase' }}>{t('out')}</Text>
+                          </View>
+                          <Text style={{ fontSize: 13, fontWeight: '800', color: colors.error, marginTop: 2 }} numberOfLines={1} adjustsFontSizeToFit>
+                            {fmt(cikis)}
+                          </Text>
+                        </View>
+                        <View style={{ flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 8, backgroundColor: colors.primary + '10', borderWidth: 1, borderColor: colors.primary + '20' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                            <Ionicons name="cart-outline" size={11} color={colors.primary} />
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase' }}>{t('sales_short')}</Text>
+                          </View>
+                          <Text style={{ fontSize: 13, fontWeight: '800', color: colors.primary, marginTop: 2 }} numberOfLines={1} adjustsFontSizeToFit>
+                            {fmt(satis)}
+                          </Text>
+                        </View>
+                      </View>
                     </View>
-                  </View>
-                ))}</View> : <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>Miktar bilgisi bulunamadı</Text></View>
+                  );
+                })}</View> : <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>Miktar bilgisi bulunamadı</Text></View>
               ) : (
                 detailExtre.length > 0 ? <View style={{ padding: 12 }}>
                   {/* 2026-05-12 — Tarih filtresi (Native DatePicker) */}
@@ -1633,9 +1688,9 @@ export default function StockScreen() {
 
       {/* Toast */}
       {toastVisible && (
-        <View style={[styles.toast, { backgroundColor: colors.text }]}>
-          <Ionicons name="checkmark-circle" size={16} color="#fff" />
-          <Text style={[{ color: '#fff', fontSize: 13, fontWeight: '600' }]}>{toastMsg}</Text>
+        <View style={[styles.toast, { backgroundColor: isDark ? '#374151' : '#111827', borderWidth: isDark ? 1 : 0, borderColor: '#4B5563' }]}>
+          <Ionicons name="checkmark-circle" size={16} color="#34D399" />
+          <Text style={[{ color: '#FFFFFF', fontSize: 13, fontWeight: '600' }]}>{toastMsg}</Text>
         </View>
       )}
       <CustomAlert {...alertProps} />
