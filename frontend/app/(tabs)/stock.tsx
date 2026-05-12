@@ -25,6 +25,7 @@ import { ScrollFab } from '../../src/components/ScrollFab';
 import { useResponsive } from '../../src/hooks/useResponsive';
 import { DataTable, TableColumn } from '../../src/components/DataTable';
 import { NegativeStockModal } from '../../src/components/NegativeStockModal';
+import DateField from '../../src/components/DateField';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -179,7 +180,7 @@ export default function StockScreen() {
   })();
   const [extreStart, setExtreStart] = useState<string>(_initExtreDates.start);
   const [extreEnd, setExtreEnd] = useState<string>(_initExtreDates.end);
-  const [showDatePicker, setShowDatePicker] = useState<null | 'start' | 'end'>(null);
+  // 2026-05-12 — Tarih seçimi DateField bileşeni içinde lokal state ile yönetiliyor.
 
   // Fiş detay modal (cari ile aynı yapı)
   const [selectedFis, setSelectedFis] = useState<any | null>(null);
@@ -1307,40 +1308,26 @@ export default function StockScreen() {
                 ))}</View> : <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>Miktar bilgisi bulunamadı</Text></View>
               ) : (
                 detailExtre.length > 0 ? <View style={{ padding: 12 }}>
-                  {/* 2026-05-12 — Tarih filtresi (Aylık seçim) */}
+                  {/* 2026-05-12 — Tarih filtresi (Native DatePicker) */}
                   <View style={{
                     flexDirection: 'row', gap: 8, marginBottom: 10,
                     padding: 10, backgroundColor: colors.background,
                     borderRadius: 10, borderWidth: 1, borderColor: colors.border,
                   }}>
-                    <TouchableOpacity
-                      onPress={() => setShowDatePicker('start')}
-                      style={{ flex: 1, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: colors.card, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}
-                    >
-                      <Text style={[{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase' }]}>Başlangıç</Text>
-                      <Text style={[{ fontSize: 12, fontWeight: '700', color: colors.text, marginTop: 2 }]}>{extreStart}</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      onPress={() => setShowDatePicker('end')}
-                      style={{ flex: 1, paddingVertical: 8, paddingHorizontal: 10, backgroundColor: colors.card, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}
-                    >
-                      <Text style={[{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase' }]}>Bitiş</Text>
-                      <Text style={[{ fontSize: 12, fontWeight: '700', color: colors.text, marginTop: 2 }]}>{extreEnd}</Text>
-                    </TouchableOpacity>
-                    {/* Hızlı: Bu Ay / Geçen Ay */}
-                    <TouchableOpacity
-                      onPress={() => {
-                        const now = new Date();
-                        const y = now.getFullYear();
-                        const m = String(now.getMonth() + 1).padStart(2, '0');
-                        const d = String(now.getDate()).padStart(2, '0');
-                        setExtreStart(`${y}-${m}-01`);
-                        setExtreEnd(`${y}-${m}-${d}`);
-                      }}
-                      style={{ paddingVertical: 8, paddingHorizontal: 10, backgroundColor: colors.primary + '20', borderRadius: 8 }}
-                    >
-                      <Text style={[{ fontSize: 11, fontWeight: '700', color: colors.primary }]}>Bu Ay</Text>
-                    </TouchableOpacity>
+                    <DateField
+                      value={extreStart}
+                      onChange={setExtreStart}
+                      label="Başlangıç"
+                      maxDate={extreEnd}
+                      colors={colors}
+                    />
+                    <DateField
+                      value={extreEnd}
+                      onChange={setExtreEnd}
+                      label="Bitiş"
+                      minDate={extreStart}
+                      colors={colors}
+                    />
                   </View>
 
                   {/* Sayım özet */}
@@ -1367,23 +1354,28 @@ export default function StockScreen() {
                     </View>
                   ) : (
                   filteredExtre.map((row: any, idx: number) => {
-                    const fisIdVal = row.BELGE_ID || row.FIS_ID || row.KAYIT_ID || row.ID || row.BELGEID || row.FIS;
-                    // 2026-05-12 — Sadece GERÇEK fiş satırları tıklanabilir.
-                    // Devir/Açılış/Düzeltme + Nakit Tahsilat/Ödeme/Tediye/Çek/Senet/Havale
-                    // gibi tahsilat-ödeme satırlarında detay AÇILMAZ (sadece bilgilendirme).
-                    const fisTuruStr = String(row.FIS_TURU || '').toLowerCase();
-                    const isInfoRow = fisTuruStr.includes('devir')
+                    // 2026-05-12 — Stok extre POS alanları:
+                    //   - FIS_ID: gerçek fiş id (pozitif int)
+                    //   - FIS_TURU: "Satış fişi", "Tahsilat", "Alış fişi", "Çek Ödeme" vb.
+                    //   - FIS_DETAY: satır id (kullanmıyoruz)
+                    const fisIdVal = row.FIS_ID || row.BELGE_ID || row.KAYIT_ID || row.ID || row.BELGEID;
+                    const fisIdNum = Number(fisIdVal);
+                    const fisTuruStr = String(row.FIS_TURU || row.ACIKLAMA || '').toLowerCase().trim();
+                    const isInfoRow = (
+                      fisIdNum <= 0
+                      || fisTuruStr.includes('devir') || fisTuruStr.includes('devreden')
                       || fisTuruStr.includes('açılış') || fisTuruStr.includes('acilis')
                       || fisTuruStr.includes('düzeltme') || fisTuruStr.includes('duzeltme')
                       || fisTuruStr.includes('tahsilat') || fisTuruStr.includes('tahsilât')
                       || fisTuruStr.includes('ödeme') || fisTuruStr.includes('odeme')
                       || fisTuruStr.includes('tediye')
-                      || fisTuruStr.includes('çek') || fisTuruStr.includes('cek ')
+                      || fisTuruStr.includes('çek') || (fisTuruStr.match(/\bcek\b/) !== null)
                       || fisTuruStr.includes('senet')
                       || fisTuruStr.includes('havale') || fisTuruStr.includes('eft')
-                      || fisTuruStr.includes('virman') || fisTuruStr.includes('mahsup');
+                      || fisTuruStr.includes('virman') || fisTuruStr.includes('mahsup')
+                    );
                     const hasFis = !isInfoRow && !!fisIdVal
-                      && String(fisIdVal).trim() !== '' && String(fisIdVal) !== '0'
+                      && String(fisIdVal).trim() !== '' && String(fisIdVal) !== '0' && String(fisIdVal) !== '-1'
                       && String(fisIdVal).toLowerCase() !== 'null';
                     return (
                   <TouchableOpacity
@@ -1502,61 +1494,7 @@ export default function StockScreen() {
         </View>
       </Modal>
 
-      {/* 2026-05-12 — Tarih Seçici Modal (Stok Ekstre) — Basit yıl/ay listesi */}
-      <Modal visible={!!showDatePicker} animationType="fade" transparent statusBarTranslucent onRequestClose={() => setShowDatePicker(null)}>
-        <View style={[styles.modalOverlay, { justifyContent: 'center' }]}>
-          <View style={{
-            margin: 24, padding: 16, borderRadius: 14,
-            backgroundColor: colors.surface, maxHeight: '70%',
-          }}>
-            <Text style={{ fontSize: 16, fontWeight: '800', color: colors.text, marginBottom: 12, textAlign: 'center' }}>
-              {showDatePicker === 'start' ? 'Başlangıç Tarihi' : 'Bitiş Tarihi'}
-            </Text>
-            <ScrollView showsVerticalScrollIndicator>
-              {(() => {
-                const now = new Date();
-                const months: { y: number; m: number; label: string }[] = [];
-                for (let i = 0; i < 12; i++) {
-                  const dt = new Date(now.getFullYear(), now.getMonth() - i, 1);
-                  const y = dt.getFullYear();
-                  const m = dt.getMonth() + 1;
-                  const names = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
-                  months.push({ y, m, label: `${names[m-1]} ${y}` });
-                }
-                return months.map((mo) => (
-                  <TouchableOpacity
-                    key={`${mo.y}-${mo.m}`}
-                    onPress={() => {
-                      const mmStr = String(mo.m).padStart(2, '0');
-                      if (showDatePicker === 'start') {
-                        setExtreStart(`${mo.y}-${mmStr}-01`);
-                      } else {
-                        // Ayın son günü
-                        const last = new Date(mo.y, mo.m, 0).getDate();
-                        setExtreEnd(`${mo.y}-${mmStr}-${String(last).padStart(2, '0')}`);
-                      }
-                      setShowDatePicker(null);
-                    }}
-                    style={{
-                      paddingVertical: 12, paddingHorizontal: 14, borderRadius: 8,
-                      backgroundColor: colors.background, marginBottom: 6,
-                      borderWidth: 1, borderColor: colors.border,
-                    }}
-                  >
-                    <Text style={[{ fontSize: 14, fontWeight: '600', color: colors.text }]}>{mo.label}</Text>
-                  </TouchableOpacity>
-                ));
-              })()}
-            </ScrollView>
-            <TouchableOpacity
-              onPress={() => setShowDatePicker(null)}
-              style={{ marginTop: 8, paddingVertical: 10, borderRadius: 8, alignItems: 'center', backgroundColor: colors.background }}
-            >
-              <Text style={[{ fontSize: 14, fontWeight: '700', color: colors.text }]}>İptal</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      {/* 2026-05-12 — Tarih seçimi artık DateField bileşeni ile yapılıyor (yukarıda inline) */}
 
       {/* Export Loading Overlay */}
       {exportLoading && (

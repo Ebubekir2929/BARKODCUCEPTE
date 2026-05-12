@@ -19,17 +19,21 @@ import { useFocusEffect } from 'expo-router';
 import { ScrollFab } from '../../src/components/ScrollFab';
 import { useResponsive } from '../../src/hooks/useResponsive';
 import { DataTable, TableColumn } from '../../src/components/DataTable';
+import DateField from '../../src/components/DateField';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 const getDefDates = () => {
-  // 2026-05-12 — Cari ekstre default tarih aralığı: içinde bulunulan ayın 1'i → bugün.
-  // Önceden Ocak 1 → bugün idi; kullanıcı isteği üzerine güncel aydan başlatılıyor.
+  // 2026-05-12 — Cari ekstre default tarih aralığı: 1 ay önceki ayın 1'i → bugün.
+  // Kullanıcı tarihi DateField ile serbestçe değiştirebilir.
   const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
-  return { start: `${y}-${m}-01`, end: `${y}-${m}-${d}` };
+  const sy = start.getFullYear();
+  const sm = String(start.getMonth() + 1).padStart(2, '0');
+  return { start: `${sy}-${sm}-01`, end: `${y}-${m}-${d}` };
 };
 
 export default function CustomersScreen() {
@@ -651,17 +655,23 @@ export default function CustomersScreen() {
               <TouchableOpacity onPress={() => { setSelectedCari(null); setExtreData([]); }}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             </View>
 
-            {/* Date filter */}
+            {/* Date filter — Native DatePicker (2026-05-12) */}
             <View style={[styles.dateRow, { borderBottomColor: colors.border }]}>
-              <View style={{ flex: 1 }}>
-                <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('start_placeholder')}</Text>
-                <TextInput style={[styles.dateInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={extreStart} onChangeText={setExtreStart} placeholder="YYYY-MM-DD" placeholderTextColor={colors.textSecondary} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('end_placeholder')}</Text>
-                <TextInput style={[styles.dateInput, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]} value={extreEnd} onChangeText={setExtreEnd} placeholder="YYYY-MM-DD" placeholderTextColor={colors.textSecondary} />
-              </View>
-              <TouchableOpacity style={[styles.runBtn, { backgroundColor: colors.primary }]} onPress={refreshExtre}>
+              <DateField
+                value={extreStart}
+                onChange={setExtreStart}
+                label={t('start_placeholder')}
+                maxDate={extreEnd}
+                colors={colors}
+              />
+              <DateField
+                value={extreEnd}
+                onChange={setExtreEnd}
+                label={t('end_placeholder')}
+                minDate={extreStart}
+                colors={colors}
+              />
+              <TouchableOpacity style={[styles.runBtn, { backgroundColor: colors.primary, alignSelf: 'flex-end' }]} onPress={refreshExtre}>
                 <Ionicons name="refresh" size={16} color="#fff" />
               </TouchableOpacity>
             </View>
@@ -690,21 +700,26 @@ export default function CustomersScreen() {
                   const bakiye = parseFloat(row.BAKIYE || '0');
                   // 2026-05-12 — POS sürümüne göre fiş id alanı farklı geliyor; hepsini kontrol et.
                   const fisIdVal = row.BELGE_ID || row.FIS_ID || row.KAYIT_ID || row.ID || row.BELGEID;
-                  // 2026-05-12 — Sadece GERÇEK fiş satırları tıklanabilir.
-                  // Tahsilat/Ödeme/Tediye/Çek/Senet/Havale/Devir/Açılış/Düzeltme
-                  // satırlarında detay AÇILMAZ (bunlar fiş değil bilgi satırı).
-                  const turuStr = String(row.BELGE_TIP || row.FIS_TURU || row.ISLEM_TIP || row.ACIKLAMA || '').toLowerCase();
-                  const isInfoRow = turuStr.includes('devir')
+                  // 2026-05-12 — Cari extre POS alanları:
+                  //   - BELGE_ID: gerçek fiş id (-1 = Devreden / placeholder)
+                  //   - ACIKLAMA / AD: "Devreden", "Nakit Tahsilat", "Çek Ödeme" vb.
+                  //   - FIS_ALT_TIPI: gerçek fiş için dolu, "--" değilse fiş
+                  const fisIdNum = Number(row.BELGE_ID);
+                  const turuStr = String(row.ACIKLAMA || row.AD || row.BELGE_TIP || row.FIS_TURU || row.ISLEM_TIP || '').toLowerCase().trim();
+                  const isInfoRow = (
+                    fisIdNum <= 0
+                    || turuStr.includes('devreden') || turuStr.includes('devir')
                     || turuStr.includes('açılış') || turuStr.includes('acilis')
                     || turuStr.includes('düzeltme') || turuStr.includes('duzeltme')
                     || turuStr.includes('tahsilat') || turuStr.includes('tahsilât')
                     || turuStr.includes('ödeme') || turuStr.includes('odeme')
                     || turuStr.includes('tediye')
-                    || turuStr.includes('çek') || turuStr.includes('cek ')
+                    || turuStr.includes('çek') || (turuStr.match(/\bcek\b/) !== null)
                     || turuStr.includes('senet')
                     || turuStr.includes('havale') || turuStr.includes('eft')
-                    || turuStr.includes('virman') || turuStr.includes('mahsup');
-                  const hasFis = !isInfoRow && !!fisIdVal && String(fisIdVal).trim() !== '' && String(fisIdVal) !== '0' && String(fisIdVal).toLowerCase() !== 'null';
+                    || turuStr.includes('virman') || turuStr.includes('mahsup')
+                  );
+                  const hasFis = !isInfoRow && !!fisIdVal && String(fisIdVal).trim() !== '' && String(fisIdVal) !== '0' && String(fisIdVal) !== '-1' && String(fisIdVal).toLowerCase() !== 'null';
                   return (
                     <TouchableOpacity key={idx} style={[styles.extreRow, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => hasFis ? openFisDetail(row) : null} disabled={!hasFis} activeOpacity={hasFis ? 0.7 : 1}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>

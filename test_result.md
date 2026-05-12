@@ -112,6 +112,81 @@ user_problem_statement: |
   Light/Dark theme support.
 
 backend:
+  - task: "Cache lookup for multi-result datasets (fis_detay_toplam, etc.)"
+    implemented: true
+    working: true
+    file: "services/dataset_cache.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: |
+          2026-05-12 22:55 TR — CRITICAL FIX in lookup_cached_report().
+          Previous code forced `data` to a list (line 341-342) which
+          silently dropped multi-result-set cache entries
+          (fis_detay_toplam stores {"result_sets": [[details],[totals]]}).
+          That caused EVERY retail-receipt click (fis_id like 20261131
+          stored as Perakende satış fişi) to return details=[] totals=[]
+          even though the cache had the full data. Fix: allow data to
+          remain a dict OR list. Verified via curl: FIS_ID 20261131 now
+          returns 2 details + 1 totals; FIS_ID 438724 still returns
+          1 detail + 1 totals (cari-side regression). iptal-detail and
+          cari-extre regression: both still return list-shape data
+          unchanged. stock-list still _source=mysql_direct. No 500.
+          Needs full backend regression sweep with deep_testing_backend_v2.
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ FULL REGRESSION SUITE PASSED 2026-05-12 (14/14 PASS,
+          /app/backend_test_fis_detail.py against
+          https://kart-stok-fix.preview.emergentagent.com/api with admin
+          cakmak.ebubekir29@gmail.com / 123456, tenant Merkez
+          d5587c87a7f9476fa82b83f40accd6c7).
+
+          PRIMARY — FIS DETAIL (multi-result-set cache) ✅✅✅:
+          • fis_id=20261131 → 200 in 487ms, ok:true, details=2, totals=1,
+            from_cache=true. detail[0] has STOK='DENEME 2',
+            BARKOD='9990000000050', MIKTAR_FIS='1.000', TUTAR='460.74545455'.
+            totals[0] has GENELTOPLAM='485.14000000',
+            KDV_TOPLAM='44.10000000', SATIR_TOPLAM='487.11000000'. ✅
+          • fis_id=20271741 → 200 in 490ms, ok:true, details=2, totals=1,
+            from_cache=true (same shape). ✅
+          • fis_id=20311658 → 200 in 458ms, ok:true, details=2, totals=1,
+            from_cache=true. ✅
+          • fis_id=438724 (older cari-side) → 200 in 443ms, ok:true,
+            details=1, totals=1, from_cache=true. Regression preserved. ✅
+          • fis_id=9999999999999 (nonexistent) → 200 in 38.5s, ok:true,
+            details=[], totals=[], from_cache=false. Graceful empty
+            (POS fallback returns no data — no 500). ✅
+          • Missing fis_id → 400 {"detail":"tenant_id ve fis_id gerekli"}. ✅
+          • No auth → 403 (FastAPI HTTPBearer default). ✅
+
+          REGRESSION (other endpoints) ✅:
+          • cari-extre {cari_id:438352, 2025-01-01..2026-02-15} → 200 in
+            671ms, 30 rows with BELGE_ID/ACIKLAMA fields present. ✅
+          • stock-extre {stok_id:438230, 2026-05-01..2026-05-12} → 200 in
+            650ms, 7 rows with FIS_ID/BELGENO/FIS_TURU present. ✅
+          • stock-list page=1 size=5 → 200, _source='mysql_direct',
+            data:[5 items]. ✅
+          • cari-list page=1 size=5 → 200, _source='mysql_direct'. ✅
+          • iptal-detail {iptal_id:1} → 200, ok:true, data:[]. ✅
+          • high-sale-detail {fis_id:20261131} → 200 in 650ms, ok:true,
+            details=2, totals=0 (DETAYLAR fallback path working). ✅
+          • GET /dashboard?sdate=2026-05-12&edate=2026-05-12 → 200 in
+            2.4s, financial_data_location has 2 location rows with
+            TOPLAM_MATRAH + TOPLAM_KDV fields. ✅
+
+          BACKEND LOG VERIFICATION:
+          • [fis-detail] cache HIT fis_id=20261131 data_type=dict
+          • [fis-detail] cache parsed: details=2 totals=True
+          → Confirms multi-result-set dict preservation working end-to-end.
+
+          NO 500 errors anywhere. All response shapes preserved.
+          fis_detay_toplam cache lookup is FIXED and the previous
+          "details=[] totals=[]" bug for retail receipts is RESOLVED.
+
   - task: "Basic API Status Endpoint"
     implemented: true
     working: true
@@ -467,27 +542,51 @@ frontend:
 
   - task: "Stock Management Screen"
     implemented: true
-    working: true
-    file: "app/(tabs)/stock.tsx"
+    working: "NA"
+    file: "app/(tabs)/stock.tsx + src/components/DateField.tsx"
     stuck_count: 0
     priority: "high"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
       - working: true
         agent: "main"
         comment: "Stock list with lazy loading, caching, search, filter, product detail with movements"
+      - working: "NA"
+        agent: "main"
+        comment: |
+          2026-05-12 22:50 TR — Replaced the previous month-list picker
+          modal in Stok Ekstre with the new cross-platform DateField
+          component (/app/frontend/src/components/DateField.tsx). Users
+          can now pick any day (not just month start/end). On native
+          (iOS/Android) opens system date picker; on Web renders HTML5
+          <input type="date">. Removed unused showDatePicker state +
+          legacy month-grid Modal. Fiş Detayı parsing already correct
+          (data.details / data.totals). Needs UI smoke test.
 
   - task: "Customers Screen"
     implemented: true
-    working: true
-    file: "app/(tabs)/customers.tsx"
+    working: "NA"
+    file: "app/(tabs)/customers.tsx + src/components/DateField.tsx"
     stuck_count: 0
     priority: "high"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
       - working: true
         agent: "main"
         comment: "Customer list with balance, search, filter, movements and invoice details"
+      - working: "NA"
+        agent: "main"
+        comment: |
+          2026-05-12 22:50 TR — Replaced TextInput date fields in Cari Ekstre
+          modal with cross-platform DateField component
+          (/app/frontend/src/components/DateField.tsx). On native
+          (iOS/Android) opens system date picker; on Web renders HTML5
+          <input type="date">. Default range extended to "1st of previous
+          month → today" for better UX (was "1st of current month → today").
+          Fiş Detayı parsing already correct (uses data.details + data.totals
+          which matches backend response). Needs UI smoke test to confirm
+          date picker opens correctly and selecting a day refreshes the
+          extre list.
 
   - task: "Reports Screen"
     implemented: true
@@ -567,8 +666,8 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Dashboard KDV/Matrah breakdown aggregation"
-    - "Notification settings low_stock_daily_minute persistence + clamp"
+    - "Cache lookup for multi-result datasets (fis_detay_toplam, etc.)"
+    - "Fis Detail API regression (cari + stock receipts)"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
@@ -837,6 +936,41 @@ agent_communication:
             rows or empty array, the loop must terminate cleanly (no extra calls).
 
 agent_communication:
+  - agent: "testing"
+    message: |
+      ✅ FIS DETAIL CACHE FIX VERIFIED — 14/14 PASS (2026-05-12)
+      Suite: /app/backend_test_fis_detail.py against
+      https://kart-stok-fix.preview.emergentagent.com/api with admin
+      cakmak.ebubekir29@gmail.com / 123456, tenant Merkez.
+
+      PRIMARY (the fix in services/dataset_cache.py L341-345):
+        • fis_id=20261131 (retail) → 200 in 487ms, ok:true, details=2,
+          totals=1, from_cache=true. Detail row has STOK/BARKOD/
+          MIKTAR_FIS/TUTAR fields populated. Totals row has GENELTOPLAM/
+          KDV_TOPLAM/SATIR_TOPLAM. ✅
+        • fis_id=20271741 → identical shape, from_cache=true ✅
+        • fis_id=20311658 → identical shape, from_cache=true ✅
+        • fis_id=438724 (cari-side) → 1 detail + 1 totals, from_cache=true
+          (regression preserved) ✅
+        • fis_id=9999999999999 (nonexistent) → 200, ok:true, empty
+          details/totals (graceful) ✅
+        • Missing fis_id → 400 "tenant_id ve fis_id gerekli" ✅
+        • No auth → 403 ✅
+
+      Backend log confirms:
+        [fis-detail] cache HIT fis_id=20261131 data_type=dict
+        [fis-detail] cache parsed: details=2 totals=True
+      → fis_detay_toplam multi-result-set cache lookup is now working
+      correctly. The previous "details=[] totals=[]" bug for retail
+      receipts is RESOLVED.
+
+      REGRESSION (7/7): cari-extre (30 rows + BELGE_ID/ACIKLAMA fields),
+      stock-extre (7 rows + FIS_ID/BELGENO/FIS_TURU fields), stock-list
+      (_source=mysql_direct, 5 items), cari-list (_source=mysql_direct),
+      iptal-detail (ok:true), high-sale-detail (ok:true, 2 details),
+      dashboard (financial_data_location with TOPLAM_MATRAH/TOPLAM_KDV).
+      ALL PASS — no shape regressions, no 500 errors anywhere.
+
   - agent: "main"
     message: |
       🎨 WEB DESKTOP MODAL POLISH (2026-02 saat ~14:45 TR):

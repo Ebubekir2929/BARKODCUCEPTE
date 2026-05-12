@@ -338,7 +338,11 @@ async def lookup_cached_report(
         data = json.loads(raw or '[]')
     except Exception:
         return None
-    if not isinstance(data, list):
+    # 2026-05-12 — multi-result datasets (e.g. fis_detay_toplam) cache the raw
+    # `{"result_sets": [[details], [totals]]}` payload as a dict. Previously
+    # the code forced data to a list which silently dropped these — keep the
+    # dict shape intact for callers that know how to parse it.
+    if not isinstance(data, (list, dict)):
         data = []
 
     return {

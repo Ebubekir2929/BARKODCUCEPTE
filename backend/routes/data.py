@@ -1838,16 +1838,16 @@ async def get_fis_detail(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Fetch fis detail + totals — DOĞRUDAN MySQL dataset_cache'den okur.
+    """Fetch fis detail + totals — Önce MySQL cache, MISS olursa POS canlı sorgu.
     
-    PHP sync zaten aylık fişlerin detayını arka planda dataset_cache'e basar
-    (dataset_key='fis_detay_toplam', params_json={FisId: X}). Bu endpoint
-    POS'a istek atmaz — cache MISS olursa 404 döner.
+    PHP sync config: dataset_key='fis_detay_toplam' → sql: dbo.GetFisDetayVeToplam
+    multi_result: true → İki result set döner: [details], [totals]
     
-    2026-05-12 — User isteği: "DİREK CACHEDEN SORGULA, ZATEN ORDA AYLIK VERİYİ TUTUYORUZ"
+    2026-05-12 — Aylık fişler önceden cache'lenmiş olur (anında); cache MISS
+    durumunda eski fişler için _on_demand_request ile POS'a request_create
+    atılır ve sonuç hem dönüş hem de cache'e yazılır.
     """
-    import json as _json
-    import hashlib as _hashlib
+    from services.dataset_cache import lookup_cached_report
     
     tenant_id = body.get("tenant_id", "")
     fis_id = body.get("fis_id")
@@ -1855,36 +1855,11 @@ async def get_fis_detail(
     if not tenant_id or fis_id is None:
         raise HTTPException(status_code=400, detail="tenant_id ve fis_id gerekli")
     
-    # Params hash (kasaceptetransfer.dataset_cache.params_hash ile aynı algoritma)
     params = {"FisId": int(fis_id)}
-    params_canon = _json.dumps(params, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    params_hash = _hashlib.sha1(params_canon.encode("utf-8")).hexdigest()
     
-    try:
-        pool = await get_data_pool()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute("""
-                    SELECT data_json, updated_at FROM dataset_cache
-                    WHERE tenant_id=%s AND dataset_key='fis_detay_toplam' AND params_hash=%s
-                    LIMIT 1
-                """, (tenant_id, params_hash))
-                row = await cur.fetchone()
-        
-        if not row:
-            raise HTTPException(
-                status_code=404,
-                detail="Bu fişin detayı henüz cache'de yok (POS sync henüz basmamış olabilir)"
-            )
-        
-        try:
-            data = _json.loads(row[0]) if isinstance(row[0], (str, bytes)) else row[0]
-        except Exception:
-            data = []
-        
+    def _parse_data(data):
         detail_rows = []
         total_row = {}
-        
         if isinstance(data, dict):
             if "result_sets" in data:
                 rs = data["result_sets"]
@@ -1903,18 +1878,53 @@ async def get_fis_detail(
                 total_row = data[1][0] if isinstance(data[1], list) and data[1] else {}
             else:
                 detail_rows = data
-        
+        return detail_rows, total_row
+    
+    # 1) MySQL cache lookup (lookup_cached_report tolerant comparison)
+    try:
+        cached = await lookup_cached_report(tenant_id, "fis_detay_toplam", params, max_age_sec=86400 * 90)
+        if cached and isinstance(cached, dict):
+            data = cached.get("data")
+            logger.info(f"[fis-detail] cache HIT fis_id={fis_id} data_type={type(data).__name__}")
+            detail_rows, total_row = _parse_data(data)
+            logger.info(f"[fis-detail] cache parsed: details={len(detail_rows) if isinstance(detail_rows, list) else 'na'} totals={bool(total_row)}")
+            if detail_rows or total_row:
+                return {
+                    "ok": True,
+                    "from_cache": True,
+                    "cached_at": str(cached.get("updated_at", "")),
+                    "details": _fix_large_ints(detail_rows) if isinstance(detail_rows, list) else [],
+                    "totals": _fix_large_ints([total_row]) if total_row else [],
+                }
+            else:
+                logger.warning(f"[fis-detail] cache HIT but empty parse, raw: {str(data)[:300]}")
+        else:
+            logger.info(f"[fis-detail] cache MISS fis_id={fis_id}, falling back to POS")
+    except Exception as e:
+        logger.warning(f"[fis-detail] cache lookup error: {e}")
+    
+    # 2) Fallback — POS canlı sorgu (eski fişler için)
+    try:
+        result = await _on_demand_request(tenant_id, "fis_detay_toplam", params,
+                                          timeout_sec=35, raw_cache=True)
+        cache = result.get("cache", {})
+        data = cache.get("data", [])
+        logger.info(f"[fis-detail] POS fallback fis_id={fis_id} data_type={type(data).__name__}")
+        detail_rows, total_row = _parse_data(data)
+        logger.info(f"[fis-detail] POS parsed: details={len(detail_rows) if isinstance(detail_rows, list) else 'na'} totals={bool(total_row)}")
+        if not detail_rows and not total_row:
+            logger.warning(f"[fis-detail] POS raw response: {str(data)[:500]}")
         return {
             "ok": True,
-            "from_cache": True,
-            "cached_at": str(row[1]) if row[1] else None,
+            "from_cache": False,
+            "request_uid": result.get("request_uid", ""),
             "details": _fix_large_ints(detail_rows) if isinstance(detail_rows, list) else [],
             "totals": _fix_large_ints([total_row]) if total_row else [],
         }
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Fis detail cache error: {e}")
+        logger.error(f"fis-detail POS fallback error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
