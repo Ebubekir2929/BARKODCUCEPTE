@@ -673,12 +673,89 @@ export default function CustomersScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Ekstre Summary */}
-            <View style={[styles.extreSummary, { borderBottomColor: colors.border }]}>
-              <View style={{ flex: 1, alignItems: 'center' }}><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('debt')}</Text><Text style={[{ fontSize: 14, fontWeight: '800', color: colors.error }]}>₺{extreSummary.borc.toFixed(2)}</Text></View>
-              <View style={{ flex: 1, alignItems: 'center' }}><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('credit')}</Text><Text style={[{ fontSize: 14, fontWeight: '800', color: colors.success }]}>₺{extreSummary.alacak.toFixed(2)}</Text></View>
-              <View style={{ flex: 1, alignItems: 'center' }}><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('balance_short')}</Text><Text style={[{ fontSize: 14, fontWeight: '800', color: colors.primary }]}>₺{extreSummary.bakiye.toFixed(2)}</Text></View>
-            </View>
+            {/* Ekstre Summary — 2026-05-13 Geliştirilmiş, anlaşılır kart */}
+            {(() => {
+              const fmt = (n: number) =>
+                '₺' + Math.abs(n).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+              const net = extreSummary.borc - extreSummary.alacak;
+              const bakiye = extreSummary.bakiye;
+              const isBorclu = bakiye > 0.005;
+              const isAlacakli = bakiye < -0.005;
+              const statusLabel = isBorclu ? t('debtor') : isAlacakli ? t('creditor') : t('balanced') || 'Kapalı';
+              const statusColor = isBorclu ? colors.error : isAlacakli ? colors.success : colors.textSecondary;
+              return (
+                <View style={{ paddingHorizontal: 12, paddingTop: 10, paddingBottom: 4, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                  {/* Bakiye hero card */}
+                  <View style={{
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                    backgroundColor: statusColor + '12', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14,
+                    borderWidth: 1, borderColor: statusColor + '30',
+                  }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                        Güncel Bakiye
+                      </Text>
+                      <Text style={{ fontSize: 22, fontWeight: '800', color: statusColor, marginTop: 2 }}>
+                        {fmt(bakiye)}
+                      </Text>
+                    </View>
+                    <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, backgroundColor: statusColor }}>
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: '#fff', letterSpacing: 0.3 }}>{statusLabel}</Text>
+                    </View>
+                  </View>
+
+                  {/* Dönem Hareketi: 2 mini-card */}
+                  <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                    <View style={{
+                      flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
+                      backgroundColor: colors.error + '10', borderRadius: 10, padding: 10,
+                      borderWidth: 1, borderColor: colors.error + '25',
+                    }}>
+                      <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: colors.error + '20', alignItems: 'center', justifyContent: 'center' }}>
+                        <Ionicons name="arrow-down" size={16} color={colors.error} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase' }}>Borç</Text>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: colors.error, marginTop: 1 }} numberOfLines={1} adjustsFontSizeToFit>
+                          {fmt(extreSummary.borc)}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={{
+                      flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
+                      backgroundColor: colors.success + '10', borderRadius: 10, padding: 10,
+                      borderWidth: 1, borderColor: colors.success + '25',
+                    }}>
+                      <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: colors.success + '20', alignItems: 'center', justifyContent: 'center' }}>
+                        <Ionicons name="arrow-up" size={16} color={colors.success} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase' }}>Alacak</Text>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: colors.success, marginTop: 1 }} numberOfLines={1} adjustsFontSizeToFit>
+                          {fmt(extreSummary.alacak)}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* Net hareket strip */}
+                  {Math.abs(net) > 0.005 && (
+                    <View style={{
+                      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                      marginTop: 8, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 8,
+                      backgroundColor: colors.card,
+                    }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: colors.textSecondary }}>
+                        Net Dönem Hareketi
+                      </Text>
+                      <Text style={{ fontSize: 13, fontWeight: '800', color: net > 0 ? colors.error : colors.success }}>
+                        {net > 0 ? '+' : '-'}{fmt(net)}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              );
+            })()}
 
             {/* Export buttons */}
             <View style={[{ flexDirection: 'row', paddingHorizontal: 12, paddingVertical: 6, gap: 8 }]}>
