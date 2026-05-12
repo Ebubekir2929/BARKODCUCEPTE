@@ -89,10 +89,14 @@ export default function CustomersScreen() {
 
   // Ekstre
   const [selectedCari, setSelectedCari] = useState<any | null>(null);
-  const [extreData, setExtreData] = useState<any[]>([]);
+  // 2026-05-13 — extreData artık React.useMemo ile extreRawData'dan türetiliyor
   const [extreLoading, setExtreLoading] = useState(false);
   const [extreStart, setExtreStart] = useState(getDefDates().start);
   const [extreEnd, setExtreEnd] = useState(getDefDates().end);
+  // 2026-05-13 — Cache aylık snapshot tutuyor; tam ay fetch edip kullanıcı
+  // tarihini client-side filtrele. Sadece ay dışına çıkınca yeniden fetch.
+  const [extreRawData, setExtreRawData] = useState<any[]>([]);
+  const [extreFetchedRange, setExtreFetchedRange] = useState<{ start: string; end: string; cariId: any } | null>(null);
 
   // Fiş
   const [selectedFis, setSelectedFis] = useState<any | null>(null);
@@ -300,6 +304,17 @@ export default function CustomersScreen() {
     return { borc, alacak, bakiye: borc - alacak, borcluCount: cariList.filter((c: any) => parseFloat(c.BAKIYE || '0') > 0).length, alacakliCount: cariList.filter((c: any) => parseFloat(c.BAKIYE || '0') < 0).length };
   }, [cariList]);
 
+  // Görüntülenen veri = raw fetched data + kullanıcı tarih filtresi (client-side)
+  // 2026-05-13 — extreData burada tanımlanıyor (extreSummary ve diğerleri için)
+  const extreData = React.useMemo(() => {
+    if (!extreRawData.length) return [];
+    return extreRawData.filter((r: any) => {
+      const t = (r.TARIH || '').slice(0, 10);
+      if (!t) return true; // tarihi yoksa göster (devreden satırı vs.)
+      return t >= extreStart && t <= extreEnd;
+    });
+  }, [extreRawData, extreStart, extreEnd]);
+
   // Ekstre totals
   const extreSummary = useMemo(() => {
     let borc = 0, alacak = 0;
@@ -308,32 +323,69 @@ export default function CustomersScreen() {
     return { borc, alacak, bakiye: lastBakiye };
   }, [extreData]);
 
-  // Open ekstre
+  // Helper: aylık aralık üret (verilen tarih → o ayın 1'i ile son günü)
+  const monthRangeFor = useCallback((dateStr: string) => {
+    const [y, m] = dateStr.slice(0, 10).split('-').map((v) => parseInt(v, 10));
+    const start = `${y}-${String(m).padStart(2, '0')}-01`;
+    const lastDay = new Date(y, m, 0).getDate();
+    const today = new Date();
+    const isCurMonth = (today.getFullYear() === y && (today.getMonth() + 1) === m);
+    const endDay = isCurMonth ? today.getDate() : lastDay;
+    const end = `${y}-${String(m).padStart(2, '0')}-${String(endDay).padStart(2, '0')}`;
+    return { start, end };
+  }, []);
+
+  // Open ekstre — 2026-05-13 Cache-aware: tam ay fetch + client-side filter
   const openCariDetail = useCallback(async (cari: any, sDate?: string, eDate?: string) => {
-    setSelectedCari(cari); setExtreData([]); setExtreLoading(true);
-    const sd = sDate || extreStart; const ed = eDate || extreEnd;
+    setSelectedCari(cari); setExtreRawData([]); setExtreLoading(true);
     const cariId = cari.KART || cari.ID;
     if (!cariId || !activeTenantId) { setExtreLoading(false); return; }
+    // 2026-05-13 — Her zaman aylık fetch yap; kullanıcı tarihini client-side filtrele.
+    // Bu sayede ay içindeki herhangi bir alt aralık seçiminde POS'a tekrar gitmez.
+    const userStart = sDate || extreStart;
+    const userEnd = eDate || extreEnd;
+    const range = monthRangeFor(userStart);
+    // Eğer kullanıcı aralığı tek ay içindeyse → tam ayı fetch et; aksi halde
+    // (örn: Mart-Mayıs aralığı seçilirse) kullanıcının seçtiği aralığı kullan.
+    const userStartMonth = userStart.slice(0, 7);
+    const userEndMonth = userEnd.slice(0, 7);
+    const fetchStart = userStartMonth === userEndMonth ? range.start : userStart;
+    const fetchEnd = userStartMonth === userEndMonth ? range.end : userEnd;
     try {
       const { token } = useAuthStore.getState();
       const resp = await fetch(`${API_URL}/api/data/cari-extre`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ tenant_id: activeTenantId, cari_id: cariId, doviz_ad: cari.DOVIZ_AD_ID || 1, tarih_baslangic: sd, tarih_bitis: ed }),
+        body: JSON.stringify({ tenant_id: activeTenantId, cari_id: cariId, doviz_ad: cari.DOVIZ_AD_ID || 1, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd }),
       });
       const data = await resp.json();
       if (data.ok && data.data) {
-        // Sort by date ascending (en eski en üstte)
         const sorted = [...data.data].sort((a: any, b: any) => {
           const da = a.TARIH || ''; const db = b.TARIH || '';
           return da.localeCompare(db);
         });
-        setExtreData(sorted);
-        // 2026-05-13 — Cache durumu (UI rozeti için)
+        setExtreRawData(sorted);
+        setExtreFetchedRange({ start: fetchStart, end: fetchEnd, cariId });
         setExtreFromCache(!!data.from_cache);
       }
     } catch (err) { console.error(err); }
     finally { setExtreLoading(false); }
-  }, [activeTenantId, extreStart, extreEnd]);
+  }, [activeTenantId, extreStart, extreEnd, monthRangeFor]);
+
+  // Tarih değişimi → eğer fetched range içinde → sadece client-side filtrele
+  // Dışındaysa → yeni fetch yap (otomatik)
+  React.useEffect(() => {
+    if (!selectedCari || !extreFetchedRange) return;
+    const cariId = selectedCari.KART || selectedCari.ID;
+    if (cariId !== extreFetchedRange.cariId) return;
+    // Kullanıcı aralığı fetched range içinde mi?
+    if (extreStart >= extreFetchedRange.start && extreEnd <= extreFetchedRange.end) {
+      // İçeride → fetch yok, sadece filtrele (extreData useMemo zaten yeniden hesaplar)
+      return;
+    }
+    // Dışarıda → yeniden fetch (geçmiş ayları çekmek için POS sorgusu olabilir)
+    openCariDetail(selectedCari, extreStart, extreEnd);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extreStart, extreEnd]);
 
   const refreshExtre = () => { if (selectedCari) openCariDetail(selectedCari, extreStart, extreEnd); };
 
@@ -648,12 +700,12 @@ export default function CustomersScreen() {
       />
 
       {/* Ekstre Modal */}
-      <Modal visible={!!selectedCari} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent onRequestClose={() => { setSelectedCari(null); setExtreData([]); }}>
+      <Modal visible={!!selectedCari} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent onRequestClose={() => { setSelectedCari(null); setExtreRawData([]); }}>
         <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }, Platform.OS === 'web' && isDesktop && [webStyles.cardDesktopWide, { borderColor: colors.border, maxWidth: 900 }]]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>{selectedCari?.AD || selectedCari?.CARI_ADI || t('statement')}</Text>
-              <TouchableOpacity onPress={() => { setSelectedCari(null); setExtreData([]); }}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
+              <TouchableOpacity onPress={() => { setSelectedCari(null); setExtreRawData([]); }}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             </View>
 
             {/* Date filter — Native DatePicker (2026-05-12) */}

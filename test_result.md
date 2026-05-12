@@ -579,14 +579,23 @@ frontend:
         comment: |
           2026-05-12 22:50 TR — Replaced TextInput date fields in Cari Ekstre
           modal with cross-platform DateField component
-          (/app/frontend/src/components/DateField.tsx). On native
-          (iOS/Android) opens system date picker; on Web renders HTML5
-          <input type="date">. Default range extended to "1st of previous
-          month → today" for better UX (was "1st of current month → today").
-          Fiş Detayı parsing already correct (uses data.details + data.totals
-          which matches backend response). Needs UI smoke test to confirm
-          date picker opens correctly and selecting a day refreshes the
-          extre list.
+          (/app/frontend/src/components/DateField.tsx).
+      - working: "NA"
+        agent: "main"
+        comment: |
+          2026-05-13 00:25 TR — Major Cari Ekstre overhaul:
+          1) Yeni "Güncel Bakiye" hero kart + ⚡ CACHE/🌥 CANLI rozeti +
+             Borç/Alacak mini-kartlar (ikonlu) + Net Dönem Hareketi stripi.
+          2) Türkçe sayı formatı (binlik nokta, ondalık virgül) eklendi.
+          3) Fiş Detayı toplamlarında "İskonto Toplamı" satırı
+             (SATIR_ISKONTO_TOPLAM + FIS_ISKONTO_TOPLAM) eklendi.
+          4) Client-side date filtering: ay içi tarih değişimleri artık POS'a
+             değil, sadece extreRawData üzerinde filter yapıyor. Sadece
+             fetched range dışına çıkıldığında refetch tetikleniyor.
+             extreData artık React.useMemo ile extreRawData'dan türetiliyor.
+          5) Default tarih: bu ayın 1'i → bugün (geri alındı).
+          6) Loading ekranında bilgilendirici alt-yazı.
+          Needs UI smoke test.
 
   - task: "Reports Screen"
     implemented: true

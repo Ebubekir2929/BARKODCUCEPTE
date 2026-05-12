@@ -1330,10 +1330,93 @@ export default function StockScreen() {
                     />
                   </View>
 
-                  {/* Sayım özet */}
-                  <Text style={[{ fontSize: 10, color: colors.textSecondary, marginBottom: 6 }]}>
-                    {filteredExtre.length} / {detailExtre.length} hareket
-                  </Text>
+                  {/* Sayım & Hareket özet — 2026-05-13 zenginleştirilmiş kart */}
+                  {(() => {
+                    let girisToplam = 0, cikisToplam = 0;
+                    filteredExtre.forEach((r: any) => {
+                      girisToplam += parseFloat(r.MIKTAR_GIRIS || '0');
+                      cikisToplam += parseFloat(r.MIKTAR_CIKIS || '0');
+                    });
+                    const netHareket = girisToplam - cikisToplam;
+                    // Son satırın BAKIYE alanı = döneme ait kapanış bakiyesi
+                    const lastBakiye = filteredExtre.length > 0
+                      ? parseFloat(filteredExtre[filteredExtre.length - 1].BAKIYE || '0')
+                      : 0;
+                    const birimText = (selectedStock?.STOK_BIRIM_FIYAT || selectedStock?.BIRIM || '').toString();
+                    const fmt = (n: number) => Math.abs(n).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+                    return (
+                      <View style={{ marginBottom: 10 }}>
+                        {/* Hero card — Kapanış Bakiyesi */}
+                        <View style={{
+                          flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                          backgroundColor: colors.primary + '12', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14,
+                          borderWidth: 1, borderColor: colors.primary + '30',
+                        }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                              Kapanış Bakiye
+                            </Text>
+                            <Text style={{ fontSize: 22, fontWeight: '800', color: colors.primary, marginTop: 2 }}>
+                              {fmt(lastBakiye)} <Text style={{ fontSize: 12, color: colors.textSecondary }}>{birimText}</Text>
+                            </Text>
+                          </View>
+                          <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, backgroundColor: colors.primary }}>
+                            <Text style={{ fontSize: 11, fontWeight: '800', color: '#fff', letterSpacing: 0.3 }}>
+                              {filteredExtre.length} / {detailExtre.length}
+                            </Text>
+                          </View>
+                        </View>
+                        {/* 2 mini card — Giriş / Çıkış */}
+                        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                          <View style={{
+                            flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
+                            backgroundColor: colors.success + '10', borderRadius: 10, padding: 10,
+                            borderWidth: 1, borderColor: colors.success + '25',
+                          }}>
+                            <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: colors.success + '20', alignItems: 'center', justifyContent: 'center' }}>
+                              <Ionicons name="arrow-up" size={16} color={colors.success} />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase' }}>Giriş</Text>
+                              <Text style={{ fontSize: 13, fontWeight: '800', color: colors.success, marginTop: 1 }} numberOfLines={1} adjustsFontSizeToFit>
+                                {fmt(girisToplam)}
+                              </Text>
+                            </View>
+                          </View>
+                          <View style={{
+                            flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8,
+                            backgroundColor: colors.error + '10', borderRadius: 10, padding: 10,
+                            borderWidth: 1, borderColor: colors.error + '25',
+                          }}>
+                            <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: colors.error + '20', alignItems: 'center', justifyContent: 'center' }}>
+                              <Ionicons name="arrow-down" size={16} color={colors.error} />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase' }}>Çıkış</Text>
+                              <Text style={{ fontSize: 13, fontWeight: '800', color: colors.error, marginTop: 1 }} numberOfLines={1} adjustsFontSizeToFit>
+                                {fmt(cikisToplam)}
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+                        {/* Net hareket strip */}
+                        {Math.abs(netHareket) > 0.001 && (
+                          <View style={{
+                            flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                            marginTop: 8, paddingVertical: 7, paddingHorizontal: 12, borderRadius: 8,
+                            backgroundColor: colors.card,
+                          }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: colors.textSecondary }}>
+                              Net Dönem Hareketi
+                            </Text>
+                            <Text style={{ fontSize: 13, fontWeight: '800', color: netHareket > 0 ? colors.success : colors.error }}>
+                              {netHareket > 0 ? '+' : '-'}{fmt(netHareket)} {birimText}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })()}
 
                   {/* Export buttons for ekstre */}
                   <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
