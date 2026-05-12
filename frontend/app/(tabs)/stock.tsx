@@ -1274,13 +1274,49 @@ export default function StockScreen() {
               <TouchableOpacity onPress={() => { setSelectedStock(null); setDetailMiktar([]); setDetailExtre([]); }}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
             </View>
             {selectedStock && (
-              <View style={[{ padding: 12, backgroundColor: colors.primary + '08', borderBottomWidth: 1, borderBottomColor: colors.border }]}>
-                <Text style={[{ fontSize: 12, color: colors.textSecondary }]}>{selectedStock.KOD || ''} · Barkod: {selectedStock.BARKOD || '-'}</Text>
-                <View style={{ flexDirection: 'row', gap: 16, marginTop: 6, flexWrap: 'wrap' }}>
-                  <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Satış</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: colors.primary }]}>₺{parseFloat(selectedStock.FIYAT || '0').toFixed(2)}</Text></View>
-                  {parseFloat(selectedStock.SON_ALIS_FIYAT || '0') > 0 && <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>Alış</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: colors.warning }]}>₺{parseFloat(selectedStock.SON_ALIS_FIYAT || '0').toFixed(2)}</Text></View>}
-                  {selectedStock.KDV_PAREKENDE && <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>KDV</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text }]}>%{String(selectedStock.KDV_PAREKENDE).replace('.00','')}</Text></View>}
-                  <View><Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('stock_label')}</Text><Text style={[{ fontSize: 16, fontWeight: '700', color: parseFloat(selectedStock.MIKTAR || '0') > 0 ? colors.success : colors.error }]}>{parseFloat(selectedStock.MIKTAR || '0').toFixed(2)}</Text></View>
+              <View style={{ paddingHorizontal: 12, paddingTop: 10, paddingBottom: 12, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                {/* Üst satır: Kod + Barkod */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+                  {!!selectedStock.KOD && (
+                    <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: colors.primary + '18' }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: colors.primary }}>{selectedStock.KOD}</Text>
+                    </View>
+                  )}
+                  {!!selectedStock.BARKOD && (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Ionicons name="barcode-outline" size={13} color={colors.textSecondary} />
+                      <Text style={{ fontSize: 11, color: colors.textSecondary, fontWeight: '600' }}>{selectedStock.BARKOD}</Text>
+                    </View>
+                  )}
+                </View>
+                {/* 4 kart: Satış / Alış / KDV / Stok */}
+                <View style={{ flexDirection: 'row', gap: 6 }}>
+                  <View style={{ flex: 1, backgroundColor: colors.primary + '12', borderRadius: 10, padding: 8, borderWidth: 1, borderColor: colors.primary + '25' }}>
+                    <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.3 }}>Satış</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '800', color: colors.primary, marginTop: 2 }} numberOfLines={1} adjustsFontSizeToFit>₺{parseFloat(selectedStock.FIYAT || '0').toFixed(2)}</Text>
+                  </View>
+                  {parseFloat(selectedStock.SON_ALIS_FIYAT || '0') > 0 && (
+                    <View style={{ flex: 1, backgroundColor: colors.warning + '12', borderRadius: 10, padding: 8, borderWidth: 1, borderColor: colors.warning + '25' }}>
+                      <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.3 }}>Alış</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '800', color: colors.warning, marginTop: 2 }} numberOfLines={1} adjustsFontSizeToFit>₺{parseFloat(selectedStock.SON_ALIS_FIYAT || '0').toFixed(2)}</Text>
+                    </View>
+                  )}
+                  {!!selectedStock.KDV_PAREKENDE && (
+                    <View style={{ width: 56, backgroundColor: colors.card, borderRadius: 10, padding: 8, borderWidth: 1, borderColor: colors.border }}>
+                      <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.3 }}>KDV</Text>
+                      <Text style={{ fontSize: 14, fontWeight: '800', color: colors.text, marginTop: 2 }}>%{String(selectedStock.KDV_PAREKENDE).replace('.00','').replace('.0','')}</Text>
+                    </View>
+                  )}
+                  {(() => {
+                    const m = parseFloat(selectedStock.MIKTAR || '0');
+                    const stockColor = m > 0 ? colors.success : m < 0 ? colors.error : colors.textSecondary;
+                    return (
+                      <View style={{ flex: 1, backgroundColor: stockColor + '12', borderRadius: 10, padding: 8, borderWidth: 1, borderColor: stockColor + '25' }}>
+                        <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.3 }}>Stok</Text>
+                        <Text style={{ fontSize: 14, fontWeight: '800', color: stockColor, marginTop: 2 }} numberOfLines={1} adjustsFontSizeToFit>{m.toFixed(2)}</Text>
+                      </View>
+                    );
+                  })()}
                 </View>
               </View>
             )}
