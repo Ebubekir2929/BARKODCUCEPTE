@@ -97,6 +97,8 @@ export default function CustomersScreen() {
   // Fiş
   const [selectedFis, setSelectedFis] = useState<any | null>(null);
   const [fisDetail, setFisDetail] = useState<any[]>([]);
+  // 2026-05-13 — Ekstre cache durum göstergesi (badge)
+  const [extreFromCache, setExtreFromCache] = useState<boolean>(false);
   const [fisTotals, setFisTotals] = useState<any | null>(null);
   const [fisLoading, setFisLoading] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
@@ -326,6 +328,8 @@ export default function CustomersScreen() {
           return da.localeCompare(db);
         });
         setExtreData(sorted);
+        // 2026-05-13 — Cache durumu (UI rozeti için)
+        setExtreFromCache(!!data.from_cache);
       }
     } catch (err) { console.error(err); }
     finally { setExtreLoading(false); }
@@ -692,9 +696,31 @@ export default function CustomersScreen() {
                     borderWidth: 1, borderColor: statusColor + '30',
                   }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                        Güncel Bakiye
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                          Güncel Bakiye
+                        </Text>
+                        {/* 2026-05-13 — Cache durum rozeti (POS canlı sorgu mu, cache mi) */}
+                        {extreData.length > 0 && (
+                          <View style={{
+                            paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
+                            backgroundColor: extreFromCache ? (colors.success + '20') : (colors.warning + '20'),
+                            flexDirection: 'row', alignItems: 'center', gap: 3,
+                          }}>
+                            <Ionicons
+                              name={extreFromCache ? 'flash' : 'cloud-download-outline'}
+                              size={9}
+                              color={extreFromCache ? colors.success : colors.warning}
+                            />
+                            <Text style={{
+                              fontSize: 8, fontWeight: '800', letterSpacing: 0.3,
+                              color: extreFromCache ? colors.success : colors.warning,
+                            }}>
+                              {extreFromCache ? 'CACHE' : 'CANLI'}
+                            </Text>
+                          </View>
+                        )}
+                      </View>
                       <Text style={{ fontSize: 22, fontWeight: '800', color: statusColor, marginTop: 2 }}>
                         {fmt(bakiye)}
                       </Text>
@@ -766,7 +792,13 @@ export default function CustomersScreen() {
 
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
               {extreLoading ? (
-                <View style={{ alignItems: 'center', paddingVertical: 40 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_statement')}</Text></View>
+                <View style={{ alignItems: 'center', paddingVertical: 40 }}>
+                  <ActivityIndicator size="large" color={colors.primary} />
+                  <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_statement')}</Text>
+                  <Text style={[{ fontSize: 11, color: colors.textSecondary, marginTop: 4, paddingHorizontal: 24, textAlign: 'center' }]}>
+                    Geçmiş tarihler ilk seferinde POS'tan getiriliyor (30-60 sn). Sonraki açılışlar anında olacak.
+                  </Text>
+                </View>
               ) : extreData.length > 0 ? (
                 extreData.map((row: any, idx: number) => {
                   const borc = parseFloat(row.BORC || '0');
