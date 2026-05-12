@@ -1838,13 +1838,16 @@ async def get_fis_detail(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """Fetch GetFisDetayVeToplam procedure for a specific receipt.
+    """Fetch fis detail + totals via dataset_key='fis_detay_toplam'.
     
-    2026-05-12 — Yeni procedure `GetFisDetayVeToplam @FisId`. Sync tarafında
-    dataset_key='fis_detay_ve_toplam' bu procedure'ı çağırır.
-    İki result set döner: [details], [totals].
+    PHP sync config:
+      dataset_key: fis_detay_toplam
+      sql: dbo.GetFisDetayVeToplam (yeni procedure)
+      params_order: [FisId]
+      multi_result: true  → İki result set: [details], [totals]
     
-    Fallback: eski dataset_key='fis_detay_toplam' (geriye uyumluluk).
+    2026-05-12 — Aylık fişler dataset_cache'e otomatik basılır; sadece
+    geçmiş/eski fişler request_create ile canlı sorgulanır (POS'a fallback).
     """
     tenant_id = body.get("tenant_id", "")
     fis_id = body.get("fis_id")
@@ -1852,57 +1855,48 @@ async def get_fis_detail(
     if not tenant_id or fis_id is None:
         raise HTTPException(status_code=400, detail="tenant_id ve fis_id gerekli")
     
-    last_error = None
-    for dataset_key in ("fis_detay_ve_toplam", "fis_detay_toplam"):
-        try:
-            result = await _on_demand_request(tenant_id, dataset_key, {
-                "FisId": int(fis_id),
-            }, timeout_sec=35, raw_cache=True)
-            
-            cache = result.get("cache", {})
-            data = cache.get("data", [])
-            
-            detail_rows = []
-            total_row = {}
-            
-            if isinstance(data, dict):
-                if "result_sets" in data:
-                    rs = data["result_sets"]
-                    if isinstance(rs, list) and len(rs) >= 1:
-                        detail_rows = rs[0] if isinstance(rs[0], list) else []
-                    if isinstance(rs, list) and len(rs) >= 2:
-                        totals = rs[1] if isinstance(rs[1], list) else []
-                        total_row = totals[0] if totals else {}
-                elif "details" in data:
-                    detail_rows = data.get("details", [])
-                    totals = data.get("totals", data.get("summary", []))
-                    total_row = totals[0] if isinstance(totals, list) and totals else {}
-            elif isinstance(data, list):
-                if len(data) >= 2 and isinstance(data[0], list):
-                    detail_rows = data[0]
-                    total_row = data[1][0] if isinstance(data[1], list) and data[1] else {}
-                else:
-                    detail_rows = data
-            
-            if detail_rows or total_row:
-                return {
-                    "ok": True,
-                    "request_uid": result.get("request_uid", ""),
-                    "dataset_key_used": dataset_key,
-                    "details": _fix_large_ints(detail_rows) if isinstance(detail_rows, list) else [],
-                    "totals": _fix_large_ints([total_row]) if total_row else [],
-                }
-        except HTTPException as he:
-            last_error = he
-            continue
-        except Exception as e:
-            logger.error(f"Fis detail error ({dataset_key}): {e}")
-            last_error = e
-            continue
-    
-    if isinstance(last_error, HTTPException):
-        raise last_error
-    raise HTTPException(status_code=500, detail=str(last_error) if last_error else "fis_detail_failed")
+    try:
+        result = await _on_demand_request(tenant_id, "fis_detay_toplam", {
+            "FisId": int(fis_id),
+        }, timeout_sec=35, raw_cache=True)
+        
+        cache = result.get("cache", {})
+        data = cache.get("data", [])
+        
+        detail_rows = []
+        total_row = {}
+        
+        if isinstance(data, dict):
+            if "result_sets" in data:
+                rs = data["result_sets"]
+                if isinstance(rs, list) and len(rs) >= 1:
+                    detail_rows = rs[0] if isinstance(rs[0], list) else []
+                if isinstance(rs, list) and len(rs) >= 2:
+                    totals = rs[1] if isinstance(rs[1], list) else []
+                    total_row = totals[0] if totals else {}
+            elif "details" in data:
+                detail_rows = data.get("details", [])
+                totals = data.get("totals", data.get("summary", []))
+                total_row = totals[0] if isinstance(totals, list) and totals else {}
+        elif isinstance(data, list):
+            if len(data) >= 2 and isinstance(data[0], list):
+                detail_rows = data[0]
+                total_row = data[1][0] if isinstance(data[1], list) and data[1] else {}
+            else:
+                detail_rows = data
+        
+        return {
+            "ok": True,
+            "request_uid": result.get("request_uid", ""),
+            "from_cache": bool(result.get("_cache_hit")),
+            "details": _fix_large_ints(detail_rows) if isinstance(detail_rows, list) else [],
+            "totals": _fix_large_ints([total_row]) if total_row else [],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Fis detail error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/high-sale-detail")

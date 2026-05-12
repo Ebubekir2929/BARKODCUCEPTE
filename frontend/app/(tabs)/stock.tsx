@@ -1368,7 +1368,16 @@ export default function StockScreen() {
                   ) : (
                   filteredExtre.map((row: any, idx: number) => {
                     const fisIdVal = row.BELGE_ID || row.FIS_ID || row.KAYIT_ID || row.ID || row.BELGEID || row.FIS;
-                    const hasFis = !!fisIdVal && String(fisIdVal).trim() !== '' && String(fisIdVal) !== '0' && String(fisIdVal).toLowerCase() !== 'null';
+                    // 2026-05-12 — Sadece GERÇEK fiş satırları tıklanabilir.
+                    // FIS_TURU içinde "Devir", "Açılış", "Düzeltme" geçen satırlarda
+                    // detay açılmaz çünkü bunlar fiş değil bilgi satırı.
+                    const fisTuruStr = String(row.FIS_TURU || '').toLowerCase();
+                    const isInfoRow = fisTuruStr.includes('devir') || fisTuruStr.includes('açılış')
+                      || fisTuruStr.includes('acilis') || fisTuruStr.includes('düzeltme')
+                      || fisTuruStr.includes('duzeltme');
+                    const hasFis = !isInfoRow && !!fisIdVal
+                      && String(fisIdVal).trim() !== '' && String(fisIdVal) !== '0'
+                      && String(fisIdVal).toLowerCase() !== 'null';
                     return (
                   <TouchableOpacity
                     key={idx}

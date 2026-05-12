@@ -690,7 +690,13 @@ export default function CustomersScreen() {
                   const bakiye = parseFloat(row.BAKIYE || '0');
                   // 2026-05-12 — POS sürümüne göre fiş id alanı farklı geliyor; hepsini kontrol et.
                   const fisIdVal = row.BELGE_ID || row.FIS_ID || row.KAYIT_ID || row.ID || row.BELGEID;
-                  const hasFis = !!fisIdVal && String(fisIdVal).trim() !== '' && String(fisIdVal) !== '0' && String(fisIdVal).toLowerCase() !== 'null';
+                  // 2026-05-12 — Sadece GERÇEK fiş satırları tıklanabilir.
+                  // FIS_TURU/BELGE_TIP "Devir", "Açılış" gibi bilgi satırlarında detay açılmaz.
+                  const turuStr = String(row.BELGE_TIP || row.FIS_TURU || row.ISLEM_TIP || '').toLowerCase();
+                  const isInfoRow = turuStr.includes('devir') || turuStr.includes('açılış')
+                    || turuStr.includes('acilis') || turuStr.includes('düzeltme')
+                    || turuStr.includes('duzeltme');
+                  const hasFis = !isInfoRow && !!fisIdVal && String(fisIdVal).trim() !== '' && String(fisIdVal) !== '0' && String(fisIdVal).toLowerCase() !== 'null';
                   return (
                     <TouchableOpacity key={idx} style={[styles.extreRow, { backgroundColor: colors.card, borderColor: colors.border }]} onPress={() => hasFis ? openFisDetail(row) : null} disabled={!hasFis} activeOpacity={hasFis ? 0.7 : 1}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
