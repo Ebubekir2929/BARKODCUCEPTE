@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gizlilik Politikası - Barkodcu Cepte</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 0 20px;
+      color: #1f2937;
+      line-height: 1.7;
+    }
+    h1 { color: #2563EB; border-bottom: 2px solid #2563EB; padding-bottom: 10px; }
+    h2 { color: #1e40af; margin-top: 32px; }
+    h3 { color: #374151; margin-top: 20px; }
+    a { color: #2563EB; }
+    ul { padding-left: 22px; }
+    .updated { color: #6b7280; font-size: 14px; font-style: italic; }
+    .lang-section { margin-bottom: 60px; padding-bottom: 40px; border-bottom: 1px solid #e5e7eb; }
+  </style>
+</head>
+<body>
+
+<div class="lang-section">
+<h1>Gizlilik Politikası — Barkodcu Cepte</h1>
+<p class="updated">Yürürlük tarihi: 8 Mayıs 2026</p>
+
+<p>
+Berk Yazılım ("biz", "bizi", "bizim") olarak "Barkodcu Cepte" mobil uygulamasını ("Uygulama") kullanırken
+kişisel verilerinizin gizliliğine önem veriyoruz. Bu Gizlilik Politikası, hangi bilgileri topladığımızı,
+nasıl kullandığımızı ve haklarınızı açıklar.
+</p>
+
+<h2>1. Topladığımız Bilgiler</h2>
+<h3>1.1 Hesap Bilgileri</h3>
+<ul>
+  <li>Ad, soyad</li>
+  <li>E-posta adresi</li>
+  <li>Şifre (yalnızca şifrelenmiş — bcrypt hash ile saklanır)</li>
+  <li>Firma/Tenant ID (POS sisteminize bağlanmak için)</li>
+</ul>
+
+<h3>1.2 Cihaz Bilgileri</h3>
+<ul>
+  <li>İşletim sistemi sürümü ve cihaz modeli (hata analizi için)</li>
+  <li>Push bildirim token'ı (FCM — Firebase Cloud Messaging)</li>
+  <li>Uygulama sürümü</li>
+</ul>
+
+<h3>1.3 POS / Satış Verileri</h3>
+<p>
+Uygulama, yetkili POS sistemine bağlanarak satış, stok, fiş, KDV ve müşteri verilerinizi okur.
+Bu veriler yalnızca size raporlama amacıyla gösterilir, üçüncü taraflara satılmaz veya paylaşılmaz.
+</p>
+
+<h3>1.4 Kamera</h3>
+<p>
+Barkod okuma özelliğini kullandığınızda kamera erişimi istenir. Kamera görüntüsü cihazınızdan
+ayrılmaz, sadece anlık olarak barkod kodunu çözmek için işlenir ve hiçbir yere kaydedilmez.
+</p>
+
+<h2>2. Bilgileri Nasıl Kullanırız</h2>
+<ul>
+  <li>Hesabınızı oluşturmak, korumak ve sizi tanıyabilmek</li>
+  <li>POS sisteminizden veri çekip dashboard, raporlar ve bildirimler oluşturmak</li>
+  <li>Eksi stok, yüksek satış ve iptal uyarılarını push bildirim olarak göndermek</li>
+  <li>Hizmet kalitesini iyileştirmek, hataları ayıklamak</li>
+  <li>Yasal yükümlülüklere uymak</li>
+</ul>
+
+<h2>3. Bilgi Paylaşımı</h2>
+<p>
+Kişisel verilerinizi <strong>satmayız</strong>. Veriler yalnızca aşağıdaki durumlarda paylaşılır:
+</p>
+<ul>
+  <li><strong>Hizmet sağlayıcılar:</strong> Push bildirimleri için Firebase (Google), backend için Railway / barındırma altyapımız</li>
+  <li><strong>Yasal zorunluluk:</strong> Mahkeme kararı veya yasal talep durumunda</li>
+  <li><strong>Onayınızla:</strong> Açık rızanız olduğu durumlarda</li>
+</ul>
+
+<h2>4. Veri Saklama Süresi</h2>
+<p>
+Hesap aktif olduğu sürece verileriniz saklanır. Hesabınızı sildiğinizde, kişisel veriler
+30 gün içinde kalıcı olarak silinir. Yasal kayıt zorunluluğu olan veriler (faturalama vb.)
+ilgili mevzuat süresi boyunca tutulur.
+</p>
+
+<h2>5. Güvenlik</h2>
+<ul>
+  <li>Tüm iletişim HTTPS/TLS ile şifrelenir</li>
+  <li>Şifreler bcrypt hash algoritmasıyla saklanır, asla düz metin tutulmaz</li>
+  <li>Veri tabanına yalnızca yetkili sunucu erişebilir</li>
+  <li>Düzenli güvenlik güncellemeleri uygulanır</li>
+</ul>
+
+<h2>6. Çocukların Gizliliği</h2>
+<p>
+Uygulamamız 18 yaş altı kullanıcılar için tasarlanmamıştır ve bilerek 18 yaş altından
+kişisel veri toplamayız.
+</p>
+
+<h2>7. Haklarınız (KVKK)</h2>
+<p>
+6698 sayılı Kişisel Verilerin Korunması Kanunu kapsamında şu haklara sahipsiniz:
+</p>
+<ul>
+  <li>Verilerinize erişme</li>
+  <li>Düzeltme talep etme</li>
+  <li>Silinmesini isteme</li>
+  <li>İşleme itiraz etme</li>
+  <li>Veri taşınabilirliği</li>
+</ul>
+<p>
+Bu hakları kullanmak için <a href="mailto:destek@berkyazilim.com">destek@berkyazilim.com</a>
+adresine yazabilirsiniz.
+</p>
+
+<h2>8. Değişiklikler</h2>
+<p>
+Bu politikayı zaman zaman güncelleyebiliriz. Önemli değişikliklerde uygulama içinden veya
+e-posta ile bilgilendirme yaparız. Yürürlük tarihi yukarıda gösterilmiştir.
+</p>
+
+<h2>9. İletişim</h2>
+<p>
+Gizlilik politikamızla ilgili sorularınız için:<br>
+<strong>Berk Yazılım</strong><br>
+E-posta: <a href="mailto:destek@berkyazilim.com">destek@berkyazilim.com</a>
+</p>
+</div>
+
+<!-- ============ ENGLISH ============ -->
+
+<div class="lang-section">
+<h1>Privacy Policy — Barkodcu Cepte (English)</h1>
+<p class="updated">Effective Date: May 8, 2026</p>
+
+<p>
+Berk Yazılım ("we", "us", "our") respects your privacy. This Privacy Policy explains
+what information we collect when you use the "Barkodcu Cepte" mobile application
+("the App") and how we use it.
+</p>
+
+<h2>1. Information We Collect</h2>
+<h3>1.1 Account Data</h3>
+<ul>
+  <li>Name and surname</li>
+  <li>Email address</li>
+  <li>Password (stored only as a bcrypt hash, never in plain text)</li>
+  <li>Tenant/Company ID to connect to your POS system</li>
+</ul>
+
+<h3>1.2 Device Data</h3>
+<ul>
+  <li>OS version and device model (for crash analytics)</li>
+  <li>Push notification token (Firebase Cloud Messaging)</li>
+  <li>App version</li>
+</ul>
+
+<h3>1.3 POS / Sales Data</h3>
+<p>
+The App connects to your authorized POS system to read sales, inventory, receipts,
+VAT and customer data. This data is shown to you only for reporting purposes and
+is never sold or shared with third parties.
+</p>
+
+<h3>1.4 Camera</h3>
+<p>
+Camera access is requested when you scan a barcode. The camera feed never leaves your
+device — it is only processed in real time to decode the barcode and is never saved.
+</p>
+
+<h2>2. How We Use Information</h2>
+<ul>
+  <li>To create and maintain your account</li>
+  <li>To pull data from your POS and generate dashboards, reports, and notifications</li>
+  <li>To send push notifications for low stock, high sales, and cancellation alerts</li>
+  <li>To improve service quality and fix bugs</li>
+  <li>To comply with legal obligations</li>
+</ul>
+
+<h2>3. Data Sharing</h2>
+<p>We do <strong>not sell</strong> your personal data. We share data only with:</p>
+<ul>
+  <li><strong>Service providers:</strong> Firebase (Google) for push notifications,
+      our hosting infrastructure (Railway)</li>
+  <li><strong>Legal requirements:</strong> Court orders or lawful requests</li>
+  <li><strong>With your consent:</strong> When you give us explicit permission</li>
+</ul>
+
+<h2>4. Data Retention</h2>
+<p>
+Your data is kept as long as your account is active. When you delete your account,
+personal data is permanently deleted within 30 days. Data subject to legal retention
+laws (e.g., financial records) is kept for the legally required period.
+</p>
+
+<h2>5. Security</h2>
+<ul>
+  <li>All communication uses HTTPS/TLS encryption</li>
+  <li>Passwords are stored as bcrypt hashes</li>
+  <li>Database is accessible only to authorized servers</li>
+  <li>Regular security updates are applied</li>
+</ul>
+
+<h2>6. Children's Privacy</h2>
+<p>
+Our App is not intended for users under 18. We do not knowingly collect personal
+data from anyone under 18.
+</p>
+
+<h2>7. Your Rights (GDPR)</h2>
+<p>You have the right to:</p>
+<ul>
+  <li>Access your data</li>
+  <li>Request correction</li>
+  <li>Request deletion</li>
+  <li>Object to processing</li>
+  <li>Data portability</li>
+</ul>
+<p>
+To exercise these rights, email
+<a href="mailto:destek@berkyazilim.com">destek@berkyazilim.com</a>.
+</p>
+
+<h2>8. Changes</h2>
+<p>
+We may update this policy occasionally. We will notify you of significant changes
+through the app or email. The effective date is shown above.
+</p>
+
+<h2>9. Contact</h2>
+<p>
+For questions about this Privacy Policy:<br>
+<strong>Berk Yazılım</strong><br>
+Email: <a href="mailto:destek@berkyazilim.com">destek@berkyazilim.com</a>
+</p>
+</div>
+
+</body>
+</html>
