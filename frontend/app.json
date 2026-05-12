@@ -10,7 +10,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.berkyazilim.barkodcucepte",
+      "bundleIdentifier": "com.cakmakebubekir.barkodcucepte",
       "buildNumber": "1",
       "infoPlist": {
         "NSCameraUsageDescription": "Barkod tarama için kamera kullanılır",
@@ -18,7 +18,7 @@
       }
     },
     "android": {
-      "package": "com.berkyazilim.barkodcucepte",
+      "package": "com.cakmakebubekir.barkodcucepte",
       "versionCode": 1,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
