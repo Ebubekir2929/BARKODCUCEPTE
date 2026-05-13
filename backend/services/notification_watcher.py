@@ -464,7 +464,8 @@ async def _check_tenant_for_user(
                 lokasyon = str(r.get("LOKASYON") or "").strip()
                 fis_no = str(r.get("FIS_NO") or r.get("BELGE_NO") or r.get("BELGENO") or "").strip()
                 try:
-                    tutar = float(r.get("TUTAR") or 0)
+                    # 2026-05-13 — Cache'te TUTAR=null, gerçek tutar IPTAL_TUTAR'da.
+                    tutar = float(r.get("IPTAL_TUTAR") or r.get("TUTAR") or 0)
                 except (TypeError, ValueError):
                     tutar = 0.0
                 detay_satir = r.get("DETAY_SATIR_SAYISI") or 0
@@ -1013,7 +1014,8 @@ async def _scan_cancellations_for_tenant(tenant: Dict[str, Any]) -> int:
         lokasyon = str(row.get("LOKASYON") or "").strip()
         fis_no = str(row.get("FIS_NO") or row.get("BELGE_NO") or row.get("BELGENO") or "").strip()
         try:
-            tutar = float(row.get("TUTAR") or 0)
+            # 2026-05-13 — Cache'te TUTAR=null, gerçek tutar IPTAL_TUTAR'da.
+            tutar = float(row.get("IPTAL_TUTAR") or row.get("TUTAR") or 0)
         except (TypeError, ValueError):
             tutar = 0.0
         detay_satir = row.get("DETAY_SATIR_SAYISI") or 0
