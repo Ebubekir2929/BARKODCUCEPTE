@@ -1365,30 +1365,21 @@ async def get_iptal_detail(
         return {}
 
     try:
-        # Step 1 — try cache
+        # Step 1 — read straight from cache (web side keeps iptal_detay cache
+        # fully populated with header + line items; no fresh POS request needed)
         result = await _on_demand_request(tenant_id, "iptal_detay", params)
         line_items = _extract_line_items(result)
         header = _extract_header(result)
 
-        # Step 2 — cache returned only headers → force fresh sync.php call
+        # 2026-05-13 — Eski "cache had no line items → forcing sync.php" mantığı
+        # kaldırıldı. Kasacepte web tarafı iptal_detay cache'ini her zaman
+        # tam payload (BARKOD, STOK_ADI, MIKTAR, SATIR_TUTAR…) ile yazıyor.
+        # Ekstra POS request iptal modalını gereksiz yere geciktiriyordu.
         if not line_items:
             logger.info(
-                f"[iptal-detail] cache had no line items for IPTAL_ID={iptal_id}, "
-                f"forcing sync.php request_create"
+                f"[iptal-detail] cache miss/empty for IPTAL_ID={iptal_id} tenant={tenant_id} "
+                f"— returning header-only payload (no POS fallback)"
             )
-            try:
-                result = await _on_demand_request(
-                    tenant_id,
-                    "iptal_detay",
-                    params,
-                    timeout_sec=30,
-                    skip_mysql_cache=True,
-                )
-                line_items = _extract_line_items(result)
-                if not header:
-                    header = _extract_header(result)
-            except Exception as e_fresh:
-                logger.warning(f"[iptal-detail] fresh sync.php failed: {e_fresh}")
 
         # Return product rows + header info — modal uses header for LOKASYON/MASA/etc
         if isinstance(result, dict):

@@ -1060,63 +1060,16 @@ async def _scan_cancellations_for_tenant(tenant: Dict[str, Any]) -> int:
                 f"type={evt_type} iptal_id={iptal_id} tutar={tutar:.2f}"
             )
 
-        # 2026-05-13 — Preload: push gönderdikten hemen sonra, iptal'in line item
-        # detayını ARKA PLANDA POS'tan çekip cache'e yaz. Kullanıcı bildirime
-        # tıkladığında detay zaten cache'te bulunur → modal anında açılır.
-        try:
-            iptal_id_int = int(iptal_id) if iptal_id else 0
-            if iptal_id_int > 0:
-                asyncio.create_task(
-                    _preload_iptal_detail(tenant_id, iptal_id_int)
-                )
-        except Exception as e_pre:
-            logger.debug(f"[cancellations_loop] preload schedule error: {e_pre}")
-
     return pushed
 
 
+# 2026-05-13 — Kasacepte web tarafı `iptal_detay` cache'ini header + line items
+# (BARKOD, STOK_ADI, MIKTAR, SATIR_TUTAR vs.) ile birlikte zaten dolduruyor.
+# Preload fonksiyonu kaldırıldı — gereksiz POS request_create tetikliyordu.
 async def _preload_iptal_detail(tenant_id: str, iptal_id: int) -> None:
-    """Trigger a POS request for iptal_detail (scope='iptal_detail') so the
-    line-item rows are cached before the user taps the notification.
-
-    Runs in the background; failures are silently swallowed (best-effort).
-    """
-    try:
-        from datetime import datetime as _dt
-        # Check if already cached with line items
-        cached_params = {"IPTAL_ID": iptal_id, "scope": "iptal_detail"}
-        try:
-            from services.dataset_cache import lookup_cached_report
-            cached = await lookup_cached_report(tenant_id, "iptal_detay", cached_params)
-        except Exception:
-            cached = None
-        if cached is not None:
-            data = cached.get("data")
-            if isinstance(data, list):
-                has_line_items = any(
-                    isinstance(r, dict) and r.get("SATIR_MI") in (True, 1, "1", "true")
-                    for r in data
-                )
-                if has_line_items:
-                    logger.info(
-                        f"[preload_iptal] iptal_id={iptal_id} already cached with line items, skip"
-                    )
-                    return
-        # Fire a fresh POS request via the shared _on_demand_request helper.
-        from routes.data import _on_demand_request  # local import to avoid circular
-        today = _dt.now()
-        sdate = today.replace(hour=0, minute=0, second=0).strftime("%Y-%m-%d %H:%M:%S")
-        edate = today.replace(hour=23, minute=59, second=59).strftime("%Y-%m-%d %H:%M:%S")
-        await _on_demand_request(
-            tenant_id, "iptal_detay",
-            {"IPTAL_ID": iptal_id, "scope": "iptal_detail",
-             "tarih_baslangic": sdate, "tarih_bitis": edate},
-            timeout_sec=45,
-            skip_mysql_cache=True,  # bypass header-only cache, force fresh
-        )
-        logger.info(f"[preload_iptal] ✅ tenant={tenant_id} iptal_id={iptal_id} detail cached")
-    except Exception as e:
-        logger.debug(f"[preload_iptal] failed iptal_id={iptal_id}: {e}")
+    """Deprecated 2026-05-13 — Cache is already fully populated by the web side;
+    no extra POS request is needed. Kept as a no-op for API compatibility."""
+    return
 
 
 async def _collect_low_stock_subscribers() -> List[Dict[str, Any]]:
