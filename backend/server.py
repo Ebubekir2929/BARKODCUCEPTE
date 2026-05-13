@@ -87,6 +87,40 @@ async def privacy_policy():
     return HTMLResponse("<h1>Gizlilik Politikası</h1><p>Yakında.</p>")
 
 
+# 2026-05-13 — Play Store asset serving (temporary helper for owner downloads)
+@app.get("/api/play-assets/{filename:path}", include_in_schema=False)
+async def play_assets(filename: str):
+    """Serve files under /app/docs/play-assets (feature graphic, screenshots, zip)."""
+    safe = filename.replace("..", "").lstrip("/")
+    fp = Path("/app/docs/play-assets") / safe
+    if not fp.exists() or not fp.is_file():
+        return HTMLResponse(f"<h3>Bulunamadı: {safe}</h3>", status_code=404)
+    media = "application/octet-stream"
+    s = safe.lower()
+    if s.endswith(".png"): media = "image/png"
+    elif s.endswith(".jpg") or s.endswith(".jpeg"): media = "image/jpeg"
+    elif s.endswith(".zip"): media = "application/zip"
+    return FileResponse(str(fp), media_type=media, filename=fp.name)
+
+
+@app.get("/api/play-assets", response_class=HTMLResponse, include_in_schema=False)
+async def play_assets_index():
+    """Tiny HTML index page listing all play-assets files."""
+    root = Path("/app/docs/play-assets")
+    items: list[str] = []
+    for f in sorted(root.rglob("*.*")):
+        rel = f.relative_to(root).as_posix()
+        size_kb = f.stat().st_size // 1024
+        items.append(f'<li><a href="/api/play-assets/{rel}">{rel}</a> <small>({size_kb} KB)</small></li>')
+    html = (
+        '<html><head><meta charset="utf-8"><title>Play Store Assets</title>'
+        '<style>body{font-family:system-ui;padding:24px;max-width:720px;margin:auto}'
+        'li{padding:6px 0;border-bottom:1px solid #eee}a{color:#0a7}</style></head>'
+        f'<body><h2>Barkodcu Cepte — Play Store Assets</h2><ul>{"".join(items)}</ul></body></html>'
+    )
+    return HTMLResponse(html)
+
+
 @app.on_event("startup")
 async def startup():
     # MySQL pool init'leri ARKA PLANDA başlasın ki uygulama port'a anında bağlansın
