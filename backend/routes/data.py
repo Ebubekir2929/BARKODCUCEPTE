@@ -2262,6 +2262,62 @@ async def get_high_sale_detail(
             except Exception as e_fb:
                 logger.info(f"[high-sale-detail] fis_detay_toplam fallback failed: {e_fb}")
 
+        # 2026-05-13 — Aggregate KDV + İskonto + Kalem from DETAYLAR into
+        # the totals row. The feed row itself only carries TUTAR / DETAY_TOPLAM_*
+        # but the frontend HighSaleDetailModal reads `totals.KDV_TUTAR` /
+        # `totals.ISKONTO_TUTAR` / `totals.KALEM_SAYISI`. Compute them now so
+        # the modal can render values directly from cache (no extra calls).
+        try:
+            if isinstance(row, dict) and isinstance(details, list) and details:
+                kdv_sum = 0.0
+                isk_sum = 0.0
+                net_sum = 0.0
+                kalem = 0
+                for d in details:
+                    if not isinstance(d, dict):
+                        continue
+                    kalem += 1
+                    try:
+                        kdv_sum += float(
+                            d.get("KDV_TUTARI") or d.get("KDV_TUTAR") or 0
+                        )
+                    except (TypeError, ValueError):
+                        pass
+                    try:
+                        isk_sum += float(
+                            d.get("TOPLAM_ISKONTO_TUTARI")
+                            or d.get("SATIR_ISKONTO_TUTARI")
+                            or d.get("ISKONTO_TUTARI")
+                            or d.get("INDIRIM_TUTARI")
+                            or 0
+                        )
+                    except (TypeError, ValueError):
+                        pass
+                    try:
+                        net_sum += float(
+                            d.get("KDV_DAHIL_NET_TUTAR")
+                            or d.get("DAHIL_TUTAR")
+                            or d.get("NET_TUTAR")
+                            or d.get("TUTAR")
+                            or 0
+                        )
+                    except (TypeError, ValueError):
+                        pass
+                # Write back to the totals row (frontend expects flat fields)
+                row = dict(row)
+                row["KDV_TUTAR"] = round(kdv_sum, 2)
+                row["KDV_TUTARI"] = round(kdv_sum, 2)
+                row["ISKONTO_TUTAR"] = round(isk_sum, 2)
+                row["TOPLAM_ISKONTO_TUTARI"] = round(isk_sum, 2)
+                row["INDIRIM_TUTAR"] = round(isk_sum, 2)
+                row["KALEM_SAYISI"] = kalem
+                row["TOPLAM"] = round(net_sum, 2)
+                # Fallback: if main TUTAR is missing/0 but details summed to a real value
+                if not row.get("TUTAR") and net_sum:
+                    row["TUTAR"] = round(net_sum, 2)
+        except Exception as _e_agg:
+            logger.debug(f"[high-sale-detail] totals aggregation failed: {_e_agg}")
+
         return {
             "ok": True,
             "_source": result.get("_source", "unknown"),
