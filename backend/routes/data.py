@@ -1435,6 +1435,24 @@ async def get_iptal_detail(
             result = bulk_result if isinstance(bulk_result, dict) else result
 
         # Return product rows + header info — modal uses header for LOKASYON/MASA/etc
+        # 2026-05-13 — Normalize header.TUTAR from IPTAL_TUTAR (cache stores
+        # the receipt amount in IPTAL_TUTAR but frontend reads TUTAR).
+        if header:
+            ipt_tutar = header.get("IPTAL_TUTAR") if isinstance(header, dict) else None
+            if ipt_tutar in (None, "", 0, "0"):
+                # Fallback: sum SATIR_TUTAR of line items
+                try:
+                    ipt_tutar = sum(
+                        float(r.get("SATIR_TUTAR") or 0) for r in line_items
+                    )
+                except (TypeError, ValueError):
+                    ipt_tutar = 0
+            if not header.get("TUTAR"):
+                header["TUTAR"] = ipt_tutar
+            header["IPTAL_TUTAR"] = ipt_tutar
+            if not header.get("DETAY_SATIR_SAYISI"):
+                header["DETAY_SATIR_SAYISI"] = len(line_items)
+
         if isinstance(result, dict):
             result["data"] = _fix_large_ints(line_items)
             result["header"] = _fix_large_ints(header) if header else {}
@@ -1521,14 +1539,42 @@ async def get_iptal_list(
                 logger.warning(f"Iptal list for {dt}: {e}")
                 continue
         
-        # Deduplicate by IPTAL_ID
+        # Deduplicate by IPTAL_ID + normalize TUTAR field
+        # 2026-05-13 — Cache rows have IPTAL_TUTAR populated but TUTAR=null.
+        # Frontend reads `item.TUTAR` for the receipt amount, so copy
+        # IPTAL_TUTAR → TUTAR before returning. Also compute SATIR_TUTAR
+        # sum across all line-items for the receipt as a sanity check.
+        from collections import defaultdict
+        iptal_groups: dict = defaultdict(list)
+        for item in all_data:
+            iid = item.get("IPTAL_ID")
+            if iid:
+                iptal_groups[iid].append(item)
         seen = set()
         unique_data = []
         for item in all_data:
             iptal_id = item.get("IPTAL_ID")
             if iptal_id and iptal_id not in seen:
                 seen.add(iptal_id)
-                unique_data.append(item)
+                # Build a per-iptal summary using the first row + aggregate
+                merged = dict(item)
+                group = iptal_groups.get(iptal_id, [item])
+                # Receipt amount: prefer IPTAL_TUTAR; fallback to sum(SATIR_TUTAR)
+                ipt_tutar = item.get("IPTAL_TUTAR")
+                if ipt_tutar in (None, "", 0, "0"):
+                    try:
+                        ipt_tutar = sum(
+                            float(r.get("SATIR_TUTAR") or 0) for r in group
+                        )
+                    except (TypeError, ValueError):
+                        ipt_tutar = 0
+                # Expose TUTAR for the frontend (it reads item.TUTAR)
+                merged["TUTAR"] = ipt_tutar
+                merged["IPTAL_TUTAR"] = ipt_tutar
+                # Line item count (frontend shows DETAY_SATIR_SAYISI)
+                if not merged.get("DETAY_SATIR_SAYISI"):
+                    merged["DETAY_SATIR_SAYISI"] = len(group)
+                unique_data.append(merged)
         
         return {
             "ok": True,
