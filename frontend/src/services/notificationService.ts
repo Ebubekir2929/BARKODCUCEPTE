@@ -69,15 +69,26 @@ class NotificationService {
 
       let tokenData: any = null;
       try {
-        tokenData = projectId
-          ? await Notifications.getExpoPushTokenAsync({ projectId })
-          : await Notifications.getExpoPushTokenAsync();
+        // 2026-05-13 — Android: use native FCM v1 device token (bypass Expo Push)
+        // because the new package identifier (com.cakmakebubekir.barkodcucepte)
+        // doesn't have an FCM server key registered on the Expo backend, causing
+        // `InvalidCredentials - Unable to retrieve FCM server key` errors.
+        // Our backend's FCM v1 sender handles raw FCM tokens directly.
+        // iOS keeps the Expo Push route (APN doesn't need a server key on Expo).
+        if (Platform.OS === 'android') {
+          tokenData = await Notifications.getDevicePushTokenAsync();
+          console.log('[push] Got Android FCM device token (direct FCM v1)');
+        } else {
+          tokenData = projectId
+            ? await Notifications.getExpoPushTokenAsync({ projectId })
+            : await Notifications.getExpoPushTokenAsync();
+        }
       } catch (tokenErr: any) {
         // Re-throw with a clear message so the Settings screen can show the real reason
         const msg = tokenErr?.message || String(tokenErr);
         throw new Error(
-          `Expo getExpoPushTokenAsync() hatası:\n${msg}\n\n` +
-          `projectId=${projectId || '(boş)'}\n\n` +
+          `Push token alma hatası:\n${msg}\n\n` +
+          `projectId=${projectId || '(boş)'} platform=${Platform.OS}\n\n` +
           `Bu hata genellikle Firebase/FCM kurulumunun eksik olmasından kaynaklanır.`,
         );
       }
