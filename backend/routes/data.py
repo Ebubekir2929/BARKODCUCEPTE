@@ -46,13 +46,22 @@ REQUEST_ALLOWED_DATASETS: set = {
     "stok_bilgi_miktar",   # stock quantity per location (paired with stok_extre)
     "kart_extre_cari",     # customer ledger (acik_hesap_kisi_detail / cari_detail)
     "fis_detay_toplam",    # receipt detail (table-detail drill-down)
-    "iptal_detay",         # cancellation line items (drill into a specific IPTAL_ID)
-                           # — blob cache only has headers (SATIR_MI=false); the
-                           # product line items must come from POS on-demand.
+    # 2026-05-13 — `iptal_detay` removed from whitelist. Kasacepte web tarafı
+    # `iptal_detay` cache'ini her zaman full payload (BARKOD, STOK_ADI, MIKTAR,
+    # SATIR_TUTAR vs.) ile yazıyor. POS request_create gereksiz ve modal'ı
+    # geciktiriyordu. Cache miss durumunda boş [] dönecek.
     # Legacy reports screen still needs live data from POS (rap_fis_kalem_listesi_web,
     # rap_cari_hesap_ekstresi_web, rap_personel_satis, rap_gunluk_ozet, …) covered by
     # the rap_ prefix in `_is_request_create_allowed` (rap_filtre_lookup is denied
     # there because its data lives in the dataset_cache blob too).
+}
+
+# 2026-05-13 — Hard DENY list: even rap_* prefix matches, never fall through to
+# POS for these. Their data lives entirely in dataset_cache (filled by the web
+# side / nightly sync). Routing them through sync.php was wasting 30-120 sn.
+_RAP_DENY: set = {
+    "rap_filtre_lookup",
+    "rap_acik_hesap_kisi_ozet_web",  # Cari özet — web zaten cache'liyor
 }
 
 def _is_request_create_allowed(dataset_key: str) -> bool:
@@ -64,12 +73,11 @@ def _is_request_create_allowed(dataset_key: str) -> bool:
     """
     if not dataset_key:
         return False
-    # Hard-denies: filter lookups and other "must be cached" datasets.
-    # Reports filter dropdowns (Fiş Türü, Fiş Alt Tür, Kasiyer, etc.) come
-    # from rap_filtre_lookup which the POS sync keeps refreshed in the rows
-    # table. No request_create is needed or wanted here — user explicitly
-    # complained about "Seçenekler yükleniyor..." spinner (sync.php timeout).
-    if dataset_key == "rap_filtre_lookup":
+    # Hard-denies (2026-05-13): filter lookups, cari summary, and any other
+    # "must be cached" datasets. Reports filter dropdowns come from
+    # rap_filtre_lookup; cari özet (rap_acik_hesap_kisi_ozet_web) is filled
+    # by the web side cache. Both should never trigger sync.php round-trips.
+    if dataset_key in _RAP_DENY:
         return False
     if dataset_key in REQUEST_ALLOWED_DATASETS:
         return True
