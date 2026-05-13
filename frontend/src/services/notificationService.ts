@@ -69,16 +69,16 @@ class NotificationService {
 
       let tokenData: any = null;
       try {
-        // 2026-05-13 — Android: use native FCM v1 device token (bypass Expo Push)
-        // because the new package identifier (com.cakmakebubekir.barkodcucepte)
-        // doesn't have an FCM server key registered on the Expo backend, causing
-        // `InvalidCredentials - Unable to retrieve FCM server key` errors.
-        // Our backend's FCM v1 sender handles raw FCM tokens directly.
-        // iOS keeps the Expo Push route (APN doesn't need a server key on Expo).
-        if (Platform.OS === 'android') {
+        // 2026-05-13 — Hem Android hem iOS için native device token (FCM/APNs)
+        // kullan, Expo Push aracılığını atla. Yeni paket adına Expo backend FCM
+        // server key tanımı eksik olduğu için Expo Push 'InvalidCredentials'
+        // hatası veriyordu. Firebase Admin SDK (FCM v1) doğrudan Android FCM
+        // tokens ve iOS APNs/FCM tokens'a route ediyor.
+        if (Platform.OS === 'android' || Platform.OS === 'ios') {
           tokenData = await Notifications.getDevicePushTokenAsync();
-          console.log('[push] Got Android FCM device token (direct FCM v1)');
+          console.log(`[push] Got native ${Platform.OS} device token`);
         } else {
+          // Web fallback (very rare in production)
           tokenData = projectId
             ? await Notifications.getExpoPushTokenAsync({ projectId })
             : await Notifications.getExpoPushTokenAsync();

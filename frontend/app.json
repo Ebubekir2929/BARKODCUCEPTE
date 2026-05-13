@@ -12,9 +12,11 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.cakmakebubekir.barkodcucepte",
       "buildNumber": "1",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSCameraUsageDescription": "Barkod tarama için kamera kullanılır",
-        "NSPhotoLibraryUsageDescription": "Raporları kaydetmek için galeri erişimi gerekli"
+        "NSPhotoLibraryUsageDescription": "Raporları kaydetmek için galeri erişimi gerekli",
+        "UIBackgroundModes": ["remote-notification"]
       }
     },
     "android": {
