@@ -46,10 +46,11 @@ REQUEST_ALLOWED_DATASETS: set = {
     "stok_bilgi_miktar",   # stock quantity per location (paired with stok_extre)
     "kart_extre_cari",     # customer ledger (acik_hesap_kisi_detail / cari_detail)
     "fis_detay_toplam",    # receipt detail (table-detail drill-down)
-    # 2026-05-13 — `iptal_detay` removed from whitelist. Kasacepte web tarafı
-    # `iptal_detay` cache'ini her zaman full payload (BARKOD, STOK_ADI, MIKTAR,
-    # SATIR_TUTAR vs.) ile yazıyor. POS request_create gereksiz ve modal'ı
-    # geciktiriyordu. Cache miss durumunda boş [] dönecek.
+    # 2026-05-13 — iptal_detay yeniden whitelist'te. Frontend için cache-only
+    # (cache_only=True flag) ile cache miss → boş döner; arka plandaki
+    # _preload_iptal_individual_cache POS'a request_create atıp bireysel
+    # cache satırı oluşturur, böylece bir sonraki tıklamada line items hazır.
+    "iptal_detay",
     # Legacy reports screen still needs live data from POS (rap_fis_kalem_listesi_web,
     # rap_cari_hesap_ekstresi_web, rap_personel_satis, rap_gunluk_ozet, …) covered by
     # the rap_ prefix in `_is_request_create_allowed` (rap_filtre_lookup is denied
@@ -825,7 +826,7 @@ async def sync_request(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, timeout_sec: int = 35, raw_cache: bool = False, skip_mysql_cache: bool = False, mysql_cache_max_age_sec: Optional[int] = None):
+async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, timeout_sec: int = 35, raw_cache: bool = False, skip_mysql_cache: bool = False, mysql_cache_max_age_sec: Optional[int] = None, cache_only: bool = False):
     """Generic on-demand: MySQL cache → sync.php cache → request_create+poll.
 
     Three-tier cache strategy:
@@ -906,11 +907,18 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
     # User request (2026-05-01): dashboard datasets must not trigger POS
     # round-trips. If MySQL cache missed and this dataset is not in
     # REQUEST_ALLOWED_DATASETS (or not a rap_* report), return empty data now.
-    if not _is_request_create_allowed(dataset_key):
-        logger.info(
-            f"[on_demand] BLOCKED request_create {dataset_key} tenant={tenant_id} — "
-            f"not in whitelist; returning empty (MySQL-only mode)"
-        )
+    # 2026-05-13 — cache_only=True flag: caller explicitly wants ZERO POS calls;
+    # short-circuit here even for whitelisted datasets.
+    if cache_only or not _is_request_create_allowed(dataset_key):
+        if cache_only:
+            logger.debug(
+                f"[on_demand] cache_only mode for {dataset_key} — returning MySQL state"
+            )
+        else:
+            logger.info(
+                f"[on_demand] BLOCKED request_create {dataset_key} tenant={tenant_id} — "
+                f"not in whitelist; returning empty (MySQL-only mode)"
+            )
         if raw_cache:
             return {
                 "ok": True,
@@ -1373,21 +1381,51 @@ async def get_iptal_detail(
         return {}
 
     try:
-        # Step 1 — read straight from cache (web side keeps iptal_detay cache
-        # fully populated with header + line items; no fresh POS request needed)
-        result = await _on_demand_request(tenant_id, "iptal_detay", params)
+        # Step 1a — bireysel cache: IPTAL_ID + scope='iptal_detail' (line items dolu)
+        # cache_only=True: cache miss durumunda POS'a istek atma, boş dön.
+        # POS request_create işini arka plandaki _preload_iptal_individual_cache
+        # yapacak — kullanıcı bekletilmez.
+        individual_params = {"IPTAL_ID": int(iptal_id), "scope": "iptal_detail"}
+        result = await _on_demand_request(
+            tenant_id, "iptal_detay", individual_params, cache_only=True,
+        )
         line_items = _extract_line_items(result)
         header = _extract_header(result)
 
-        # 2026-05-13 — Eski "cache had no line items → forcing sync.php" mantığı
-        # kaldırıldı. Kasacepte web tarafı iptal_detay cache'ini her zaman
-        # tam payload (BARKOD, STOK_ADI, MIKTAR, SATIR_TUTAR…) ile yazıyor.
-        # Ekstra POS request iptal modalını gereksiz yere geciktiriyordu.
-        if not line_items:
-            logger.info(
-                f"[iptal-detail] cache miss/empty for IPTAL_ID={iptal_id} tenant={tenant_id} "
-                f"— returning header-only payload (no POS fallback)"
+        # Step 1b — bireysel cache yoksa: günlük toplu cache'ten (IPTAL_ID=null)
+        # bu IPTAL_ID'nin header'ını filtrele. Line items olmaz ama en azından
+        # TUTAR, LOKASYON, PERSONEL gözükür.
+        if not line_items and not header:
+            bulk_params = {
+                "IPTAL_ID": None,
+                "sdate": f"{filter_date} 00:00:00",
+                "edate": f"{filter_date} 23:59:59",
+            }
+            bulk_result = await _on_demand_request(
+                tenant_id, "iptal_detay", bulk_params, cache_only=True,
             )
+            # Toplu cache rows arasında bu IPTAL_ID'yi filtrele
+            bulk_rows = bulk_result.get("data", []) if isinstance(bulk_result, dict) else []
+            iptal_rows = [
+                r for r in bulk_rows
+                if isinstance(r, dict) and int(r.get("IPTAL_ID") or 0) == int(iptal_id)
+            ]
+            line_items = _extract_line_items({"data": iptal_rows})
+            if not header and iptal_rows:
+                header = _extract_header({"data": iptal_rows})
+            if not line_items:
+                logger.info(
+                    f"[iptal-detail] cache hit (bulk only, no line items) "
+                    f"for IPTAL_ID={iptal_id} tenant={tenant_id}"
+                )
+            # 2026-05-13 — Arka planda bireysel cache'i tetikle (POS request_create).
+            # Bir sonraki tıklamada line items hazır olur.
+            try:
+                import asyncio as _aio
+                _aio.create_task(_preload_iptal_individual_cache(tenant_id, int(iptal_id), filter_date))
+            except Exception:
+                pass
+            result = bulk_result if isinstance(bulk_result, dict) else result
 
         # Return product rows + header info — modal uses header for LOKASYON/MASA/etc
         if isinstance(result, dict):
@@ -1399,6 +1437,28 @@ async def get_iptal_detail(
     except Exception as e:
         logger.error(f"Iptal detail error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _preload_iptal_individual_cache(tenant_id: str, iptal_id: int, filter_date: str) -> None:
+    """2026-05-13 — Yeni iptal için bireysel cache (line items dahil) yoksa,
+    POS sync.php'e tek seferlik request_create at ki sonraki tıklamalarda
+    cache hit olsun. Best-effort, hatalar yutulur.
+    """
+    try:
+        params = {
+            "IPTAL_ID": iptal_id,
+            "scope": "iptal_detail",
+            "tarih_baslangic": f"{filter_date} 00:00:00",
+            "tarih_bitis": f"{filter_date} 23:59:59",
+        }
+        await _on_demand_request(
+            tenant_id, "iptal_detay", params,
+            timeout_sec=45,
+            skip_mysql_cache=True,   # cache'i atla → doğrudan POS request_create
+        )
+        logger.info(f"[preload_iptal] ✅ individual cache filled for IPTAL_ID={iptal_id}")
+    except Exception as e:
+        logger.debug(f"[preload_iptal] failed IPTAL_ID={iptal_id}: {e}")
 
 
 
