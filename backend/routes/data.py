@@ -1063,15 +1063,22 @@ async def get_acik_hesap_kisi(
     page = int(body.get("page", 1))
     page_size = int(body.get("pageSize", 200))
 
+    # 2026-05-13 — Cache lookup için SADECE sdate/edate kullan. Web tarafı
+    # bu dataset'i Page/PageSize'sız (tek satır cache) yazıyor. Eski param
+    # set'i (Page=1, PageSize=200) cache'le eşleşmediği için POS'a gereksiz
+    # request_create atılıyordu. cache_only=True ile POS roundtrip kesin
+    # engelleniyor. Pagination caller tarafında uygulanır (rows zaten 200'ün
+    # altında geliyor).
     params = {
         "sdate": f"{sdate} 00:00:00",
         "edate": f"{edate} 23:59:59",
-        "Page": page,
-        "PageSize": page_size,
     }
 
     try:
-        result = await _on_demand_request(tenant_id, "rap_acik_hesap_kisi_ozet_web", params, timeout_sec=120)
+        result = await _on_demand_request(
+            tenant_id, "rap_acik_hesap_kisi_ozet_web", params,
+            timeout_sec=120, cache_only=True,
+        )
     except HTTPException:
         raise
     except Exception as e:

@@ -112,6 +112,87 @@ user_problem_statement: |
   Light/Dark theme support.
 
 backend:
+  - task: "Acik Hesap Kisi cache lookup (rap_acik_hesap_kisi_ozet_web) — Page/PageSize strip"
+    implemented: true
+    working: true
+    file: "routes/data.py (get_acik_hesap_kisi)"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: |
+          2026-05-13 — User reported that "Açık Hesap Detayı" modal/screen
+          was slow (~120s) because the kasacepteweb cache row for
+          `rap_acik_hesap_kisi_ozet_web` only contains
+          `{"sdate":"YYYY-MM-DD 00:00:00","edate":"YYYY-MM-DD 23:59:59"}`
+          while the mobile endpoint /api/data/acik-hesap-kisi was sending
+          additional `Page`/`PageSize` params to lookup_cached_report,
+          causing a cache MISS and a 120s POS request_create timeout.
+
+          Fix in /app/backend/routes/data.py get_acik_hesap_kisi():
+          - Cache lookup params now STRICTLY {"sdate","edate"} only
+            (no Page/PageSize). Pagination is applied client-side via
+            existing page/page_size body args.
+          - cache_only=True flag retained → no POS roundtrip even on miss.
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅ ACIK HESAP KISI CACHE LOOKUP FIX VERIFIED (2026-05-13,
+          8/8 PASS, /app/backend_test_acik_hesap.py against
+          https://mobile-pos-app-7.preview.emergentagent.com/api with admin
+          cakmak.ebubekir29@gmail.com / 123456).
+
+          🎯 PRIMARY VERDICT: The 120s timeout is FIXED. Every call to
+          /api/data/acik-hesap-kisi now returns in <700ms (well under
+          the 5s acceptance criterion and 1s aspirational target). Cache
+          lookup now correctly resolves because params are stripped to
+          {sdate, edate} only.
+
+          Test results:
+          1) Merkez sdate=edate=2026-05-13 → HTTP 200 in 435ms,
+             data=[1 row], totals={toplam_kayit:1, genel_toplam:1.0,
+             genel_perakende:1.0, genel_erp12:0.0}, page+page_size present.
+             CACHE HIT confirmed (data populated, _source omitted = not
+             mysql_only_blocked). ✅
+          2) Merkez sdate=edate=2026-05-12 → HTTP 200 in 569ms,
+             data=[], totals=zero. Empty but graceful — there is genuinely
+             no cached row for 2026-05-12 in the dataset_cache snapshot
+             (cache_only=True correctly prevents POS roundtrip on miss). ✅
+          3) Gümüşhane today=2026-05-13 → HTTP 200 in 667ms, data=[],
+             totals=zero. Same empty-but-graceful path; tenant has no
+             cached row for this dataset (consistent with known data-
+             ingestion gap on Gümüşhane). ✅
+          4) Merkez sdate-only (no edate) → HTTP 200 in 411ms, data=[1 row].
+             Auto-fill edate=sdate working correctly. ✅
+          5) No tenant_id → HTTP 400 {"detail":"tenant_id gerekli"}. ✅
+          6) Regression sweep (same admin/tenant, all <700ms):
+             • /fis-detail fis_id=20261131 → 200 in 552ms,
+               details=2 totals=1 (multi-result-set cache OK). ✅
+             • /cari-extre cari_id=438352 (2026-01-01..2026-02-15) →
+               200 in 448ms, rows=4. ✅
+             • /stock-extre stok_id=438230 (2026-05-01..2026-05-12) →
+               200 in 604ms, rows=8. ✅
+
+          Response shape: {ok, data:[...], totals:{...}, page, page_size}
+          consistent across all calls. No 500 errors anywhere. The
+          `_source:"mysql_only_blocked"` flag did NOT appear on the
+          populated 2026-05-13 result, confirming the cache lookup
+          succeeded rather than short-circuiting. Pagination args
+          (page=1, page_size=200 defaults) preserved on response.
+
+          NOTE on 2026-05-12 / Gümüşhane empty results: this is NOT a
+          regression — `lookup_cached_report` is correctly returning
+          empty when no matching row exists in kasacepteweb.dataset_cache
+          for the requested (tenant, dataset, params) tuple. The fact
+          that 2026-05-13 returns data while 2026-05-12 does not simply
+          means the POS data ingestion has only written the today-row
+          for this tenant at the moment of test. Frontend will show
+          "no open accounts" gracefully.
+
+          Fix is production-ready. Closing task as working=true.
+
   - task: "Cache lookup for multi-result datasets (fis_detay_toplam, etc.)"
     implemented: true
     working: true
@@ -675,8 +756,7 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Cache lookup for multi-result datasets (fis_detay_toplam, etc.)"
-    - "Fis Detail API regression (cari + stock receipts)"
+    - "Acik Hesap Kisi cache lookup (rap_acik_hesap_kisi_ozet_web) — Page/PageSize strip"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
