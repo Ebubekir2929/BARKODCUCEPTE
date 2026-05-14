@@ -3,7 +3,6 @@ import {
   View, Text, StyleSheet, Modal, TouchableOpacity, ActivityIndicator, Platform, ScrollView, StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
 import { useLanguageStore } from '../store/languageStore';
@@ -302,14 +301,22 @@ export const NegativeStockModal: React.FC<Props> = ({
                   </Text>
                 </View>
               ) : (
-                <FlashList
-                  data={negativeOnly}
-                  renderItem={renderRow}
-                  keyExtractor={(item: any, idx) => String(item.KOD || item.STOK_KODU || idx)}
-                  estimatedItemSize={60}
+                // 2026-05-14 — FlashList yerine ScrollView+map kullanılıyor.
+                // Satır yüksekliği değişken (bazıları 1 satır miktar, bazıları
+                // miktar+kayıp tutarı ile 2 satır) olduğu için FlashList'in
+                // estimatedItemSize hesabı satır araları boş gözükmesine
+                // neden oluyordu. Liste ~30 kalem civarı kaldığı için
+                // ScrollView performans olarak yeterli.
+                <ScrollView
                   showsVerticalScrollIndicator={false}
-                  ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
-                />
+                  contentContainerStyle={{ paddingBottom: 8 }}
+                >
+                  {negativeOnly.map((item: any, idx: number) => (
+                    <View key={String(item.KOD || item.STOK_KODU || idx)} style={{ marginBottom: 8 }}>
+                      {renderRow({ item } as any)}
+                    </View>
+                  ))}
+                </ScrollView>
               )}
             </View>
           </View>
