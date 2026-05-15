@@ -15,7 +15,13 @@ import { attachNotificationTapHandler } from '../src/services/notificationTapHan
 
 // 2026-05-15 — iOS-spesifik notification-response yardımcısı. Expo'nun resmi
 // useLastNotificationResponse hook'u cold start race condition'larını çözer.
+// Web'de bu hook native bir API çağırıp çöküyor — Platform check ile native'e sınırla.
 function NotificationResponseBridge() {
+  if (Platform.OS === 'web') return null;
+  return <NotificationResponseBridgeNative />;
+}
+
+function NotificationResponseBridgeNative() {
   const lastResponse = Notifications.useLastNotificationResponse();
   useEffect(() => {
     if (!lastResponse) return;
