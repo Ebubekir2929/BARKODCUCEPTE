@@ -2,7 +2,7 @@ import React, { useMemo, useCallback, useState } from 'react';
 import {
   View, Text, StyleSheet, Modal, TouchableOpacity, ActivityIndicator, Platform, ScrollView, StatusBar,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
 import { useLanguageStore } from '../store/languageStore';
@@ -58,6 +58,7 @@ interface Props {
 export const NegativeStockModal: React.FC<Props> = ({
   visible, onClose, items, loading = false, tenantName, onItemPress,
 }) => {
+  const insets = useSafeAreaInsets();
   const { colors } = useThemeStore();
   const { t } = useLanguageStore();
   const [exported, setExported] = useState(false);
@@ -182,8 +183,11 @@ export const NegativeStockModal: React.FC<Props> = ({
         {/* 2026-05-06 — translucent=true ile birlikte SafeAreaView edges={['top']}
             phone clock'un üstüne gelmesini engelliyor. */}
         <StatusBar barStyle="light-content" backgroundColor={colors.error} translucent />
-        {/* Header */}
-        <View style={[styles.header, { backgroundColor: colors.error, paddingTop: 12 }]}>
+        {/* Header — 2026-05-15: presentationStyle="fullScreen" SafeAreaView'in
+            edges'ini etkilemiyordu, header Dynamic Island'a yapışıyordu.
+            useSafeAreaInsets().top değerini paddingTop olarak ekleyerek
+            iPhone Pro modellerinde de düzgün gösterim sağlanır. */}
+        <View style={[styles.header, { backgroundColor: colors.error, paddingTop: Math.max(insets.top, 12) + 12 }]}>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <Ionicons name="warning" size={22} color="#fff" />
