@@ -127,16 +127,23 @@ async def send_apns_push(
     aps: dict = {
         "alert": {"title": title, "body": body},
         "sound": sound,
+        "mutable-content": 1,
     }
     if badge is not None:
         aps["badge"] = int(badge)
 
     payload: dict = {"aps": aps}
-    # Custom data merged at root level for client to access
+    # Custom data merged at root level for client to access.
+    # 2026-05-15 — Stringify all values; expo-notifications iOS bridge maps
+    # NSDictionary→JS object and primitive types stay, but Python ints
+    # vs strings can confuse downstream consumers. FCM v1 does the same.
     if isinstance(data, dict):
         for k, v in data.items():
-            if k != "aps":
-                payload[k] = v
+            if k == "aps":
+                continue
+            if v is None:
+                continue
+            payload[k] = str(v)
 
     headers = {
         "authorization": f"bearer {provider_jwt}",
