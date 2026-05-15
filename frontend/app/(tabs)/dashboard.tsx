@@ -2331,13 +2331,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   greeting: {
-    fontSize: Platform.OS === 'web' ? 12 : 13,
+    fontSize: Platform.select({ web: 12, ios: 12, android: 14, default: 13 }),
     marginBottom: 2,
     fontWeight: Platform.OS === 'web' ? '600' : '400',
     ...(Platform.OS === 'web' ? { letterSpacing: 0.4, textTransform: 'uppercase' as const } : {}),
   },
   userName: {
-    fontSize: Platform.OS === 'web' ? 22 : 20,
+    fontSize: Platform.select({ web: 22, ios: 17, android: 22, default: 20 }),
     fontWeight: Platform.OS === 'web' ? '800' : '700',
     ...(Platform.OS === 'web' ? { letterSpacing: -0.5 } : {}),
   },
