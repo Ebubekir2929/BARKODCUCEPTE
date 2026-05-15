@@ -1544,7 +1544,15 @@ async def get_iptal_list(
                             if v:
                                 return str(v).strip()[:10]
                         return ""
+                    before_count = len(day_data)
                     filtered = [r for r in day_data if not _row_date(r) or _row_date(r) == dt]
+                    after_count = len(filtered)
+                    if before_count != after_count:
+                        logger.info(f"[iptal-list] dt={dt} filtered {before_count} -> {after_count} (excluded mismatched dates)")
+                    elif before_count > 0:
+                        sample = day_data[0]
+                        sample_date = _row_date(sample)
+                        logger.info(f"[iptal-list] dt={dt} rows={before_count} all-kept sample_date={sample_date!r} keys={list(sample.keys())[:8]}")
                     all_data.extend(filtered)
             except Exception as e:
                 logger.warning(f"Iptal list for {dt}: {e}")
