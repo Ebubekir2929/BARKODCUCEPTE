@@ -75,15 +75,16 @@ export default function TabLayout() {
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
         tabBarLabelStyle: {
-          // 2026-05-15 — iOS'ta 11pt + "Dashboard" + bold label kesilebiliyor.
-          // 10pt'ye düşürdük; tüm tab adları (Dashboard / Stok / Cariler / Raporlar / Ayarlar)
-          // taşmadan görünüyor.
-          fontSize: Platform.OS === 'ios' ? 10 : 11,
+          // 2026-05-15 — iOS'ta "Dashboard" (9 karakter) sığmıyordu. Font 9pt
+          // ve marginTop -2 ile tab item içinde tam görünür.
+          fontSize: Platform.OS === 'ios' ? 9 : 11,
           fontWeight: '600',
+          ...(Platform.OS === 'ios' ? { marginTop: -2 } : {}),
         },
+        tabBarItemStyle: Platform.OS === 'ios' ? { paddingHorizontal: 0 } : undefined,
       }}
     >
-      <Tabs.Screen name="dashboard" options={{ title: Platform.OS === 'ios' ? 'Pano' : t('dashboard'), tabBarIcon: renderDashboardIcon }} />
+      <Tabs.Screen name="dashboard" options={{ title: t('dashboard'), tabBarIcon: renderDashboardIcon }} />
       <Tabs.Screen name="stock" options={{ title: t('stock'), tabBarIcon: renderStockIcon }} />
       <Tabs.Screen name="customers" options={{ title: t('customers'), tabBarIcon: renderCustomersIcon }} />
       <Tabs.Screen name="reports" options={{ title: t('reports'), tabBarIcon: renderReportsIcon }} />
