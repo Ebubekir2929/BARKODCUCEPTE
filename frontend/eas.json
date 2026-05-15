@@ -52,7 +52,7 @@
     "production": {
       "android": {
         "serviceAccountKeyPath": "./google-service-account.json",
-        "track": "production",
+        "track": "alpha",
         "releaseStatus": "completed"
       },
       "ios": {
@@ -65,6 +65,13 @@
         "serviceAccountKeyPath": "./google-service-account.json",
         "track": "internal",
         "releaseStatus": "draft"
+      },
+      "production-track": {
+        "android": {
+          "serviceAccountKeyPath": "./google-service-account.json",
+          "track": "production",
+          "releaseStatus": "completed"
+        }
       }
     }
   }
