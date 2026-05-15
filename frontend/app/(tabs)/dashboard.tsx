@@ -211,6 +211,10 @@ export default function DashboardScreen() {
   const [iptalListLocation, setIptalListLocation] = useState<string>('');
   const [iptalListItems, setIptalListItems] = useState<any[]>([]);
   const [iptalListLoading, setIptalListLoading] = useState(false);
+  // 2026-05-16 — Detay kapatılınca liste modalını geri açabilmek için.
+  // iOS nested modal sorunu nedeniyle liste detayın altında değil yan yana açılıyor;
+  // bu state detay kapanırken listeyi geri açar.
+  const [iptalDetailCameFromList, setIptalDetailCameFromList] = useState(false);
 
   // Open Tables state
   const [selectedOpenTable, setSelectedOpenTable] = useState<OpenTable | null>(null);
@@ -552,6 +556,8 @@ export default function DashboardScreen() {
     const tid = tenantOverride || activeTenantId;
     const t = user?.tenants?.find?.((x: any) => x.tenant_id === tid);
     const wasInListModal = showIptalListModal;
+    // 2026-05-16 — Detay kapanırken listeyi geri açabilmek için bayrak set et.
+    setIptalDetailCameFromList(wasInListModal);
     if (wasInListModal) {
       // Close parent first to avoid iOS nested-modal blockage
       setShowIptalListModal(false);
@@ -2267,7 +2273,23 @@ export default function DashboardScreen() {
           from MySQL cache via /api/data/iptal-detail (iptal_detay dataset). */}
       <IptalDetailModal
         visible={iptalDetailVisible}
-        onClose={() => { setIptalDetailVisible(false); setIptalDetailIptalId(''); setIptalDetailTenantId(''); setIptalDetailTenantName(''); }}
+        onClose={() => {
+          const shouldReopenList = iptalDetailCameFromList;
+          setIptalDetailVisible(false);
+          setIptalDetailIptalId('');
+          setIptalDetailTenantId('');
+          setIptalDetailTenantName('');
+          setIptalDetailCameFromList(false);
+          // 2026-05-16 — Detay listeden açıldıysa kapanınca listeyi geri aç.
+          // iOS'ta animasyon çakışmasını önlemek için kısa gecikme veriyoruz.
+          if (shouldReopenList) {
+            if (Platform.OS === 'ios') {
+              setTimeout(() => setShowIptalListModal(true), 350);
+            } else {
+              setShowIptalListModal(true);
+            }
+          }
+        }}
         tenantId={iptalDetailTenantId || activeTenantId}
         iptalId={iptalDetailIptalId}
         tenantName={iptalDetailTenantName || user?.tenants?.find?.((x: any) => x.tenant_id === (iptalDetailTenantId || activeTenantId))?.name || ''}

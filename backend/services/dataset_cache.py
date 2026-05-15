@@ -450,7 +450,7 @@ def filter_iptal_rows(items: List[dict], params: dict) -> List[dict]:
                     continue
             except (TypeError, ValueError):
                 continue
-        if not _between_dates(r, sdate, edate, ["IPTAL_TARIHI", "TARIH", "FIS_TARIHI", "TARIH_SAAT"]):
+        if not _between_dates(r, sdate, edate, ["IPTAL_TARIHI", "TARIH_IPTAL", "TARIH", "FIS_TARIHI", "TARIH_SAAT"]):
             continue
         # Track whether we have any product-line rows
         if r.get("SATIR_MI") is True or r.get("STOK_AD") or r.get("STOK_ID"):
