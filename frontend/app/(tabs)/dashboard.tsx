@@ -514,7 +514,23 @@ export default function DashboardScreen() {
         });
         const data = await response.json();
         if (data.ok && data.data) {
-          setHourDetailProducts(data.data);
+          // 2026-05-15 — VERESİYE/NAKİT/KART vb. LOKASYON adları aslında ödeme
+          // tipidir, gerçek lokasyon değil. POS bunları fake "lokasyon" olarak
+          // dönüyor ve toplam değerleri 2x'liyor. Filtreleyerek hero ile detay
+          // tutarları tutarlı hale getirelim.
+          const PAYMENT_TYPES = new Set([
+            'VERESİYE', 'VERESIYE',
+            'NAKİT', 'NAKIT',
+            'KART', 'KREDİ KARTI', 'KREDI KARTI', 'KREDİ', 'KREDI',
+            'ÇEK', 'CEK',
+            'BANKA', 'HAVALE',
+            'PUAN', 'YEMEK ÇEKİ', 'YEMEK CEKI',
+          ]);
+          const filtered = (Array.isArray(data.data) ? data.data : []).filter((row: any) => {
+            const lok = String(row?.LOKASYON || '').trim().toUpperCase();
+            return !PAYMENT_TYPES.has(lok);
+          });
+          setHourDetailProducts(filtered);
         }
       } catch (err) {
         console.error('Hourly detail error:', err);
