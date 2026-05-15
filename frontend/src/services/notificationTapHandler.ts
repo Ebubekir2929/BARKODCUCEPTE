@@ -17,7 +17,7 @@
  */
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { DeviceEventEmitter } from 'react-native';
+import { DeviceEventEmitter, Platform } from 'react-native';
 
 const STORAGE_KEY = '@notification_pending_tap_v2';
 /** Event fired immediately after a tap is persisted. Dashboard/Stock subscribe
@@ -107,6 +107,9 @@ export async function clearPendingTap(): Promise<void> {
  */
 export function attachNotificationTapHandler(): void {
   if (_attached) return;
+  // 2026-05-15 — Web'de expo-notifications native API'ları throw eder
+  // (getLastNotificationResponse not available on web). Skip cleanly.
+  if (Platform.OS === 'web') return;
   _attached = true;
 
   // 1) Cold start: app henüz mount olmadan tıklanmış olabilir
