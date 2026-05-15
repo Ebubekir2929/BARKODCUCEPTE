@@ -544,15 +544,31 @@ export default function DashboardScreen() {
 
   // İptal detay açma helper'ı — yeni standalone IptalDetailModal'ı tetikler.
   // 2026-05-06 — Eski fetchIptalDetail (POS API + state mutation karmaşası) tamamen silindi.
+  // 2026-05-15 — iOS nested Modal sorunu: IptalListModal açıkken IptalDetailModal'ı
+  // doğrudan açarsak iOS hiç göstermiyor (Android'de çalışıyor). Önce parent
+  // modal'ı kapatıp animasyon bitince detayı açıyoruz.
   const openIptalDetail = useCallback((iptalId: string, tenantOverride?: string) => {
     if (!iptalId) return;
     const tid = tenantOverride || activeTenantId;
     const t = user?.tenants?.find?.((x: any) => x.tenant_id === tid);
-    setIptalDetailIptalId(String(iptalId));
-    setIptalDetailTenantId(String(tid || ''));
-    setIptalDetailTenantName(String(t?.name || ''));
-    setIptalDetailVisible(true);
-  }, [activeTenantId, user]);
+    const wasInListModal = showIptalListModal;
+    if (wasInListModal) {
+      // Close parent first to avoid iOS nested-modal blockage
+      setShowIptalListModal(false);
+    }
+    const apply = () => {
+      setIptalDetailIptalId(String(iptalId));
+      setIptalDetailTenantId(String(tid || ''));
+      setIptalDetailTenantName(String(t?.name || ''));
+      setIptalDetailVisible(true);
+    };
+    if (Platform.OS === 'ios' && wasInListModal) {
+      // iOS Modal dismiss animation takes ~300ms; wait before presenting next.
+      setTimeout(apply, 350);
+    } else {
+      apply();
+    }
+  }, [activeTenantId, user, showIptalListModal]);
 
   // Lokasyon bazlı iptal listesini aç ve POS'tan tam listeyi çek
   const openLocationIptalList = useCallback(async (locationName: string) => {

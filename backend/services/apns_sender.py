@@ -127,7 +127,6 @@ async def send_apns_push(
     aps: dict = {
         "alert": {"title": title, "body": body},
         "sound": sound,
-        "mutable-content": 1,
     }
     if badge is not None:
         aps["badge"] = int(badge)
