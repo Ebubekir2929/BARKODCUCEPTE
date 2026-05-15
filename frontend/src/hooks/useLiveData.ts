@@ -401,12 +401,17 @@ export function useLiveData(filter?: DashboardFilter) {
       let transformed = transformApiData(apiData);
       
       if (filter?.branchId) {
-        const filteredBranch = transformed.branchSales.find(b => b.branchId === filter.branchId);
+        // 2026-05-16 — filter.branchId might be either branchId or location name
+        // (when selected from allLocations dropdown). Match against both.
+        const filteredBranch = transformed.branchSales.find(b =>
+          b.branchId === filter.branchId || b.branchName === filter.branchId
+        );
         if (filteredBranch) {
           // Also filter hourly location sales to the selected branch so totals match
           const filteredHourlyLoc = (transformed.hourlyLocationSales || []).filter((r: any) =>
             r?.LOKASYON === filteredBranch.branchName ||
-            String(r?.LOKASYON_ID || '') === String(filter.branchId)
+            String(r?.LOKASYON_ID || '') === String(filter.branchId) ||
+            String(r?.LOKASYON_ID || '') === String(filteredBranch.branchId)
           );
           transformed = {
             ...transformed,

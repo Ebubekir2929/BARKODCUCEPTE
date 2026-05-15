@@ -415,8 +415,10 @@ export default function DashboardScreen() {
   // Calculate totals from all branches
   const totals = useMemo(() => {
     const branches = sourceData?.branchSales || [];
+    // 2026-05-16 — Filter id can be either branchId OR location name (when
+    // selected from allLocations dropdown). Match against both fields.
     const filteredBranches = filters.branchId
-      ? branches.filter((b) => b.branchId === filters.branchId)
+      ? branches.filter((b) => b.branchId === filters.branchId || b.branchName === filters.branchId)
       : branches;
 
     return filteredBranches.reduce(
@@ -687,7 +689,12 @@ export default function DashboardScreen() {
             <Ionicons name="funnel" size={14} color={colors.primary} />
             <Text style={[styles.filterBannerText, { color: colors.primary }]} numberOfLines={1}>
               {filters.branchId
-                ? (sourceData?.branchSales || []).find(b => b.branchId === filters.branchId)?.branchName || 'Şube'
+                ? (
+                    // 2026-05-16 — Filter id can be branchId or location name; try both.
+                    (sourceData?.branchSales || []).find(b => b.branchId === filters.branchId)?.branchName
+                    || (sourceData?.branchSales || []).find(b => b.branchName === filters.branchId)?.branchName
+                    || filters.branchId
+                  )
                 : 'Tüm Şubeler'
               }
               {' · '}

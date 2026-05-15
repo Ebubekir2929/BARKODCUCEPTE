@@ -1534,7 +1534,18 @@ async def get_iptal_list(
                 )
                 day_data = resp.get("data", [])
                 if isinstance(day_data, list):
-                    all_data.extend(day_data)
+                    # 2026-05-16 — Safety net: even if cache returned a wider
+                    # date range (blob cache may have multiple days), strictly
+                    # filter rows to the requested day. Frontend's primary
+                    # date field is TARIH_IPTAL, with fallbacks.
+                    def _row_date(r: dict) -> str:
+                        for key in ("TARIH_IPTAL", "IPTAL_TARIHI", "TARIH", "FIS_TARIHI", "TARIH_SAAT"):
+                            v = r.get(key)
+                            if v:
+                                return str(v).strip()[:10]
+                        return ""
+                    filtered = [r for r in day_data if not _row_date(r) or _row_date(r) == dt]
+                    all_data.extend(filtered)
             except Exception as e:
                 logger.warning(f"Iptal list for {dt}: {e}")
                 continue
