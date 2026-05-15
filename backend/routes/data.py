@@ -388,6 +388,32 @@ async def fetch_dataset(pool, tenant_id: str, dataset_key: str, filter_date: Opt
                 except Exception:
                     continue
             data = parsed
+            # 2026-05-16 — dataset_cache_rows tablosu tarih bazlı bölümlenmiyor;
+            # tüm tarihlerin satırlarını içeriyor. Eğer çağıran kod tek bir gün
+            # için (filter_date) veri istiyorsa, bu blob'u tarihe göre süzeriz.
+            # Aksi halde dashboard'da farklı günlerin iptalleri vs. sızıyor.
+            if filter_date and data:
+                date_keys_by_ds = {
+                    "iptal_detay": ("TARIH_IPTAL", "IPTAL_TARIHI", "TARIH", "FIS_TARIHI", "TARIH_SAAT"),
+                    "iptal_ozet":  ("TARIH_IPTAL", "IPTAL_TARIHI", "TARIH"),
+                    "satis_detay": ("TARIH", "FIS_TARIHI"),
+                    "garson_satis_ozet": ("TARIH",),
+                    "acik_masalar": ("TARIH", "MASA_ACILIS_TARIHI"),
+                }
+                dkeys = date_keys_by_ds.get(dataset_key)
+                if dkeys:
+                    def _rd(r):
+                        if not isinstance(r, dict):
+                            return ""
+                        for k in dkeys:
+                            v = r.get(k)
+                            if v:
+                                return str(v).strip()[:10]
+                        return ""
+                    filtered = [r for r in data if not _rd(r) or _rd(r) == filter_date]
+                    if len(filtered) != len(data):
+                        logger.info(f"[fetch_dataset] {dataset_key} date={filter_date} delta_rows {len(data)} -> {len(filtered)} (date-filtered)")
+                    data = filtered
         except Exception as e:
             logger.warning(f"[fetch_dataset] delta_rows fallback for {dataset_key} failed: {e}")
             data = []
