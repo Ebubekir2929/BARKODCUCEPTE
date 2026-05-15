@@ -11,7 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.cakmakebubekir.barkodcucepte",
-      "buildNumber": "4",
+      "buildNumber": "7",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "CFBundleDisplayName": "Barkodcu",
@@ -22,7 +22,7 @@
     },
     "android": {
       "package": "com.cakmakebubekir.barkodcucepte",
-      "versionCode": 4,
+      "versionCode": 7,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",

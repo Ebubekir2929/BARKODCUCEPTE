@@ -9,8 +9,35 @@ import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as NavigationBar from 'expo-navigation-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
 import notificationService from '../src/services/notificationService';
 import { attachNotificationTapHandler } from '../src/services/notificationTapHandler';
+
+// 2026-05-15 — iOS-spesifik notification-response yardımcısı. Expo'nun resmi
+// useLastNotificationResponse hook'u cold start race condition'larını çözer.
+function NotificationResponseBridge() {
+  const lastResponse = Notifications.useLastNotificationResponse();
+  useEffect(() => {
+    if (!lastResponse) return;
+    try {
+      const data: any = (lastResponse as any)?.notification?.request?.content?.data;
+      const rawUserInfo: any = (lastResponse as any)?.notification?.request?.trigger?.payload
+        || (lastResponse as any)?.notification?.request?.content?.userInfo
+        || data;
+      // Stream the FULL payload into AsyncStorage so the dashboard tap handler
+      // sees it regardless of how iOS structured the response.
+      const payload = data && Object.keys(data).length > 0 ? data : rawUserInfo;
+      if (!payload || typeof payload !== 'object') return;
+      // Lazy-import to avoid circular deps
+      import('../src/services/notificationTapHandler').then((mod: any) => {
+        try {
+          (mod as any).writePendingTap?.(payload);
+        } catch {}
+      });
+    } catch {}
+  }, [lastResponse]);
+  return null;
+}
 
 function AppShell() {
   const { colors } = useThemeStore();
@@ -132,6 +159,8 @@ export default function RootLayout() {
         backgroundColor={isDark ? '#000000' : '#FFFFFF'}
         translucent={false}
       />
+      {/* 2026-05-15 — iOS APNs notification response için yedek köprü */}
+      <NotificationResponseBridge />
       <AppShell />
     </SafeAreaProvider>
   );

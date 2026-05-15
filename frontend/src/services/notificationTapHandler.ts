@@ -41,8 +41,11 @@ let _subscriptions: Array<{ remove?: () => void }> = [];
 /**
  * Bildirim tap'ını AsyncStorage'a yazar. Aynı tap iki kere işlenmesin diye
  * receivedAt timestamp'i ile beraber saklanır.
+ *
+ * 2026-05-15 — Export edildi ki RootLayout'taki NotificationResponseBridge
+ * (useLastNotificationResponse hook) doğrudan çağırabilsin.
  */
-async function writePendingTap(payload: any) {
+export async function writePendingTap(payload: any) {
   try {
     // 2026-05-15 — iOS APNs payloads sometimes deliver the full userInfo
     // (including the `aps` key). Strip it so we only persist our custom data.
