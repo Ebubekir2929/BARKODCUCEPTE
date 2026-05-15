@@ -426,6 +426,36 @@ async def fetch_dataset(pool, tenant_id: str, dataset_key: str, filter_date: Opt
     if not isinstance(data, list):
         data = []
 
+    # 2026-05-16 — UNIVERSAL DATE FILTER: POS occasionally returns
+    # cache entries labeled for a specific date but containing rows
+    # from many other dates (POS bug). When caller passes filter_date
+    # we must strictly drop mismatched rows so the dashboard's "yesterday"
+    # filter doesn't bleed in last-month data.
+    if filter_date and data:
+        _date_keys_by_ds = {
+            "iptal_detay": ("TARIH_IPTAL", "IPTAL_TARIHI", "TARIH", "FIS_TARIHI", "TARIH_SAAT"),
+            "iptal_ozet":  ("TARIH_IPTAL", "IPTAL_TARIHI", "TARIH"),
+            "satis_detay": ("TARIH", "FIS_TARIHI"),
+            "garson_satis_ozet": ("TARIH",),
+            "acik_masalar": ("TARIH", "MASA_ACILIS_TARIHI"),
+            "fis_gunluk_bildirim_feed": ("TARIH", "FIS_TARIHI"),
+        }
+        _dkeys = _date_keys_by_ds.get(dataset_key)
+        if _dkeys:
+            def _rd(r):
+                if not isinstance(r, dict):
+                    return ""
+                for k in _dkeys:
+                    v = r.get(k)
+                    if v:
+                        return str(v).strip()[:10]
+                return ""
+            before = len(data)
+            data = [r for r in data if not _rd(r) or _rd(r) == filter_date]
+            after = len(data)
+            if before != after:
+                logger.info(f"[fetch_dataset] {dataset_key} date={filter_date} hard-filtered {before} -> {after}")
+
     # Fix large integers for JavaScript safety
     data = _fix_large_ints(data)
     
