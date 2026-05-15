@@ -170,18 +170,37 @@ async def _push_many(tokens: List[str], title: str, body: str, data: dict | None
         logger.warning("[push] _push_many called with 0 tokens")
         return
 
-    # 2026-02 — Split tokens between Expo (mobile) and FCM v1 (web)
+    # 2026-02 — FCM v1 + Expo Push split
+    # 2026-05-15 — Added APNs HTTP/2 direct sender for iOS raw APNs tokens.
+    #   The frontend uses `expo-notifications.getDevicePushTokenAsync()` which
+    #   returns raw APNs tokens (64 hex char) on iOS. Those can't go via FCM v1
+    #   (Firebase only accepts FCM registration tokens), so we deliver them
+    #   directly to api.push.apple.com using the .p8 Authentication Key.
     from services.fcm_v1_sender import send_fcm_web, is_web_push_token
-    expo_tokens: List[str] = [t for t in tokens if not is_web_push_token(t)]
-    web_tokens: List[str] = [t for t in tokens if is_web_push_token(t)]
+    from services.apns_sender import send_apns_push_many, _is_apns_token
 
+    apns_tokens: List[str] = [t for t in tokens if _is_apns_token(t)]
+    remaining: List[str] = [t for t in tokens if t not in apns_tokens]
+    expo_tokens: List[str] = [t for t in remaining if not is_web_push_token(t)]
+    web_tokens: List[str] = [t for t in remaining if is_web_push_token(t)]
+
+    # 1) iOS APNs direct
+    if apns_tokens:
+        try:
+            ares = await send_apns_push_many(apns_tokens, title, body, data)
+            logger.info(f"[push] APNs sent={ares.get('sent')}/{len(apns_tokens)} failed={ares.get('failed')}")
+        except Exception as e:
+            logger.error(f"[push] APNs error: {e}")
+
+    # 2) FCM v1 (Android native FCM + Web push)
     if web_tokens:
         try:
             wres = await send_fcm_web(web_tokens, title, body, data)
-            logger.info(f"[push] FCM web sent={wres.get('sent')}/{len(web_tokens)} failed={wres.get('failed')}")
+            logger.info(f"[push] FCM v1 sent={wres.get('sent')}/{len(web_tokens)} failed={wres.get('failed')}")
         except Exception as e:
-            logger.error(f"[push] FCM web error: {e}")
+            logger.error(f"[push] FCM v1 error: {e}")
 
+    # 3) Expo legacy fallback (kept for any ExponentPushToken... tokens that may still exist)
     if not expo_tokens:
         return
 
