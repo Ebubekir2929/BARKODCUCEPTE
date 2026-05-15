@@ -39,3 +39,6 @@ yarn-error.*
 *.tsbuildinfo
 
 app-example
+
+# Play Store service account key (never commit)
+google-service-account.json
