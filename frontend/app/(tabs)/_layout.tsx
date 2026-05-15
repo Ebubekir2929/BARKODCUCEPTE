@@ -75,7 +75,10 @@ export default function TabLayout() {
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
         tabBarLabelStyle: {
-          fontSize: 11,
+          // 2026-05-15 — iOS'ta 11pt + "Dashboard" + bold label kesilebiliyor.
+          // 10pt'ye düşürdük; tüm tab adları (Dashboard / Stok / Cariler / Raporlar / Ayarlar)
+          // taşmadan görünüyor.
+          fontSize: Platform.OS === 'ios' ? 10 : 11,
           fontWeight: '600',
         },
       }}

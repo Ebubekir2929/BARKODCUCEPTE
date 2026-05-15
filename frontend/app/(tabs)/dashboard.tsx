@@ -602,9 +602,16 @@ export default function DashboardScreen() {
       <View style={[styles.statusBarLine, { backgroundColor: colors.border }]} />
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, marginRight: 8 }}>
           <Text style={[styles.greeting, { color: colors.textSecondary }]}>{t('welcome_greeting')}</Text>
-          <Text style={[styles.userName, { color: colors.text }]}>{user?.full_name || 'Kullanıcı'}</Text>
+          <Text
+            style={[styles.userName, { color: colors.text }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.7}
+          >
+            {user?.full_name || 'Kullanıcı'}
+          </Text>
         </View>
         <TouchableOpacity
           style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border, marginRight: 8, position: 'relative' }]}
@@ -2276,11 +2283,11 @@ const styles = StyleSheet.create({
   filterButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: Platform.OS === 'ios' ? 10 : 14,
+    paddingVertical: Platform.OS === 'ios' ? 8 : 10,
     borderRadius: 20,
     borderWidth: 1,
-    gap: 6,
+    gap: 4,
     ...Platform.select({
       web: {
         boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
@@ -2290,7 +2297,7 @@ const styles = StyleSheet.create({
     }),
   },
   filterText: {
-    fontSize: 14,
+    fontSize: Platform.OS === 'ios' ? 12 : 14,
     fontWeight: '600',
   },
   scrollView: {

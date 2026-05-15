@@ -80,7 +80,10 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginHorizontal: 4,
     borderWidth: 1,
-    minWidth: 150,
+    // 2026-05-15 — minWidth kaldırıldı; iPhone 14 Pro gibi dar ekranlarda
+    // iki kart yan yana sığmıyordu (her biri 150px → 300px + margin → taşıyor).
+    // flex:1 zaten esnek paylaşıyor, minWidth gereksiz.
+    minWidth: 0,
   },
   headerRow: {
     flexDirection: 'row',

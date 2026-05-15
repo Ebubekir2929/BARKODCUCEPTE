@@ -315,6 +315,10 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     padding: 24,
+    // 2026-05-15 — iOS'ta üstte absolute pozisyonlu TR/Tema toolbar
+    // logo ile çakışıyordu. ScrollView içeriğini ortalamak yerine üstten
+    // ~70px boşluk bırakıp toolbar'ın altına itiyoruz.
+    paddingTop: Platform.OS === 'ios' ? 72 : 24,
     justifyContent: 'center',
   },
   themeToggle: {
