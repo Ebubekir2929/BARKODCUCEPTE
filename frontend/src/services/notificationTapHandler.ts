@@ -44,18 +44,28 @@ let _subscriptions: Array<{ remove?: () => void }> = [];
  */
 async function writePendingTap(payload: any) {
   try {
-    if (!payload || typeof payload !== 'object') return;
+    // 2026-05-15 — iOS APNs payloads sometimes deliver the full userInfo
+    // (including the `aps` key). Strip it so we only persist our custom data.
+    let p: any = payload;
+    if (p && typeof p === 'object' && p.aps && typeof p.aps === 'object') {
+      const { aps, ...rest } = p;
+      p = rest;
+    }
+    if (!p || typeof p !== 'object') {
+      console.log('[NotifTap] empty payload, skip');
+      return;
+    }
     const tap: PendingTap = {
-      type: String(payload.type || '').toLowerCase(),
-      iptal_id: payload.iptal_id ? String(payload.iptal_id) : undefined,
-      fis_id: payload.fis_id ? String(payload.fis_id) : undefined,
-      belgeno: payload.belgeno ? String(payload.belgeno) : undefined,
-      amount: payload.amount ? String(payload.amount) : undefined,
-      tenant: payload.tenant ? String(payload.tenant) : undefined,
+      type: String(p.type || '').toLowerCase(),
+      iptal_id: p.iptal_id != null ? String(p.iptal_id) : undefined,
+      fis_id: p.fis_id != null ? String(p.fis_id) : undefined,
+      belgeno: p.belgeno != null ? String(p.belgeno) : undefined,
+      amount: p.amount != null ? String(p.amount) : undefined,
+      tenant: p.tenant != null ? String(p.tenant) : undefined,
       receivedAt: Date.now(),
     };
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(tap));
-    console.log('[NotifTap] wrote pending:', tap);
+    console.log('[NotifTap] ✅ wrote pending:', tap, 'rawPayload=', JSON.stringify(payload));
     // Emit in-app event so screens already focused can immediately react
     // (foreground tap scenario — useFocusEffect wouldn't fire again).
     try { DeviceEventEmitter.emit(NOTIFICATION_TAP_EVENT, tap); } catch {}
