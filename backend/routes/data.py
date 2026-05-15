@@ -1501,6 +1501,9 @@ async def get_iptal_list(
     if not tenant_id:
         raise HTTPException(status_code=400, detail="tenant_id gerekli")
     
+    # 2026-05-16 — Debug what frontend is actually sending
+    logger.info(f"[iptal-list] REQ tenant={tenant_id[:8]} sdate={sdate!r} edate={edate!r} filter_date={filter_date!r}")
+    
     try:
         from datetime import datetime, timedelta
         
