@@ -14,6 +14,7 @@
       "buildNumber": "4",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
+        "CFBundleDisplayName": "Barkodcu",
         "NSCameraUsageDescription": "Barkod tarama için kamera kullanılır",
         "NSPhotoLibraryUsageDescription": "Raporları kaydetmek için galeri erişimi gerekli",
         "UIBackgroundModes": ["remote-notification"]

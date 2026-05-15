@@ -83,7 +83,7 @@ export default function TabLayout() {
         },
       }}
     >
-      <Tabs.Screen name="dashboard" options={{ title: t('dashboard'), tabBarIcon: renderDashboardIcon }} />
+      <Tabs.Screen name="dashboard" options={{ title: Platform.OS === 'ios' ? 'Pano' : t('dashboard'), tabBarIcon: renderDashboardIcon }} />
       <Tabs.Screen name="stock" options={{ title: t('stock'), tabBarIcon: renderStockIcon }} />
       <Tabs.Screen name="customers" options={{ title: t('customers'), tabBarIcon: renderCustomersIcon }} />
       <Tabs.Screen name="reports" options={{ title: t('reports'), tabBarIcon: renderReportsIcon }} />
