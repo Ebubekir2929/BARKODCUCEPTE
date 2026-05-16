@@ -406,50 +406,56 @@ export function useLiveData(filter?: DashboardFilter) {
         const filteredBranch = transformed.branchSales.find(b =>
           b.branchId === filter.branchId || b.branchName === filter.branchId
         );
-        if (filteredBranch) {
-          const wantedName = (filteredBranch.branchName || '').toLowerCase();
-          const wantedId = String(filter.branchId || '').toLowerCase();
-          const wantedBranchId = String(filteredBranch.branchId || '').toLowerCase();
+        // The location MAY exist in allLocations but not in branchSales (e.g. no
+        // sales today). In that case, treat the filter as STILL active and
+        // strictly filter all sections by location-name match. If branchSales
+        // doesn't have it, totals/branches should be zero, not "fall back to all".
+        const wantedName = String(
+          (filteredBranch?.branchName) || filter.branchId || ''
+        ).toLowerCase();
+        const wantedId = String(filter.branchId || '').toLowerCase();
+        const wantedBranchId = String(filteredBranch?.branchId || '').toLowerCase();
 
-          // Generic row-matcher for any list whose rows carry LOKASYON/LOKASYON_ID/SUBE_AD
-          const matchLoc = (r: any): boolean => {
-            if (!r || typeof r !== 'object') return false;
-            const id = String(r.LOKASYON_ID ?? r.SUBE_ID ?? '').toLowerCase();
-            const name = String(r.LOKASYON ?? r.LOKASYON_AD ?? r.SUBE ?? r.SUBE_AD ?? '').toLowerCase();
-            return (
-              (!!wantedName && (name === wantedName || id === wantedName)) ||
-              (!!wantedId && (id === wantedId || name === wantedId)) ||
-              (!!wantedBranchId && (id === wantedBranchId || name === wantedBranchId))
-            );
-          };
+        // Generic row-matcher for any list whose rows carry LOKASYON/LOKASYON_ID/SUBE_AD
+        const matchLoc = (r: any): boolean => {
+          if (!r || typeof r !== 'object') return false;
+          const id = String(r.LOKASYON_ID ?? r.SUBE_ID ?? '').toLowerCase();
+          const name = String(r.LOKASYON ?? r.LOKASYON_AD ?? r.SUBE ?? r.SUBE_AD ?? '').toLowerCase();
+          return (
+            (!!wantedName && (name === wantedName || id === wantedName)) ||
+            (!!wantedId && (id === wantedId || name === wantedId)) ||
+            (!!wantedBranchId && (id === wantedBranchId || name === wantedBranchId))
+          );
+        };
 
-          const filterList = (arr: any[]): any[] => {
-            if (!Array.isArray(arr) || arr.length === 0) return arr || [];
-            const out = arr.filter(matchLoc);
-            // If filtering wiped everything but data exists, return empty array
-            // (user expects "no data for this location"), not unfiltered list.
-            return out;
-          };
+        const filterList = (arr: any[]): any[] => {
+          if (!Array.isArray(arr) || arr.length === 0) return arr || [];
+          return arr.filter(matchLoc);
+        };
 
-          transformed = {
-            ...transformed,
-            branchSales: [filteredBranch],
-            hourlyLocationSales: filterList(transformed.hourlyLocationSales || []),
-            iptalOzet: filterList(transformed.iptalOzet || []),
-            iptalDetay: filterList(transformed.iptalDetay || []),
-            waiterSales: filterList(transformed.waiterSales || []),
-            topProducts: filterList(transformed.topProducts || []),
-            worstProducts: filterList(transformed.worstProducts || []),
-            topSelling: filterList(transformed.topSelling || []),
-            leastSelling: filterList(transformed.leastSelling || []),
-            cancelledReceipts: filterList(transformed.cancelledReceipts || []),
-            openTables: filterList(transformed.openTables || []),
-            weeklyComparison: {
-              thisWeek: filteredBranch.sales,
-              lastWeek: { cash: 0, card: 0, openAccount: 0, total: 0 },
-            },
-          };
-        }
+        const zeroSales = { cash: 0, card: 0, openAccount: 0, total: 0 };
+
+        transformed = {
+          ...transformed,
+          // Even if filteredBranch undefined we still scope to that single (empty) branch
+          branchSales: filteredBranch
+            ? [filteredBranch]
+            : [{ branchId: filter.branchId, branchName: filter.branchId, sales: zeroSales, cancellations: [] } as any],
+          hourlyLocationSales: filterList(transformed.hourlyLocationSales || []),
+          iptalOzet: filterList(transformed.iptalOzet || []),
+          iptalDetay: filterList(transformed.iptalDetay || []),
+          waiterSales: filterList(transformed.waiterSales || []),
+          topProducts: filterList(transformed.topProducts || []),
+          worstProducts: filterList(transformed.worstProducts || []),
+          topSelling: filterList(transformed.topSelling || []),
+          leastSelling: filterList(transformed.leastSelling || []),
+          cancelledReceipts: filterList(transformed.cancelledReceipts || []),
+          openTables: filterList(transformed.openTables || []),
+          weeklyComparison: {
+            thisWeek: filteredBranch ? filteredBranch.sales : zeroSales,
+            lastWeek: zeroSales,
+          },
+        };
       }
       
       setData(transformed);
