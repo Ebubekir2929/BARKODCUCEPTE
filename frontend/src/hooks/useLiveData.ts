@@ -451,6 +451,32 @@ export function useLiveData(filter?: DashboardFilter) {
           leastSelling: filterList(transformed.leastSelling || []),
           cancelledReceipts: filterList(transformed.cancelledReceipts || []),
           openTables: filterList(transformed.openTables || []),
+          // Filter branch-keyed breakdowns by matching branchName
+          branchBreakdowns: (transformed.branchBreakdowns || []).filter((b: any) =>
+            (b?.branchName || '').toLowerCase() === wantedName ||
+            (b?.branchId || '').toLowerCase() === wantedId
+          ),
+          kdvBreakdown: {
+            ...(transformed.kdvBreakdown || { branches: [], grandRates: [], grandTotalMatrah: 0, grandTotalKdv: 0 }),
+            branches: ((transformed.kdvBreakdown?.branches || []) as any[]).filter((b: any) =>
+              (b?.branchName || '').toLowerCase() === wantedName ||
+              (b?.branchId || '').toLowerCase() === wantedId
+            ),
+          },
+          // 2026-05-16 — Aggregated hourly sales: rebuild from the filtered location list.
+          hourlySales: (() => {
+            const filteredHourly = (transformed.hourlyLocationSales || []).filter(matchLoc);
+            const byHour: Record<string, any> = {};
+            for (const r of filteredHourly) {
+              const h = String(r.SAAT ?? r.HOUR ?? '').padStart(2, '0');
+              if (!byHour[h]) byHour[h] = { hour: h, cash: 0, card: 0, openAccount: 0, total: 0 };
+              byHour[h].cash += parseFloat(r.NAKIT || r.CASH || '0');
+              byHour[h].card += parseFloat(r.KK || r.KART || r.CARD || '0');
+              byHour[h].openAccount += parseFloat(r.ACIK_HESAP || r.OPEN_ACCOUNT || '0');
+              byHour[h].total += parseFloat(r.TOPLAM || r.TOTAL || '0');
+            }
+            return Object.values(byHour).sort((a: any, b: any) => a.hour.localeCompare(b.hour));
+          })(),
           weeklyComparison: {
             thisWeek: filteredBranch ? filteredBranch.sales : zeroSales,
             lastWeek: zeroSales,
