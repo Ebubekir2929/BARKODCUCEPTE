@@ -1324,6 +1324,89 @@ export default function DashboardScreen() {
                   </View>
                 );
               })}
+
+              {/* 2026-05-16 — Lokasyon kırılımı: filtreli durumda sadece seçili
+                  lokasyon, normalde tüm gerçek lokasyonlar. Her satır o
+                  lokasyonun matrah/kdv/toplamını ve oran kırılımını gösterir. */}
+              {((sourceData?.kdvBreakdown?.branches || []) as any[]).length > 0 && (
+                <View style={{ marginTop: 16 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                    <Ionicons name="business-outline" size={14} color={colors.primary} />
+                    <Text style={{ fontSize: 13, fontWeight: '800', color: colors.text }}>
+                      Lokasyon Bazında
+                    </Text>
+                  </View>
+                  {((sourceData?.kdvBreakdown?.branches || []) as any[]).map((b: any) => {
+                    const bTotal = (b.totalMatrah || 0) + (b.totalKdv || 0);
+                    if (bTotal <= 0) return null;
+                    return (
+                      <View
+                        key={b.branchId || b.branchName}
+                        style={{
+                          marginBottom: 10,
+                          padding: 12,
+                          borderRadius: 12,
+                          backgroundColor: colors.background,
+                          borderWidth: 1,
+                          borderColor: colors.border,
+                        }}
+                      >
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary }} />
+                            <Text style={{ fontSize: 14, fontWeight: '800', color: colors.text }} numberOfLines={1}>
+                              {b.branchName || 'Bilinmeyen'}
+                            </Text>
+                          </View>
+                          <Text style={{ fontSize: 14, fontWeight: '900', color: colors.primary }} numberOfLines={1}>
+                            ₺{fmt(bTotal)}
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 10 }}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase' }}>
+                              Matrah
+                            </Text>
+                            <Text style={{ fontSize: 12, fontWeight: '800', color: colors.text, marginTop: 2 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                              ₺{fmt(b.totalMatrah || 0)}
+                            </Text>
+                          </View>
+                          <View style={{ width: 1, backgroundColor: colors.border, marginHorizontal: 4 }} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 9, fontWeight: '700', color: '#F59E0B', textTransform: 'uppercase' }}>
+                              KDV
+                            </Text>
+                            <Text style={{ fontSize: 12, fontWeight: '800', color: '#F59E0B', marginTop: 2 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
+                              ₺{fmt(b.totalKdv || 0)}
+                            </Text>
+                          </View>
+                        </View>
+                        {/* Oran kırılımı satırları */}
+                        {(b.rates || []).length > 0 && (
+                          <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.border }}>
+                            {(b.rates || []).map((r: any) => {
+                              const c = rateColor(r.rate);
+                              return (
+                                <View key={r.rate} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                                  <View style={{
+                                    backgroundColor: c + '20', paddingHorizontal: 7, paddingVertical: 2,
+                                    borderRadius: 5,
+                                  }}>
+                                    <Text style={{ fontSize: 10, fontWeight: '800', color: c }}>%{r.rate}</Text>
+                                  </View>
+                                  <Text style={{ fontSize: 11, color: colors.textSecondary }}>
+                                    M: ₺{fmt(r.matrah || 0)} · K: ₺{fmt(r.kdv || 0)}
+                                  </Text>
+                                </View>
+                              );
+                            })}
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
             </View>
           );
         })()}
