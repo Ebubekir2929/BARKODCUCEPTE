@@ -133,7 +133,18 @@ export default function DashboardScreen() {
             if (!resp.ok) return;
             const j = await resp.json();
             const locs: any[] = j?.financial_data_location?.data || [];
-            const total = locs.reduce(
+            // 2026-05-16 — Lokasyon filtresi aktifse sadece seçili lokasyonun
+            // toplamını al; aksi halde tüm lokasyonların toplamı.
+            let scopedLocs = locs;
+            if (filters.branchId) {
+              const wanted = String(filters.branchId).toLowerCase();
+              scopedLocs = locs.filter((l: any) => {
+                const id = String(l?.LOKASYON_ID || l?.SUBE_ID || '').toLowerCase();
+                const name = String(l?.LOKASYON || l?.SUBE || l?.LOKASYON_AD || '').toLowerCase();
+                return id === wanted || name === wanted;
+              });
+            }
+            const total = scopedLocs.reduce(
               (s, l) => s + parseFloat(l?.GENELTOPLAM || l?.TOPLAM || '0'),
               0
             );

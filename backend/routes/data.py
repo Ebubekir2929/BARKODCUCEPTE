@@ -1448,12 +1448,28 @@ async def get_iptal_detail(
         # cache_only=True: cache miss durumunda POS'a istek atma, boş dön.
         # POS request_create işini arka plandaki _preload_iptal_individual_cache
         # yapacak — kullanıcı bekletilmez.
-        individual_params = {"IPTAL_ID": int(iptal_id), "scope": "iptal_detail"}
+        # 2026-05-16 — POS bazı senaryolarda cache'i `tarih_baslangic/tarih_bitis`
+        # ile de yazıyor. Önce bu ek parametrelerle dene; bulamazsa sade
+        # IPTAL_ID+scope ile tekrar dene.
+        individual_params_with_date = {
+            "IPTAL_ID": int(iptal_id),
+            "scope": "iptal_detail",
+            "tarih_baslangic": f"{filter_date} 00:00:00",
+            "tarih_bitis": f"{filter_date} 23:59:59",
+        }
         result = await _on_demand_request(
-            tenant_id, "iptal_detay", individual_params, cache_only=True,
+            tenant_id, "iptal_detay", individual_params_with_date, cache_only=True,
         )
         line_items = _extract_line_items(result)
         header = _extract_header(result)
+        # Fallback: sade IPTAL_ID + scope ile dene (eski POS yazımı)
+        if not line_items and not header:
+            individual_params = {"IPTAL_ID": int(iptal_id), "scope": "iptal_detail"}
+            result = await _on_demand_request(
+                tenant_id, "iptal_detay", individual_params, cache_only=True,
+            )
+            line_items = _extract_line_items(result)
+            header = _extract_header(result)
 
         # Step 1b — bireysel cache yoksa: günlük toplu cache'ten (IPTAL_ID=null)
         # bu IPTAL_ID'nin header'ını filtrele. Line items olmaz ama en azından
