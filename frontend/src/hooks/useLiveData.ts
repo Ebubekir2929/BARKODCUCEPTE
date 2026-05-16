@@ -119,13 +119,13 @@ function isToday(d: Date): boolean {
 }
 
 function transformApiData(apiData: any): DashboardData {
-  // 2026-05-16 — POS, ödeme tiplerini (NAKİT, KART, VERESİYE) lokasyon
-  // şeklinde döndürebiliyor; bunlar gerçek lokasyon değil. Toplama girince
-  // tutarları 2x yapıyor + filtreleme listesini kirletiyor. Burada filtreliyoruz.
+  // 2026-05-16 — POS, ödeme tiplerini lokasyon şeklinde döndürebiliyor;
+  // bunlar gerçek lokasyon değil. Filtrelemenin amacı NAKİT/KART gibi ödeme
+  // tipi sahte "lokasyon"ları listeden çıkarmak. "Veresiye" gerçek bir
+  // lokasyon adı olabilir (müşteri tanımlı) — listeye dokunmuyoruz.
   const PAYMENT_TYPE_LOCATIONS = new Set([
-    'VERESİYE', 'VERESIYE',
     'NAKİT', 'NAKIT',
-    'KART', 'KREDİ KARTI', 'KREDI KARTI', 'KREDİ', 'KREDI',
+    'KREDİ KARTI', 'KREDI KARTI',
     'ÇEK', 'CEK',
     'BANKA', 'HAVALE',
     'PUAN', 'YEMEK ÇEKİ', 'YEMEK CEKI',
@@ -455,12 +455,53 @@ export function useLiveData(filter?: DashboardFilter) {
 
         const zeroSales = { cash: 0, card: 0, openAccount: 0, total: 0 };
 
+        // Compute filtered branchBreakdowns first; we'll reuse it.
+        const filteredBranchBreakdowns = (transformed.branchBreakdowns || []).filter((b: any) =>
+          (b?.branchName || '').toLowerCase() === wantedName ||
+          (b?.branchId || '').toLowerCase() === wantedId
+        );
+
+        // Recompute tenant-level financialBreakdown from filtered branches so
+        // the "kırılım" (Nakit/Kart/Toplam ERP/Perakende) bölümleri seçili
+        // lokasyonun verisini gösterir, tüm tenant'ı değil.
+        const recomputedFinancial = (() => {
+          let totalNakit = 0, perakendeNakit = 0, erp12Nakit = 0;
+          let totalKart = 0, perakendeKart = 0, erp12Kart = 0;
+          let totalGenel = 0, perakendeGenel = 0, erp12Genel = 0;
+          let totalIsk = 0, perakendeIsk = 0, erp12Isk = 0;
+          let totalFis = 0, perakendeFis = 0, erp12Fis = 0;
+          for (const b of filteredBranchBreakdowns) {
+            const pNakit = b.perakende_nakit || 0;
+            const eNakit = b.erp12_nakit || 0;
+            const pKart = b.perakende_kart || 0;
+            const eKart = b.erp12_kart || 0;
+            const pIsk = b.perakende_iskonto || 0;
+            const eIsk = b.erp12_iskonto || 0;
+            const pFis = b.perakende_fis || 0;
+            const eFis = b.erp12_fis || 0;
+            perakendeNakit += pNakit; erp12Nakit += eNakit; totalNakit += pNakit + eNakit;
+            perakendeKart += pKart; erp12Kart += eKart; totalKart += pKart + eKart;
+            perakendeIsk += pIsk; erp12Isk += eIsk; totalIsk += b.toplam_iskonto || (pIsk + eIsk);
+            perakendeFis += pFis; erp12Fis += eFis; totalFis += b.toplam_fis || (pFis + eFis);
+          }
+          // GENELTOPLAM = NAKIT + KK + (other) — we derive from branchSales totals
+          totalGenel = (filteredBranch?.sales?.total) || (totalNakit + totalKart);
+          perakendeGenel = perakendeNakit + perakendeKart;
+          erp12Genel = erp12Nakit + erp12Kart;
+          return {
+            nakit:       { total: totalNakit,  perakende: perakendeNakit,  erp12: erp12Nakit  },
+            krediKarti:  { total: totalKart,   perakende: perakendeKart,   erp12: erp12Kart   },
+            geneltoplam: { total: totalGenel,  perakende: perakendeGenel,  erp12: erp12Genel  },
+            iskonto:     { total: totalIsk,    perakende: perakendeIsk,    erp12: erp12Isk    },
+            fisSayisi:   { total: totalFis,    perakende: perakendeFis,    erp12: erp12Fis    },
+          };
+        })();
+
         transformed = {
           ...transformed,
-          // Even if filteredBranch undefined we still scope to that single (empty) branch
-          branchSales: filteredBranch
-            ? [filteredBranch]
-            : [{ branchId: filter.branchId, branchName: filter.branchId, sales: zeroSales, cancellations: [] } as any],
+          // Show ONLY the matched branch; if filter location has no real data,
+          // return EMPTY array so the user doesn't see a fake "0" entry.
+          branchSales: filteredBranch ? [filteredBranch] : [],
           hourlyLocationSales: filterList(transformed.hourlyLocationSales || []),
           iptalOzet: filterList(transformed.iptalOzet || []),
           iptalDetay: filterList(transformed.iptalDetay || []),
@@ -471,22 +512,18 @@ export function useLiveData(filter?: DashboardFilter) {
           leastSelling: filterList(transformed.leastSelling || []),
           cancelledReceipts: filterList(transformed.cancelledReceipts || []),
           openTables: filterList(transformed.openTables || []),
-          // Filter branch-keyed breakdowns by matching branchName
-          branchBreakdowns: (transformed.branchBreakdowns || []).filter((b: any) =>
-            (b?.branchName || '').toLowerCase() === wantedName ||
-            (b?.branchId || '').toLowerCase() === wantedId
-          ),
+          financialBreakdown: recomputedFinancial,
+          branchBreakdowns: filteredBranchBreakdowns,
           kdvBreakdown: (() => {
-            const filteredBranches = ((transformed.kdvBreakdown?.branches || []) as any[]).filter((b: any) =>
+            const filteredKdvBranches = ((transformed.kdvBreakdown?.branches || []) as any[]).filter((b: any) =>
               (b?.branchName || '').toLowerCase() === wantedName ||
               (b?.branchId || '').toLowerCase() === wantedId
             );
-            // 2026-05-16 — Recompute grand totals from filtered branches so
-            // KDV/Matrah header KPIs respect the location filter.
+            // Recompute KDV grand totals from filtered branches
             const perRate: Record<number, { matrah: number; kdv: number }> = {};
             let totalMatrah = 0;
             let totalKdv = 0;
-            for (const b of filteredBranches) {
+            for (const b of filteredKdvBranches) {
               for (const r of (b.rates || [])) {
                 if (!perRate[r.rate]) perRate[r.rate] = { matrah: 0, kdv: 0 };
                 perRate[r.rate].matrah += r.matrah || 0;
@@ -499,13 +536,12 @@ export function useLiveData(filter?: DashboardFilter) {
               .map(([rate, v]) => ({ rate: parseInt(rate, 10), matrah: v.matrah, kdv: v.kdv, total: v.matrah + v.kdv }))
               .sort((a, b) => a.rate - b.rate);
             return {
-              branches: filteredBranches,
+              branches: filteredKdvBranches,
               grandRates,
               grandTotalMatrah: totalMatrah,
               grandTotalKdv: totalKdv,
             };
           })(),
-          // 2026-05-16 — Aggregated hourly sales: rebuild from the filtered location list.
           hourlySales: (() => {
             const filteredHourly = (transformed.hourlyLocationSales || []).filter(matchLoc);
             const byHour: Record<string, any> = {};
