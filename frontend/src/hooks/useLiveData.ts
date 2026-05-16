@@ -119,9 +119,29 @@ function isToday(d: Date): boolean {
 }
 
 function transformApiData(apiData: any): DashboardData {
+  // 2026-05-16 — POS, ödeme tiplerini (NAKİT, KART, VERESİYE) lokasyon
+  // şeklinde döndürebiliyor; bunlar gerçek lokasyon değil. Toplama girince
+  // tutarları 2x yapıyor + filtreleme listesini kirletiyor. Burada filtreliyoruz.
+  const PAYMENT_TYPE_LOCATIONS = new Set([
+    'VERESİYE', 'VERESIYE',
+    'NAKİT', 'NAKIT',
+    'KART', 'KREDİ KARTI', 'KREDI KARTI', 'KREDİ', 'KREDI',
+    'ÇEK', 'CEK',
+    'BANKA', 'HAVALE',
+    'PUAN', 'YEMEK ÇEKİ', 'YEMEK CEKI',
+  ]);
+  const isRealLocation = (name: string | null | undefined): boolean => {
+    const n = String(name || '').trim().toUpperCase();
+    if (!n) return false;
+    if (PAYMENT_TYPE_LOCATIONS.has(n)) return false;
+    if (n === 'GENEL TOPLAM' || n === 'TOPLAM') return false;
+    return true;
+  };
+
   const branchSales: BranchSales[] = [];
   const branchBreakdowns: DashboardData['branchBreakdowns'] = [];
-  const locationData = apiData?.financial_data_location?.data || [];
+  const rawLocationData = apiData?.financial_data_location?.data || [];
+  const locationData = rawLocationData.filter((loc: any) => isRealLocation(loc?.LOKASYON));
   locationData.forEach((loc: any, idx: number) => {
     branchSales.push({
       branchId: `loc-${idx}`,
@@ -308,7 +328,7 @@ function transformApiData(apiData: any): DashboardData {
     waiterSales: apiData?.garson_satis_ozet?.data || [],
     iptalOzet: apiData?.iptal_ozet?.data || [],
     iptalDetay: apiData?.iptal_detay?.data || [],
-    allLocations: apiData?.all_locations || [],
+    allLocations: (apiData?.all_locations || []).filter((loc: string) => isRealLocation(loc)),
     financialBreakdown,
     branchBreakdowns,
     kdvBreakdown: {
@@ -456,13 +476,35 @@ export function useLiveData(filter?: DashboardFilter) {
             (b?.branchName || '').toLowerCase() === wantedName ||
             (b?.branchId || '').toLowerCase() === wantedId
           ),
-          kdvBreakdown: {
-            ...(transformed.kdvBreakdown || { branches: [], grandRates: [], grandTotalMatrah: 0, grandTotalKdv: 0 }),
-            branches: ((transformed.kdvBreakdown?.branches || []) as any[]).filter((b: any) =>
+          kdvBreakdown: (() => {
+            const filteredBranches = ((transformed.kdvBreakdown?.branches || []) as any[]).filter((b: any) =>
               (b?.branchName || '').toLowerCase() === wantedName ||
               (b?.branchId || '').toLowerCase() === wantedId
-            ),
-          },
+            );
+            // 2026-05-16 — Recompute grand totals from filtered branches so
+            // KDV/Matrah header KPIs respect the location filter.
+            const perRate: Record<number, { matrah: number; kdv: number }> = {};
+            let totalMatrah = 0;
+            let totalKdv = 0;
+            for (const b of filteredBranches) {
+              for (const r of (b.rates || [])) {
+                if (!perRate[r.rate]) perRate[r.rate] = { matrah: 0, kdv: 0 };
+                perRate[r.rate].matrah += r.matrah || 0;
+                perRate[r.rate].kdv += r.kdv || 0;
+                totalMatrah += r.matrah || 0;
+                totalKdv += r.kdv || 0;
+              }
+            }
+            const grandRates = Object.entries(perRate)
+              .map(([rate, v]) => ({ rate: parseInt(rate, 10), matrah: v.matrah, kdv: v.kdv, total: v.matrah + v.kdv }))
+              .sort((a, b) => a.rate - b.rate);
+            return {
+              branches: filteredBranches,
+              grandRates,
+              grandTotalMatrah: totalMatrah,
+              grandTotalKdv: totalKdv,
+            };
+          })(),
           // 2026-05-16 — Aggregated hourly sales: rebuild from the filtered location list.
           hourlySales: (() => {
             const filteredHourly = (transformed.hourlyLocationSales || []).filter(matchLoc);

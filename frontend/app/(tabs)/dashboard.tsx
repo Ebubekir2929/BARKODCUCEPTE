@@ -543,9 +543,20 @@ export default function DashboardScreen() {
             'BANKA', 'HAVALE',
             'PUAN', 'YEMEK ÇEKİ', 'YEMEK CEKI',
           ]);
+          // 2026-05-16 — Aktif filtre lokasyonunun adı (varsa) — modal verisi
+          // de filtreye sadık kalsın.
+          const selectedBranchName = (() => {
+            if (!filters?.branchId) return null;
+            const found = (sourceData?.branchSales || []).find(
+              (b) => b.branchId === filters.branchId || b.branchName === filters.branchId
+            );
+            return (found?.branchName || filters.branchId || '').toString().toUpperCase();
+          })();
           const filtered = (Array.isArray(data.data) ? data.data : []).filter((row: any) => {
             const lok = String(row?.LOKASYON || '').trim().toUpperCase();
-            return !PAYMENT_TYPES.has(lok);
+            if (PAYMENT_TYPES.has(lok)) return false;
+            if (selectedBranchName && lok !== selectedBranchName) return false;
+            return true;
           });
           setHourDetailProducts(filtered);
         }
