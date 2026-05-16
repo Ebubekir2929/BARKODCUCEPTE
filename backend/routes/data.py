@@ -2271,9 +2271,12 @@ async def get_high_sale_detail(
 
         # Fall back to the regular cached path (covers edge cases where the
         # direct query failed).
+        # 2026-05-16 — cache_only=True: kullanıcı isteği, POS'a request_create
+        # yapılmıyor, sadece mevcut cache okunuyor.
         if not rows:
             result = await _on_demand_request(
-                tenant_id, "fis_gunluk_bildirim_feed", {}, raw_cache=True
+                tenant_id, "fis_gunluk_bildirim_feed", {}, raw_cache=True,
+                cache_only=True,
             )
             cache = result.get("cache") or {}
             if isinstance(cache.get("data"), list):
@@ -2296,9 +2299,10 @@ async def get_high_sale_detail(
         if not details and fis_id_int is not None:
             fallback_used = True
             try:
+                # 2026-05-16 — cache_only=True: kullanıcı isteği, POS'a request_create yok.
                 fb = await _on_demand_request(
                     tenant_id, "fis_detay_toplam", {"FisId": fis_id_int},
-                    timeout_sec=20, raw_cache=True,
+                    timeout_sec=20, raw_cache=True, cache_only=True,
                 )
                 fb_data = (fb.get("cache") or {}).get("data") or fb.get("data")
                 # `fis_detay_toplam` may return [[details], [totals]] or {result_sets:[…]}
