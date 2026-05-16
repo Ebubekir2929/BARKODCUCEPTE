@@ -1497,13 +1497,9 @@ async def get_iptal_detail(
                     f"[iptal-detail] cache hit (bulk only, no line items) "
                     f"for IPTAL_ID={iptal_id} tenant={tenant_id}"
                 )
-            # 2026-05-13 — Arka planda bireysel cache'i tetikle (POS request_create).
-            # Bir sonraki tıklamada line items hazır olur.
-            try:
-                import asyncio as _aio
-                _aio.create_task(_preload_iptal_individual_cache(tenant_id, int(iptal_id), filter_date))
-            except Exception:
-                pass
+            # 2026-05-16 — Preload kaldırıldı (kullanıcı isteği): cache'de yoksa
+            # POS'a yeni request_create + MySQL write yapılmıyor. Sadece var olan
+            # cache'i okuyoruz. Cache eksikse boş döner, kullanıcı uyarısı gösterilir.
             result = bulk_result if isinstance(bulk_result, dict) else result
 
         # Return product rows + header info — modal uses header for LOKASYON/MASA/etc
