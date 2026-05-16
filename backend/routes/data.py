@@ -1593,6 +1593,8 @@ async def get_iptal_list(
         for dt in dates_to_fetch:
             try:
                 # Prefer MySQL direct (_on_demand_request handles 3-tier caching)
+                # 2026-05-16 — cache_only=True: kullanıcı isteği üzerine POS'a
+                # request_create atılmıyor. Cache'de varsa döner, yoksa boş.
                 resp = await _on_demand_request(
                     tenant_id,
                     "iptal_detay",
@@ -1602,6 +1604,7 @@ async def get_iptal_list(
                         "IPTAL_ID": None,
                     },
                     timeout_sec=45,
+                    cache_only=True,
                 )
                 day_data = resp.get("data", [])
                 if isinstance(day_data, list):
