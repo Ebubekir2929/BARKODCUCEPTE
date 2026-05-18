@@ -20,6 +20,8 @@ DEVICES = {
     "iphone_6_7": (430, 932, 1290, 2796, 3),   # iPhone 14/15 Pro Max
     "iphone_6_5": (414, 896, 1242, 2688, 3),   # iPhone 11 Pro Max / XS Max
     "iphone_5_5": (414, 736, 1242, 2208, 3),   # iPhone 8 Plus
+    # 2026-05-18 — iPad Pro 13" (M4)
+    "ipad_13":    (1032, 1376, 2064, 2752, 2),  # iPad Pro 13" portrait
 }
 
 # Demo data substitution: real_text -> demo_text
@@ -136,7 +138,7 @@ async def shoot(page, out_dir: Path, name: str):
     print(f"  ✓ {path}")
 
 
-async def capture_screen_set(playwright, device_key: str, css_w: int, css_h: int):
+async def capture_screen_set(playwright, device_key: str, css_w: int, css_h: int, scale: int):
     out_dir = OUT_BASE / device_key
     # Use the bundled headless_shell at /pw-browsers (version pinned by env)
     exe_path = "/pw-browsers/chromium_headless_shell-1208/chrome-linux/headless_shell"
@@ -144,12 +146,19 @@ async def capture_screen_set(playwright, device_key: str, css_w: int, css_h: int
         browser = await playwright.chromium.launch(headless=True, executable_path=exe_path)
     else:
         browser = await playwright.chromium.launch(headless=True)
+    is_tablet = device_key.startswith("ipad")
     context = await browser.new_context(
         viewport={"width": css_w, "height": css_h},
-        device_scale_factor=3,
-        is_mobile=True,
+        device_scale_factor=scale,
+        is_mobile=not is_tablet,
         has_touch=True,
-        user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+        user_agent=(
+            "Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+            "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+            if is_tablet else
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+            "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+        ),
     )
     page = await context.new_page()
 
@@ -250,11 +259,18 @@ async def capture_screen_set(playwright, device_key: str, css_w: int, css_h: int
 
 
 async def main():
+    import sys
     OUT_BASE.mkdir(parents=True, exist_ok=True)
+    # Optional CLI args: device keys to run (default = all)
+    requested = sys.argv[1:] if len(sys.argv) > 1 else list(DEVICES.keys())
     async with async_playwright() as p:
-        for key, (cw, ch, _, _, _) in DEVICES.items():
-            print(f"\n=== {key} ({cw}x{ch}) ===")
-            await capture_screen_set(p, key, cw, ch)
+        for key in requested:
+            if key not in DEVICES:
+                print(f"Skipping unknown device: {key}")
+                continue
+            cw, ch, _, _, sc = DEVICES[key]
+            print(f"\n=== {key} ({cw}x{ch} @ {sc}x) ===")
+            await capture_screen_set(p, key, cw, ch, sc)
     print("\nDone.")
 
 
