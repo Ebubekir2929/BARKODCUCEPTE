@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS pending_price_updates (
     product_id VARCHAR(64) NOT NULL,
     product_barcode VARCHAR(64) DEFAULT NULL,
     product_name VARCHAR(255) DEFAULT NULL,
+    price_name_id INT DEFAULT NULL,
+    price_name VARCHAR(100) DEFAULT NULL,
     old_price DECIMAL(15,2) DEFAULT NULL,
     new_price DECIMAL(15,2) NOT NULL,
     status ENUM('pending','applied','failed','cancelled') NOT NULL DEFAULT 'pending',
@@ -59,6 +61,19 @@ CREATE TABLE IF NOT EXISTS pending_price_updates (
 """
 
 
+# Run an idempotent ALTER for upgrades from earlier table version
+async def _migrate_add_price_name_cols(cur):
+    """Adds price_name_id / price_name columns if they don't exist (idempotent)."""
+    try:
+        await cur.execute("SHOW COLUMNS FROM pending_price_updates LIKE 'price_name_id'")
+        if not await cur.fetchone():
+            await cur.execute("ALTER TABLE pending_price_updates ADD COLUMN price_name_id INT NULL AFTER product_name")
+            await cur.execute("ALTER TABLE pending_price_updates ADD COLUMN price_name VARCHAR(100) NULL AFTER price_name_id")
+            logger.info("pending_price_updates: added price_name_id + price_name columns")
+    except Exception as e:
+        logger.warning(f"_migrate_add_price_name_cols skipped: {e}")
+
+
 async def ensure_table_exists():
     global _TABLE_INITIALIZED
     if _TABLE_INITIALIZED:
@@ -67,6 +82,7 @@ async def ensure_table_exists():
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(CREATE_TABLE_SQL)
+            await _migrate_add_price_name_cols(cur)
     _TABLE_INITIALIZED = True
     logger.info("pending_price_updates table ensured")
 
@@ -81,6 +97,8 @@ class PriceItem(BaseModel):
     product_barcode: Optional[str] = Field(default=None, max_length=64)
     product_name: Optional[str] = Field(default=None, max_length=255)
     old_price: Optional[float] = Field(default=None)
+    price_name_id: Optional[int] = Field(default=None)
+    price_name: Optional[str] = Field(default=None, max_length=100)
 
 
 class CreatePriceUpdateRequest(BaseModel):
@@ -196,10 +214,12 @@ async def create_price_updates(
                 await cur.execute(
                     """INSERT INTO pending_price_updates
                        (user_id, tenant_id, product_id, product_barcode, product_name,
+                        price_name_id, price_name,
                         old_price, new_price, status, source, batch_id, created_at, notes)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s)""",
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s)""",
                     (
                         user_id, tenant_id, item.product_id, item.product_barcode, item.product_name,
+                        item.price_name_id, item.price_name,
                         item.old_price, item.new_price, data.source, batch_id, now, data.notes,
                     ),
                 )
@@ -285,6 +305,7 @@ async def list_price_updates(
             counts = {r[0]: r[1] for r in await cur.fetchall()}
 
             sql = """SELECT id, user_id, tenant_id, product_id, product_barcode, product_name,
+                            price_name_id, price_name,
                             old_price, new_price, status, source, batch_id,
                             created_at, applied_at, error_message, notes
                      FROM pending_price_updates
@@ -297,6 +318,7 @@ async def list_price_updates(
             params.extend([limit, offset])
             await cur.execute(sql, params)
             cols = ["id", "user_id", "tenant_id", "product_id", "product_barcode", "product_name",
+                    "price_name_id", "price_name",
                     "old_price", "new_price", "status", "source", "batch_id",
                     "created_at", "applied_at", "error_message", "notes"]
             rows = await cur.fetchall()

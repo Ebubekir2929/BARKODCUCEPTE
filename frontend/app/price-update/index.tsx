@@ -85,20 +85,26 @@ export default function PriceUpdateScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // New update modal
-  const [showNewModal, setShowNewModal] = useState(false);
+  // Stock & price names (fiyat adları)
   const [stockList, setStockList] = useState<StockItem[]>([]);
   const [stockLoading, setStockLoading] = useState(false);
   const [stockSearch, setStockSearch] = useState('');
-  const [mode, setMode] = useState<'single' | 'bulk'>('single');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
-  // Single product edit sheet
+  // Tek ürün state'leri ARTIK KULLANILMIYOR ama eski referansları korumak için tutuluyor
   const [editProduct, setEditProduct] = useState<StockItem | null>(null);
   const [newPrice, setNewPrice] = useState('');
-  // Tek ürün modunda kullanıcının kendi girdiği yüzde / sabit miktar
   const [singlePercent, setSinglePercent] = useState('');
   const [singleAmount, setSingleAmount] = useState('');
+  const mode: 'bulk' = 'bulk';
+  const setMode = (_: any) => {};
+
+  // Fiyat Adları (Parekende, Toptan vb.) — kullanıcı seçer
+  const [priceNames, setPriceNames] = useState<Array<{ ID: number | string; AD: string }>>([]);
+  const [selectedPriceNameId, setSelectedPriceNameId] = useState<string>('');
+  const [showPriceNameDropdown, setShowPriceNameDropdown] = useState(false);
+  // Diğer fiyat adlarına da aynı yeni fiyatı uygula
+  const [applyToOtherPrices, setApplyToOtherPrices] = useState(false);
 
   // Bulk adjust panel — toplu hesaplama widget (artık satır listesinin üstünde)
   const [bulkType, setBulkType] = useState<'percent' | 'amount' | 'fixed_price'>('percent');
@@ -119,7 +125,32 @@ export default function PriceUpdateScreen() {
   // Pending action context: 'single' or 'bulk', plus the payload to send
   const [pendingAction, setPendingAction] = useState<any>(null);
 
-  // === API CALLS ===
+  // New update modal
+  const [showNewModal, setShowNewModal] = useState(false);
+
+  // Fiyat Adlarını çek (Parekende / Toptan / vb.)
+  const fetchPriceNames = useCallback(async () => {
+    if (!token || !activeTenantId) return;
+    try {
+      const r = await fetch(`${API_URL}/api/data/stock-price-names`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ tenant_id: activeTenantId }),
+      });
+      const j = await r.json();
+      if (r.ok && j.ok && Array.isArray(j.data)) {
+        setPriceNames(j.data);
+        setSelectedPriceNameId(prev => {
+          if (prev) return prev;
+          if (j.data.length === 0) return '';
+          return String(j.data[0].ID || j.data[0].AD || '');
+        });
+      }
+    } catch { /* noop */ }
+  }, [token, activeTenantId]);
+
+  useEffect(() => { fetchPriceNames(); }, [fetchPriceNames]);
+
   const fetchList = useCallback(async (silent = false) => {
     if (!token) return;
     if (!silent) setLoading(true);
@@ -145,21 +176,44 @@ export default function PriceUpdateScreen() {
   useEffect(() => { fetchList(); }, [fetchList]);
 
   const fetchStock = useCallback(async () => {
-    if (!token || !activeTenantId) return;
+    if (!token || !activeTenantId || !selectedPriceNameId) return;
     setStockLoading(true);
+    setStockList([]);
     try {
-      const resp = await fetch(`${API_URL}/api/data/stock-list`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ tenant_id: activeTenantId, page: 1, page_size: 300 }),
-      });
-      const j = await resp.json();
-      if (resp.ok && j.ok) setStockList(j.data || []);
+      // Tüm sayfaları sırayla çek
+      const PAGE_SIZE = 300;
+      let page = 1;
+      let total_pages = 1;
+      const all: StockItem[] = [];
+      do {
+        const resp = await fetch(`${API_URL}/api/data/stock-list`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({
+            tenant_id: activeTenantId,
+            fiyat_ad: selectedPriceNameId,
+            page,
+            page_size: PAGE_SIZE,
+          }),
+        });
+        const j = await resp.json();
+        if (!resp.ok || !j.ok) break;
+        const rows = Array.isArray(j.data) ? j.data : [];
+        all.push(...rows);
+        total_pages = parseInt(j.total_pages || 1);
+        // Progressive update so user sees results as they stream in
+        setStockList([...all]);
+        page++;
+        if (page > 20) break;  // safety cap (6000 items)
+      } while (page <= total_pages);
     } catch { /* noop */ }
     finally { setStockLoading(false); }
-  }, [token, activeTenantId]);
+  }, [token, activeTenantId, selectedPriceNameId]);
 
-  useEffect(() => { if (showNewModal) fetchStock(); }, [showNewModal, fetchStock]);
+  // Yeni modal açıldığında veya fiyat adı değiştiğinde stok çek
+  useEffect(() => {
+    if (showNewModal && selectedPriceNameId) fetchStock();
+  }, [showNewModal, selectedPriceNameId, fetchStock]);
 
   // === CANCEL pending ===
   const cancelOne = async (id: number) => {
@@ -290,18 +344,37 @@ export default function PriceUpdateScreen() {
       showWarning('Boş Liste', 'En az 1 ürün için yeni fiyat girin');
       return;
     }
+    // Hangi fiyat adına (price_name_id) yazılacağını belirle
+    const pn = priceNames.find(p => String(p.ID) === String(selectedPriceNameId));
+    const items: any[] = [];
+    valid.forEach(({ row, np }) => {
+      const base = {
+        product_id: String(row.ID),
+        product_barcode: row.BARKOD || null,
+        product_name: row.AD || null,
+        old_price: row.oldPrice || null,
+        new_price: Math.round(np * 100) / 100,
+      };
+      if (applyToOtherPrices && priceNames.length > 1) {
+        // Tüm fiyat adlarına ayrı ayrı kayıt ekle (Windows client her birini günceller)
+        priceNames.forEach(p => {
+          items.push({
+            ...base,
+            price_name_id: typeof p.ID === 'number' ? p.ID : parseInt(String(p.ID)) || null,
+            price_name: p.AD || null,
+          });
+        });
+      } else {
+        items.push({
+          ...base,
+          price_name_id: pn ? (typeof pn.ID === 'number' ? pn.ID : parseInt(String(pn.ID)) || null) : null,
+          price_name: pn ? pn.AD : null,
+        });
+      }
+    });
     setPendingAction({
-      type: 'single',  // backend single endpoint kullan (her satır kendi yeni fiyatını taşıyor)
-      body: {
-        items: valid.map(({ row, np }) => ({
-          product_id: String(row.ID),
-          product_barcode: row.BARKOD || null,
-          product_name: row.AD || null,
-          old_price: row.oldPrice || null,
-          new_price: Math.round(np * 100) / 100,
-        })),
-        source: 'bulk',
-      },
+      type: 'single',
+      body: { items, source: 'bulk' },
     });
     setShowPasswordModal(true);
   };
@@ -502,24 +575,29 @@ export default function PriceUpdateScreen() {
               )}
             </View>
 
-            {/* Mode Tabs */}
-            <View style={[styles.tabsRow, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+            {/* Fiyat Adı seçici (Parekende, Toptan vb.) */}
+            <View style={{ paddingHorizontal: 12, paddingTop: 12, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+              <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 6 }}>Fiyat Adı (Liste)</Text>
               <TouchableOpacity
-                style={[styles.tab, mode === 'single' && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
-                onPress={() => { setMode('single'); setSelectedIds(new Set()); }}
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background, marginBottom: 10 }}
+                onPress={() => setShowPriceNameDropdown(true)}
               >
-                <Text style={{ color: mode === 'single' ? colors.primary : colors.textSecondary, fontWeight: mode === 'single' ? '700' : '500' }}>
-                  Tek Ürün
+                <Text style={{ color: colors.text, fontWeight: '600', flex: 1 }}>
+                  {priceNames.find(p => String(p.ID) === String(selectedPriceNameId))?.AD || 'Fiyat adı seçin'}
                 </Text>
+                <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.tab, mode === 'bulk' && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
-                onPress={() => { setMode('bulk'); setEditProduct(null); }}
-              >
-                <Text style={{ color: mode === 'bulk' ? colors.primary : colors.textSecondary, fontWeight: mode === 'bulk' ? '700' : '500' }}>
-                  Toplu {selectedIds.size > 0 ? `(${selectedIds.size})` : ''}
-                </Text>
-              </TouchableOpacity>
+              {priceNames.length > 1 && (
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8 }}
+                  onPress={() => setApplyToOtherPrices(v => !v)}
+                >
+                  <Ionicons name={applyToOtherPrices ? 'checkbox' : 'square-outline'} size={22} color={applyToOtherPrices ? colors.primary : colors.textSecondary} />
+                  <Text style={{ color: colors.text, fontSize: 13, marginLeft: 8, flex: 1 }}>
+                    Diğer fiyat adlarına da aynı yeni fiyatı uygula ({priceNames.length - 1} ek liste)
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             {/* Search */}
@@ -878,6 +956,40 @@ export default function PriceUpdateScreen() {
             </View>
           </TouchableWithoutFeedback>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ====================  PRICE NAME DROPDOWN  ==================== */}
+      <Modal visible={showPriceNameDropdown} animationType="fade" transparent onRequestClose={() => setShowPriceNameDropdown(false)}>
+        <TouchableWithoutFeedback onPress={() => setShowPriceNameDropdown(false)}>
+          <View style={[styles.modalOverlay, { justifyContent: 'center', padding: 30 }]}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={{ backgroundColor: colors.surface, borderRadius: 14, maxHeight: '70%', overflow: 'hidden' }}>
+                <View style={{ padding: 14, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                  <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700' }}>Fiyat Adı Seç</Text>
+                </View>
+                <ScrollView>
+                  {priceNames.map(p => {
+                    const active = String(p.ID) === String(selectedPriceNameId);
+                    return (
+                      <TouchableOpacity
+                        key={String(p.ID)}
+                        style={{ padding: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: active ? colors.primary + '15' : 'transparent' }}
+                        onPress={() => {
+                          setSelectedPriceNameId(String(p.ID));
+                          setShowPriceNameDropdown(false);
+                          setSelectedIds(new Set());
+                        }}
+                      >
+                        <Text style={{ color: active ? colors.primary : colors.text, fontWeight: active ? '700' : '500' }}>{p.AD}</Text>
+                        {active && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
       <CustomAlert {...alertProps} />
