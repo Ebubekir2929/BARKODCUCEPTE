@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 from datetime import datetime, timedelta, date
+from pydantic import BaseModel
 from models.user import (
     UserRegister, UserLogin, UserResponse,
     TenantSource, TenantAdd, TenantUpdate, TokenResponse, LicenseStatus,
@@ -154,10 +155,13 @@ async def build_user_response(user_dict: dict) -> UserResponse:
 async def register(data: UserRegister):
     if not data.terms_accepted:
         raise HTTPException(status_code=400, detail="Şartlar ve koşulları kabul etmelisiniz")
-    
-    # Validate tax number
-    if not data.tax_number.isdigit() or len(data.tax_number) not in [10, 11]:
-        raise HTTPException(status_code=400, detail="Vergi numarası 10 veya 11 haneli olmalıdır")
+
+    # 2026-05-20 — Apple App Store rejection 5.1.1(v): Vergi Numarası is now
+    # OPTIONAL. Only validate format IF user provided a value.
+    tax_number_clean = (data.tax_number or "").strip()
+    if tax_number_clean:
+        if not tax_number_clean.isdigit() or len(tax_number_clean) not in [10, 11]:
+            raise HTTPException(status_code=400, detail="Vergi numarası geçersiz (boş bırakabilir veya 10-11 haneli girebilirsiniz)")
     
     pool = await get_patron_pool()
     async with pool.acquire() as conn:
@@ -191,7 +195,7 @@ async def register(data: UserRegister):
             """, (
                 data.username, data.email, data.full_name, password_hash,
                 '', '', '', '', '',  # Ip, Port, VtAdi, VtKullaniciAd, VtSifre - set by admin later
-                today, end_date, data.tax_number, 'on', 1,
+                today, end_date, tax_number_clean, 'on', 1,
                 data.tenant_id if data.tenant_id else None, has_tables,
             ))
             
@@ -209,7 +213,7 @@ async def register(data: UserRegister):
     
     user_dict = {
         "user_id": user_id, "username": data.username, "email": data.email,
-        "full_name": data.full_name, "tax_number": data.tax_number,
+        "full_name": data.full_name, "tax_number": tax_number_clean,
         "tenant_id": data.tenant_id, "has_tables": has_tables,
         "start_date": today, "end_date": end_date, "active": 1,
     }
@@ -495,3 +499,77 @@ async def remove_tenant(tenant_id: str, current_user: dict = Depends(get_current
 
     logger.info(f"Tenant removed for user {current_user['email']}: {tenant_id} (with cleanup)")
     return await build_user_response(current_user)
+
+
+# 2026-05-20 — Apple App Store rejection 5.1.1(v) — in-app account deletion
+# is mandatory for apps that support account creation.
+class DeleteAccountRequest(BaseModel):
+    password: str
+    confirm: str = ""  # user types "SİL" to confirm
+
+
+@router.delete("/account")
+@router.post("/account/delete")
+async def delete_account(
+    data: DeleteAccountRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Permanently delete the authenticated user's account and all related data.
+
+    Steps:
+      1. Re-verify password (extra safety).
+      2. Delete MongoDB tenant/name records owned by this user.
+      3. Delete patron MariaDB rows (users + push tokens + notification settings).
+      4. Done — client must clear its local token after a 200 response.
+    """
+    if data.confirm and data.confirm.strip().upper() not in ("SİL", "SIL", "DELETE"):
+        raise HTTPException(status_code=400, detail="Onay metni hatalı. 'SİL' yazmalısınız.")
+
+    if not data.password:
+        raise HTTPException(status_code=400, detail="Hesabınızı silmek için şifrenizi girin")
+
+    user_id = current_user["user_id"]
+    email = current_user["email"]
+
+    pool = await get_patron_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            # 1) Verify password
+            await cur.execute("SELECT password FROM users WHERE user_id = %s", (user_id,))
+            row = await cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+            stored_hash = row[0] or ""
+            if stored_hash != sha1_hash(data.password):
+                raise HTTPException(status_code=401, detail="Şifre hatalı")
+
+    # 2) Mongo cleanup
+    if mongo_db is not None:
+        try:
+            await mongo_db.tenant_names.delete_many({"user_id": user_id})
+        except Exception as e:
+            logger.warning(f"delete_account: mongo tenant_names cleanup failed for {user_id}: {e}")
+        try:
+            await mongo_db.user_tenants.delete_many({"user_id": user_id})
+        except Exception as e:
+            logger.warning(f"delete_account: mongo user_tenants cleanup failed for {user_id}: {e}")
+
+    # 3) Patron MariaDB cleanup — push tokens, notification settings, user row.
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            for tbl, where in [
+                ("push_tokens", "user_id = %s"),
+                ("notification_settings", "user_id = %s"),
+                ("notification_events_seen", "user_id = %s"),
+            ]:
+                try:
+                    await cur.execute(f"DELETE FROM {tbl} WHERE {where}", (user_id,))
+                except Exception as e:
+                    # table may not exist on some installations; log and continue
+                    logger.warning(f"delete_account: cleanup {tbl} skipped: {e}")
+            # Finally, delete the user row itself.
+            await cur.execute("DELETE FROM users WHERE user_id = %s", (user_id,))
+            await conn.commit()
+
+    logger.info(f"Account deleted: user_id={user_id} email={email}")
+    return {"success": True, "message": "Hesabınız ve tüm verileriniz silindi"}

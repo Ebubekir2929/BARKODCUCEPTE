@@ -15,7 +15,9 @@ class UserRegister(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     email: EmailStr
     password: str = Field(..., min_length=6)
-    tax_number: str = Field(..., min_length=10, max_length=11)  # Vergi Numarası
+    # 2026-05-20 — Apple App Store rejection 5.1.1(v): Vergi Numarası must NOT be
+    # required (it is not directly relevant to core functionality). Made optional.
+    tax_number: Optional[str] = Field(default="", max_length=11)
     tenant_id: str = Field(..., min_length=1)  # Primary Tenant ID
     tenant_name: str = Field(default="Data 1")  # Name for the first tenant
     business_type: str = Field(..., pattern="^(normal|restoran)$")  # İşletme Tipi

@@ -320,6 +320,48 @@ export default function SettingsScreen() {
     ]);
   };
 
+  // 2026-05-20 — Apple App Store rejection 5.1.1(v) — in-app account deletion required.
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const handleDeleteAccountPress = () => {
+    setDeletePassword('');
+    setDeleteConfirmText('');
+    setShowDeleteModal(true);
+  };
+
+  const handleConfirmDeleteAccount = async () => {
+    if (deleteConfirmText.trim().toUpperCase() !== 'SİL' && deleteConfirmText.trim().toUpperCase() !== 'SIL') {
+      showWarning('Onay Eksik', 'Hesabınızı silmek için kutuya "SİL" yazın.');
+      return;
+    }
+    if (!deletePassword) {
+      showWarning('Şifre Eksik', 'Lütfen şifrenizi girin.');
+      return;
+    }
+    setDeleteLoading(true);
+    try {
+      const result = await deleteAccount(deletePassword);
+      if (result.success) {
+        setShowDeleteModal(false);
+        showSuccess('Hesap Silindi', 'Hesabınız ve tüm verileriniz kalıcı olarak silindi.', [
+          {
+            text: 'Tamam',
+            onPress: () => router.replace('/(auth)/login'),
+          },
+        ]);
+      } else {
+        showError('Silme Başarısız', result.error || 'Hesap silinemedi. Lütfen tekrar deneyin.');
+      }
+    } catch (e: any) {
+      showError('Hata', e?.message || 'Bir hata oluştu.');
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   const handleClearCache = () => {
     showWarning(t('cache_clear_title'), t('clear_cache_confirm'), [
       { text: t('cancel'), style: 'cancel' },
@@ -1075,8 +1117,146 @@ export default function SettingsScreen() {
           <Ionicons name="log-out-outline" size={22} color={colors.error} />
           <Text style={[styles.logoutText, { color: colors.error }]}>{t('logout')}</Text>
         </TouchableOpacity>
+
+        {/* 2026-05-20 — Apple 5.1.1(v) — Hesabımı Sil */}
+        <TouchableOpacity
+          style={[styles.logoutButton, { backgroundColor: 'transparent', borderColor: colors.error, marginTop: 12 }]}
+          onPress={handleDeleteAccountPress}
+        >
+          <Ionicons name="trash-outline" size={22} color={colors.error} />
+          <Text style={[styles.logoutText, { color: colors.error }]}>Hesabımı Sil</Text>
+        </TouchableOpacity>
+        <Text style={{ color: colors.textSecondary, fontSize: 12, textAlign: 'center', marginTop: 8, paddingHorizontal: 16 }}>
+          Hesabınızı sildiğinizde tüm verileriniz (kullanıcı, veri kaynakları, bildirim ayarları) kalıcı olarak silinir ve geri alınamaz.
+        </Text>
       </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Delete Account Confirmation Modal */}
+      <Modal visible={showDeleteModal} animationType="slide" transparent onRequestClose={() => !deleteLoading && setShowDeleteModal(false)}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={{ flex: 1 }}
+        >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+            <View style={styles.modalOverlay}>
+              <View style={[styles.modalContent, { backgroundColor: colors.surface, maxWidth: 480 }]}>
+                <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+                  <Text style={[styles.modalTitle, { color: colors.error }]}>Hesabımı Sil</Text>
+                  {!deleteLoading && (
+                    <TouchableOpacity onPress={() => setShowDeleteModal(false)}>
+                      <Ionicons name="close" size={24} color={colors.text} />
+                    </TouchableOpacity>
+                  )}
+                </View>
+                <View style={[styles.modalBody, { padding: 20 }]}>
+                  <View style={{
+                    backgroundColor: colors.error + '15',
+                    borderColor: colors.error,
+                    borderWidth: 1,
+                    borderRadius: 12,
+                    padding: 14,
+                    marginBottom: 16,
+                  }}>
+                    <Text style={{ color: colors.error, fontWeight: '700', marginBottom: 6, fontSize: 15 }}>
+                      ⚠️ Bu işlem geri alınamaz
+                    </Text>
+                    <Text style={{ color: colors.text, fontSize: 13, lineHeight: 18 }}>
+                      Hesabınız ve aşağıdaki tüm verileriniz kalıcı olarak silinecek:{'\n'}
+                      • Kullanıcı bilgileri (e-posta, şifre, ad){'\n'}
+                      • Tüm veri kaynakları (Tenant'lar){'\n'}
+                      • Bildirim ayarları ve cihaz tokenları{'\n'}
+                      • Lisans bilgileri
+                    </Text>
+                  </View>
+
+                  <Text style={[styles.menuItemLabel, { color: colors.text, marginBottom: 6 }]}>Şifrenizi girin</Text>
+                  <TextInput
+                    style={{
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      backgroundColor: colors.card,
+                      color: colors.text,
+                      borderRadius: 10,
+                      padding: 12,
+                      marginBottom: 14,
+                      fontSize: 15,
+                    }}
+                    placeholder="Mevcut şifreniz"
+                    placeholderTextColor={colors.textSecondary}
+                    secureTextEntry
+                    value={deletePassword}
+                    onChangeText={setDeletePassword}
+                    editable={!deleteLoading}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+
+                  <Text style={[styles.menuItemLabel, { color: colors.text, marginBottom: 6 }]}>
+                    Onaylamak için &quot;SİL&quot; yazın
+                  </Text>
+                  <TextInput
+                    style={{
+                      borderWidth: 1,
+                      borderColor: colors.border,
+                      backgroundColor: colors.card,
+                      color: colors.text,
+                      borderRadius: 10,
+                      padding: 12,
+                      marginBottom: 18,
+                      fontSize: 15,
+                      letterSpacing: 2,
+                    }}
+                    placeholder="SİL"
+                    placeholderTextColor={colors.textSecondary}
+                    value={deleteConfirmText}
+                    onChangeText={setDeleteConfirmText}
+                    editable={!deleteLoading}
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                  />
+
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <TouchableOpacity
+                      style={{
+                        flex: 1,
+                        backgroundColor: colors.card,
+                        borderColor: colors.border,
+                        borderWidth: 1,
+                        paddingVertical: 14,
+                        borderRadius: 10,
+                        alignItems: 'center',
+                      }}
+                      onPress={() => setShowDeleteModal(false)}
+                      disabled={deleteLoading}
+                    >
+                      <Text style={{ color: colors.text, fontWeight: '600' }}>Vazgeç</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={{
+                        flex: 1,
+                        backgroundColor: colors.error,
+                        paddingVertical: 14,
+                        borderRadius: 10,
+                        alignItems: 'center',
+                        opacity: deleteLoading ? 0.7 : 1,
+                      }}
+                      onPress={handleConfirmDeleteAccount}
+                      disabled={deleteLoading}
+                    >
+                      {deleteLoading ? (
+                        <ActivityIndicator color="#FFF" />
+                      ) : (
+                        <Text style={{ color: '#FFF', fontWeight: '700' }}>Hesabımı Kalıcı Olarak Sil</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </View>
+          </TouchableWithoutFeedback>
+        </KeyboardAvoidingView>
+      </Modal>
 
       {/* Language Selection Modal */}
       <Modal visible={showLanguageModal} animationType="slide" transparent>

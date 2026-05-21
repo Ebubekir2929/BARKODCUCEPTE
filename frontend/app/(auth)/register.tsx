@@ -101,8 +101,10 @@ export default function RegisterScreen() {
 
   const handleRegister = async () => {
     // Validate step 2
-    if (!taxNumber || !taxNumber.match(/^\d{10,11}$/)) {
-      showWarning('Uyarı', 'Vergi numarası 10 veya 11 haneli olmalıdır');
+    // 2026-05-20 — Apple App Store rejection 5.1.1(v): Vergi Numarası is now
+    // OPTIONAL. Only validate format if user provided a value.
+    if (taxNumber && !taxNumber.match(/^\d{10,11}$/)) {
+      showWarning('Uyarı', 'Vergi numarası girerseniz 10 veya 11 haneli olmalıdır');
       return;
     }
     if (!tenantId.trim()) {
@@ -257,8 +259,8 @@ export default function RegisterScreen() {
 
   const renderStep2 = () => (
     <>
-      <Text style={[styles.sectionTitle, { color: colors.text }]}>Vergi Numarası</Text>
-      {renderInputWithActions(taxNumber, setTaxNumber, '10 veya 11 haneli', 'document-text-outline', { keyboardType: 'numeric', maxLength: 11 })}
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>Vergi Numarası (İsteğe bağlı)</Text>
+      {renderInputWithActions(taxNumber, setTaxNumber, '10 veya 11 haneli (opsiyonel)', 'document-text-outline', { keyboardType: 'numeric', maxLength: 11 })}
 
       <Text style={[styles.sectionTitle, { color: colors.text }]}>Tenant ID</Text>
       {renderInputWithActions(tenantId, setTenantId, 'Client tarafında oluşturulur', 'key-outline', { showCopy: true, showClear: true })}

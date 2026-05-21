@@ -38,6 +38,7 @@ interface AuthStore {
   updateTenantName: (tenant_id: string, name: string) => Promise<{ success: boolean; error?: string }>;
   removeTenant: (tenant_id: string) => Promise<{ success: boolean; error?: string }>;
   refreshUser: () => Promise<void>;
+  deleteAccount: (password: string) => Promise<{ success: boolean; error?: string }>;
 }
 
 export const useAuthStore = create<AuthStore>((set, get) => ({
@@ -127,6 +128,33 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     await AsyncStorage.removeItem('token');
     await AsyncStorage.removeItem('user');
     set({ user: null, token: null, isAuthenticated: false, isLoading: false });
+  },
+
+  deleteAccount: async (password: string) => {
+    const token = get().token;
+    if (!token) return { success: false, error: 'Oturum bulunamadı' };
+    try {
+      const response = await fetch(`${API_URL}/api/auth/account/delete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ password, confirm: 'SİL' }),
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        // Clear all local state
+        await AsyncStorage.removeItem('token');
+        await AsyncStorage.removeItem('user');
+        set({ user: null, token: null, isAuthenticated: false, isLoading: false, license: null });
+        return { success: true };
+      }
+      return { success: false, error: data.detail || data.message || 'Hesap silinemedi' };
+    } catch (error) {
+      console.error('deleteAccount error:', error);
+      return { success: false, error: 'Bağlantı hatası. Lütfen tekrar deneyin.' };
+    }
   },
 
   checkAuth: async () => {
