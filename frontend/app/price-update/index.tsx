@@ -378,22 +378,54 @@ export default function PriceUpdateScreen() {
   }, [showBulkEdit, applyToOtherPrices, fetchOtherPrices]);
 
   // Toplu hesaplama widget'ı — değer ve tipe göre tüm satırların newPrice'ını doldurur
+  // applyToOtherPrices açıksa diğer fiyat adlarına da her birinin kendi eski fiyatına göre uygulanır
   const applyBulkCalculation = () => {
     const v = parseFloat(bulkValue.replace(',', '.'));
     if (isNaN(v)) { showWarning('Geçersiz Değer', 'Bir sayı girin (örn. 10 veya -5)'); return; }
     if (bulkType === 'fixed_price' && v <= 0) { showWarning('Geçersiz Fiyat', 'Sabit fiyat 0\'dan büyük olmalı'); return; }
-    setBulkEditRows(prev => prev.map(r => {
+    const calc = (oldP: number): string => {
       let np = 0;
-      if (bulkType === 'percent') np = r.oldPrice * (1 + v / 100);
-      else if (bulkType === 'amount') np = r.oldPrice + v;
+      if (bulkType === 'percent') np = oldP * (1 + v / 100);
+      else if (bulkType === 'amount') np = oldP + v;
       else if (bulkType === 'fixed_price') np = v;
       np = Math.round(np * 100) / 100;
-      return { ...r, newPrice: np > 0 ? np.toFixed(2) : '' };
-    }));
+      return np > 0 ? np.toFixed(2) : '';
+    };
+    setBulkEditRows(prev => prev.map(r => ({ ...r, newPrice: calc(r.oldPrice) })));
+    // Diğer fiyat adlarına da aynı kuralla uygula (her birinin kendi eski fiyatından hesaplanır)
+    if (applyToOtherPrices) {
+      setOtherNewPricesByProduct(prev => {
+        const next = { ...prev };
+        bulkEditRows.forEach(r => {
+          const rowOthers: Record<string, string> = { ...(next[String(r.ID)] || {}) };
+          priceNames.forEach(p => {
+            if (String(p.ID) === String(selectedPriceNameId)) return;
+            const oldP = otherPricesByProduct[String(r.ID)]?.[String(p.ID)] || 0;
+            rowOthers[String(p.ID)] = calc(oldP);
+          });
+          next[String(r.ID)] = rowOthers;
+        });
+        return next;
+      });
+    }
   };
 
   const setRowNewPrice = (id: number, value: string) => {
     setBulkEditRows(prev => prev.map(r => r.ID === id ? { ...r, newPrice: value } : r));
+    // applyToOtherPrices açıkken aynı fiyatı diğer fiyat adlarına da otomatik doldur
+    // (kullanıcı sonra her birini elle değiştirebilir)
+    if (applyToOtherPrices) {
+      setOtherNewPricesByProduct(prev => {
+        const next = { ...prev };
+        const rowOthers: Record<string, string> = { ...(next[String(id)] || {}) };
+        priceNames.forEach(p => {
+          if (String(p.ID) === String(selectedPriceNameId)) return;
+          rowOthers[String(p.ID)] = value;
+        });
+        next[String(id)] = rowOthers;
+        return next;
+      });
+    }
   };
 
   // === Save bulk edit (Final kaydet) ===
