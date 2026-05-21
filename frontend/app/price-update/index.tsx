@@ -91,6 +91,12 @@ export default function PriceUpdateScreen() {
   const [stockSearch, setStockSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
+  // Stok ekranındaki gibi filtreler
+  const [selectedGroup, setSelectedGroup] = useState<string>('all');
+  const [showGroupDropdown, setShowGroupDropdown] = useState(false);
+  const [filterPositiveStock, setFilterPositiveStock] = useState(false);
+  const [filterNegativeStock, setFilterNegativeStock] = useState(false);
+
   // Tek ürün state'leri ARTIK KULLANILMIYOR ama eski referansları korumak için tutuluyor
   const [editProduct, setEditProduct] = useState<StockItem | null>(null);
   const [newPrice, setNewPrice] = useState('');
@@ -103,8 +109,14 @@ export default function PriceUpdateScreen() {
   const [priceNames, setPriceNames] = useState<Array<{ ID: number | string; AD: string }>>([]);
   const [selectedPriceNameId, setSelectedPriceNameId] = useState<string>('');
   const [showPriceNameDropdown, setShowPriceNameDropdown] = useState(false);
-  // Diğer fiyat adlarına da aynı yeni fiyatı uygula
+  // Diğer fiyat adlarına da aynı yeni fiyatı uygula (artık toplu düzenleme ekranında)
   const [applyToOtherPrices, setApplyToOtherPrices] = useState(false);
+  // Her ürünün diğer fiyat adlarındaki mevcut fiyatları — applyToOtherPrices açılınca yüklenir
+  // Map: productId -> { priceNameId: oldPrice }
+  const [otherPricesByProduct, setOtherPricesByProduct] = useState<Record<string, Record<string, number>>>({});
+  // Her ürünün diğer fiyat adları için kullanıcının girdiği yeni fiyatlar (boş bırakılırsa pas geçilir)
+  // Map: productId -> { priceNameId: newPriceString }
+  const [otherNewPricesByProduct, setOtherNewPricesByProduct] = useState<Record<string, Record<string, string>>>({});
 
   // Bulk adjust panel — toplu hesaplama widget (artık satır listesinin üstünde)
   const [bulkType, setBulkType] = useState<'percent' | 'amount' | 'fixed_price'>('percent');
@@ -175,17 +187,13 @@ export default function PriceUpdateScreen() {
 
   useEffect(() => { fetchList(); }, [fetchList]);
 
-  const fetchStock = useCallback(async () => {
+  const fetchStock = useCallback(async (force = false) => {
     if (!token || !activeTenantId || !selectedPriceNameId) return;
     setStockLoading(true);
     setStockList([]);
     try {
-      // Tüm sayfaları sırayla çek
-      const PAGE_SIZE = 300;
-      let page = 1;
-      let total_pages = 1;
-      const all: StockItem[] = [];
-      do {
+      const PAGE_SIZE = 200;
+      const fetchPage = async (page: number) => {
         const resp = await fetch(`${API_URL}/api/data/stock-list`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -194,20 +202,33 @@ export default function PriceUpdateScreen() {
             fiyat_ad: selectedPriceNameId,
             page,
             page_size: PAGE_SIZE,
+            force_refresh: force,
           }),
         });
+        if (!resp.ok) return null;
         const j = await resp.json();
-        if (!resp.ok || !j.ok) break;
-        const rows = Array.isArray(j.data) ? j.data : [];
-        all.push(...rows);
-        total_pages = parseInt(j.total_pages || 1);
-        // Progressive update so user sees results as they stream in
+        return {
+          data: Array.isArray(j?.data) ? j.data : [],
+          total_pages: parseInt(j?.total_pages || 1),
+          total_count: parseInt(j?.total_count || 0),
+        };
+      };
+      const first = await fetchPage(1);
+      if (!first || first.data.length === 0) { setStockLoading(false); return; }
+      setStockList(first.data);
+      setStockLoading(false);
+      const totalPages = first.total_pages || 1;
+      if (totalPages <= 1) return;
+      // Sayfa 2..N — 5 paralel batch (stock.tsx ile aynı)
+      const BATCH = 5;
+      const all: any[] = [...first.data];
+      for (let start = 2; start <= totalPages; start += BATCH) {
+        const ps = Array.from({ length: Math.min(BATCH, totalPages - start + 1) }, (_, i) => start + i);
+        const results = await Promise.all(ps.map(p => fetchPage(p)));
+        for (const r of results) if (r?.data?.length) all.push(...r.data);
         setStockList([...all]);
-        page++;
-        if (page > 20) break;  // safety cap (6000 items)
-      } while (page <= total_pages);
-    } catch { /* noop */ }
-    finally { setStockLoading(false); }
+      }
+    } catch { setStockLoading(false); }
   }, [token, activeTenantId, selectedPriceNameId]);
 
   // Yeni modal açıldığında veya fiyat adı değiştiğinde stok çek
@@ -293,7 +314,7 @@ export default function PriceUpdateScreen() {
     setShowPasswordModal(true);
   };
 
-  // === Bulk: prepare edit rows (Devam Et) ===
+  // Bulk: prepare edit rows (Devam Et)
   // Seçili ürünleri editable rows'a aktar — kullanıcı her birine elle yeni fiyat girer
   const openBulkEdit = () => {
     if (selectedIds.size === 0) { showWarning('Seçim Yok', 'En az 1 ürün seçin'); return; }
@@ -304,13 +325,57 @@ export default function PriceUpdateScreen() {
         AD: s.AD || `#${s.ID}`,
         BARKOD: s.BARKOD || null,
         oldPrice: s.FIYAT ? Number(s.FIYAT) : 0,
-        newPrice: '',   // boş başlar — kullanıcı elle girer veya toplu hesapla
+        newPrice: '',
       }));
     setBulkEditRows(rows);
     setBulkValue('');
     setBulkType('percent');
+    setOtherPricesByProduct({});
+    setOtherNewPricesByProduct({});
+    setApplyToOtherPrices(false);
     setShowBulkEdit(true);
   };
+
+  // applyToOtherPrices açıldığında diğer fiyat adlarının fiyatlarını çek
+  const fetchOtherPrices = useCallback(async () => {
+    if (!token || !activeTenantId) return;
+    const others = priceNames.filter(p => String(p.ID) !== String(selectedPriceNameId));
+    if (others.length === 0) return;
+    const selectedIdsArr = bulkEditRows.map(r => r.ID);
+    if (selectedIdsArr.length === 0) return;
+    const newMap: Record<string, Record<string, number>> = {};
+    // Her diğer fiyat adı için stock-list çek + seçili ürünleri filtrele
+    await Promise.all(others.map(async (pn) => {
+      try {
+        // Sayfa 1 — cache'den hızlı (eğer stock_count büyükse birkaç sayfa çekmek gerekebilir)
+        let allRows: any[] = [];
+        for (let page = 1; page <= 20; page++) {
+          const resp = await fetch(`${API_URL}/api/data/stock-list`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ tenant_id: activeTenantId, fiyat_ad: String(pn.ID), page, page_size: 200 }),
+          });
+          const j = await resp.json();
+          if (!resp.ok || !j.ok) break;
+          allRows.push(...(j.data || []));
+          if (page >= parseInt(j.total_pages || 1)) break;
+        }
+        const idSet = new Set(selectedIdsArr.map(x => String(x)));
+        allRows.forEach((r: any) => {
+          const rid = String(r.ID);
+          if (idSet.has(rid)) {
+            if (!newMap[rid]) newMap[rid] = {};
+            newMap[rid][String(pn.ID)] = parseFloat(String(r.FIYAT || 0).replace(',', '.')) || 0;
+          }
+        });
+      } catch { /* noop */ }
+    }));
+    setOtherPricesByProduct(newMap);
+  }, [token, activeTenantId, priceNames, selectedPriceNameId, bulkEditRows]);
+
+  useEffect(() => {
+    if (showBulkEdit && applyToOtherPrices) fetchOtherPrices();
+  }, [showBulkEdit, applyToOtherPrices, fetchOtherPrices]);
 
   // Toplu hesaplama widget'ı — değer ve tipe göre tüm satırların newPrice'ını doldurur
   const applyBulkCalculation = () => {
@@ -333,45 +398,59 @@ export default function PriceUpdateScreen() {
 
   // === Save bulk edit (Final kaydet) ===
   const onBulkSave = () => {
-    // Boş veya geçersiz fiyatları filtrele
     const valid = bulkEditRows
       .map(r => {
         const np = parseFloat((r.newPrice || '').replace(',', '.'));
         return { row: r, np };
       })
       .filter(x => !isNaN(x.np) && x.np > 0);
-    if (valid.length === 0) {
+    if (valid.length === 0 && !applyToOtherPrices) {
       showWarning('Boş Liste', 'En az 1 ürün için yeni fiyat girin');
       return;
     }
-    // Hangi fiyat adına (price_name_id) yazılacağını belirle
     const pn = priceNames.find(p => String(p.ID) === String(selectedPriceNameId));
     const items: any[] = [];
-    valid.forEach(({ row, np }) => {
-      const base = {
+    bulkEditRows.forEach(row => {
+      const baseProduct = {
         product_id: String(row.ID),
         product_barcode: row.BARKOD || null,
         product_name: row.AD || null,
-        old_price: row.oldPrice || null,
-        new_price: Math.round(np * 100) / 100,
       };
-      if (applyToOtherPrices && priceNames.length > 1) {
-        // Tüm fiyat adlarına ayrı ayrı kayıt ekle (Windows client her birini günceller)
-        priceNames.forEach(p => {
-          items.push({
-            ...base,
-            price_name_id: typeof p.ID === 'number' ? p.ID : parseInt(String(p.ID)) || null,
-            price_name: p.AD || null,
-          });
-        });
-      } else {
+      // 1) Seçili fiyat adı için
+      const np = parseFloat((row.newPrice || '').replace(',', '.'));
+      if (!isNaN(np) && np > 0) {
         items.push({
-          ...base,
+          ...baseProduct,
+          old_price: row.oldPrice || null,
+          new_price: Math.round(np * 100) / 100,
           price_name_id: pn ? (typeof pn.ID === 'number' ? pn.ID : parseInt(String(pn.ID)) || null) : null,
           price_name: pn ? pn.AD : null,
         });
       }
+      // 2) applyToOtherPrices açıkken, otherNewPricesByProduct'tan diğer fiyat adı değerlerini ekle
+      if (applyToOtherPrices) {
+        const otherInputs = otherNewPricesByProduct[String(row.ID)] || {};
+        const otherOlds = otherPricesByProduct[String(row.ID)] || {};
+        priceNames.forEach(p => {
+          if (String(p.ID) === String(selectedPriceNameId)) return;
+          const val = otherInputs[String(p.ID)];
+          if (!val) return;
+          const np2 = parseFloat(val.replace(',', '.'));
+          if (isNaN(np2) || np2 <= 0) return;
+          items.push({
+            ...baseProduct,
+            old_price: otherOlds[String(p.ID)] || null,
+            new_price: Math.round(np2 * 100) / 100,
+            price_name_id: typeof p.ID === 'number' ? p.ID : parseInt(String(p.ID)) || null,
+            price_name: p.AD || null,
+          });
+        });
+      }
     });
+    if (items.length === 0) {
+      showWarning('Boş Liste', 'En az 1 ürün için yeni fiyat girin');
+      return;
+    }
     setPendingAction({
       type: 'single',
       body: { items, source: 'bulk' },
@@ -380,15 +459,35 @@ export default function PriceUpdateScreen() {
   };
 
   // === Filter products ===
+  const groupOptions = useMemo(() => {
+    const set = new Set<string>();
+    stockList.forEach(s => { if (s.STOK_GRUP) set.add(String(s.STOK_GRUP)); });
+    return ['all', ...Array.from(set).sort()];
+  }, [stockList]);
+
   const filteredStock = useMemo(() => {
-    if (!stockSearch.trim()) return stockList.slice(0, 50);
-    const q = stockSearch.toLowerCase().trim();
-    return stockList.filter(s =>
-      (s.AD || '').toLowerCase().includes(q) ||
-      (s.BARKOD || '').toLowerCase().includes(q) ||
-      (s.KOD || '').toLowerCase().includes(q)
-    ).slice(0, 100);
-  }, [stockList, stockSearch]);
+    let arr = stockList;
+    if (selectedGroup && selectedGroup !== 'all') {
+      arr = arr.filter(s => String(s.STOK_GRUP || '') === selectedGroup);
+    }
+    if (filterPositiveStock || filterNegativeStock) {
+      arr = arr.filter((s: any) => {
+        const stok = parseFloat(String(s.MIKTAR ?? s.STOK ?? 0).replace(',', '.')) || 0;
+        if (filterPositiveStock && stok > 0) return true;
+        if (filterNegativeStock && stok < 0) return true;
+        return false;
+      });
+    }
+    if (stockSearch.trim()) {
+      const q = stockSearch.toLowerCase().trim();
+      arr = arr.filter(s =>
+        (s.AD || '').toLowerCase().includes(q) ||
+        (s.BARKOD || '').toLowerCase().includes(q) ||
+        (s.KOD || '').toLowerCase().includes(q)
+      );
+    }
+    return arr.slice(0, 500);
+  }, [stockList, stockSearch, selectedGroup, filterPositiveStock, filterNegativeStock]);
 
   // ============================================================
   // RENDERERS
@@ -587,17 +686,34 @@ export default function PriceUpdateScreen() {
                 </Text>
                 <Ionicons name="chevron-down" size={18} color={colors.textSecondary} />
               </TouchableOpacity>
-              {priceNames.length > 1 && (
+
+              {/* Filtre çubuğu: Grup + Stok > 0 + Stok < 0 (stok ekranındaki gibi) */}
+              <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
                 <TouchableOpacity
-                  style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8 }}
-                  onPress={() => setApplyToOtherPrices(v => !v)}
+                  style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 10, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background }}
+                  onPress={() => setShowGroupDropdown(true)}
                 >
-                  <Ionicons name={applyToOtherPrices ? 'checkbox' : 'square-outline'} size={22} color={applyToOtherPrices ? colors.primary : colors.textSecondary} />
-                  <Text style={{ color: colors.text, fontSize: 13, marginLeft: 8, flex: 1 }}>
-                    Diğer fiyat adlarına da aynı yeni fiyatı uygula ({priceNames.length - 1} ek liste)
+                  <Ionicons name="folder-outline" size={14} color={colors.textSecondary} />
+                  <Text style={{ color: colors.text, fontSize: 12, fontWeight: '600', flex: 1, marginLeft: 6 }} numberOfLines={1}>
+                    {selectedGroup === 'all' ? 'Tüm Gruplar' : selectedGroup}
                   </Text>
+                  <Ionicons name="chevron-down" size={14} color={colors.textSecondary} />
                 </TouchableOpacity>
-              )}
+                <TouchableOpacity
+                  style={{ padding: 10, borderRadius: 8, borderWidth: 1, borderColor: filterPositiveStock ? '#10B981' : colors.border, backgroundColor: filterPositiveStock ? '#10B98115' : colors.background, alignItems: 'center', flexDirection: 'row', gap: 4 }}
+                  onPress={() => setFilterPositiveStock(v => !v)}
+                >
+                  <Ionicons name="add-circle-outline" size={14} color={filterPositiveStock ? '#10B981' : colors.textSecondary} />
+                  <Text style={{ color: filterPositiveStock ? '#10B981' : colors.text, fontSize: 12, fontWeight: '600' }}>Stok+</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={{ padding: 10, borderRadius: 8, borderWidth: 1, borderColor: filterNegativeStock ? colors.error : colors.border, backgroundColor: filterNegativeStock ? colors.error + '15' : colors.background, alignItems: 'center', flexDirection: 'row', gap: 4 }}
+                  onPress={() => setFilterNegativeStock(v => !v)}
+                >
+                  <Ionicons name="remove-circle-outline" size={14} color={filterNegativeStock ? colors.error : colors.textSecondary} />
+                  <Text style={{ color: filterNegativeStock ? colors.error : colors.text, fontSize: 12, fontWeight: '600' }}>Stok−</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* Search */}
@@ -786,6 +902,22 @@ export default function PriceUpdateScreen() {
 
             {/* Toplu Hesapla Widget (opsiyonel) */}
             <View style={{ padding: 12, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+              {priceNames.length > 1 && (
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, marginBottom: 10, paddingHorizontal: 4, borderRadius: 8, backgroundColor: applyToOtherPrices ? colors.primary + '12' : 'transparent' }}
+                  onPress={() => setApplyToOtherPrices(v => !v)}
+                >
+                  <Ionicons name={applyToOtherPrices ? 'checkbox' : 'square-outline'} size={22} color={applyToOtherPrices ? colors.primary : colors.textSecondary} />
+                  <View style={{ marginLeft: 8, flex: 1 }}>
+                    <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>
+                      Diğer fiyat adlarına da uygula ({priceNames.length - 1} ek liste)
+                    </Text>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
+                      Açıkken her satırda her fiyat adı için ayrı alan açılır
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              )}
               <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
                 Toplu Hesapla (opsiyonel) — tüm satırlara dağıtır, sonra her satırı elle değiştirebilirsiniz:
               </Text>
@@ -885,6 +1017,36 @@ export default function PriceUpdateScreen() {
                         {diff >= 0 ? '+' : ''}{fmt(diff)} {pct != null && `(${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)`}
                       </Text>
                     )}
+                    {/* applyToOtherPrices açıksa her diğer fiyat adı için ek satır */}
+                    {applyToOtherPrices && priceNames.filter(p => String(p.ID) !== String(selectedPriceNameId)).map(p => {
+                      const otherOld = otherPricesByProduct[String(item.ID)]?.[String(p.ID)];
+                      const otherNew = otherNewPricesByProduct[String(item.ID)]?.[String(p.ID)] || '';
+                      return (
+                        <View key={String(p.ID)} style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <Text style={{ color: colors.textSecondary, fontSize: 11, width: 80 }} numberOfLines={1}>{p.AD}</Text>
+                          <Text style={{ color: colors.text, fontSize: 12, width: 70, textAlign: 'right' }}>{fmt(otherOld)}</Text>
+                          <Ionicons name="arrow-forward" size={12} color={colors.textSecondary} />
+                          <TextInput
+                            style={{
+                              flex: 1, color: colors.text, fontSize: 13, fontWeight: '700',
+                              padding: 6, paddingLeft: 8,
+                              borderWidth: 1, borderColor: colors.primary, borderRadius: 6,
+                              backgroundColor: colors.primary + '08',
+                            }}
+                            placeholder="Yeni fiyat..."
+                            placeholderTextColor={colors.textSecondary}
+                            keyboardType="decimal-pad"
+                            value={otherNew}
+                            onChangeText={(v) => {
+                              setOtherNewPricesByProduct(prev => ({
+                                ...prev,
+                                [String(item.ID)]: { ...(prev[String(item.ID)] || {}), [String(p.ID)]: v },
+                              }));
+                            }}
+                          />
+                        </View>
+                      );
+                    })}
                   </View>
                 );
               }}
@@ -956,6 +1118,38 @@ export default function PriceUpdateScreen() {
             </View>
           </TouchableWithoutFeedback>
         </KeyboardAvoidingView>
+      </Modal>
+
+      {/* ====================  GROUP DROPDOWN  ==================== */}
+      <Modal visible={showGroupDropdown} animationType="fade" transparent onRequestClose={() => setShowGroupDropdown(false)}>
+        <TouchableWithoutFeedback onPress={() => setShowGroupDropdown(false)}>
+          <View style={[styles.modalOverlay, { justifyContent: 'center', padding: 30 }]}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={{ backgroundColor: colors.surface, borderRadius: 14, maxHeight: '70%', overflow: 'hidden' }}>
+                <View style={{ padding: 14, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+                  <Text style={{ color: colors.text, fontSize: 16, fontWeight: '700' }}>Grup Seç</Text>
+                </View>
+                <ScrollView>
+                  {groupOptions.map(g => {
+                    const active = g === selectedGroup;
+                    return (
+                      <TouchableOpacity
+                        key={g}
+                        style={{ padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: colors.border, backgroundColor: active ? colors.primary + '15' : 'transparent' }}
+                        onPress={() => { setSelectedGroup(g); setShowGroupDropdown(false); }}
+                      >
+                        <Text style={{ color: active ? colors.primary : colors.text, fontWeight: active ? '700' : '500' }}>
+                          {g === 'all' ? 'Tüm Gruplar' : g}
+                        </Text>
+                        {active && <Ionicons name="checkmark" size={18} color={colors.primary} />}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
       {/* ====================  PRICE NAME DROPDOWN  ==================== */}

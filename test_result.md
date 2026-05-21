@@ -2055,3 +2055,49 @@ agent_communication:
       - Liste satırlarında "−811.00 Adet" / "−5.00 Kg" şeklinde birim
         görünüyor mu?
 
+
+    -agent: "main"
+    -message: |
+      [2026-05-21] Price Update Screen — UI verification PASSED ✅
+      ────────────────────────────────────────────────────────────
+      Refactored screen `/app/frontend/app/price-update/index.tsx` smoke
+      tested via screenshot_tool (390x844, iPhone-like) on
+      https://price-update-test.preview.emergentagent.com.
+
+      Login → /price-update → renders cleanly:
+        ✅ Header "Fiyat Güncelleme" + 3 tabs (Bekleyen / Uygulandı /
+           İptal (7))
+        ✅ Empty state with FAB "+ Yeni Güncelleme"
+        ✅ No "Rendered fewer hooks" / TypeError / undefined ref errors
+        ✅ 0 page errors in console
+
+      FAB → New Update modal:
+        ✅ "Fiyat Adı (Liste)" dropdown showing default "Bayi"
+        ✅ Filter row: "Tüm Gruplar" + "Stok+" + "Stok-"
+        ✅ Search input
+        ✅ Product list loaded via batched stock-list fetch (6 products
+           for Merkez tenant)
+
+      Selection + Devam Et:
+        ✅ Tapping rows toggles checkbox, shows "2 ürün seçildi" footer
+        ✅ "Temizle" button appears in header
+        ✅ Devam Et opens Bulk Edit modal
+
+      Bulk Edit modal:
+        ✅ "Toplu Düzenleme · 2 ürün · Yeni fiyatları elle girin"
+        ✅ Checkbox "Diğer fiyat adlarına da uygula (2 ek liste)"
+        ✅ Toplu Hesapla widget (% Yüzde / +/- ₺ / Sabit ₺ + Hepsine Uygula)
+        ✅ Each row: product info + Eski → Yeni input
+        ✅ Sıraya Al submit button + counter "0 / 2 hazır"
+
+      Multi-price-name (applyToOtherPrices):
+        ✅ Checkbox toggled → fetchOtherPrices() called
+        ✅ Each row expands with "Dağıtıcı" and "Parekende" sub-rows
+        ✅ Current prices for other lists displayed (e.g. DENEME 2
+           Dağıtıcı=2500,99 ₺ / Parekende=506,82 ₺)
+        ✅ Yeni fiyat input field per price name (user can fill any
+           combination, empty → skipped)
+
+      The complex refactor (stock.tsx caching/filters + multi-price-name
+      inputs) is rendering correctly. No hook order violations.
+      Task closed as working=true.
