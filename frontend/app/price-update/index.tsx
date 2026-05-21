@@ -97,10 +97,17 @@ export default function PriceUpdateScreen() {
   const [editProduct, setEditProduct] = useState<StockItem | null>(null);
   const [newPrice, setNewPrice] = useState('');
 
-  // Bulk adjust panel
-  const [showBulkPanel, setShowBulkPanel] = useState(false);
+  // Bulk adjust panel — toplu hesaplama widget (artık satır listesinin üstünde)
   const [bulkType, setBulkType] = useState<'percent' | 'amount' | 'fixed_price'>('percent');
-  const [bulkValue, setBulkValue] = useState('10');
+  const [bulkValue, setBulkValue] = useState('');
+
+  // 2026-05-21 — Kullanıcı talebi: toplu modda her ürün için satır satır elle
+  // yeni fiyat girebilme. Devam Et → bu ekran açılır.
+  const [showBulkEdit, setShowBulkEdit] = useState(false);
+  const [bulkEditRows, setBulkEditRows] = useState<Array<{
+    ID: number; AD: string; BARKOD?: string | null;
+    oldPrice: number; newPrice: string;
+  }>>([]);
 
   // Password confirm step
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -192,12 +199,13 @@ export default function PriceUpdateScreen() {
       if (r.ok && j.success) {
         setShowPasswordModal(false);
         setShowNewModal(false);
+        setShowBulkEdit(false);
+        setBulkEditRows([]);
         setPassword('');
         setPendingAction(null);
         setEditProduct(null);
         setNewPrice('');
         setSelectedIds(new Set());
-        setShowBulkPanel(false);
         showSuccess('Kaydedildi', j.message || `${j.count} kayıt sıraya alındı`);
         fetchList();
       } else {
@@ -228,28 +236,68 @@ export default function PriceUpdateScreen() {
     setShowPasswordModal(true);
   };
 
-  // === Bulk save ===
-  const onBulkSave = () => {
-    const v = parseFloat(bulkValue.replace(',', '.'));
-    if (isNaN(v)) { showWarning('Geçersiz Değer', 'Geçerli bir sayı girin'); return; }
-    if (bulkType === 'fixed_price' && v <= 0) { showWarning('Geçersiz Fiyat', 'Sabit fiyat 0\'dan büyük olmalı'); return; }
+  // === Bulk: prepare edit rows (Devam Et) ===
+  // Seçili ürünleri editable rows'a aktar — kullanıcı her birine elle yeni fiyat girer
+  const openBulkEdit = () => {
     if (selectedIds.size === 0) { showWarning('Seçim Yok', 'En az 1 ürün seçin'); return; }
-    const itemsArr = stockList
+    const rows = stockList
       .filter(s => selectedIds.has(s.ID))
       .map(s => ({
-        product_id: String(s.ID),
-        product_barcode: s.BARKOD || null,
-        product_name: s.AD || null,
-        old_price: s.FIYAT ? Number(s.FIYAT) : 0,
-      }))
-      .filter(it => it.old_price > 0);
-    if (itemsArr.length === 0) { showWarning('Geçerli Ürün Yok', 'Seçili ürünlerin mevcut fiyatı yok'); return; }
+        ID: s.ID,
+        AD: s.AD || `#${s.ID}`,
+        BARKOD: s.BARKOD || null,
+        oldPrice: s.FIYAT ? Number(s.FIYAT) : 0,
+        newPrice: '',   // boş başlar — kullanıcı elle girer veya toplu hesapla
+      }));
+    setBulkEditRows(rows);
+    setBulkValue('');
+    setBulkType('percent');
+    setShowBulkEdit(true);
+  };
+
+  // Toplu hesaplama widget'ı — değer ve tipe göre tüm satırların newPrice'ını doldurur
+  const applyBulkCalculation = () => {
+    const v = parseFloat(bulkValue.replace(',', '.'));
+    if (isNaN(v)) { showWarning('Geçersiz Değer', 'Bir sayı girin (örn. 10 veya -5)'); return; }
+    if (bulkType === 'fixed_price' && v <= 0) { showWarning('Geçersiz Fiyat', 'Sabit fiyat 0\'dan büyük olmalı'); return; }
+    setBulkEditRows(prev => prev.map(r => {
+      let np = 0;
+      if (bulkType === 'percent') np = r.oldPrice * (1 + v / 100);
+      else if (bulkType === 'amount') np = r.oldPrice + v;
+      else if (bulkType === 'fixed_price') np = v;
+      np = Math.round(np * 100) / 100;
+      return { ...r, newPrice: np > 0 ? np.toFixed(2) : '' };
+    }));
+  };
+
+  const setRowNewPrice = (id: number, value: string) => {
+    setBulkEditRows(prev => prev.map(r => r.ID === id ? { ...r, newPrice: value } : r));
+  };
+
+  // === Save bulk edit (Final kaydet) ===
+  const onBulkSave = () => {
+    // Boş veya geçersiz fiyatları filtrele
+    const valid = bulkEditRows
+      .map(r => {
+        const np = parseFloat((r.newPrice || '').replace(',', '.'));
+        return { row: r, np };
+      })
+      .filter(x => !isNaN(x.np) && x.np > 0);
+    if (valid.length === 0) {
+      showWarning('Boş Liste', 'En az 1 ürün için yeni fiyat girin');
+      return;
+    }
     setPendingAction({
-      type: 'bulk',
+      type: 'single',  // backend single endpoint kullan (her satır kendi yeni fiyatını taşıyor)
       body: {
-        items: itemsArr,
-        adjustment_type: bulkType,
-        value: v,
+        items: valid.map(({ row, np }) => ({
+          product_id: String(row.ID),
+          product_barcode: row.BARKOD || null,
+          product_name: row.AD || null,
+          old_price: row.oldPrice || null,
+          new_price: Math.round(np * 100) / 100,
+        })),
+        source: 'bulk',
       },
     });
     setShowPasswordModal(true);
@@ -513,10 +561,10 @@ export default function PriceUpdateScreen() {
                 <Text style={{ color: colors.text, fontWeight: '700' }}>{selectedIds.size} ürün seçildi</Text>
                 <TouchableOpacity
                   style={[styles.bulkBtn, { backgroundColor: colors.primary }]}
-                  onPress={() => setShowBulkPanel(true)}
+                  onPress={openBulkEdit}
                 >
-                  <Ionicons name="calculator" size={18} color="#FFF" />
-                  <Text style={{ color: '#FFF', fontWeight: '700', marginLeft: 6 }}>Toplu Güncelle</Text>
+                  <Ionicons name="arrow-forward" size={18} color="#FFF" />
+                  <Text style={{ color: '#FFF', fontWeight: '700', marginLeft: 6 }}>Devam Et</Text>
                 </TouchableOpacity>
               </View>
             )}
@@ -613,20 +661,32 @@ export default function PriceUpdateScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* ====================  BULK ADJUST PANEL  ==================== */}
-      <Modal visible={showBulkPanel} animationType="slide" transparent onRequestClose={() => setShowBulkPanel(false)}>
-        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View style={[styles.sheet, { backgroundColor: colors.surface }]}>
-              <View style={styles.sheetHandle} />
-              <Text style={[styles.sheetTitle, { color: colors.text }]}>
-                Toplu Güncelleme — {selectedIds.size} ürün
-              </Text>
+      {/* ====================  BULK EDIT SCREEN  ==================== */}
+      {/* Toplu modda "Devam Et" ile açılır. Her ürün için elle yeni fiyat girilebilir.
+          Üstte opsiyonel "Toplu Hesapla" widget'ı var (yüzde/sabit/tutar gir, hepsine dağıt). */}
+      <Modal visible={showBulkEdit} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowBulkEdit(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={['top']}>
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+              <TouchableOpacity onPress={() => setShowBulkEdit(false)} style={styles.headerBtn}>
+                <Ionicons name="arrow-back" size={26} color={colors.text} />
+              </TouchableOpacity>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.headerTitle, { color: colors.text }]}>Toplu Düzenleme</Text>
+                <Text style={[styles.headerSub, { color: colors.textSecondary }]}>
+                  {bulkEditRows.length} ürün · Yeni fiyatları elle girin
+                </Text>
+              </View>
+            </View>
 
-              <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 6, marginTop: 8 }}>Tip:</Text>
-              <View style={styles.presetRow}>
+            {/* Toplu Hesapla Widget (opsiyonel) */}
+            <View style={{ padding: 12, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+              <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
+                Toplu Hesapla (opsiyonel) — tüm satırlara dağıtır, sonra her satırı elle değiştirebilirsiniz:
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
                 {([
-                  { v: 'percent', label: '%' },
+                  { v: 'percent', label: '% Yüzde' },
                   { v: 'amount', label: '+/- ₺' },
                   { v: 'fixed_price', label: 'Sabit ₺' },
                 ] as const).map(b => {
@@ -634,65 +694,118 @@ export default function PriceUpdateScreen() {
                   return (
                     <TouchableOpacity
                       key={b.v}
-                      style={[styles.preset, {
-                        backgroundColor: active ? colors.primary : 'transparent',
+                      style={{
+                        flex: 1, paddingVertical: 8, borderRadius: 8, borderWidth: 1,
                         borderColor: colors.primary,
-                        minWidth: 90,
-                      }]}
+                        backgroundColor: active ? colors.primary : 'transparent',
+                        alignItems: 'center',
+                      }}
                       onPress={() => setBulkType(b.v)}
                     >
-                      <Text style={{ color: active ? '#FFF' : colors.primary, fontWeight: '700' }}>{b.label}</Text>
+                      <Text style={{ color: active ? '#FFF' : colors.primary, fontWeight: '700', fontSize: 12 }}>{b.label}</Text>
                     </TouchableOpacity>
                   );
                 })}
               </View>
-
-              <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 6, marginTop: 16 }}>
-                {bulkType === 'percent' ? 'Yüzde (+ artış, - indirim):' : bulkType === 'amount' ? 'Miktar (+ artış, - indirim) ₺:' : 'Yeni Sabit Fiyat ₺:'}
-              </Text>
-              <TextInput
-                style={{
-                  borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background,
-                  color: colors.text, padding: 14, borderRadius: 10, fontSize: 22, fontWeight: '700', textAlign: 'center',
-                }}
-                placeholder={bulkType === 'percent' ? '10' : bulkType === 'amount' ? '5' : '99.99'}
-                placeholderTextColor={colors.textSecondary}
-                keyboardType="numbers-and-punctuation"
-                value={bulkValue}
-                onChangeText={setBulkValue}
-              />
-
-              {/* Quick presets for bulk */}
-              {bulkType === 'percent' && (
-                <View style={[styles.presetRow, { marginTop: 12 }]}>
-                  {([-10, -5, 5, 10, 15, 20, 25] as const).map(p => (
-                    <TouchableOpacity
-                      key={p}
-                      style={[styles.preset, { borderColor: p < 0 ? colors.error : colors.primary }]}
-                      onPress={() => setBulkValue(String(p))}
-                    >
-                      <Text style={{ color: p < 0 ? colors.error : colors.primary, fontWeight: '700', fontSize: 13 }}>
-                        {p > 0 ? '+' : ''}{p}%
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-
-              <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TextInput
+                  style={{
+                    flex: 1, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background,
+                    color: colors.text, padding: 12, borderRadius: 10, fontSize: 16, fontWeight: '600',
+                  }}
+                  placeholder={bulkType === 'percent' ? 'örn. 10 (artış) veya -5 (indirim)' : bulkType === 'amount' ? 'örn. 5 (artış) veya -2 (indirim)' : 'örn. 99.99'}
+                  placeholderTextColor={colors.textSecondary}
+                  keyboardType="numbers-and-punctuation"
+                  value={bulkValue}
+                  onChangeText={setBulkValue}
+                />
                 <TouchableOpacity
-                  style={[styles.cancelBtn, { borderColor: colors.border }]}
-                  onPress={() => setShowBulkPanel(false)}
+                  style={{
+                    paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10,
+                    backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
+                  }}
+                  onPress={applyBulkCalculation}
                 >
-                  <Text style={{ color: colors.text, fontWeight: '600' }}>Vazgeç</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.primary }]} onPress={onBulkSave}>
-                  <Text style={{ color: '#FFF', fontWeight: '700' }}>Sıraya Al</Text>
+                  <Text style={{ color: '#FFF', fontWeight: '700' }}>Hepsine Uygula</Text>
                 </TouchableOpacity>
               </View>
             </View>
-          </TouchableWithoutFeedback>
-        </KeyboardAvoidingView>
+
+            {/* Editable Rows */}
+            <FlatList
+              data={bulkEditRows}
+              keyExtractor={(it) => String(it.ID)}
+              contentContainerStyle={{ padding: 12, paddingBottom: 120 }}
+              renderItem={({ item }) => {
+                const np = parseFloat((item.newPrice || '').replace(',', '.'));
+                const diff = !isNaN(np) && item.oldPrice > 0 ? np - item.oldPrice : null;
+                const pct = diff != null && item.oldPrice > 0 ? (diff / item.oldPrice) * 100 : null;
+                return (
+                  <View style={{
+                    backgroundColor: colors.surface,
+                    borderColor: colors.border, borderWidth: 1, borderRadius: 12,
+                    padding: 12, marginBottom: 10,
+                  }}>
+                    <Text style={{ color: colors.text, fontWeight: '600', fontSize: 14 }} numberOfLines={1}>
+                      {item.AD}
+                    </Text>
+                    {item.BARKOD ? (
+                      <Text style={{ color: colors.textSecondary, fontSize: 11, marginBottom: 8 }}>
+                        Barkod: {item.BARKOD}
+                      </Text>
+                    ) : <View style={{ height: 8 }} />}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                      <View style={{ flex: 1, padding: 10, backgroundColor: colors.background, borderRadius: 8, borderWidth: 1, borderColor: colors.border }}>
+                        <Text style={{ color: colors.textSecondary, fontSize: 10 }}>Eski</Text>
+                        <Text style={{ color: colors.text, fontSize: 15, fontWeight: '600' }}>{fmt(item.oldPrice)}</Text>
+                      </View>
+                      <Ionicons name="arrow-forward" size={18} color={colors.textSecondary} />
+                      <View style={{ flex: 1.2, padding: 8, backgroundColor: colors.primary + '10', borderRadius: 8, borderWidth: 1, borderColor: colors.primary }}>
+                        <Text style={{ color: colors.primary, fontSize: 10, fontWeight: '600' }}>Yeni ₺</Text>
+                        <TextInput
+                          style={{ color: colors.text, fontSize: 16, fontWeight: '700', padding: 0, marginTop: 2 }}
+                          placeholder="0.00"
+                          placeholderTextColor={colors.textSecondary}
+                          keyboardType="decimal-pad"
+                          value={item.newPrice}
+                          onChangeText={(v) => setRowNewPrice(item.ID, v)}
+                        />
+                      </View>
+                    </View>
+                    {diff != null && (
+                      <Text style={{
+                        marginTop: 6, fontSize: 12, fontWeight: '600',
+                        color: diff < 0 ? colors.error : diff > 0 ? '#10B981' : colors.textSecondary,
+                      }}>
+                        {diff >= 0 ? '+' : ''}{fmt(diff)} {pct != null && `(${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)`}
+                      </Text>
+                    )}
+                  </View>
+                );
+              }}
+            />
+
+            {/* Bottom Save Bar */}
+            <View style={[styles.bulkBar, { backgroundColor: colors.surface, borderTopColor: colors.border }]}>
+              <View>
+                <Text style={{ color: colors.text, fontWeight: '700', fontSize: 14 }}>
+                  {bulkEditRows.filter(r => {
+                    const v = parseFloat((r.newPrice || '').replace(',', '.'));
+                    return !isNaN(v) && v > 0;
+                  }).length} / {bulkEditRows.length} hazır
+                </Text>
+                <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Boş bırakılanlar pas geçilir</Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.bulkBtn, { backgroundColor: colors.primary }]}
+                onPress={onBulkSave}
+              >
+                <Ionicons name="save" size={18} color="#FFF" />
+                <Text style={{ color: '#FFF', fontWeight: '700', marginLeft: 6 }}>Sıraya Al</Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
       </Modal>
 
       {/* ====================  PASSWORD CONFIRM  ==================== */}
