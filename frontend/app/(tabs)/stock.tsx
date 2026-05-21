@@ -873,14 +873,25 @@ export default function StockScreen() {
               })()
           }
         </Text>
-        {manualToast && (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: '#10B981' + '20', borderWidth: 1, borderColor: '#10B981' }}>
-            <Ionicons name="checkmark-circle" size={12} color={'#10B981'} />
-            <Text style={{ fontSize: 11, fontWeight: '700', color: '#10B981' }}>
-              Güncellendi · {new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
-            </Text>
-          </View>
-        )}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {/* 2026-05-21 — Fiyat Güncelleme menü girişi */}
+          <TouchableOpacity
+            onPress={() => router.push('/price-update')}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: colors.primary + '15', borderWidth: 1, borderColor: colors.primary }}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="pricetag" size={13} color={colors.primary} />
+            <Text style={{ fontSize: 11, fontWeight: '700', color: colors.primary }}>Fiyat Güncelle</Text>
+          </TouchableOpacity>
+          {manualToast && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, backgroundColor: '#10B981' + '20', borderWidth: 1, borderColor: '#10B981' }}>
+              <Ionicons name="checkmark-circle" size={12} color={'#10B981'} />
+              <Text style={{ fontSize: 11, fontWeight: '700', color: '#10B981' }}>
+                Güncellendi · {new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+              </Text>
+            </View>
+          )}
+        </View>
       </View>
 
       {/* Top progress bar — visible only while streaming */}
