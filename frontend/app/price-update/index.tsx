@@ -976,13 +976,14 @@ export default function PriceUpdateScreen() {
                   );
                 })}
               </View>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
+              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'stretch' }}>
                 <TextInput
+                  allowFontScaling={false}
                   style={{
-                    flex: 1, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background,
-                    color: colors.text, padding: 12, borderRadius: 10, fontSize: 16, fontWeight: '600',
+                    flex: 1, minWidth: 0, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background,
+                    color: colors.text, padding: 12, borderRadius: 10, fontSize: 15, fontWeight: '600',
                   }}
-                  placeholder={bulkType === 'percent' ? 'örn. 10 (artış) veya -5 (indirim)' : bulkType === 'amount' ? 'örn. 5 (artış) veya -2 (indirim)' : 'örn. 99.99'}
+                  placeholder={bulkType === 'percent' ? 'örn. 10 / -5' : bulkType === 'amount' ? 'örn. 5 / -2' : 'örn. 99.99'}
                   placeholderTextColor={colors.textSecondary}
                   keyboardType="numbers-and-punctuation"
                   value={bulkValue}
@@ -990,12 +991,13 @@ export default function PriceUpdateScreen() {
                 />
                 <TouchableOpacity
                   style={{
-                    paddingHorizontal: 18, paddingVertical: 12, borderRadius: 10,
+                    paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10,
                     backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
+                    flexShrink: 0,
                   }}
                   onPress={applyBulkCalculation}
                 >
-                  <Text style={{ color: '#FFF', fontWeight: '700' }}>Hepsine Uygula</Text>
+                  <Text allowFontScaling={false} style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>Uygula</Text>
                 </TouchableOpacity>
               </View>
             </View>
