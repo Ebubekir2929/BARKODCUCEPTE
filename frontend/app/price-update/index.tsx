@@ -1017,33 +1017,53 @@ export default function PriceUpdateScreen() {
                         {diff >= 0 ? '+' : ''}{fmt(diff)} {pct != null && `(${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%)`}
                       </Text>
                     )}
-                    {/* applyToOtherPrices açıksa her diğer fiyat adı için ek satır */}
+                    {/* applyToOtherPrices açıksa her diğer fiyat adı için ek satır
+                        — 2 satırlık esnek layout: (1) Fiyat adı + Eski fiyat,
+                        (2) Yeni fiyat input. Font scaling'e dayanıklı. */}
                     {applyToOtherPrices && priceNames.filter(p => String(p.ID) !== String(selectedPriceNameId)).map(p => {
                       const otherOld = otherPricesByProduct[String(item.ID)]?.[String(p.ID)];
                       const otherNew = otherNewPricesByProduct[String(item.ID)]?.[String(p.ID)] || '';
                       return (
-                        <View key={String(p.ID)} style={{ marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <Text style={{ color: colors.textSecondary, fontSize: 11, width: 80 }} numberOfLines={1}>{p.AD}</Text>
-                          <Text style={{ color: colors.text, fontSize: 12, width: 70, textAlign: 'right' }}>{fmt(otherOld)}</Text>
-                          <Ionicons name="arrow-forward" size={12} color={colors.textSecondary} />
-                          <TextInput
-                            style={{
-                              flex: 1, color: colors.text, fontSize: 13, fontWeight: '700',
-                              padding: 6, paddingLeft: 8,
-                              borderWidth: 1, borderColor: colors.primary, borderRadius: 6,
-                              backgroundColor: colors.primary + '08',
-                            }}
-                            placeholder="Yeni fiyat..."
-                            placeholderTextColor={colors.textSecondary}
-                            keyboardType="decimal-pad"
-                            value={otherNew}
-                            onChangeText={(v) => {
-                              setOtherNewPricesByProduct(prev => ({
-                                ...prev,
-                                [String(item.ID)]: { ...(prev[String(item.ID)] || {}), [String(p.ID)]: v },
-                              }));
-                            }}
-                          />
+                        <View key={String(p.ID)} style={{ marginTop: 10, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.border }}>
+                          {/* Satır 1: Fiyat adı (sol) + Eski fiyat (sağ) */}
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                            <Text
+                              allowFontScaling={false}
+                              style={{ color: colors.text, fontSize: 12, fontWeight: '600', flexShrink: 1, marginRight: 8 }}
+                              numberOfLines={1}
+                            >
+                              {p.AD}
+                            </Text>
+                            <Text
+                              allowFontScaling={false}
+                              style={{ color: colors.textSecondary, fontSize: 11 }}
+                            >
+                              Eski: <Text style={{ color: colors.text, fontWeight: '600' }}>{fmt(otherOld)}</Text>
+                            </Text>
+                          </View>
+                          {/* Satır 2: Yeni fiyat input (geniş) */}
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <Ionicons name="arrow-forward" size={14} color={colors.primary} />
+                            <TextInput
+                              allowFontScaling={false}
+                              style={{
+                                flex: 1, color: colors.text, fontSize: 14, fontWeight: '700',
+                                paddingVertical: 8, paddingHorizontal: 10,
+                                borderWidth: 1, borderColor: colors.primary, borderRadius: 8,
+                                backgroundColor: colors.primary + '08',
+                              }}
+                              placeholder="Yeni fiyat (₺)"
+                              placeholderTextColor={colors.textSecondary}
+                              keyboardType="decimal-pad"
+                              value={otherNew}
+                              onChangeText={(v) => {
+                                setOtherNewPricesByProduct(prev => ({
+                                  ...prev,
+                                  [String(item.ID)]: { ...(prev[String(item.ID)] || {}), [String(p.ID)]: v },
+                                }));
+                              }}
+                            />
+                          </View>
                         </View>
                       );
                     })}
