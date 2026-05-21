@@ -96,6 +96,9 @@ export default function PriceUpdateScreen() {
   // Single product edit sheet
   const [editProduct, setEditProduct] = useState<StockItem | null>(null);
   const [newPrice, setNewPrice] = useState('');
+  // Tek ürün modunda kullanıcının kendi girdiği yüzde / sabit miktar
+  const [singlePercent, setSinglePercent] = useState('');
+  const [singleAmount, setSingleAmount] = useState('');
 
   // Bulk adjust panel — toplu hesaplama widget (artık satır listesinin üstünde)
   const [bulkType, setBulkType] = useState<'percent' | 'amount' | 'fixed_price'>('percent');
@@ -607,42 +610,66 @@ export default function PriceUpdateScreen() {
                 </View>
               </View>
 
-              {/* Quick presets */}
-              <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>Yüzde:</Text>
-              <View style={styles.presetRow}>
-                {([-10, -5, 5, 10, 15, 20, 25] as const).map(p => (
-                  <TouchableOpacity
-                    key={p}
-                    style={[styles.preset, { borderColor: p < 0 ? colors.error : colors.primary }]}
-                    onPress={() => {
-                      const op = editProduct?.FIYAT ? Number(editProduct.FIYAT) : 0;
-                      if (op > 0) setNewPrice((op * (1 + p / 100)).toFixed(2));
-                    }}
-                  >
-                    <Text style={{ color: p < 0 ? colors.error : colors.primary, fontWeight: '700', fontSize: 13 }}>
-                      {p > 0 ? '+' : ''}{p}%
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+              {/* Yüzde — kullanıcı kendi yüzdesini girer */}
+              <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
+                Yüzde Uygula (örn. 10 artış, -5 indirim):
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                <TextInput
+                  style={{
+                    flex: 1, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background,
+                    color: colors.text, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, fontSize: 16, fontWeight: '600',
+                  }}
+                  placeholder="örn. 10"
+                  placeholderTextColor={colors.textSecondary}
+                  keyboardType="numbers-and-punctuation"
+                  value={singlePercent}
+                  onChangeText={setSinglePercent}
+                />
+                <TouchableOpacity
+                  style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}
+                  onPress={() => {
+                    const p = parseFloat((singlePercent || '').replace(',', '.'));
+                    const op = editProduct?.FIYAT ? Number(editProduct.FIYAT) : 0;
+                    if (isNaN(p)) { showWarning('Yüzde Girin', 'Bir sayı girin'); return; }
+                    if (op <= 0) { showWarning('Eski Fiyat Yok', 'Mevcut fiyat 0, yüzde uygulanamaz'); return; }
+                    const newP = op * (1 + p / 100);
+                    setNewPrice(newP > 0 ? newP.toFixed(2) : '');
+                  }}
+                >
+                  <Text style={{ color: '#FFF', fontWeight: '700' }}>% Uygula</Text>
+                </TouchableOpacity>
               </View>
 
-              <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 6, marginTop: 12 }}>Sabit Miktar:</Text>
-              <View style={styles.presetRow}>
-                {([-10, -5, -1, 1, 5, 10, 50] as const).map(m => (
-                  <TouchableOpacity
-                    key={m}
-                    style={[styles.preset, { borderColor: m < 0 ? colors.error : '#10B981' }]}
-                    onPress={() => {
-                      const op = editProduct?.FIYAT ? Number(editProduct.FIYAT) : 0;
-                      const cur = parseFloat(newPrice.replace(',', '.')) || op;
-                      setNewPrice((cur + m).toFixed(2));
-                    }}
-                  >
-                    <Text style={{ color: m < 0 ? colors.error : '#10B981', fontWeight: '700', fontSize: 13 }}>
-                      {m > 0 ? '+' : ''}{m}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+              {/* Sabit Miktar — kullanıcı kendi miktarını girer */}
+              <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
+                Sabit Miktar Uygula (örn. 5 artış, -2 indirim) ₺:
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TextInput
+                  style={{
+                    flex: 1, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background,
+                    color: colors.text, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, fontSize: 16, fontWeight: '600',
+                  }}
+                  placeholder="örn. 5 veya -2"
+                  placeholderTextColor={colors.textSecondary}
+                  keyboardType="numbers-and-punctuation"
+                  value={singleAmount}
+                  onChangeText={setSingleAmount}
+                />
+                <TouchableOpacity
+                  style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: '#10B981', alignItems: 'center', justifyContent: 'center' }}
+                  onPress={() => {
+                    const m = parseFloat((singleAmount || '').replace(',', '.'));
+                    const op = editProduct?.FIYAT ? Number(editProduct.FIYAT) : 0;
+                    if (isNaN(m)) { showWarning('Miktar Girin', 'Bir sayı girin'); return; }
+                    const baseVal = parseFloat((newPrice || '').replace(',', '.')) || op;
+                    const newP = baseVal + m;
+                    setNewPrice(newP > 0 ? newP.toFixed(2) : '');
+                  }}
+                >
+                  <Text style={{ color: '#FFF', fontWeight: '700' }}>₺ Uygula</Text>
+                </TouchableOpacity>
               </View>
 
               <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
