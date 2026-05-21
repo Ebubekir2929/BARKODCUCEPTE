@@ -377,6 +377,30 @@ export default function PriceUpdateScreen() {
     if (showBulkEdit && applyToOtherPrices) fetchOtherPrices();
   }, [showBulkEdit, applyToOtherPrices, fetchOtherPrices]);
 
+  // applyToOtherPrices açıldığı anda → ana "Yeni" alanında dolu olan fiyatları
+  // diğer fiyat adı alanlarına da retroaktif olarak dağıt (kullanıcı tikten önce yazmış olabilir)
+  useEffect(() => {
+    if (!applyToOtherPrices) return;
+    if (bulkEditRows.length === 0) return;
+    setOtherNewPricesByProduct(prev => {
+      const next = { ...prev };
+      bulkEditRows.forEach(r => {
+        if (!r.newPrice) return;
+        const rowOthers: Record<string, string> = { ...(next[String(r.ID)] || {}) };
+        priceNames.forEach(p => {
+          if (String(p.ID) === String(selectedPriceNameId)) return;
+          // Sadece boş olanları otomatik doldur — kullanıcı manuel girdiyse koru
+          if (!rowOthers[String(p.ID)]) {
+            rowOthers[String(p.ID)] = r.newPrice;
+          }
+        });
+        next[String(r.ID)] = rowOthers;
+      });
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyToOtherPrices]);
+
   // Toplu hesaplama widget'ı — değer ve tipe göre tüm satırların newPrice'ını doldurur
   // applyToOtherPrices açıksa diğer fiyat adlarına da her birinin kendi eski fiyatına göre uygulanır
   const applyBulkCalculation = () => {
