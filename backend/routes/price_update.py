@@ -22,7 +22,7 @@ from datetime import datetime
 from decimal import Decimal
 import logging
 
-from services import get_patron_pool
+from services import get_data_pool, get_patron_pool
 from routes.auth import get_current_user, sha1_hash
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,7 @@ async def ensure_table_exists():
     global _TABLE_INITIALIZED
     if _TABLE_INITIALIZED:
         return
-    pool = await get_patron_pool()
+    pool = await get_data_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(CREATE_TABLE_SQL)
@@ -206,7 +206,7 @@ async def create_price_updates(
     batch_id = uuid.uuid4().hex[:32]
     now = datetime.utcnow()
 
-    pool = await get_patron_pool()
+    pool = await get_data_pool()
     inserted_ids = []
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -252,7 +252,7 @@ async def bulk_adjust(
     batch_id = uuid.uuid4().hex[:32]
     now = datetime.utcnow()
 
-    pool = await get_patron_pool()
+    pool = await get_data_pool()
     inserted_ids = []
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -293,7 +293,7 @@ async def list_price_updates(
     user_id = current_user["user_id"]
     tenant_id = current_user.get("tenant_id") or ""
 
-    pool = await get_patron_pool()
+    pool = await get_data_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             # Total counts per status (always returned for UI badges)
@@ -347,7 +347,7 @@ async def cancel_price_update(
     await ensure_table_exists()
     user_id = current_user["user_id"]
     tenant_id = current_user.get("tenant_id") or ""
-    pool = await get_patron_pool()
+    pool = await get_data_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -369,7 +369,7 @@ async def cancel_batch(
     """Aynı batch içindeki tüm pending kayıtları iptal eder."""
     await ensure_table_exists()
     tenant_id = current_user.get("tenant_id") or ""
-    pool = await get_patron_pool()
+    pool = await get_data_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -394,7 +394,7 @@ async def poll_pending(
     güncellemeleri eski tarihten yeniye doğru döndürür."""
     await ensure_table_exists()
     tenant_id = current_user.get("tenant_id") or ""
-    pool = await get_patron_pool()
+    pool = await get_data_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -425,7 +425,7 @@ async def mark_applied(
     tenant_id = current_user.get("tenant_id") or ""
     err = (data.error_message if data else None)
     new_status = "failed" if err else "applied"
-    pool = await get_patron_pool()
+    pool = await get_data_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -448,7 +448,7 @@ async def mark_applied_bulk(
     await ensure_table_exists()
     tenant_id = current_user.get("tenant_id") or ""
     new_status = "failed" if data.error_message else "applied"
-    pool = await get_patron_pool()
+    pool = await get_data_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             placeholders = ",".join(["%s"] * len(data.ids))

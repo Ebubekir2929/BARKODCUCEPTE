@@ -25,7 +25,7 @@
 
 ```
 ┌─────────────┐      POST       ┌──────────────────────────┐
-│   Mobil     │ ───────────────> │ patron.pending_price_    │
+│   Mobil     │ ───────────────> │ kasacepteweb.pending_price_    │
 │ Kullanıcı   │ /api/stock/...   │ updates  (status=pending)│
 └─────────────┘                  └──────────┬───────────────┘
                                             │
@@ -43,7 +43,7 @@
                        POST /api/stock/price-update/mark-applied-bulk
                                             │
                                             ▼
-                              patron.pending_price_updates
+                              kasacepteweb.pending_price_updates
                                   (status=applied)
                                             │
                                             ▼
@@ -553,18 +553,18 @@ Eğer Windows client backend'in MariaDB'sine DIREKT erişebiliyorsa (aynı netwo
 SELECT id, product_id, product_barcode, product_name,
        price_name_id, price_name,
        old_price, new_price, batch_id, created_at
-FROM patron.pending_price_updates
+FROM kasacepteweb.pending_price_updates
 WHERE tenant_id = 'SIZIN_TENANT_ID'
   AND status = 'pending'
 ORDER BY created_at ASC;
 
 -- Uygulananları işaretle
-UPDATE patron.pending_price_updates
+UPDATE kasacepteweb.pending_price_updates
 SET status = 'applied', applied_at = NOW()
 WHERE id IN (127, 128, 129);
 
 -- Hatalı olanları işaretle
-UPDATE patron.pending_price_updates
+UPDATE kasacepteweb.pending_price_updates
 SET status = 'failed', applied_at = NOW(), error_message = 'Ürün bulunamadı'
 WHERE id = 130;
 ```
@@ -576,7 +576,7 @@ WHERE id = 130;
 
 ## DB Schema Referansı
 
-**Tablo**: `patron.pending_price_updates`
+**Tablo**: `kasacepteweb.pending_price_updates`
 
 | Kolon | Tip | Açıklama |
 |---|---|---|
