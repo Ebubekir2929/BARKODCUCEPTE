@@ -114,6 +114,8 @@ export default function PriceUpdateScreen() {
   // Her ürünün diğer fiyat adlarındaki mevcut fiyatları — applyToOtherPrices açılınca yüklenir
   // Map: productId -> { priceNameId: oldPrice }
   const [otherPricesByProduct, setOtherPricesByProduct] = useState<Record<string, Record<string, number>>>({});
+  // 2026-05-22 — Diğer fiyat adları için stok_stok_birim_id'leri ayrı tut (her price_name için farklı)
+  const [otherBirimByProduct, setOtherBirimByProduct] = useState<Record<string, Record<string, string | null>>>({});
   // Her ürünün diğer fiyat adları için kullanıcının girdiği yeni fiyatlar (boş bırakılırsa pas geçilir)
   // Map: productId -> { priceNameId: newPriceString }
   const [otherNewPricesByProduct, setOtherNewPricesByProduct] = useState<Record<string, Record<string, string>>>({});
@@ -127,6 +129,7 @@ export default function PriceUpdateScreen() {
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [bulkEditRows, setBulkEditRows] = useState<Array<{
     ID: number; AD: string; BARKOD?: string | null;
+    STOK_STOK_BIRIM_FIYAT?: number | string | null;
     oldPrice: number; newPrice: string;
   }>>([]);
 
@@ -325,6 +328,7 @@ export default function PriceUpdateScreen() {
         ID: s.ID,
         AD: s.AD || `#${s.ID}`,
         BARKOD: s.BARKOD || null,
+        STOK_STOK_BIRIM_FIYAT: (s as any).STOK_STOK_BIRIM_FIYAT ?? null,
         oldPrice: s.FIYAT ? Number(s.FIYAT) : 0,
         newPrice: '',
       }));
@@ -332,6 +336,7 @@ export default function PriceUpdateScreen() {
     setBulkValue('');
     setBulkType('percent');
     setOtherPricesByProduct({});
+    setOtherBirimByProduct({});
     setOtherNewPricesByProduct({});
     setApplyToOtherPrices(false);
     setShowBulkEdit(true);
@@ -345,6 +350,7 @@ export default function PriceUpdateScreen() {
     const selectedIdsArr = bulkEditRows.map(r => r.ID);
     if (selectedIdsArr.length === 0) return;
     const newMap: Record<string, Record<string, number>> = {};
+    const newBirim: Record<string, Record<string, string | null>> = {};
     // Her diğer fiyat adı için stock-list çek + seçili ürünleri filtrele
     await Promise.all(others.map(async (pn) => {
       try {
@@ -366,12 +372,15 @@ export default function PriceUpdateScreen() {
           const rid = String(r.ID);
           if (idSet.has(rid)) {
             if (!newMap[rid]) newMap[rid] = {};
+            if (!newBirim[rid]) newBirim[rid] = {};
             newMap[rid][String(pn.ID)] = parseFloat(String(r.FIYAT || 0).replace(',', '.')) || 0;
+            newBirim[rid][String(pn.ID)] = r.STOK_STOK_BIRIM_FIYAT != null ? String(r.STOK_STOK_BIRIM_FIYAT) : null;
           }
         });
       } catch { /* noop */ }
     }));
     setOtherPricesByProduct(newMap);
+    setOtherBirimByProduct(newBirim);
   }, [token, activeTenantId, priceNames, selectedPriceNameId, bulkEditRows]);
 
   useEffect(() => {
@@ -489,6 +498,7 @@ export default function PriceUpdateScreen() {
       if (applyToOtherPrices) {
         const otherInputs = otherNewPricesByProduct[String(row.ID)] || {};
         const otherOlds = otherPricesByProduct[String(row.ID)] || {};
+        const otherBirims = otherBirimByProduct[String(row.ID)] || {};
         priceNames.forEach(p => {
           if (String(p.ID) === String(selectedPriceNameId)) return;
           const val = otherInputs[String(p.ID)];
@@ -497,6 +507,8 @@ export default function PriceUpdateScreen() {
           if (isNaN(np2) || np2 <= 0) return;
           items.push({
             ...baseProduct,
+            // Diğer fiyat adı için o price_name'in kendi stok_stok_birim_id'sini kullan
+            stok_stok_birim_id: otherBirims[String(p.ID)] ?? baseProduct.stok_stok_birim_id,
             old_price: otherOlds[String(p.ID)] || null,
             new_price: Math.round(np2 * 100) / 100,
             price_name_id: typeof p.ID === 'number' ? p.ID : parseInt(String(p.ID)) || null,
