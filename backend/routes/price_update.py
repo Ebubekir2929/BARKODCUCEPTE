@@ -399,6 +399,7 @@ async def poll_pending(
         async with conn.cursor() as cur:
             await cur.execute(
                 """SELECT id, product_id, product_barcode, product_name,
+                          price_name_id, price_name,
                           old_price, new_price, batch_id, created_at
                    FROM pending_price_updates
                    WHERE tenant_id=%s AND status='pending'
@@ -406,6 +407,7 @@ async def poll_pending(
                 (tenant_id, limit),
             )
             cols = ["id", "product_id", "product_barcode", "product_name",
+                    "price_name_id", "price_name",
                     "old_price", "new_price", "batch_id", "created_at"]
             rows = await cur.fetchall()
             items = [_row_to_dict(r, cols) for r in rows]
