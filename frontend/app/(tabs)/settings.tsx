@@ -24,10 +24,11 @@ import { usePrefsStore } from '../../src/store/prefsStore';
 import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import notificationService from '../../src/services/notificationService';
+import AccentColorPickerModal from '../../src/components/AccentColorPickerModal';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { colors, isDark, mode: themeMode, setMode: setThemeMode } = useThemeStore();
+  const { colors, isDark, mode: themeMode, setMode: setThemeMode, accent } = useThemeStore();
   const { user, logout, addTenant, updateTenantName, removeTenant } = useAuthStore();
   const refreshInterval = usePrefsStore((s) => s.refreshInterval);
   const setRefreshInterval = usePrefsStore((s) => s.setRefreshInterval);
@@ -37,6 +38,7 @@ export default function SettingsScreen() {
   const tabBarHeight = (Platform.OS === 'ios' ? 65 : 60) + insets.bottom;
   
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [showAccentPicker, setShowAccentPicker] = useState(false);
   const [lowStockAlert, setLowStockAlert] = useState(true);
   const [salesAlert, setSalesAlert] = useState(true);
   const [cancellationAlert, setCancellationAlert] = useState(true);
@@ -614,6 +616,26 @@ export default function SettingsScreen() {
                 );
               })}
             </View>
+
+            {/* Accent Color Picker */}
+            <TouchableOpacity
+              style={[styles.menuItem, { borderTopColor: colors.border, borderTopWidth: 1 }]}
+              onPress={() => setShowAccentPicker(true)}
+            >
+              <View style={styles.menuItemLeft}>
+                <Ionicons name="color-palette-outline" size={22} color={colors.primary} />
+                <Text style={[styles.menuItemLabel, { color: colors.text }]}>Vurgu Rengi</Text>
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={{
+                  width: 28, height: 28, borderRadius: 14,
+                  backgroundColor: accent,
+                  borderWidth: 2, borderColor: colors.border,
+                }} />
+                <Text style={{ color: colors.textSecondary, fontSize: 13, fontWeight: '600' }}>{accent}</Text>
+                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+              </View>
+            </TouchableOpacity>
             
             {/* Language Selection */}
             <TouchableOpacity
@@ -1578,6 +1600,7 @@ export default function SettingsScreen() {
       </Modal>
 
       <CustomAlert {...alertProps} />
+      <AccentColorPickerModal visible={showAccentPicker} onClose={() => setShowAccentPicker(false)} />
     </SafeAreaView>
   );
 }
