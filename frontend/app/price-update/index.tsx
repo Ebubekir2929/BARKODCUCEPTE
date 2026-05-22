@@ -304,6 +304,7 @@ export default function PriceUpdateScreen() {
       body: {
         items: [{
           product_id: String(editProduct.ID),
+          stok_stok_birim_id: editProduct.STOK_STOK_BIRIM_FIYAT ? String(editProduct.STOK_STOK_BIRIM_FIYAT) : null,
           product_barcode: editProduct.BARKOD || null,
           product_name: editProduct.AD || null,
           old_price: editProduct.FIYAT ? Number(editProduct.FIYAT) : null,
@@ -469,6 +470,7 @@ export default function PriceUpdateScreen() {
     bulkEditRows.forEach(row => {
       const baseProduct = {
         product_id: String(row.ID),
+        stok_stok_birim_id: row.STOK_STOK_BIRIM_FIYAT ? String(row.STOK_STOK_BIRIM_FIYAT) : null,
         product_barcode: row.BARKOD || null,
         product_name: row.AD || null,
       };
@@ -561,9 +563,21 @@ export default function PriceUpdateScreen() {
             <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={1}>
               {item.product_name || `#${item.product_id}`}
             </Text>
-            {item.product_barcode ? (
-              <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Barkod: {item.product_barcode}</Text>
-            ) : null}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 2, alignItems: 'center' }}>
+              {item.price_name ? (
+                <View style={{
+                  backgroundColor: colors.primary + '20',
+                  paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4,
+                }}>
+                  <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>
+                    {item.price_name}
+                  </Text>
+                </View>
+              ) : null}
+              {item.product_barcode ? (
+                <Text style={{ color: colors.textSecondary, fontSize: 11 }}>{item.product_barcode}</Text>
+              ) : null}
+            </View>
           </View>
           {activeTab === 'pending' && (
             <TouchableOpacity onPress={() => cancelOne(item.id)} style={{ padding: 6 }}>

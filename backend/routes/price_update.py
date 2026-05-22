@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS pending_price_updates (
     user_id INT NOT NULL,
     tenant_id VARCHAR(64) NOT NULL,
     product_id VARCHAR(64) NOT NULL,
+    stok_stok_birim_id VARCHAR(64) DEFAULT NULL,
     product_barcode VARCHAR(64) DEFAULT NULL,
     product_name VARCHAR(255) DEFAULT NULL,
     price_name_id INT DEFAULT NULL,
@@ -63,13 +64,18 @@ CREATE TABLE IF NOT EXISTS pending_price_updates (
 
 # Run an idempotent ALTER for upgrades from earlier table version
 async def _migrate_add_price_name_cols(cur):
-    """Adds price_name_id / price_name columns if they don't exist (idempotent)."""
+    """Adds price_name_id / price_name / stok_stok_birim_id columns if they don't exist (idempotent)."""
     try:
         await cur.execute("SHOW COLUMNS FROM pending_price_updates LIKE 'price_name_id'")
         if not await cur.fetchone():
             await cur.execute("ALTER TABLE pending_price_updates ADD COLUMN price_name_id INT NULL AFTER product_name")
             await cur.execute("ALTER TABLE pending_price_updates ADD COLUMN price_name VARCHAR(100) NULL AFTER price_name_id")
             logger.info("pending_price_updates: added price_name_id + price_name columns")
+        # stok_stok_birim_id — birim referansı (POS sisteminde fiyat ürün+birim için tutulur)
+        await cur.execute("SHOW COLUMNS FROM pending_price_updates LIKE 'stok_stok_birim_id'")
+        if not await cur.fetchone():
+            await cur.execute("ALTER TABLE pending_price_updates ADD COLUMN stok_stok_birim_id VARCHAR(64) NULL AFTER product_id")
+            logger.info("pending_price_updates: added stok_stok_birim_id column")
     except Exception as e:
         logger.warning(f"_migrate_add_price_name_cols skipped: {e}")
 
@@ -99,6 +105,7 @@ class PriceItem(BaseModel):
     old_price: Optional[float] = Field(default=None)
     price_name_id: Optional[int] = Field(default=None)
     price_name: Optional[str] = Field(default=None, max_length=100)
+    stok_stok_birim_id: Optional[str] = Field(default=None, max_length=64)
 
 
 class CreatePriceUpdateRequest(BaseModel):
@@ -119,6 +126,9 @@ class BulkAdjustItem(BaseModel):
     product_barcode: Optional[str] = None
     product_name: Optional[str] = None
     old_price: float = Field(..., gt=0)
+    price_name_id: Optional[int] = None
+    price_name: Optional[str] = None
+    stok_stok_birim_id: Optional[str] = None
 
 
 class BulkAdjustRequest(BaseModel):
@@ -213,12 +223,14 @@ async def create_price_updates(
             for item in data.items:
                 await cur.execute(
                     """INSERT INTO pending_price_updates
-                       (user_id, tenant_id, product_id, product_barcode, product_name,
+                       (user_id, tenant_id, product_id, stok_stok_birim_id,
+                        product_barcode, product_name,
                         price_name_id, price_name,
                         old_price, new_price, status, source, batch_id, created_at, notes)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s)""",
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending',%s,%s,%s,%s)""",
                     (
-                        user_id, tenant_id, item.product_id, item.product_barcode, item.product_name,
+                        user_id, tenant_id, item.product_id, item.stok_stok_birim_id,
+                        item.product_barcode, item.product_name,
                         item.price_name_id, item.price_name,
                         item.old_price, item.new_price, data.source, batch_id, now, data.notes,
                     ),
@@ -260,11 +272,15 @@ async def bulk_adjust(
                 new_price = _calc_new_price(item.old_price, data.adjustment_type, data.value)
                 await cur.execute(
                     """INSERT INTO pending_price_updates
-                       (user_id, tenant_id, product_id, product_barcode, product_name,
+                       (user_id, tenant_id, product_id, stok_stok_birim_id,
+                        product_barcode, product_name,
+                        price_name_id, price_name,
                         old_price, new_price, status, source, batch_id, created_at, notes)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,'pending','bulk',%s,%s,%s)""",
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending','bulk',%s,%s,%s)""",
                     (
-                        user_id, tenant_id, item.product_id, item.product_barcode, item.product_name,
+                        user_id, tenant_id, item.product_id, item.stok_stok_birim_id,
+                        item.product_barcode, item.product_name,
+                        item.price_name_id, item.price_name,
                         item.old_price, new_price, batch_id, now, data.notes,
                     ),
                 )
@@ -304,7 +320,8 @@ async def list_price_updates(
             )
             counts = {r[0]: r[1] for r in await cur.fetchall()}
 
-            sql = """SELECT id, user_id, tenant_id, product_id, product_barcode, product_name,
+            sql = """SELECT id, user_id, tenant_id, product_id, stok_stok_birim_id,
+                            product_barcode, product_name,
                             price_name_id, price_name,
                             old_price, new_price, status, source, batch_id,
                             created_at, applied_at, error_message, notes
@@ -317,7 +334,8 @@ async def list_price_updates(
             sql += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
             params.extend([limit, offset])
             await cur.execute(sql, params)
-            cols = ["id", "user_id", "tenant_id", "product_id", "product_barcode", "product_name",
+            cols = ["id", "user_id", "tenant_id", "product_id", "stok_stok_birim_id",
+                    "product_barcode", "product_name",
                     "price_name_id", "price_name",
                     "old_price", "new_price", "status", "source", "batch_id",
                     "created_at", "applied_at", "error_message", "notes"]
@@ -398,7 +416,8 @@ async def poll_pending(
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                """SELECT id, product_id, product_barcode, product_name,
+                """SELECT id, product_id, stok_stok_birim_id,
+                          product_barcode, product_name,
                           price_name_id, price_name,
                           old_price, new_price, batch_id, created_at
                    FROM pending_price_updates
@@ -406,7 +425,8 @@ async def poll_pending(
                    ORDER BY created_at ASC LIMIT %s""",
                 (tenant_id, limit),
             )
-            cols = ["id", "product_id", "product_barcode", "product_name",
+            cols = ["id", "product_id", "stok_stok_birim_id",
+                    "product_barcode", "product_name",
                     "price_name_id", "price_name",
                     "old_price", "new_price", "batch_id", "created_at"]
             rows = await cur.fetchall()

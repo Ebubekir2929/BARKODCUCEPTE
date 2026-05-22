@@ -126,6 +126,7 @@ Authorization: Bearer <access_token>
     {
       "id": 127,
       "product_id": "443226",
+      "stok_stok_birim_id": "443228",
       "product_barcode": "9998000007895",
       "product_name": "Sade Çay",
       "price_name_id": 1016,
@@ -138,6 +139,7 @@ Authorization: Bearer <access_token>
     {
       "id": 128,
       "product_id": "443226",
+      "stok_stok_birim_id": "443228",
       "product_barcode": "9998000007895",
       "product_name": "Sade Çay",
       "price_name_id": 1017,
@@ -160,6 +162,7 @@ Authorization: Bearer <access_token>
 | `id` | Pending kaydın benzersiz ID'si — `mark-applied` için gereklidir |
 | `product_id` | POS sisteminizdeki ürün ID (mobile uygulamadaki `ID`) |
 | `product_barcode` | Çift kontrol için barkod (opsiyonel ama önerilir) |
+| `stok_stok_birim_id` | **Birim referans ID'si** ⭐ — POS'ta fiyat ürün+birim için tutuluyorsa bu kolonu da WHERE'a ekleyin |
 | `price_name_id` | **Hangi fiyat listesi** (örn. 1016=Parekende, 1017=Bayi). NULL ise eski tek-fiyat kaydı. |
 | `price_name` | Fiyat listesi adı (insan okuyabilir) |
 | `old_price` | Mobilden çekildiği andaki bilinen son fiyat (referans, zorunlu değil) |
@@ -198,7 +201,7 @@ for item in response.items:
     if item.price_name_id is not None:
         UPDATE local_pos.STOK_FIYAT
         SET FIYAT = item.new_price
-        WHERE STOK_ID = item.product_id
+        WHERE STOK_STOK_BIRIM_ID = item.stok_stok_birim_id
           AND FIYAT_AD_ID = item.price_name_id
     else:
         # Eski tek fiyat senaryosu
@@ -550,7 +553,8 @@ Eğer Windows client backend'in MariaDB'sine DIREKT erişebiliyorsa (aynı netwo
 
 ```sql
 -- Bekleyenleri çek
-SELECT id, product_id, product_barcode, product_name,
+SELECT id, product_id, stok_stok_birim_id,
+       product_barcode, product_name,
        price_name_id, price_name,
        old_price, new_price, batch_id, created_at
 FROM kasacepteweb.pending_price_updates
@@ -584,6 +588,7 @@ WHERE id = 130;
 | `user_id` | INT | Mobil kullanıcı |
 | `tenant_id` | VARCHAR(64) | Müşteri tenant'ı (filtre için ⭐) |
 | `product_id` | VARCHAR(64) | POS ürün ID'si |
+| `stok_stok_birim_id` | VARCHAR(64) | Birim ID'si (stok_birim tablosundaki referans) |
 | `product_barcode` | VARCHAR(64) | Referans (opsiyonel) |
 | `product_name` | VARCHAR(255) | Referans (opsiyonel) |
 | `price_name_id` | INT | Hangi fiyat adı (1016=Parekende, vb.). NULL=tek fiyat |
