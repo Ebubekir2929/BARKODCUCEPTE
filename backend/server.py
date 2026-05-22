@@ -123,6 +123,61 @@ async def play_assets_index():
     return HTMLResponse(html)
 
 
+# 2026-05-22 — Fiyat Güncelleme Dokümantasyonu (Windows POS developer için)
+@app.get("/api/docs/price-update", response_class=HTMLResponse, include_in_schema=False)
+async def price_update_doc_html():
+    """Tarayıcıdan erişilebilir HTML formatında dokümantasyon."""
+    md_path = Path("/app/docs/PRICE_UPDATE_INTEGRATION.md")
+    if not md_path.exists():
+        return HTMLResponse("<h1>Doc bulunamadı</h1>", status_code=404)
+    md_content = md_path.read_text(encoding="utf-8")
+    # Markdown'ı basit bir HTML viewer'la render et (CDN üzerinden marked.js)
+    html = f'''<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fiyat Güncelleme — Windows POS Entegrasyonu</title>
+<style>
+  body {{ font-family: -apple-system, system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 24px; line-height: 1.6; color: #222; background: #fafafa; }}
+  h1, h2, h3 {{ color: #1a1a1a; border-bottom: 1px solid #ddd; padding-bottom: 6px; }}
+  h1 {{ font-size: 28px; }} h2 {{ font-size: 22px; margin-top: 36px; }} h3 {{ font-size: 18px; }}
+  code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 4px; font-size: 14px; color: #c7254e; }}
+  pre {{ background: #2d2d2d; color: #f8f8f2; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 13px; }}
+  pre code {{ background: transparent; color: inherit; padding: 0; }}
+  table {{ border-collapse: collapse; width: 100%; margin: 16px 0; }}
+  th, td {{ border: 1px solid #ddd; padding: 8px 12px; text-align: left; }}
+  th {{ background: #f5f5f5; }}
+  blockquote {{ border-left: 4px solid #0a7; background: #f0fdf4; padding: 8px 16px; margin: 16px 0; color: #166534; }}
+  a {{ color: #0a7; }}
+  .download-bar {{ position: sticky; top: 0; background: #fff; padding: 12px 0; margin: -24px -24px 24px; padding: 16px 24px; border-bottom: 2px solid #0a7; z-index: 10; }}
+  .download-bar a {{ display: inline-block; background: #0a7; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; margin-right: 8px; }}
+  .download-bar a:hover {{ background: #086; }}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+<div class="download-bar">
+  <a href="/api/docs/price-update.md" download="PRICE_UPDATE_INTEGRATION.md">⬇️ Markdown İndir</a>
+  <a href="javascript:window.print()">🖨 Yazdır / PDF</a>
+</div>
+<div id="content"></div>
+<script>
+  const md = {repr(md_content)};
+  document.getElementById('content').innerHTML = marked.parse(md);
+</script>
+</body></html>'''
+    return HTMLResponse(html)
+
+
+@app.get("/api/docs/price-update.md", include_in_schema=False)
+async def price_update_doc_raw():
+    """Ham Markdown — Windows developer indirebilir."""
+    md_path = Path("/app/docs/PRICE_UPDATE_INTEGRATION.md")
+    if not md_path.exists():
+        return HTMLResponse("Doc bulunamadı", status_code=404)
+    return FileResponse(str(md_path), media_type="text/markdown; charset=utf-8", filename="PRICE_UPDATE_INTEGRATION.md")
+
+
 @app.on_event("startup")
 async def startup():
     # MySQL pool init'leri ARKA PLANDA başlasın ki uygulama port'a anında bağlansın
