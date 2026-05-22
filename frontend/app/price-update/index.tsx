@@ -1155,8 +1155,13 @@ export default function PriceUpdateScreen() {
 
       {/* ====================  PASSWORD CONFIRM  ==================== */}
       <Modal visible={showPasswordModal} animationType="fade" transparent onRequestClose={() => !submitting && setShowPasswordModal(false)}>
-        <KeyboardAvoidingView style={[styles.modalOverlay, { justifyContent: 'center', padding: 24 }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={[styles.modalOverlay, { justifyContent: 'center', padding: 24 }]}>
+            {/* Backdrop tap to close */}
+            <TouchableWithoutFeedback onPress={() => { if (!submitting) { Keyboard.dismiss(); setShowPasswordModal(false); } }}>
+              <View style={StyleSheet.absoluteFill} />
+            </TouchableWithoutFeedback>
+            {/* Content (no parent tap handler — input gets focus) */}
             <View style={[styles.confirmBox, { backgroundColor: colors.surface }]}>
               <Ionicons name="shield-checkmark" size={40} color={colors.primary} style={{ alignSelf: 'center' }} />
               <Text style={[styles.confirmTitle, { color: colors.text }]}>Şifre ile Onayla</Text>
@@ -1176,6 +1181,7 @@ export default function PriceUpdateScreen() {
                 editable={!submitting}
                 autoCapitalize="none"
                 autoCorrect={false}
+                autoFocus
               />
               <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
                 <TouchableOpacity
@@ -1194,7 +1200,7 @@ export default function PriceUpdateScreen() {
                 </TouchableOpacity>
               </View>
             </View>
-          </TouchableWithoutFeedback>
+          </View>
         </KeyboardAvoidingView>
       </Modal>
 
