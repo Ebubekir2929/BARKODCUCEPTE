@@ -567,7 +567,7 @@ export const CompareModal: React.FC<{
       visible={visible}
       animationType="slide"
       onRequestClose={onClose}
-      statusBarTranslucent
+      statusBarTranslucent={Platform.OS === 'android'}
       presentationStyle={Platform.OS === 'web' && isDesktop ? 'overFullScreen' : 'fullScreen'}
       transparent={Platform.OS === 'web' && isDesktop}
     >
@@ -578,6 +578,8 @@ export const CompareModal: React.FC<{
       <SafeAreaView style={[
         styles.container,
         { backgroundColor: colors.background },
+        // iOS Dynamic Island / notch için fallback: insets.top en az 44 kabul et
+        Platform.OS === 'ios' && { paddingTop: Math.max(insets.top, 12) },
         Platform.OS === 'web' && isDesktop && {
           width: '95%', maxWidth: 1400, height: '95%', maxHeight: 1000,
           alignSelf: 'center', marginVertical: 24, borderRadius: 16,
@@ -585,7 +587,7 @@ export const CompareModal: React.FC<{
           boxShadow: '0 12px 30px rgba(0,0,0,0.25)',
           overflow: 'hidden',
         } as any,
-      ]} edges={Platform.OS === 'web' && isDesktop ? [] : ['top', 'left', 'right']}>
+      ]} edges={Platform.OS === 'web' && isDesktop ? [] : ['left', 'right']}>
         {/* Header */}
         <View style={[styles.header, { borderBottomColor: colors.border }]}>
           <TouchableOpacity onPress={onClose} style={styles.headerBtn} hitSlop={12}>
