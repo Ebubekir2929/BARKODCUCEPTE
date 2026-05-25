@@ -13,7 +13,7 @@ import React, { useMemo } from 'react';
 import {
   View, Text, Modal, ScrollView, TouchableOpacity, StyleSheet, Platform, StatusBar,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
 
@@ -39,6 +39,7 @@ export const ProductHourlyDetailModal: React.FC<Props> = ({
   visible, onClose, productName, snapshots, productHourByTenant, getTenantColor, fmtTL,
 }) => {
   const { colors } = useThemeStore();
+  const insets = useSafeAreaInsets();
 
   // Build per-tenant aggregate + (tenant×location) rows + union of hours.
   // 2026-05-06 — Cheap memo: only runs when productName / data actually change.
@@ -119,8 +120,15 @@ export const ProductHourlyDetailModal: React.FC<Props> = ({
   if (!productName) return null;
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose} statusBarTranslucent>
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose} statusBarTranslucent={Platform.OS === 'android'}>
+      <SafeAreaView
+        style={[
+          styles.container,
+          { backgroundColor: colors.background },
+          Platform.OS === 'ios' && { paddingTop: Math.max(insets.top, 12) },
+        ]}
+        edges={['left', 'right']}
+      >
         <StatusBar barStyle="light-content" backgroundColor={colors.primary} translucent={false} />
 
         {/* Header — ürün adı + kapat */}

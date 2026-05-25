@@ -178,8 +178,15 @@ export const NegativeStockModal: React.FC<Props> = ({
   }, [colors, onItemPress]);
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose} statusBarTranslucent>
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
+    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose} statusBarTranslucent={Platform.OS === 'android'}>
+      <SafeAreaView
+        style={[
+          styles.container,
+          { backgroundColor: colors.background },
+          Platform.OS === 'ios' && { paddingTop: Math.max(insets.top, 12) },
+        ]}
+        edges={['left', 'right']}
+      >
         {/* 2026-05-06 — translucent=true ile birlikte SafeAreaView edges={['top']}
             phone clock'un üstüne gelmesini engelliyor. */}
         <StatusBar barStyle="light-content" backgroundColor={colors.error} translucent />

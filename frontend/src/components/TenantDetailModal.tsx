@@ -185,10 +185,17 @@ export const TenantDetailModal: React.FC<{
       visible={visible}
       animationType="slide"
       onRequestClose={onClose}
-      statusBarTranslucent
+      statusBarTranslucent={Platform.OS === 'android'}
       presentationStyle="overFullScreen"
     >
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top', 'left', 'right']}>
+      <SafeAreaView
+        style={[
+          styles.container,
+          { backgroundColor: colors.background },
+          Platform.OS === 'ios' && { paddingTop: Math.max(insets.top, 12) },
+        ]}
+        edges={['left', 'right']}
+      >
         {/* Header */}
         <View style={[styles.header, { borderBottomColor: colors.border }]}>
           <TouchableOpacity onPress={onClose} style={styles.headerBtn} hitSlop={12}>
