@@ -1642,7 +1642,7 @@ export default function DashboardScreen() {
       />
 
       {/* Card Type Location Modal */}
-      <Modal visible={!!selectedCardType} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent onRequestClose={() => setSelectedCardType(null)}>
+      <Modal visible={!!selectedCardType} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent={Platform.OS === "android"} onRequestClose={() => setSelectedCardType(null)}>
         <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={() => setSelectedCardType(null)} />
           <View style={[
@@ -1835,7 +1835,7 @@ export default function DashboardScreen() {
       </Modal>
 
       {/* Hour Detail Modal */}
-      <Modal visible={showHourDetail} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent onRequestClose={() => { setShowHourDetail(false); setHighlightedHourIndex(null); setHourDetailProducts([]); }}>
+      <Modal visible={showHourDetail} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent={Platform.OS === "android"} onRequestClose={() => { setShowHourDetail(false); setHighlightedHourIndex(null); setHourDetailProducts([]); }}>
         <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
           <View style={[styles.modalContent, Platform.OS === 'web' && isDesktop && [webStyles.cardDesktop, { borderColor: colors.border, maxWidth: 720, backgroundColor: colors.surface }]]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
@@ -2161,7 +2161,7 @@ export default function DashboardScreen() {
       </Modal>
 
       {/* Lokasyon İptal Listesi Modal */}
-      <Modal visible={showIptalListModal} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent onRequestClose={() => { setShowIptalListModal(false); setIptalListItems([]); }}>
+      <Modal visible={showIptalListModal} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent={Platform.OS === "android"} onRequestClose={() => { setShowIptalListModal(false); setIptalListItems([]); }}>
         <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
           <View style={[styles.modalContent, Platform.OS === 'web' && isDesktop && [webStyles.cardDesktopWide, { borderColor: colors.border, maxWidth: 900, backgroundColor: colors.surface }]]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>
@@ -2273,7 +2273,7 @@ export default function DashboardScreen() {
           Render'ı return'in en altında, HighSaleDetailModal'ın yanında yapılıyor. */}
 
       {/* Open Table Detail Modal */}
-      <Modal visible={!!selectedOpenTable} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent onRequestClose={() => { setSelectedOpenTable(null); setTableDetailItems([]); }}>
+      <Modal visible={!!selectedOpenTable} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent={Platform.OS === "android"} onRequestClose={() => { setSelectedOpenTable(null); setTableDetailItems([]); }}>
         <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }, Platform.OS === 'web' && isDesktop && [webStyles.cardDesktop, { borderColor: colors.border, maxWidth: 720 }]]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border, backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 }]}>

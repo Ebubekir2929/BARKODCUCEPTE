@@ -2,7 +2,7 @@ import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, Modal,
   ScrollView, ActivityIndicator, Alert, RefreshControl, Platform,
-  FlatList, DeviceEventEmitter,
+  FlatList, DeviceEventEmitter, Keyboard,
 } from 'react-native';
 import { webStyles } from '../../src/styles/webModalStyles';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -205,6 +205,9 @@ export default function StockScreen() {
       showToast('Bu satırın fiş detayı bulunamadı');
       return;
     }
+    // iOS: ikinci modal açılırken klavye/touch sistemini stabilize et
+    Keyboard.dismiss();
+    if (Platform.OS === 'ios') await new Promise(r => setTimeout(r, 80));
     setSelectedFis(row);
     setFisDetail([]);
     setFisTotals(null);
@@ -980,7 +983,7 @@ export default function StockScreen() {
       />
 
       {/* Filter Modal */}
-      <Modal visible={showFilterModal} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent onRequestClose={() => setShowFilterModal(false)}>
+      <Modal visible={showFilterModal} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent={Platform.OS === "android"} onRequestClose={() => setShowFilterModal(false)}>
         <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '85%' }, Platform.OS === 'web' && isDesktop && [webStyles.cardDesktop, { borderColor: colors.border }]]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
@@ -1237,7 +1240,7 @@ export default function StockScreen() {
       </Modal>
 
       {/* Price Name Modal */}
-      <Modal visible={showPriceModal} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent onRequestClose={() => setShowPriceModal(false)}>
+      <Modal visible={showPriceModal} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent={Platform.OS === "android"} onRequestClose={() => setShowPriceModal(false)}>
         <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
           <View style={[
             { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24 },
@@ -1277,7 +1280,7 @@ export default function StockScreen() {
       </Modal>
 
       {/* Stock Detail Modal */}
-      <Modal visible={!!selectedStock} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent onRequestClose={() => { setSelectedStock(null); setDetailMiktar([]); setDetailExtre([]); }}>
+      <Modal visible={!!selectedStock} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent={Platform.OS === "android"} onRequestClose={() => { setSelectedStock(null); setDetailMiktar([]); setDetailExtre([]); }}>
         <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }, Platform.OS === 'web' && isDesktop && [webStyles.cardDesktopWide, { borderColor: colors.border, maxWidth: 900 }]]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
@@ -1596,7 +1599,7 @@ export default function StockScreen() {
       </Modal>
 
       {/* 2026-05-12 — Fiş Detay Modal (Stok ekstre satırına tıklayınca açılır) */}
-      <Modal visible={!!selectedFis} animationType="slide" transparent statusBarTranslucent onRequestClose={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }}>
+      <Modal visible={!!selectedFis} animationType="slide" transparent statusBarTranslucent={Platform.OS === "android"} onRequestClose={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }}>
         <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface, maxHeight: '85%' }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>

@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, Modal,
-  ScrollView, ActivityIndicator, Alert, RefreshControl, Platform,
+  ScrollView, ActivityIndicator, Alert, RefreshControl, Platform, Keyboard,
 } from 'react-native';
 import { webStyles } from '../../src/styles/webModalStyles';
 import { FlashList } from '@shopify/flash-list';
@@ -398,6 +398,9 @@ export default function CustomersScreen() {
       showToast('Bu satırın fiş detayı bulunamadı');
       return;
     }
+    // iOS: ikinci modal açılırken klavye/touch sistemini stabilize et
+    Keyboard.dismiss();
+    if (Platform.OS === 'ios') await new Promise(r => setTimeout(r, 80));
     setSelectedFis(row); setFisDetail([]); setFisTotals(null); setFisLoading(true);
     try {
       const { token } = useAuthStore.getState();
@@ -700,7 +703,7 @@ export default function CustomersScreen() {
       />
 
       {/* Ekstre Modal */}
-      <Modal visible={!!selectedCari} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent onRequestClose={() => { setSelectedCari(null); setExtreRawData([]); }}>
+      <Modal visible={!!selectedCari} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent={Platform.OS === "android"} onRequestClose={() => { setSelectedCari(null); setExtreRawData([]); }}>
         <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }, Platform.OS === 'web' && isDesktop && [webStyles.cardDesktopWide, { borderColor: colors.border, maxWidth: 900 }]]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
@@ -921,7 +924,7 @@ export default function CustomersScreen() {
       </Modal>
 
       {/* Fiş Detail Modal */}
-      <Modal visible={!!selectedFis} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent onRequestClose={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }}>
+      <Modal visible={!!selectedFis} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent={Platform.OS === "android"} onRequestClose={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }}>
         <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }, Platform.OS === 'web' && isDesktop && [webStyles.cardDesktopWide, { borderColor: colors.border, maxWidth: 800 }]]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
@@ -999,7 +1002,7 @@ export default function CustomersScreen() {
       )}
 
       {/* 2026-05-03 — Cari Filter Modal (city / group multi-select) */}
-      <Modal visible={showFilterModal} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent onRequestClose={() => setShowFilterModal(false)}>
+      <Modal visible={showFilterModal} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent={Platform.OS === "android"} onRequestClose={() => setShowFilterModal(false)}>
         <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
           <View style={[
             { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '88%' },

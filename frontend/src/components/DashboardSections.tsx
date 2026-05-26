@@ -373,7 +373,7 @@ export const CancellationSection: React.FC<{ ozet: any[]; detay: any[]; tenantId
       ))}
 
       {/* İptal Detay Modal */}
-      <Modal visible={!!selectedIptal} animationType="slide" transparent statusBarTranslucent>
+      <Modal visible={!!selectedIptal} animationType="slide" transparent statusBarTranslucent={Platform.OS === "android"}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
@@ -766,7 +766,7 @@ export const HourlyLocationSection: React.FC<{
       })()}
 
       {/* Detail Modal */}
-      <Modal visible={!!selectedItem} animationType="slide" transparent statusBarTranslucent>
+      <Modal visible={!!selectedItem} animationType="slide" transparent statusBarTranslucent={Platform.OS === "android"}>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }]}>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>

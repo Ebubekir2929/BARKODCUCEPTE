@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef, memo, useDeferredValue } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal,
-  TextInput, ActivityIndicator, FlatList, Alert, Platform,
+  TextInput, ActivityIndicator, FlatList, Alert, Platform, Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -1082,7 +1082,11 @@ export default function ReportsScreen() {
       }
     }
 
-    setShowFilterModal(false); setShowResultModal(true);
+    // iOS: arka arkaya modal toggle'ı stabilize et
+    Keyboard.dismiss();
+    setShowFilterModal(false);
+    if (Platform.OS === 'ios') await new Promise(r => setTimeout(r, 350));
+    setShowResultModal(true);
 
     // Build cache key from report key + filter values
     const baseParams: Record<string, any> = { ...selectedReport.defaultParams };
@@ -1855,7 +1859,7 @@ export default function ReportsScreen() {
       </ScrollView>
 
       {/* FILTER MODAL — 2026-05-05: switched from `transparent
-          statusBarTranslucent` to `presentationStyle="overFullScreen"` so it
+          statusBarTranslucent={Platform.OS === "android"}` to `presentationStyle="overFullScreen"` so it
           renders correctly on RN-Web (the previous combo produced a 0-height
           card on Chrome / Safari).
           2026-02 update (web/desktop polish): proper dark backdrop + centered
@@ -1946,7 +1950,7 @@ export default function ReportsScreen() {
 
       {/* DATE PICKER MODAL */}
       {datePickerFor && (Platform.OS === 'web' ? (
-        <Modal visible animationType="fade" transparent statusBarTranslucent>
+        <Modal visible animationType="fade" transparent statusBarTranslucent={Platform.OS === "android"}>
           <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center', padding: 30 }]}>
             <View style={{ backgroundColor: colors.card, padding: 20, borderRadius: 16, width: '90%', maxWidth: 340, gap: 14 }}>
               <Text style={[{ fontSize: 15, fontWeight: '700', color: colors.text }]}>Tarih Seçin</Text>
@@ -1999,7 +2003,7 @@ export default function ReportsScreen() {
         />
       ))}
 
-      <Modal visible={showPickerModal} animationType="slide" transparent statusBarTranslucent>
+      <Modal visible={showPickerModal} animationType="slide" transparent statusBarTranslucent={Platform.OS === "android"}>
         <View style={[
           styles.modalOverlay,
           Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop,
@@ -2077,7 +2081,10 @@ export default function ReportsScreen() {
                 if (abortRef.current) { try { abortRef.current.abort(); } catch(_){} }
                 runTokenRef.current++;
                 setMoreLoading(false); setReportLoading(false);
-                setShowResultModal(false); setShowFilterModal(true);
+                // iOS: arka arkaya modal toggle'ı stabilize et
+                Keyboard.dismiss();
+                setShowResultModal(false);
+                setTimeout(() => setShowFilterModal(true), Platform.OS === 'ios' ? 350 : 50);
               }}><Ionicons name="options-outline" size={22} color={colors.primary} /></TouchableOpacity>
               <TouchableOpacity onPress={() => {
                 // Abort and clean up on close
