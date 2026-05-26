@@ -9,7 +9,7 @@
  *
  * Mimari: POS API kredisi yakmaz — sadece patron.pending_price_updates tablosu.
  */
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput, Modal,
   ScrollView, ActivityIndicator, FlatList, KeyboardAvoidingView,
@@ -135,6 +135,8 @@ export default function PriceUpdateScreen() {
 
   // Password confirm step
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  // Bulk Edit ekranında her satırın TextInput'una ref tut — Enter ile sonrakine geç
+  const bulkInputRefs = useRef<Record<string, any>>({});
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   // Pending action context: 'single' or 'bulk', plus the payload to send
@@ -529,7 +531,12 @@ export default function PriceUpdateScreen() {
       type: 'single',
       body: { items, source: 'bulk' },
     });
-    setShowPasswordModal(true);
+    // iOS donma fix: BulkEdit (pageSheet) açıkken transparent password modal'ı
+    // direkt açmak, klavye aktif ise touch sistemi kilitleyebiliyor. Önce
+    // klavyeyi kapat, animasyon bitince password modal'ı aç.
+    Keyboard.dismiss();
+    const delay = Platform.OS === 'ios' ? 350 : 50;
+    setTimeout(() => setShowPasswordModal(true), delay);
   };
 
   // === Filter products ===
@@ -1061,10 +1068,13 @@ export default function PriceUpdateScreen() {
               data={bulkEditRows}
               keyExtractor={(it) => String(it.ID)}
               contentContainerStyle={{ padding: 12, paddingBottom: 120 }}
-              renderItem={({ item }) => {
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="none"
+              renderItem={({ item, index }) => {
                 const np = parseFloat((item.newPrice || '').replace(',', '.'));
                 const diff = !isNaN(np) && item.oldPrice > 0 ? np - item.oldPrice : null;
                 const pct = diff != null && item.oldPrice > 0 ? (diff / item.oldPrice) * 100 : null;
+                const isLast = index === bulkEditRows.length - 1;
                 return (
                   <View style={{
                     backgroundColor: colors.surface,
@@ -1088,12 +1098,25 @@ export default function PriceUpdateScreen() {
                       <View style={{ flex: 1.2, padding: 8, backgroundColor: colors.primary + '10', borderRadius: 8, borderWidth: 1, borderColor: colors.primary }}>
                         <Text style={{ color: colors.primary, fontSize: 10, fontWeight: '600' }}>Yeni ₺</Text>
                         <TextInput
+                          ref={(r) => { bulkInputRefs.current[String(item.ID)] = r; }}
                           style={{ color: colors.text, fontSize: 16, fontWeight: '700', padding: 0, marginTop: 2 }}
                           placeholder="0.00"
                           placeholderTextColor={colors.textSecondary}
                           keyboardType="decimal-pad"
+                          returnKeyType={isLast ? 'done' : 'next'}
+                          blurOnSubmit={isLast}
                           value={item.newPrice}
                           onChangeText={(v) => setRowNewPrice(item.ID, v)}
+                          onSubmitEditing={() => {
+                            if (!isLast) {
+                              const nextItem = bulkEditRows[index + 1];
+                              if (nextItem) {
+                                bulkInputRefs.current[String(nextItem.ID)]?.focus?.();
+                              }
+                            } else {
+                              Keyboard.dismiss();
+                            }
+                          }}
                         />
                       </View>
                     </View>
