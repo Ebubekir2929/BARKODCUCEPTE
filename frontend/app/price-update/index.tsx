@@ -339,7 +339,11 @@ export default function PriceUpdateScreen() {
     setOtherBirimByProduct({});
     setOtherNewPricesByProduct({});
     setApplyToOtherPrices(false);
-    setShowBulkEdit(true);
+    // iOS'ta iki pageSheet modal üst üste açılamaz — önce New modal'ı kapat,
+    // animasyonu bekle, sonra Bulk Edit'i aç. Android/Web'de animasyon kısa.
+    setShowNewModal(false);
+    const delay = Platform.OS === 'ios' ? 450 : 100;
+    setTimeout(() => setShowBulkEdit(true), delay);
   };
 
   // applyToOtherPrices açıldığında diğer fiyat adlarının fiyatlarını çek
