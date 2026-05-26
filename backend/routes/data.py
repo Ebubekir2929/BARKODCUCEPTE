@@ -1565,6 +1565,9 @@ async def get_iptal_list(
     filter_date = body.get("date", "")
     sdate = body.get("sdate", "")
     edate = body.get("edate", "")
+    # 2026-05-26 — Kullanıcı modal'ı elle açtığında allow_fetch=true ile
+    # cache boşsa tek seferlik POS isteği at; otomatik yenilemelerde False.
+    allow_fetch = bool(body.get("allow_fetch", False))
     
     if not tenant_id:
         raise HTTPException(status_code=400, detail="tenant_id gerekli")
@@ -1604,7 +1607,7 @@ async def get_iptal_list(
                         "IPTAL_ID": None,
                     },
                     timeout_sec=45,
-                    cache_only=True,
+                    cache_only=not allow_fetch,
                 )
                 day_data = resp.get("data", [])
                 if isinstance(day_data, list):

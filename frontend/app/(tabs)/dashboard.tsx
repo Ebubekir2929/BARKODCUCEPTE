@@ -609,7 +609,7 @@ export default function DashboardScreen() {
     
     try {
       const { token: authToken } = useAuthStore.getState();
-      const body: any = { tenant_id: activeTenantId };
+      const body: any = { tenant_id: activeTenantId, allow_fetch: true };
       
       // Send date range if filter is active
       if (filters?.startDate && filters?.endDate) {
