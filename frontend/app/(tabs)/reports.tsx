@@ -994,6 +994,9 @@ export default function ReportsScreen() {
   const openPicker = useCallback(async (filter: FilterDef) => {
     setPickerFilter(filter);
     setPickerSearch('');
+    // iOS: filter modal üzerine üçüncü modal açılırken touch sistemini stabilize et
+    Keyboard.dismiss();
+    if (Platform.OS === 'ios') await new Promise(r => setTimeout(r, 100));
     setShowPickerModal(true);
 
     if (filter.source && lookupCache[filter.source]) {
