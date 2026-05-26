@@ -1592,24 +1592,63 @@ async def get_iptal_list(
             from datetime import date as date_cls
             dates_to_fetch = [date_cls.today().strftime("%Y-%m-%d")]
         
+        # 2026-05-26 — daily_cancel_list scope rolling 30-day verisini tutuyor.
+        # En son sync'lenen (bugünkü) blob'u tek seferde çek, tüm istenen tarihleri
+        # ondan filtrele. Her gün için ayrı blob aramak yanıltıcı çünkü o günün
+        # blob'u 00:00'da oluşturuldu ve o günün iptalleri henüz yokken.
+        latest_blob_rows: list = []
+        try:
+            from services.dataset_cache import lookup_cached_report
+            from datetime import date as date_cls
+            today = date_cls.today().strftime("%Y-%m-%d")
+            blob = await lookup_cached_report(
+                tenant_id, "iptal_detay",
+                {"day": today, "scope": "daily_cancel_list"},
+            )
+            if not blob or not isinstance(blob.get("data"), list):
+                # Bugünün blob'u yoksa dünün blob'unu dene
+                from datetime import timedelta
+                yesterday = (date_cls.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+                blob = await lookup_cached_report(
+                    tenant_id, "iptal_detay",
+                    {"day": yesterday, "scope": "daily_cancel_list"},
+                )
+            if blob and isinstance(blob.get("data"), list):
+                latest_blob_rows = blob["data"]
+                logger.info(f"[iptal-list] latest blob has {len(latest_blob_rows)} rows (rolling 30-day)")
+        except Exception as e:
+            logger.debug(f"[iptal-list] daily_cancel_list latest blob lookup failed: {e}")
+
         all_data = []
         for dt in dates_to_fetch:
             try:
-                # Prefer MySQL direct (_on_demand_request handles 3-tier caching)
-                # 2026-05-16 — cache_only=True: kullanıcı isteği üzerine POS'a
-                # request_create atılmıyor. Cache'de varsa döner, yoksa boş.
-                resp = await _on_demand_request(
-                    tenant_id,
-                    "iptal_detay",
-                    {
-                        "sdate": f"{dt} 00:00:00",
-                        "edate": f"{dt} 23:59:59",
-                        "IPTAL_ID": None,
-                    },
-                    timeout_sec=45,
-                    cache_only=not allow_fetch,
-                )
-                day_data = resp.get("data", [])
+                day_data = None
+                # 1) Rolling blob'tan istenen güne ait satırları filtrele
+                if latest_blob_rows:
+                    def _row_date(r: dict) -> str:
+                        for key in ("TARIH_IPTAL", "IPTAL_TARIHI", "TARIH", "FIS_TARIHI", "TARIH_SAAT"):
+                            v = r.get(key)
+                            if v:
+                                return str(v).strip()[:10]
+                        return ""
+                    day_data = [r for r in latest_blob_rows if _row_date(r) == dt]
+                    if day_data:
+                        logger.info(f"[iptal-list] dt={dt} got {len(day_data)} from rolling blob")
+
+                # 2) Fallback: standart _on_demand_request
+                if not day_data:
+                    resp = await _on_demand_request(
+                        tenant_id,
+                        "iptal_detay",
+                        {
+                            "sdate": f"{dt} 00:00:00",
+                            "edate": f"{dt} 23:59:59",
+                            "IPTAL_ID": None,
+                        },
+                        timeout_sec=45,
+                        cache_only=not allow_fetch,
+                    )
+                    day_data = resp.get("data", [])
                 if isinstance(day_data, list):
                     # 2026-05-16 — Safety net: even if cache returned a wider
                     # date range (blob cache may have multiple days), strictly
