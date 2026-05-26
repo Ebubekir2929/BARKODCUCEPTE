@@ -1492,6 +1492,41 @@ async def get_iptal_detail(
             line_items = _extract_line_items({"data": iptal_rows})
             if not header and iptal_rows:
                 header = _extract_header({"data": iptal_rows})
+
+        # 2026-05-26 — Step 1c: daily_cancel_list rolling blob fallback.
+        # `_on_demand_request` farklı params hash'iyle baktığı için aynı
+        # iptal_detay blob'unu kaçırıyor. Burada doğrudan latest blob'tan çek.
+        if not line_items:
+            try:
+                from services.dataset_cache import lookup_cached_report
+                from datetime import date as date_cls, timedelta
+                today = date_cls.today().strftime("%Y-%m-%d")
+                blob = await lookup_cached_report(
+                    tenant_id, "iptal_detay",
+                    {"day": today, "scope": "daily_cancel_list"},
+                )
+                if not blob or not isinstance(blob.get("data"), list):
+                    yesterday = (date_cls.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+                    blob = await lookup_cached_report(
+                        tenant_id, "iptal_detay",
+                        {"day": yesterday, "scope": "daily_cancel_list"},
+                    )
+                if blob and isinstance(blob.get("data"), list):
+                    blob_rows = blob["data"]
+                    iptal_rows = [
+                        r for r in blob_rows
+                        if isinstance(r, dict) and int(r.get("IPTAL_ID") or 0) == int(iptal_id)
+                    ]
+                    if iptal_rows:
+                        logger.info(
+                            f"[iptal-detail] daily_cancel_list blob hit IPTAL_ID={iptal_id} rows={len(iptal_rows)}"
+                        )
+                        line_items = _extract_line_items({"data": iptal_rows})
+                        if not header:
+                            header = _extract_header({"data": iptal_rows})
+            except Exception as e:
+                logger.debug(f"[iptal-detail] daily_cancel_list fallback failed: {e}")
+
             if not line_items:
                 logger.info(
                     f"[iptal-detail] cache hit (bulk only, no line items) "
