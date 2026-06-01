@@ -2,7 +2,7 @@
   "expo": {
     "name": "Barkodcu Cepte",
     "slug": "barkodcu-cepte",
-    "version": "1.0.14",
+    "version": "1.0.15",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "barkodcucepte",
@@ -11,7 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.cakmakebubekir.barkodcucepte",
-      "buildNumber": "18",
+      "buildNumber": "19",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "CFBundleDisplayName": "Barkodcu",
@@ -24,7 +24,7 @@
     },
     "android": {
       "package": "com.cakmakebubekir.barkodcucepte",
-      "versionCode": 18,
+      "versionCode": 19,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
