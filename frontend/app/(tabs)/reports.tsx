@@ -2033,6 +2033,9 @@ export default function ReportsScreen() {
             {/* 2026-06-01 — Picker inline overlay (iOS modal stack fix v2):
                 Filter Modal'ının İÇİNDE absolute overlay olarak render
                 ediliyor; native sub-modal yok, iOS donması yaşanmıyor. */}
+            {/* 2026-06-01 — Required filter uyarısı için inline CustomAlert.
+                Filter Modal içinde native sub-modal sorununu önlemek için inline mode. */}
+            <CustomAlert {...alertProps} inline />
             {showPickerModal && (
               <View style={[
                 StyleSheet.absoluteFillObject,

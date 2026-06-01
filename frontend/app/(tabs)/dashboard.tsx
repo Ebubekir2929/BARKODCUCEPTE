@@ -791,9 +791,11 @@ export default function DashboardScreen() {
       )}
       <ScrollView
         style={styles.scrollView}
-        contentContainerStyle={Platform.OS === 'web' && isDesktop ? { width: '100%', paddingHorizontal: 0 } : undefined}
+        contentContainerStyle={Platform.OS === 'web' && isDesktop ? { width: '100%', paddingHorizontal: 0 } : { paddingBottom: 80 }}
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        onScroll={(e) => { try { require('../../src/store/uiStore').useUIStore.getState().reportScroll(e.nativeEvent.contentOffset.y); } catch {} }}
+        scrollEventThrottle={16}
       >
         {/* Manuel refresh confirmation toast */}
         {manualRefreshToast && (

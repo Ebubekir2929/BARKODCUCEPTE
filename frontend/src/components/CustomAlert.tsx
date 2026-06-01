@@ -26,6 +26,9 @@ interface CustomAlertProps {
   message?: string;
   buttons?: AlertButton[];
   onClose: () => void;
+  /** 2026-06-01 — iOS modal stack fix: inline=true ise native <Modal> yerine
+   *  absolute overlay olarak render edilir (parent modal içinde güvenli). */
+  inline?: boolean;
 }
 
 const alertConfig = {
@@ -54,6 +57,7 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
   message,
   buttons = [{ text: 'Tamam', style: 'default' }],
   onClose,
+  inline = false,
 }) => {
   const { colors } = useThemeStore();
   const scaleAnim = useRef(new Animated.Value(0)).current;
@@ -128,6 +132,40 @@ export const CustomAlert: React.FC<CustomAlertProps> = ({
         return { color: '#FFFFFF' };
     }
   };
+
+  // 2026-06-01 — Inline mode: parent modal içinde absolute overlay
+  if (inline) {
+    if (!visible) return null;
+    return (
+      <Animated.View style={[styles.overlay, { opacity: opacityAnim, position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999 }]}>
+        <Animated.View
+          style={[styles.container, { backgroundColor: colors.surface, transform: [{ scale: scaleAnim }] }]}
+        >
+          <Animated.View style={[styles.iconCircle, { backgroundColor: config.gradient[0], transform: [{ scale: iconScaleAnim }] }]}>
+            <View style={[styles.iconInner, { backgroundColor: config.gradient[1] }]}>
+              <Ionicons name={config.icon} size={40} color="#FFFFFF" />
+            </View>
+          </Animated.View>
+          <View style={styles.content}>
+            <Text style={[styles.title, { color: colors.text }]}>{title}</Text>
+            {message && <Text style={[styles.message, { color: colors.textSecondary }]}>{message}</Text>}
+          </View>
+          <View style={styles.buttonContainer}>
+            {buttons.map((button, index) => (
+              <TouchableOpacity
+                key={index}
+                style={[styles.button, getButtonStyle(button.style), buttons.length > 1 && { flex: 1 }]}
+                onPress={() => handleButtonPress(button)}
+                activeOpacity={0.8}
+              >
+                <Text style={[styles.buttonText, getButtonTextStyle(button.style)]}>{button.text}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </Animated.View>
+      </Animated.View>
+    );
+  }
 
   return (
     <Modal visible={visible} transparent animationType="none">
