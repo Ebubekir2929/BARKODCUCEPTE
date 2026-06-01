@@ -127,6 +127,9 @@ export default function PriceUpdateScreen() {
   // 2026-05-21 — Kullanıcı talebi: toplu modda her ürün için satır satır elle
   // yeni fiyat girebilme. Devam Et → bu ekran açılır.
   const [showBulkEdit, setShowBulkEdit] = useState(false);
+  // 2026-06-01 — Toplu Hesapla paneli collapsible; varsayılan KAPALI →
+  // küçük ekranlarda satır listesi için maksimum yer bırakır.
+  const [bulkPanelOpen, setBulkPanelOpen] = useState(false);
   const [bulkEditRows, setBulkEditRows] = useState<Array<{
     ID: number; AD: string; BARKOD?: string | null;
     STOK_STOK_BIRIM_FIYAT?: number | string | null;
@@ -1056,74 +1059,92 @@ export default function PriceUpdateScreen() {
               </View>
             </View>
 
-            {/* Toplu Hesapla Widget (opsiyonel) */}
-            <View style={{ padding: 12, backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border }}>
+            {/* 2026-06-01 — Kompakt collapsible top bar.
+                * Diğer fiyat adı checkbox sadece priceNames.length > 1 ise minik banner
+                * Toplu Hesapla paneli varsayılan KAPALI, kullanıcı genişletir
+                Bu sayede satır listesi için 3x daha fazla yer kalır. */}
+            <View style={{ backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border }}>
               {priceNames.length > 1 && (
                 <TouchableOpacity
-                  style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 8, marginBottom: 10, paddingHorizontal: 4, borderRadius: 8, backgroundColor: applyToOtherPrices ? colors.primary + '12' : 'transparent' }}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center',
+                    paddingHorizontal: 12, paddingVertical: 8,
+                    backgroundColor: applyToOtherPrices ? colors.primary + '12' : 'transparent',
+                  }}
                   onPress={() => setApplyToOtherPrices(v => !v)}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                 >
-                  <Ionicons name={applyToOtherPrices ? 'checkbox' : 'square-outline'} size={22} color={applyToOtherPrices ? colors.primary : colors.textSecondary} />
-                  <View style={{ marginLeft: 8, flex: 1 }}>
-                    <Text style={{ color: colors.text, fontSize: 13, fontWeight: '600' }}>
-                      Diğer fiyat adlarına da uygula ({priceNames.length - 1} ek liste)
-                    </Text>
-                    <Text style={{ color: colors.textSecondary, fontSize: 11 }}>
-                      Açıkken her satırda her fiyat adı için ayrı alan açılır
-                    </Text>
-                  </View>
+                  <Ionicons name={applyToOtherPrices ? 'checkbox' : 'square-outline'} size={18} color={applyToOtherPrices ? colors.primary : colors.textSecondary} />
+                  <Text style={{ color: colors.text, fontSize: 12, fontWeight: '600', marginLeft: 8, flex: 1 }} numberOfLines={1}>
+                    {applyToOtherPrices ? `+ ${priceNames.length - 1} ek fiyat listesine de uygulanır` : `Diğer ${priceNames.length - 1} fiyat listesine de uygula`}
+                  </Text>
                 </TouchableOpacity>
               )}
-              <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 8 }}>
-                Toplu Hesapla (opsiyonel) — tüm satırlara dağıtır, sonra her satırı elle değiştirebilirsiniz:
-              </Text>
-              <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
-                {([
-                  { v: 'percent', label: '% Yüzde' },
-                  { v: 'amount', label: '+/- ₺' },
-                  { v: 'fixed_price', label: 'Sabit ₺' },
-                ] as const).map(b => {
-                  const active = bulkType === b.v;
-                  return (
-                    <TouchableOpacity
-                      key={b.v}
+
+              {/* Collapsible "Toplu Hesapla" header (her zaman görünür, küçük) */}
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10 }}
+                onPress={() => setBulkPanelOpen(v => !v)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="flash" size={16} color={colors.primary} />
+                <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700', marginLeft: 6, flex: 1 }}>
+                  Toplu Hesapla {bulkValue ? `· ${bulkType === 'percent' ? '%' : ''}${bulkValue}${bulkType === 'amount' ? ' ₺' : bulkType === 'fixed_price' ? ' ₺' : ''}` : '(opsiyonel)'}
+                </Text>
+                <Ionicons name={bulkPanelOpen ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
+
+              {bulkPanelOpen && (
+                <View style={{ paddingHorizontal: 12, paddingBottom: 12 }}>
+                  <View style={{ flexDirection: 'row', gap: 6, marginBottom: 8 }}>
+                    {([
+                      { v: 'percent', label: '% Yüzde' },
+                      { v: 'amount', label: '+/- ₺' },
+                      { v: 'fixed_price', label: 'Sabit ₺' },
+                    ] as const).map(b => {
+                      const active = bulkType === b.v;
+                      return (
+                        <TouchableOpacity
+                          key={b.v}
+                          style={{
+                            flex: 1, paddingVertical: 8, borderRadius: 8, borderWidth: 1,
+                            borderColor: colors.primary,
+                            backgroundColor: active ? colors.primary : 'transparent',
+                            alignItems: 'center',
+                          }}
+                          onPress={() => setBulkType(b.v)}
+                        >
+                          <Text style={{ color: active ? '#FFF' : colors.primary, fontWeight: '700', fontSize: 12 }}>{b.label}</Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                  <View style={{ flexDirection: 'row', gap: 8, alignItems: 'stretch' }}>
+                    <TextInput
+                      allowFontScaling={false}
                       style={{
-                        flex: 1, paddingVertical: 8, borderRadius: 8, borderWidth: 1,
-                        borderColor: colors.primary,
-                        backgroundColor: active ? colors.primary : 'transparent',
-                        alignItems: 'center',
+                        flex: 1, minWidth: 0, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background,
+                        color: colors.text, padding: 10, borderRadius: 10, fontSize: 14, fontWeight: '600',
                       }}
-                      onPress={() => setBulkType(b.v)}
+                      placeholder={bulkType === 'percent' ? 'örn. 10 / -5' : bulkType === 'amount' ? 'örn. 5 / -2' : 'örn. 99.99'}
+                      placeholderTextColor={colors.textSecondary}
+                      keyboardType="numbers-and-punctuation"
+                      value={bulkValue}
+                      onChangeText={setBulkValue}
+                    />
+                    <TouchableOpacity
+                      style={{
+                        paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10,
+                        backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                      onPress={applyBulkCalculation}
                     >
-                      <Text style={{ color: active ? '#FFF' : colors.primary, fontWeight: '700', fontSize: 12 }}>{b.label}</Text>
+                      <Text allowFontScaling={false} style={{ color: '#FFF', fontWeight: '700', fontSize: 13 }}>Uygula</Text>
                     </TouchableOpacity>
-                  );
-                })}
-              </View>
-              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'stretch' }}>
-                <TextInput
-                  allowFontScaling={false}
-                  style={{
-                    flex: 1, minWidth: 0, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background,
-                    color: colors.text, padding: 12, borderRadius: 10, fontSize: 15, fontWeight: '600',
-                  }}
-                  placeholder={bulkType === 'percent' ? 'örn. 10 / -5' : bulkType === 'amount' ? 'örn. 5 / -2' : 'örn. 99.99'}
-                  placeholderTextColor={colors.textSecondary}
-                  keyboardType="numbers-and-punctuation"
-                  value={bulkValue}
-                  onChangeText={setBulkValue}
-                />
-                <TouchableOpacity
-                  style={{
-                    paddingHorizontal: 14, paddingVertical: 12, borderRadius: 10,
-                    backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0,
-                  }}
-                  onPress={applyBulkCalculation}
-                >
-                  <Text allowFontScaling={false} style={{ color: '#FFF', fontWeight: '700', fontSize: 14 }}>Uygula</Text>
-                </TouchableOpacity>
-              </View>
+                  </View>
+                </View>
+              )}
             </View>
 
             {/* Editable Rows */}

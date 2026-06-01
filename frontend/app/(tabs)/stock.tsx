@@ -630,6 +630,10 @@ export default function StockScreen() {
     const userEndMonth = userEnd.slice(0, 7);
     const fetchStart = userStartMonth === userEndMonth ? range.start : userStart;
     const fetchEnd = userStartMonth === userEndMonth ? range.end : userEnd;
+    // 2026-06-01 — Yıllık/çoklu ay aralığında force_refresh=true ile POS'a git;
+    // cache stale ise eski tarih kayıtları gelmeyebiliyor. Tek ay içi seçimde
+    // cache'den hızlı dön.
+    const multiMonth = userStartMonth !== userEndMonth;
     try {
       const { token } = useAuthStore.getState();
       // Miktar tek seferde, ekstre tarih aralığı ile paralel
@@ -642,7 +646,7 @@ export default function StockScreen() {
         fetch(`${API_URL}/api/data/stock-extre`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ tenant_id: activeTenantId, stok_id: stockId, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd }),
+          body: JSON.stringify({ tenant_id: activeTenantId, stok_id: stockId, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd, force_refresh: multiMonth }),
         }),
       ]);
       const miktarJson = await miktarResp.json().catch(() => ({}));
