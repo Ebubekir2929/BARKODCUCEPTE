@@ -2550,8 +2550,11 @@ async def run_report(
         params_hash = str(params_for_key)
     cache_key = f"report::{dataset_key}::{tenant_id}::{params_hash}::all={fetch_all}"
     now = time.time()
-    TTL_FRESH = 180     # 3 min: serve immediately
-    TTL_STALE = 900     # 15 min: serve while refreshing in background
+    # 2026-06-01 — Raporlar için cache TTL'ları arttırıldı (kullanıcı isteği):
+    # POS on-demand yavaş olduğundan aynı rapor tekrar açıldığında anında dönelim.
+    # Arka planda otomatik yenileme (SWR pattern) zaten kuruluydu.
+    TTL_FRESH = 600     # 10 min: anında dön
+    TTL_STALE = 3600    # 60 min: anında dön + arkada yenile
 
     cached = _GLOBAL_CACHE.get(cache_key)
     age = now - cached["ts"] if cached else None
@@ -2604,7 +2607,7 @@ async def run_report(
                 logger.info(f"Report result (paged): {dataset_key} -> {len(all_rows)} rows across {page-1} page(s)")
                 return {"ok": True, "request_uid": req_uid, "data": all_rows, "pages": page - 1}
 
-            result = await _on_demand_request(tenant_id, dataset_key, params, timeout_sec=90)
+            result = await _on_demand_request(tenant_id, dataset_key, params, timeout_sec=60)
             data_count = len(result.get("data", [])) if isinstance(result.get("data"), list) else 0
             logger.info(f"Report result: {dataset_key} -> {data_count} rows")
             return result
