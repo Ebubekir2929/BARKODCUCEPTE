@@ -1372,6 +1372,10 @@ export default function StockScreen() {
       <Modal visible={!!selectedStock} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent={Platform.OS === "android"} onRequestClose={() => { setSelectedStock(null); setDetailMiktar([]); setDetailExtre([]); }}>
         <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
           <View style={[styles.modalContent, { backgroundColor: colors.surface }, Platform.OS === 'web' && isDesktop && [webStyles.cardDesktopWide, { borderColor: colors.border, maxWidth: 900 }]]}>
+            {/* 2026-06-01 v3 — Stock Detail / Fiş Detay swap (iOS-safe).
+                selectedFis varsa stock content gizlenir, Fiş Detay tek başına
+                modalContent içinde flex:1 ile render edilir. */}
+            {!selectedFis && (<>
             <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
               <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>{selectedStock?.AD || selectedStock?.STOK_ADI || t('stock_label')}</Text>
               <TouchableOpacity onPress={() => { setSelectedStock(null); setDetailMiktar([]); setDetailExtre([]); }}><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
@@ -1683,30 +1687,32 @@ export default function StockScreen() {
                 </View> : <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>Ekstre bulunamadı</Text></View>
               )}
             </ScrollView>
-
-            {/* 2026-06-01 — Fiş Detay inline overlay (iOS modal stack fix v2):
-                Stock Detail Modal'ının İÇİNDE absolute overlay olarak render
-                ediliyor; native sub-modal yok, iOS donması yaşanmıyor. */}
+            </>)}
+            {/* 2026-06-01 v3 — Fiş Detay: artık absolute overlay değil, modalContent
+                içinde flex:1 ile tek başına render ediliyor (selectedFis varsa
+                stock content yukarıda zaten gizli). iOS'ta garantili görünür. */}
             {!!selectedFis && (
-              <View style={[
-                StyleSheet.absoluteFillObject,
-                { backgroundColor: colors.surface, zIndex: 100 },
-              ]}>
-                <View style={[styles.modalHeader, { borderBottomColor: colors.border, alignItems: 'center' }]}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>
-                      Fiş Detayı
-                    </Text>
-                    {selectedFis && (
-                      <Text style={[{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }]} numberOfLines={1}>
-                        {selectedFis.TARIH || ''} · {selectedFis.FIS_TURU || ''}
-                      </Text>
-                    )}
-                  </View>
-                  <TouchableOpacity onPress={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                    <Ionicons name="close" size={26} color={colors.text} />
+              <View style={{ flex: 1, backgroundColor: colors.surface }}>
+                <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+                  <TouchableOpacity
+                    onPress={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Ionicons name="arrow-back" size={24} color={colors.text} />
                   </TouchableOpacity>
+                  <Text style={[styles.modalTitle, { color: colors.text, flex: 1, textAlign: 'center' }]}>Fiş Detayı</Text>
+                  <View style={{ width: 24 }} />
                 </View>
+                {selectedFis && (
+                  <View style={[{ padding: 12, borderBottomWidth: 1, borderBottomColor: colors.border }]}>
+                    <Text style={[{ fontSize: 14, fontWeight: '700', color: colors.text }]} numberOfLines={1}>
+                      {selectedFis.FIS_TURU || ''} {selectedFis.BELGENO || ''}
+                    </Text>
+                    <Text style={[{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }]} numberOfLines={1}>
+                      {selectedFis.TARIH || ''} · {selectedFis.ACIKLAMA || ''}
+                    </Text>
+                  </View>
+                )}
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
                   {fisLoading ? (
                     <View style={{ alignItems: 'center', paddingVertical: 40 }}>
