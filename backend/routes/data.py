@@ -1902,14 +1902,15 @@ async def get_stock_detail(
     """Fetch stok_bilgi_miktar and stok_extre for a specific stock item"""
     tenant_id = body.get("tenant_id", "")
     stock_id = body.get("stock_id")
-    
+    cache_only = bool(body.get("cache_only", False))
+
     if not tenant_id or stock_id is None:
         raise HTTPException(status_code=400, detail="tenant_id ve stock_id gerekli")
     
     try:
-        # Fetch both miktar and extre in parallel
-        miktar_task = _on_demand_request(tenant_id, "stok_bilgi_miktar", {"ID": int(stock_id), "LOKASYON": 0}, timeout_sec=35)
-        extre_task = _on_demand_request(tenant_id, "stok_extre", {"ID": int(stock_id)}, timeout_sec=35)
+        # 2026-06-01 — cache_only=True: sadece MySQL dataset_cache okur, POS'a gitmez
+        miktar_task = _on_demand_request(tenant_id, "stok_bilgi_miktar", {"ID": int(stock_id), "LOKASYON": 0}, timeout_sec=35, cache_only=cache_only)
+        extre_task = _on_demand_request(tenant_id, "stok_extre", {"ID": int(stock_id)}, timeout_sec=35, cache_only=cache_only)
         
         miktar_result, extre_result = await asyncio.gather(miktar_task, extre_task, return_exceptions=True)
         

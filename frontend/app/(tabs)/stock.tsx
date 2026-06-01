@@ -214,7 +214,35 @@ export default function StockScreen() {
     });
   }, [detailExtre, extreStart, extreEnd]);
 
-  // 2026-06-01 — fetchWithTimeout: cache + POS fallback için; uzun bekleyiş yok.
+  // 2026-06-01 — fetchStockDetailWithFallback: stock-detail (miktar+extre) için
+  // cache HIT → anında dön; MISS → POS'a 10sn timeout. Aynı pattern.
+  const fetchStockDetailWithFallback = useCallback(async (stockId: any, token: string): Promise<any> => {
+    try {
+      const r1 = await fetch(`${API_URL}/api/data/stock-detail`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ tenant_id: activeTenantId, stock_id: stockId, cache_only: true }),
+      });
+      const d1 = await r1.json().catch(() => ({}));
+      if (d1.ok && (Array.isArray(d1.miktar) && d1.miktar.length > 0)) return d1;
+    } catch {}
+    try {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 10000);
+      const r2 = await fetch(`${API_URL}/api/data/stock-detail`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ tenant_id: activeTenantId, stock_id: stockId }),
+        signal: ctrl.signal,
+      });
+      clearTimeout(tid);
+      return await r2.json().catch(() => ({ ok: true, miktar: [], extre: [] }));
+    } catch {
+      return { ok: true, miktar: [], extre: [] };
+    }
+  }, [activeTenantId]);
+
+  // fetchWithTimeout: cache + POS fallback için
   // İlk önce cache_only=true ile dene (anında dön), boş gelirse POS'a 10sn timeout
   const fetchExtreWithFallback = useCallback(async (
     url: string,
@@ -662,20 +690,16 @@ export default function StockScreen() {
     // zaten web DB'ye basılıyor, POS'a gerek yok. Cache hit = milisaniyeler.
     try {
       const { token } = useAuthStore.getState();
-      // Miktar tek seferde (her zaman cache+POS fallback); ekstre tarih aralığı ile
-      const [miktarResp, extreData] = await Promise.all([
-        fetch(`${API_URL}/api/data/stock-detail`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ tenant_id: activeTenantId, stock_id: stockId }),
-        }),
+      // 2026-06-01 — Miktar artık cache+POS fallback ile (10sn timeout)
+      // ekstre yine fetchExtreWithFallback ile paralel
+      const [miktarJson, extreData] = await Promise.all([
+        fetchStockDetailWithFallback(stockId, token || ''),
         fetchExtreWithFallback(
           `${API_URL}/api/data/stock-extre`,
           { tenant_id: activeTenantId, stok_id: stockId, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd },
           token || '',
         ),
       ]);
-      const miktarJson = await miktarResp.json().catch(() => ({}));
       if (miktarJson.ok) setDetailMiktar(miktarJson.miktar || []);
       if (extreData.ok) {
         const rows = (extreData.data || []).slice().sort((a: any, b: any) => {
@@ -690,7 +714,7 @@ export default function StockScreen() {
       }
     } catch (err) { console.error(err); }
     finally { setDetailLoading(false); }
-  }, [activeTenantId, extreStart, extreEnd, monthRangeFor, fetchExtreWithFallback]);
+  }, [activeTenantId, extreStart, extreEnd, monthRangeFor, fetchExtreWithFallback, fetchStockDetailWithFallback]);
 
   // 2026-06-01 — Tarih değişimi → eğer fetched range içinde → sadece client-side
   // filtrele (filteredExtre useMemo). Dışındaysa → otomatik yeniden fetch.
