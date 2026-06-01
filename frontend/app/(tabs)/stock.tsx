@@ -1505,8 +1505,9 @@ export default function StockScreen() {
                   );
                 })}</View> : <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>Miktar bilgisi bulunamadı</Text></View>
               ) : (
-                detailExtre.length > 0 ? <View style={{ padding: 12 }}>
-                  {/* 2026-05-12 — Tarih filtresi (Native DatePicker) */}
+                <View style={{ padding: 12 }}>
+                  {/* 2026-06-01 — Tarih filtresi her zaman görünür (veri 0 olsa bile
+                      kullanıcı geçmiş ayı seçebilsin). */}
                   <View style={{
                     flexDirection: 'row', gap: 8, marginBottom: 10,
                     padding: 10, backgroundColor: colors.background,
@@ -1527,6 +1528,7 @@ export default function StockScreen() {
                       colors={colors}
                     />
                   </View>
+                  {detailExtre.length > 0 ? <></> : null}
 
                   {/* Sayım & Hareket özet — 2026-05-13 zenginleştirilmiş kart */}
                   {(() => {
@@ -1684,7 +1686,7 @@ export default function StockScreen() {
                     );
                   })
                   )}
-                </View> : <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>Ekstre bulunamadı</Text></View>
+                </View>
               )}
             </ScrollView>
             </>)}

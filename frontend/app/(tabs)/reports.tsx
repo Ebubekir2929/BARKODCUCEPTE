@@ -1989,7 +1989,17 @@ export default function ReportsScreen() {
                   <Text style={[{ fontSize: 16, fontWeight: '800', color: colors.text, textAlign: 'center', marginBottom: 8 }]}>Tarih Seç</Text>
                   <View style={{ alignItems: 'center', justifyContent: 'center', minHeight: 220 }}>
                     <DateTimePicker
-                      value={filterValues[datePickerFor] ? new Date(filterValues[datePickerFor]) : new Date()}
+                      value={(() => {
+                        // 2026-06-01 — 1970 fix: invalid/boş tarih durumunda BUGÜN'ü
+                        // göster (önceki kod new Date("") yaptığında 1970 dönüyordu).
+                        const v = filterValues[datePickerFor];
+                        if (!v) return new Date();
+                        const datePart = String(v).slice(0, 10);
+                        const [yy, mm, dd] = datePart.split('-').map(n => parseInt(n, 10));
+                        if (!yy || !mm || !dd || yy < 1990) return new Date();
+                        const d = new Date(yy, mm - 1, dd);
+                        return isNaN(d.getTime()) ? new Date() : d;
+                      })()}
                       mode="date"
                       display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                       locale="tr-TR"
