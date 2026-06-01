@@ -17,6 +17,7 @@
         "CFBundleDisplayName": "Barkodcu",
         "NSCameraUsageDescription": "Barkod tarama için kamera kullanılır",
         "NSPhotoLibraryUsageDescription": "Raporları kaydetmek için galeri erişimi gerekli",
+        "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": [
           "remote-notification"
         ]
