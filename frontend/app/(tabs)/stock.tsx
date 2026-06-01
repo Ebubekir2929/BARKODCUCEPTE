@@ -233,7 +233,7 @@ export default function StockScreen() {
       const resp = await fetch(`${API_URL}/api/data/fis-detail`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ tenant_id: activeTenantId, fis_id: fisId }),
+        body: JSON.stringify({ tenant_id: activeTenantId, fis_id: fisId, cache_only: true }),
       });
       const data = await resp.json();
       if (data.ok) {
@@ -630,10 +630,8 @@ export default function StockScreen() {
     const userEndMonth = userEnd.slice(0, 7);
     const fetchStart = userStartMonth === userEndMonth ? range.start : userStart;
     const fetchEnd = userStartMonth === userEndMonth ? range.end : userEnd;
-    // 2026-06-01 — Yıllık/çoklu ay aralığında force_refresh=true ile POS'a git;
-    // cache stale ise eski tarih kayıtları gelmeyebiliyor. Tek ay içi seçimde
-    // cache'den hızlı dön.
-    const multiMonth = userStartMonth !== userEndMonth;
+    // 2026-06-01 — Tüm tarih aralıklarında MySQL dataset_cache'ten çek; veri
+    // zaten web DB'ye basılıyor, POS'a gerek yok. Cache hit = milisaniyeler.
     try {
       const { token } = useAuthStore.getState();
       // Miktar tek seferde, ekstre tarih aralığı ile paralel
@@ -646,7 +644,7 @@ export default function StockScreen() {
         fetch(`${API_URL}/api/data/stock-extre`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ tenant_id: activeTenantId, stok_id: stockId, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd, force_refresh: multiMonth }),
+          body: JSON.stringify({ tenant_id: activeTenantId, stok_id: stockId, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd, cache_only: true }),
         }),
       ]);
       const miktarJson = await miktarResp.json().catch(() => ({}));
@@ -1409,7 +1407,7 @@ export default function StockScreen() {
             </View>
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
               {detailLoading ? (
-                <View style={{ alignItems: 'center', paddingVertical: 40 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>POS'tan veri alınıyor...</Text></View>
+                <View style={{ alignItems: 'center', paddingVertical: 40 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>Yükleniyor...</Text></View>
               ) : detailTab === 'miktar' ? (
                 detailMiktar.length > 0 ? <View style={{ padding: 12 }}>{detailMiktar.map((loc: any, idx: number) => {
                   const mevcut = parseFloat(loc.MIKTAR || '0');
@@ -1687,7 +1685,7 @@ export default function StockScreen() {
                   {fisLoading ? (
                     <View style={{ alignItems: 'center', paddingVertical: 40 }}>
                       <ActivityIndicator size="large" color={colors.primary} />
-                      <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>POS'tan veri alınıyor...</Text>
+                      <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>Yükleniyor...</Text>
                     </View>
                   ) : fisDetail.length > 0 ? (
                     <View style={{ padding: 12 }}>

@@ -351,13 +351,12 @@ export default function CustomersScreen() {
     const userEndMonth = userEnd.slice(0, 7);
     const fetchStart = userStartMonth === userEndMonth ? range.start : userStart;
     const fetchEnd = userStartMonth === userEndMonth ? range.end : userEnd;
-    // 2026-06-01 — Yıllık/çoklu ay aralığında force_refresh=true ile POS'a git
-    const multiMonth = userStartMonth !== userEndMonth;
+    // 2026-06-01 — Tüm tarih aralıklarında MySQL dataset_cache'ten çek
     try {
       const { token } = useAuthStore.getState();
       const resp = await fetch(`${API_URL}/api/data/cari-extre`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ tenant_id: activeTenantId, cari_id: cariId, doviz_ad: cari.DOVIZ_AD_ID || 1, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd, force_refresh: multiMonth }),
+        body: JSON.stringify({ tenant_id: activeTenantId, cari_id: cariId, doviz_ad: cari.DOVIZ_AD_ID || 1, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd, cache_only: true }),
       });
       const data = await resp.json();
       if (data.ok && data.data) {
@@ -407,7 +406,7 @@ export default function CustomersScreen() {
       const { token } = useAuthStore.getState();
       const resp = await fetch(`${API_URL}/api/data/fis-detail`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ tenant_id: activeTenantId, fis_id: fisId }),
+        body: JSON.stringify({ tenant_id: activeTenantId, fis_id: fisId, cache_only: true }),
       });
       const data = await resp.json();
       if (data.ok) {

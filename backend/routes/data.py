@@ -2034,6 +2034,7 @@ async def get_cari_extre(
             },
             timeout_sec=45,
             skip_mysql_cache=force_refresh,
+            cache_only=bool(body.get("cache_only", False)),
         )
         # Surface cache hit info to frontend
         if isinstance(result, dict):
@@ -2079,6 +2080,7 @@ async def get_stock_extre(
             tenant_id, "stok_extre", {"ID": int(stok_id)},
             timeout_sec=35, raw_cache=True,
             skip_mysql_cache=force_refresh,
+            cache_only=bool(body.get("cache_only", False)),
         )
         from_cache = bool(result.get("_cache_hit"))
         cache_data = (result or {}).get("cache", {})
@@ -2185,7 +2187,12 @@ async def get_fis_detail(
     except Exception as e:
         logger.warning(f"[fis-detail] cache lookup error: {e}")
     
-    # 2) Fallback — POS canlı sorgu (eski fişler için)
+    # 2) Fallback — POS canlı sorgu (eski fişler için) — sadece cache_only=False ise
+    cache_only_flag = bool(body.get("cache_only", False))
+    if cache_only_flag:
+        # 2026-06-01 — Kullanıcı POS'a istek atmak istemiyor: cache'te yoksa boş dön.
+        logger.info(f"[fis-detail] cache_only=True ve cache MISS → boş dönülüyor fis_id={fis_id}")
+        return {"ok": True, "from_cache": False, "details": [], "totals": []}
     try:
         result = await _on_demand_request(tenant_id, "fis_detay_toplam", params,
                                           timeout_sec=35, raw_cache=True)
