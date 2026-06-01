@@ -679,10 +679,13 @@ export default function CustomersScreen() {
           onScroll={(e) => {
             const y = e.nativeEvent.contentOffset.y;
             const layoutH = e.nativeEvent.layoutMeasurement.height;
-            setShowScrollUp(y > layoutH * 0.8);
-            setShowScrollDown(y < (e.nativeEvent.contentSize.height - layoutH * 1.5));
+            const contentH = e.nativeEvent.contentSize.height;
+            setShowScrollUp(y > layoutH * 0.5);
+            setShowScrollDown(contentH - (y + layoutH) > layoutH * 0.5);
+            // 2026-06-01 — Twitter-tarzı tab bar scroll-to-hide
+            try { require('../../src/store/uiStore').useUIStore.getState().reportScroll(y); } catch {}
           }}
-          scrollEventThrottle={250}
+          scrollEventThrottle={16}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={[colors.primary]} tintColor={colors.primary} />}
           ListEmptyComponent={<View style={styles.emptyContainer}><Ionicons name="people-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>{t('no_customers')}</Text></View>}
           ListFooterComponent={(manualToast ? (
@@ -710,8 +713,11 @@ export default function CustomersScreen() {
       <ScrollFab
         showUp={showScrollUp}
         showDown={showScrollDown && filteredCaris.length > 20}
-        onUp={() => listRef.current?.scrollToOffset?.({ offset: 0, animated: true })}
-        onDown={() => listRef.current?.scrollToEnd?.({ animated: true })}
+        onUp={() => listRef.current?.scrollToOffset?.({ offset: 0, animated: false })}
+        onDown={() => {
+          // 2026-06-01 — FlashList scrollToEnd bazen ıskalıyor; büyük offset güvenilir
+          try { listRef.current?.scrollToOffset?.({ offset: 999999, animated: false }); } catch {}
+        }}
         primaryColor={colors.primary}
         bottomOffset={100}
       />

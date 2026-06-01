@@ -1833,10 +1833,14 @@ export default function ReportsScreen() {
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>{t('reports')}</Text>
       </View>
-      <ScrollView contentContainerStyle={[
-        { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 100 },
-        Platform.OS === 'web' && isDesktop && { maxWidth: 1440, width: '100%', alignSelf: 'center' as const },
-      ]}>
+      <ScrollView
+        contentContainerStyle={[
+          { paddingHorizontal: 16, paddingTop: 10, paddingBottom: 100 },
+          Platform.OS === 'web' && isDesktop && { maxWidth: 1440, width: '100%', alignSelf: 'center' as const },
+        ]}
+        onScroll={(e) => { try { require('../../src/store/uiStore').useUIStore.getState().reportScroll(e.nativeEvent.contentOffset.y); } catch {} }}
+        scrollEventThrottle={16}
+      >
         {/* 2026-05-05 — Reports cards in 2/3-col grid on tablet/desktop */}
         <View style={isDesktop || isXLarge ? { flexDirection: 'row', flexWrap: 'wrap', gap: 12 } : undefined}>
         {ALL_REPORTS.map(report => (
