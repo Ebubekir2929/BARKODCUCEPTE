@@ -531,12 +531,10 @@ export default function PriceUpdateScreen() {
       type: 'single',
       body: { items, source: 'bulk' },
     });
-    // iOS donma fix: BulkEdit (pageSheet) açıkken transparent password modal'ı
-    // direkt açmak, klavye aktif ise touch sistemi kilitleyebiliyor. Önce
-    // klavyeyi kapat, animasyon bitince password modal'ı aç.
+    // 2026-06-01 — Password overlay artık inline (NewModal & BulkEdit içinde
+    // render ediliyor). Klavyeyi kapatıp direkt aç.
     Keyboard.dismiss();
-    const delay = Platform.OS === 'ios' ? 350 : 50;
-    setTimeout(() => setShowPasswordModal(true), delay);
+    setShowPasswordModal(true);
   };
 
   // === Filter products ===
@@ -678,6 +676,61 @@ export default function PriceUpdateScreen() {
   // ============================================================
   // MAIN RENDER
   // ============================================================
+
+  // 2026-06-01 — Password Confirm inline overlay helper. Hem Single Edit
+  // (NewModal içinde) hem Bulk Edit modal'ı içinde render edilir; iOS modal
+  // stack çakışması yaşanmaz.
+  const renderPasswordOverlay = () => {
+    if (!showPasswordModal) return null;
+    return (
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 24, zIndex: 999 }]}
+      >
+        <TouchableWithoutFeedback onPress={() => { if (!submitting) { Keyboard.dismiss(); setShowPasswordModal(false); } }}>
+          <View style={StyleSheet.absoluteFill} />
+        </TouchableWithoutFeedback>
+        <View style={[styles.confirmBox, { backgroundColor: colors.surface }]}>
+          <Ionicons name="shield-checkmark" size={40} color={colors.primary} style={{ alignSelf: 'center' }} />
+          <Text style={[styles.confirmTitle, { color: colors.text }]}>Şifre ile Onayla</Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginBottom: 16 }}>
+            Güvenliğiniz için şifrenizi tekrar girin. Bu işlem POS sisteminize fiyat değişikliği için sıraya alınacak.
+          </Text>
+          <TextInput
+            style={{
+              borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background,
+              color: colors.text, padding: 14, borderRadius: 10, fontSize: 15,
+            }}
+            placeholder="Şifreniz"
+            placeholderTextColor={colors.textSecondary}
+            secureTextEntry
+            value={password}
+            onChangeText={setPassword}
+            editable={!submitting}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus
+          />
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
+            <TouchableOpacity
+              style={[styles.cancelBtn, { borderColor: colors.border }]}
+              onPress={() => { setShowPasswordModal(false); setPassword(''); }}
+              disabled={submitting}
+            >
+              <Text style={{ color: colors.text, fontWeight: '600' }}>Vazgeç</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]}
+              onPress={onPasswordConfirm}
+              disabled={submitting}
+            >
+              {submitting ? <ActivityIndicator color="#FFF" /> : <Text style={{ color: '#FFF', fontWeight: '700' }}>Onayla & Kaydet</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    );
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
@@ -859,121 +912,131 @@ export default function PriceUpdateScreen() {
               </View>
             )}
           </KeyboardAvoidingView>
+
+          {/* 2026-06-01 — Single Product Edit inline overlay (iOS modal stack fix v2):
+              NewModal'ın İÇİNDE absolute overlay olarak render ediliyor. */}
+          {!!editProduct && (
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={[StyleSheet.absoluteFill, styles.modalOverlay, { zIndex: 50 }]}
+            >
+              <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+                <View style={[styles.sheet, { backgroundColor: colors.surface }]}>
+                  <View style={styles.sheetHandle} />
+                  <Text style={[styles.sheetTitle, { color: colors.text }]} numberOfLines={2}>
+                    {editProduct?.AD || `Ürün #${editProduct?.ID}`}
+                  </Text>
+                  {editProduct?.BARKOD ? (
+                    <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 12 }}>
+                      Barkod: {editProduct.BARKOD}
+                    </Text>
+                  ) : null}
+
+                  <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
+                    <View style={[styles.priceBox, { backgroundColor: colors.background, borderColor: colors.border }]}>
+                      <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Eski Fiyat</Text>
+                      <Text style={{ color: colors.text, fontSize: 18, fontWeight: '600' }}>
+                        {fmt(editProduct?.FIYAT ? Number(editProduct.FIYAT) : undefined)}
+                      </Text>
+                    </View>
+                    <View style={[styles.priceBox, { backgroundColor: colors.primary + '10', borderColor: colors.primary }]}>
+                      <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '600' }}>Yeni Fiyat</Text>
+                      <TextInput
+                        style={{ color: colors.text, fontSize: 18, fontWeight: '700', padding: 0, marginTop: 2 }}
+                        placeholder="0.00"
+                        placeholderTextColor={colors.textSecondary}
+                        keyboardType="decimal-pad"
+                        value={newPrice}
+                        onChangeText={setNewPrice}
+                      />
+                    </View>
+                  </View>
+
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
+                    Yüzde Uygula (örn. 10 artış, -5 indirim):
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                    <TextInput
+                      style={{
+                        flex: 1, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background,
+                        color: colors.text, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, fontSize: 16, fontWeight: '600',
+                      }}
+                      placeholder="örn. 10"
+                      placeholderTextColor={colors.textSecondary}
+                      keyboardType="numbers-and-punctuation"
+                      value={singlePercent}
+                      onChangeText={setSinglePercent}
+                    />
+                    <TouchableOpacity
+                      style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}
+                      onPress={() => {
+                        const p = parseFloat((singlePercent || '').replace(',', '.'));
+                        const op = editProduct?.FIYAT ? Number(editProduct.FIYAT) : 0;
+                        if (isNaN(p)) { showWarning('Yüzde Girin', 'Bir sayı girin'); return; }
+                        if (op <= 0) { showWarning('Eski Fiyat Yok', 'Mevcut fiyat 0, yüzde uygulanamaz'); return; }
+                        const newP = op * (1 + p / 100);
+                        setNewPrice(newP > 0 ? newP.toFixed(2) : '');
+                      }}
+                    >
+                      <Text style={{ color: '#FFF', fontWeight: '700' }}>% Uygula</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
+                    Sabit Miktar Uygula (örn. 5 artış, -2 indirim) ₺:
+                  </Text>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TextInput
+                      style={{
+                        flex: 1, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background,
+                        color: colors.text, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, fontSize: 16, fontWeight: '600',
+                      }}
+                      placeholder="örn. 5 veya -2"
+                      placeholderTextColor={colors.textSecondary}
+                      keyboardType="numbers-and-punctuation"
+                      value={singleAmount}
+                      onChangeText={setSingleAmount}
+                    />
+                    <TouchableOpacity
+                      style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: '#10B981', alignItems: 'center', justifyContent: 'center' }}
+                      onPress={() => {
+                        const m = parseFloat((singleAmount || '').replace(',', '.'));
+                        const op = editProduct?.FIYAT ? Number(editProduct.FIYAT) : 0;
+                        if (isNaN(m)) { showWarning('Miktar Girin', 'Bir sayı girin'); return; }
+                        const baseVal = parseFloat((newPrice || '').replace(',', '.')) || op;
+                        const newP = baseVal + m;
+                        setNewPrice(newP > 0 ? newP.toFixed(2) : '');
+                      }}
+                    >
+                      <Text style={{ color: '#FFF', fontWeight: '700' }}>₺ Uygula</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
+                    <TouchableOpacity
+                      style={[styles.cancelBtn, { borderColor: colors.border }]}
+                      onPress={() => { setEditProduct(null); setNewPrice(''); }}
+                    >
+                      <Text style={{ color: colors.text, fontWeight: '600' }}>Vazgeç</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.primary }]} onPress={onSingleSave}>
+                      <Text style={{ color: '#FFF', fontWeight: '700' }}>Sıraya Al</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableWithoutFeedback>
+            </KeyboardAvoidingView>
+          )}
+
+          {/* 2026-06-01 — Password Confirm inline overlay (NewModal içinde de
+              gerekli, çünkü Single Edit'ten gelen "Sıraya Al" akışı NewModal
+              içindeyken çalışıyor). */}
+          {renderPasswordOverlay()}
         </SafeAreaView>
       </Modal>
 
-      {/* ====================  SINGLE PRODUCT EDIT SHEET  ==================== */}
-      <Modal visible={!!editProduct} animationType="slide" transparent onRequestClose={() => setEditProduct(null)}>
-        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View style={[styles.sheet, { backgroundColor: colors.surface }]}>
-              <View style={styles.sheetHandle} />
-              <Text style={[styles.sheetTitle, { color: colors.text }]} numberOfLines={2}>
-                {editProduct?.AD || `Ürün #${editProduct?.ID}`}
-              </Text>
-              {editProduct?.BARKOD ? (
-                <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 12 }}>
-                  Barkod: {editProduct.BARKOD}
-                </Text>
-              ) : null}
-
-              <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-                <View style={[styles.priceBox, { backgroundColor: colors.background, borderColor: colors.border }]}>
-                  <Text style={{ color: colors.textSecondary, fontSize: 11 }}>Eski Fiyat</Text>
-                  <Text style={{ color: colors.text, fontSize: 18, fontWeight: '600' }}>
-                    {fmt(editProduct?.FIYAT ? Number(editProduct.FIYAT) : undefined)}
-                  </Text>
-                </View>
-                <View style={[styles.priceBox, { backgroundColor: colors.primary + '10', borderColor: colors.primary }]}>
-                  <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '600' }}>Yeni Fiyat</Text>
-                  <TextInput
-                    style={{ color: colors.text, fontSize: 18, fontWeight: '700', padding: 0, marginTop: 2 }}
-                    placeholder="0.00"
-                    placeholderTextColor={colors.textSecondary}
-                    keyboardType="decimal-pad"
-                    value={newPrice}
-                    onChangeText={setNewPrice}
-                  />
-                </View>
-              </View>
-
-              {/* Yüzde — kullanıcı kendi yüzdesini girer */}
-              <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
-                Yüzde Uygula (örn. 10 artış, -5 indirim):
-              </Text>
-              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
-                <TextInput
-                  style={{
-                    flex: 1, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background,
-                    color: colors.text, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, fontSize: 16, fontWeight: '600',
-                  }}
-                  placeholder="örn. 10"
-                  placeholderTextColor={colors.textSecondary}
-                  keyboardType="numbers-and-punctuation"
-                  value={singlePercent}
-                  onChangeText={setSinglePercent}
-                />
-                <TouchableOpacity
-                  style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' }}
-                  onPress={() => {
-                    const p = parseFloat((singlePercent || '').replace(',', '.'));
-                    const op = editProduct?.FIYAT ? Number(editProduct.FIYAT) : 0;
-                    if (isNaN(p)) { showWarning('Yüzde Girin', 'Bir sayı girin'); return; }
-                    if (op <= 0) { showWarning('Eski Fiyat Yok', 'Mevcut fiyat 0, yüzde uygulanamaz'); return; }
-                    const newP = op * (1 + p / 100);
-                    setNewPrice(newP > 0 ? newP.toFixed(2) : '');
-                  }}
-                >
-                  <Text style={{ color: '#FFF', fontWeight: '700' }}>% Uygula</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Sabit Miktar — kullanıcı kendi miktarını girer */}
-              <Text style={{ color: colors.textSecondary, fontSize: 12, marginBottom: 6 }}>
-                Sabit Miktar Uygula (örn. 5 artış, -2 indirim) ₺:
-              </Text>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TextInput
-                  style={{
-                    flex: 1, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background,
-                    color: colors.text, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, fontSize: 16, fontWeight: '600',
-                  }}
-                  placeholder="örn. 5 veya -2"
-                  placeholderTextColor={colors.textSecondary}
-                  keyboardType="numbers-and-punctuation"
-                  value={singleAmount}
-                  onChangeText={setSingleAmount}
-                />
-                <TouchableOpacity
-                  style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10, backgroundColor: '#10B981', alignItems: 'center', justifyContent: 'center' }}
-                  onPress={() => {
-                    const m = parseFloat((singleAmount || '').replace(',', '.'));
-                    const op = editProduct?.FIYAT ? Number(editProduct.FIYAT) : 0;
-                    if (isNaN(m)) { showWarning('Miktar Girin', 'Bir sayı girin'); return; }
-                    const baseVal = parseFloat((newPrice || '').replace(',', '.')) || op;
-                    const newP = baseVal + m;
-                    setNewPrice(newP > 0 ? newP.toFixed(2) : '');
-                  }}
-                >
-                  <Text style={{ color: '#FFF', fontWeight: '700' }}>₺ Uygula</Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={{ flexDirection: 'row', gap: 10, marginTop: 20 }}>
-                <TouchableOpacity
-                  style={[styles.cancelBtn, { borderColor: colors.border }]}
-                  onPress={() => { setEditProduct(null); setNewPrice(''); }}
-                >
-                  <Text style={{ color: colors.text, fontWeight: '600' }}>Vazgeç</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.saveBtn, { backgroundColor: colors.primary }]} onPress={onSingleSave}>
-                  <Text style={{ color: '#FFF', fontWeight: '700' }}>Sıraya Al</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </TouchableWithoutFeedback>
-        </KeyboardAvoidingView>
-      </Modal>
+      {/* 2026-06-01 — Eski standalone Single Product Edit Modal kaldırıldı.
+          Artık NewModal'ın içinde inline overlay (iOS stack fix). */}
 
       {/* ====================  BULK EDIT SCREEN  ==================== */}
       {/* Toplu modda "Devam Et" ile açılır. Her ürün için elle yeni fiyat girilebilir.
@@ -1203,59 +1266,14 @@ export default function PriceUpdateScreen() {
               </TouchableOpacity>
             </View>
           </KeyboardAvoidingView>
+
+          {/* 2026-06-01 — Password Confirm inline overlay (helper kullanılır). */}
+          {renderPasswordOverlay()}
         </SafeAreaView>
       </Modal>
 
-      {/* ====================  PASSWORD CONFIRM  ==================== */}
-      <Modal visible={showPasswordModal} animationType="fade" transparent onRequestClose={() => !submitting && setShowPasswordModal(false)}>
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={[styles.modalOverlay, { justifyContent: 'center', padding: 24 }]}>
-            {/* Backdrop tap to close */}
-            <TouchableWithoutFeedback onPress={() => { if (!submitting) { Keyboard.dismiss(); setShowPasswordModal(false); } }}>
-              <View style={StyleSheet.absoluteFill} />
-            </TouchableWithoutFeedback>
-            {/* Content (no parent tap handler — input gets focus) */}
-            <View style={[styles.confirmBox, { backgroundColor: colors.surface }]}>
-              <Ionicons name="shield-checkmark" size={40} color={colors.primary} style={{ alignSelf: 'center' }} />
-              <Text style={[styles.confirmTitle, { color: colors.text }]}>Şifre ile Onayla</Text>
-              <Text style={{ color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginBottom: 16 }}>
-                Güvenliğiniz için şifrenizi tekrar girin. Bu işlem POS sisteminize fiyat değişikliği için sıraya alınacak.
-              </Text>
-              <TextInput
-                style={{
-                  borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background,
-                  color: colors.text, padding: 14, borderRadius: 10, fontSize: 15,
-                }}
-                placeholder="Şifreniz"
-                placeholderTextColor={colors.textSecondary}
-                secureTextEntry
-                value={password}
-                onChangeText={setPassword}
-                editable={!submitting}
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoFocus
-              />
-              <View style={{ flexDirection: 'row', gap: 10, marginTop: 18 }}>
-                <TouchableOpacity
-                  style={[styles.cancelBtn, { borderColor: colors.border }]}
-                  onPress={() => { setShowPasswordModal(false); setPassword(''); }}
-                  disabled={submitting}
-                >
-                  <Text style={{ color: colors.text, fontWeight: '600' }}>Vazgeç</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.saveBtn, { backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]}
-                  onPress={onPasswordConfirm}
-                  disabled={submitting}
-                >
-                  {submitting ? <ActivityIndicator color="#FFF" /> : <Text style={{ color: '#FFF', fontWeight: '700' }}>Onayla & Kaydet</Text>}
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+      {/* 2026-05-31 — Eski standalone Password Modal kaldırıldı. Artık Bulk Edit
+          modal'ının içinde inline overlay olarak render ediliyor (iOS stack fix). */}
 
       {/* ====================  GROUP DROPDOWN  ==================== */}
       <Modal visible={showGroupDropdown} animationType="fade" transparent onRequestClose={() => setShowGroupDropdown(false)}>

@@ -389,7 +389,8 @@ export default function CustomersScreen() {
 
   const refreshExtre = () => { if (selectedCari) openCariDetail(selectedCari, extreStart, extreEnd); };
 
-  // Open fiş detail
+  // Open fiş detail — iOS modal stack fix v2: Fiş Detay artık parent Cari Extre
+  // Modal'ının İÇİNDE inline overlay olarak render ediliyor; native sub-modal yok.
   const openFisDetail = useCallback(async (row: any) => {
     // 2026-05-12 — kart_extre_cari farklı POS sürümlerinde belge id'sini farklı
     // alan adlarıyla döndürebiliyor: BELGE_ID, FIS_ID, KAYIT_ID, ID. Hepsini sırasıyla dene.
@@ -398,9 +399,7 @@ export default function CustomersScreen() {
       showToast('Bu satırın fiş detayı bulunamadı');
       return;
     }
-    // iOS: ikinci modal açılırken klavye/touch sistemini stabilize et
     Keyboard.dismiss();
-    if (Platform.OS === 'ios') await new Promise(r => setTimeout(r, 80));
     setSelectedFis(row); setFisDetail([]); setFisTotals(null); setFisLoading(true);
     try {
       const { token } = useAuthStore.getState();
@@ -919,70 +918,76 @@ export default function CustomersScreen() {
                 <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>{t('no_statement')}</Text></View>
               )}
             </ScrollView>
+
+            {/* 2026-06-01 — Fiş Detay inline overlay (iOS modal stack fix v2):
+                Cari Extre Modal'ının İÇİNDE absolute overlay olarak render
+                ediliyor; native sub-modal yok, iOS donması yaşanmıyor. */}
+            {!!selectedFis && (
+              <View style={[
+                StyleSheet.absoluteFillObject,
+                { backgroundColor: colors.surface, zIndex: 100 },
+              ]}>
+                <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+                  <TouchableOpacity onPress={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
+                  <Text style={[styles.modalTitle, { color: colors.text, flex: 1, textAlign: 'center' }]}>{t('receipt_detail')}</Text>
+                  <View style={{ width: 24 }} />
+                </View>
+                {selectedFis && (
+                  <View style={[{ padding: 12, backgroundColor: colors.primary + '08', borderBottomWidth: 1, borderBottomColor: colors.border }]}>
+                    <Text style={[{ fontSize: 13, fontWeight: '600', color: colors.text }]}>{selectedFis.BELGENO || ''}</Text>
+                    <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{selectedFis.TARIH || ''} · {selectedFis.ACIKLAMA || ''}</Text>
+                  </View>
+                )}
+                <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
+                  {fisLoading ? (
+                    <View style={{ alignItems: 'center', paddingVertical: 40 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_receipt')}</Text></View>
+                  ) : fisDetail.length > 0 ? (
+                    <>
+                      {fisDetail.map((item: any, idx: number) => (
+                        <View key={idx} style={[styles.fisRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
+                            <Text style={[{ fontSize: 12, fontWeight: '600', color: colors.text, flex: 1 }]} numberOfLines={1}>{item.STOK || t('product')}</Text>
+                            <Text style={[{ fontSize: 12, fontWeight: '700', color: colors.primary }]}>₺{parseFloat(item.DAHIL_TUTAR || item.TUTAR || '0').toFixed(2)}</Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', gap: 10 }}>
+                            <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{item.BIRIM || ''}</Text>
+                            <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('quantity_short')}: {parseFloat(item.MIKTAR_FIS || '0').toFixed(2)}</Text>
+                            <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('price_short')}: ₺{parseFloat(item.DAHIL_FIYAT || item.FIYAT || '0').toFixed(2)}</Text>
+                          </View>
+                        </View>
+                      ))}
+                      {fisTotals && (
+                        <View style={[styles.fisTotals, { backgroundColor: colors.primary + '10', borderColor: colors.border }]}>
+                          <View style={styles.fisTotalRow}><Text style={[{ color: colors.textSecondary }]}>{t('line_total')}</Text><Text style={[{ fontWeight: '600', color: colors.text }]}>₺{parseFloat(fisTotals.SATIR_TOPLAM || '0').toFixed(2)}</Text></View>
+                          {(() => {
+                            const satirIsk = parseFloat(fisTotals.SATIR_ISKONTO_TOPLAM || '0');
+                            const fisIsk = parseFloat(fisTotals.FIS_ISKONTO_TOPLAM || '0');
+                            const totalIsk = satirIsk + fisIsk;
+                            if (totalIsk <= 0) return null;
+                            return (
+                              <View style={styles.fisTotalRow}>
+                                <Text style={[{ color: colors.textSecondary }]}>İskonto Toplamı</Text>
+                                <Text style={[{ fontWeight: '600', color: colors.warning || '#f59e0b' }]}>-₺{totalIsk.toFixed(2)}</Text>
+                              </View>
+                            );
+                          })()}
+                          <View style={styles.fisTotalRow}><Text style={[{ color: colors.textSecondary }]}>KDV</Text><Text style={[{ fontWeight: '600', color: colors.text }]}>₺{parseFloat(fisTotals.KDV_TOPLAM || '0').toFixed(2)}</Text></View>
+                          <View style={[styles.fisTotalRow, { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 6 }]}><Text style={[{ fontSize: 15, fontWeight: '800', color: colors.text }]}>{t('grand_total')}</Text><Text style={[{ fontSize: 16, fontWeight: '800', color: colors.primary }]}>₺{parseFloat(fisTotals.GENELTOPLAM || '0').toFixed(2)}</Text></View>
+                        </View>
+                      )}
+                    </>
+                  ) : (
+                    <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>{t('no_receipt_detail')}</Text></View>
+                  )}
+                </ScrollView>
+              </View>
+            )}
           </View>
         </View>
       </Modal>
 
-      {/* Fiş Detail Modal */}
-      <Modal visible={!!selectedFis} animationType={Platform.OS === 'web' && isDesktop ? 'fade' : 'slide'} transparent statusBarTranslucent={Platform.OS === "android"} onRequestClose={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }}>
-        <View style={[styles.modalOverlay, Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop]}>
-          <View style={[styles.modalContent, { backgroundColor: colors.surface }, Platform.OS === 'web' && isDesktop && [webStyles.cardDesktopWide, { borderColor: colors.border, maxWidth: 800 }]]}>
-            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <TouchableOpacity onPress={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
-              <Text style={[styles.modalTitle, { color: colors.text, flex: 1, textAlign: 'center' }]}>{t('receipt_detail')}</Text>
-              <View style={{ width: 24 }} />
-            </View>
-            {selectedFis && (
-              <View style={[{ padding: 12, backgroundColor: colors.primary + '08', borderBottomWidth: 1, borderBottomColor: colors.border }]}>
-                <Text style={[{ fontSize: 13, fontWeight: '600', color: colors.text }]}>{selectedFis.BELGENO || ''}</Text>
-                <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{selectedFis.TARIH || ''} · {selectedFis.ACIKLAMA || ''}</Text>
-              </View>
-            )}
-            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
-              {fisLoading ? (
-                <View style={{ alignItems: 'center', paddingVertical: 40 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_receipt')}</Text></View>
-              ) : fisDetail.length > 0 ? (
-                <>
-                  {fisDetail.map((item: any, idx: number) => (
-                    <View key={idx} style={[styles.fisRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 }}>
-                        <Text style={[{ fontSize: 12, fontWeight: '600', color: colors.text, flex: 1 }]} numberOfLines={1}>{item.STOK || t('product')}</Text>
-                        <Text style={[{ fontSize: 12, fontWeight: '700', color: colors.primary }]}>₺{parseFloat(item.DAHIL_TUTAR || item.TUTAR || '0').toFixed(2)}</Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', gap: 10 }}>
-                        <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{item.BIRIM || ''}</Text>
-                        <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('quantity_short')}: {parseFloat(item.MIKTAR_FIS || '0').toFixed(2)}</Text>
-                        <Text style={[{ fontSize: 10, color: colors.textSecondary }]}>{t('price_short')}: ₺{parseFloat(item.DAHIL_FIYAT || item.FIYAT || '0').toFixed(2)}</Text>
-                      </View>
-                    </View>
-                  ))}
-                  {fisTotals && (
-                    <View style={[styles.fisTotals, { backgroundColor: colors.primary + '10', borderColor: colors.border }]}>
-                      <View style={styles.fisTotalRow}><Text style={[{ color: colors.textSecondary }]}>{t('line_total')}</Text><Text style={[{ fontWeight: '600', color: colors.text }]}>₺{parseFloat(fisTotals.SATIR_TOPLAM || '0').toFixed(2)}</Text></View>
-                      {(() => {
-                        const satirIsk = parseFloat(fisTotals.SATIR_ISKONTO_TOPLAM || '0');
-                        const fisIsk = parseFloat(fisTotals.FIS_ISKONTO_TOPLAM || '0');
-                        const totalIsk = satirIsk + fisIsk;
-                        if (totalIsk <= 0) return null;
-                        return (
-                          <View style={styles.fisTotalRow}>
-                            <Text style={[{ color: colors.textSecondary }]}>İskonto Toplamı</Text>
-                            <Text style={[{ fontWeight: '600', color: colors.warning || '#f59e0b' }]}>-₺{totalIsk.toFixed(2)}</Text>
-                          </View>
-                        );
-                      })()}
-                      <View style={styles.fisTotalRow}><Text style={[{ color: colors.textSecondary }]}>KDV</Text><Text style={[{ fontWeight: '600', color: colors.text }]}>₺{parseFloat(fisTotals.KDV_TOPLAM || '0').toFixed(2)}</Text></View>
-                      <View style={[styles.fisTotalRow, { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 6 }]}><Text style={[{ fontSize: 15, fontWeight: '800', color: colors.text }]}>{t('grand_total')}</Text><Text style={[{ fontSize: 16, fontWeight: '800', color: colors.primary }]}>₺{parseFloat(fisTotals.GENELTOPLAM || '0').toFixed(2)}</Text></View>
-                    </View>
-                  )}
-                </>
-              ) : (
-                <View style={{ alignItems: 'center', paddingVertical: 30 }}><Text style={[{ color: colors.textSecondary }]}>{t('no_receipt_detail')}</Text></View>
-              )}
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
+      {/* 2026-06-01 — Eski standalone Fiş Detay Modal kaldırıldı.
+          Artık Cari Extre Modal'ının içinde inline overlay (iOS stack fix). */}
       {/* Export Loading Overlay */}
       {exportLoading && (
         <View style={styles.exportOverlay}>

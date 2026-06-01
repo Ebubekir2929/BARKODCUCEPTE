@@ -991,12 +991,12 @@ export default function ReportsScreen() {
   };
 
   // Open picker for multiselect filter (on-demand load)
+  // 2026-06-01 — iOS modal stack fix v2: Picker artık ayrı bir Modal değil,
+  // Filter Modal'ının İÇİNDE inline overlay olarak render ediliyor.
   const openPicker = useCallback(async (filter: FilterDef) => {
     setPickerFilter(filter);
     setPickerSearch('');
-    // iOS: filter modal üzerine üçüncü modal açılırken touch sistemini stabilize et
     Keyboard.dismiss();
-    if (Platform.OS === 'ios') await new Promise(r => setTimeout(r, 100));
     setShowPickerModal(true);
 
     if (filter.source && lookupCache[filter.source]) {
@@ -1947,6 +1947,66 @@ export default function ReportsScreen() {
                 <Text style={[{ color: '#fff', fontWeight: '700', fontSize: 15 }]}>{t('run_report')}</Text>
               </TouchableOpacity>
             </ScrollView>
+
+            {/* 2026-06-01 — Picker inline overlay (iOS modal stack fix v2):
+                Filter Modal'ının İÇİNDE absolute overlay olarak render
+                ediliyor; native sub-modal yok, iOS donması yaşanmıyor. */}
+            {showPickerModal && (
+              <View style={[
+                StyleSheet.absoluteFillObject,
+                { backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end', zIndex: 100 },
+              ]}>
+                <TouchableOpacity
+                  activeOpacity={1}
+                  style={StyleSheet.absoluteFillObject}
+                  onPress={() => setShowPickerModal(false)}
+                />
+                <View style={[
+                  { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%' },
+                  Platform.OS === 'web' && isDesktop && {
+                    alignSelf: 'center', width: '95%', maxWidth: 560,
+                    borderRadius: 16, borderWidth: 1, borderColor: colors.border, overflow: 'hidden',
+                  },
+                ]}>
+                  <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+                    <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text, flex: 1 }]}>{pickerFilter?.label}</Text>
+                    <TouchableOpacity onPress={() => setShowPickerModal(false)}><Ionicons name="checkmark" size={24} color={colors.primary} /></TouchableOpacity>
+                  </View>
+                  {pickerOptions.length > 5 && !pickerLoading && (
+                    <View style={{ paddingHorizontal: 12, paddingVertical: 8 }}>
+                      <View style={[styles.searchInput, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                        <Ionicons name="search" size={16} color={colors.textSecondary} />
+                        <TextInput style={[{ flex: 1, fontSize: 13, color: colors.text, paddingVertical: 0 }]} placeholder="Ara..." placeholderTextColor={colors.textSecondary} value={pickerSearch} onChangeText={setPickerSearch} />
+                        {pickerSearch.length > 0 && (
+                          <TouchableOpacity onPress={() => setPickerSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                            <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  )}
+                  {pickerLoading ? (
+                    <View style={{ alignItems: 'center', paddingVertical: 40 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>Seçenekler yükleniyor...</Text></View>
+                  ) : (
+                    <FlatList
+                      data={filteredPickerOpts}
+                      keyExtractor={(item, idx) => String(idx)}
+                      contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 20, paddingTop: pickerOptions.length > 5 ? 0 : 8 }}
+                      renderItem={({ item }) => {
+                        const sel = isPickerSelected(item.value);
+                        return (
+                          <TouchableOpacity style={[styles.pickerItem, { backgroundColor: sel ? colors.primary + '15' : colors.card, borderColor: sel ? colors.primary : colors.border }]} onPress={() => togglePickerValue(item.value)}>
+                            <Ionicons name={sel ? 'checkbox' : 'square-outline'} size={20} color={sel ? colors.primary : colors.textSecondary} />
+                            <Text style={[{ fontSize: 14, color: sel ? colors.primary : colors.text, fontWeight: sel ? '600' : '400', flex: 1 }]}>{item.label}</Text>
+                          </TouchableOpacity>
+                        );
+                      }}
+                      ListEmptyComponent={<View style={{ alignItems: 'center', paddingVertical: 20 }}><Text style={[{ color: colors.textSecondary }]}>Seçenek bulunamadı</Text></View>}
+                    />
+                  )}
+                </View>
+              </View>
+            )}
           </View>
         </View>
       </Modal>
@@ -2006,59 +2066,8 @@ export default function ReportsScreen() {
         />
       ))}
 
-      <Modal visible={showPickerModal} animationType="slide" transparent statusBarTranslucent={Platform.OS === "android"}>
-        <View style={[
-          styles.modalOverlay,
-          Platform.OS === 'web' && isDesktop && webStyles.overlayDesktop,
-        ]}>
-          <View style={[
-            { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, maxHeight: '85%' },
-            Platform.OS === 'web' && isDesktop && {
-              width: '95%', maxWidth: 560, maxHeight: '78%',
-              borderRadius: 16, borderTopLeftRadius: 16, borderTopRightRadius: 16,
-              shadowColor: '#000', shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.25, shadowRadius: 30, elevation: 24,
-              borderWidth: 1, borderColor: colors.border, overflow: 'hidden',
-            },
-          ]}>
-            <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[{ fontSize: 16, fontWeight: '700', color: colors.text, flex: 1 }]}>{pickerFilter?.label}</Text>
-              <TouchableOpacity onPress={() => setShowPickerModal(false)}><Ionicons name="checkmark" size={24} color={colors.primary} /></TouchableOpacity>
-            </View>
-            {pickerOptions.length > 5 && !pickerLoading && (
-              <View style={{ paddingHorizontal: 12, paddingVertical: 8 }}>
-                <View style={[styles.searchInput, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <Ionicons name="search" size={16} color={colors.textSecondary} />
-                  <TextInput style={[{ flex: 1, fontSize: 13, color: colors.text, paddingVertical: 0 }]} placeholder="Ara..." placeholderTextColor={colors.textSecondary} value={pickerSearch} onChangeText={setPickerSearch} />
-                  {pickerSearch.length > 0 && (
-                    <TouchableOpacity onPress={() => setPickerSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                      <Ionicons name="close-circle" size={16} color={colors.textSecondary} />
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-            )}
-            {pickerLoading ? (
-              <View style={{ alignItems: 'center', paddingVertical: 40 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>Seçenekler yükleniyor...</Text></View>
-            ) : (
-              <FlatList
-                data={filteredPickerOpts}
-                keyExtractor={(item, idx) => String(idx)}
-                contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 20, paddingTop: pickerOptions.length > 5 ? 0 : 8 }}
-                renderItem={({ item }) => {
-                  const sel = isPickerSelected(item.value);
-                  return (
-                    <TouchableOpacity style={[styles.pickerItem, { backgroundColor: sel ? colors.primary + '15' : colors.card, borderColor: sel ? colors.primary : colors.border }]} onPress={() => togglePickerValue(item.value)}>
-                      <Ionicons name={sel ? 'checkbox' : 'square-outline'} size={20} color={sel ? colors.primary : colors.textSecondary} />
-                      <Text style={[{ fontSize: 14, color: sel ? colors.primary : colors.text, fontWeight: sel ? '600' : '400', flex: 1 }]}>{item.label}</Text>
-                    </TouchableOpacity>
-                  );
-                }}
-                ListEmptyComponent={<View style={{ alignItems: 'center', paddingVertical: 20 }}><Text style={[{ color: colors.textSecondary }]}>Seçenek bulunamadı</Text></View>}
-              />
-            )}
-          </View>
-        </View>
-      </Modal>
+      {/* 2026-06-01 — Eski standalone Picker Modal kaldırıldı.
+          Artık Filter Modal'ının içinde inline overlay (iOS stack fix). */}
 
       {/* RESULT MODAL — 2026-05-05: same web fix as filter modal.
           2026-02 update: dark backdrop + centered card on isDesktop. */}
