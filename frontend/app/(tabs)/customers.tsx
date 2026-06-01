@@ -927,15 +927,22 @@ export default function CustomersScreen() {
                 StyleSheet.absoluteFillObject,
                 { backgroundColor: colors.surface, zIndex: 100 },
               ]}>
-                <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-                  <TouchableOpacity onPress={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }}><Ionicons name="arrow-back" size={24} color={colors.text} /></TouchableOpacity>
-                  <Text style={[styles.modalTitle, { color: colors.text, flex: 1, textAlign: 'center' }]}>{t('receipt_detail')}</Text>
-                  <View style={{ width: 24 }} />
+                <View style={[styles.modalHeader, { borderBottomColor: colors.border, alignItems: 'center' }]}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>{t('receipt_detail')}</Text>
+                    {selectedFis && (
+                      <Text style={[{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }]} numberOfLines={1}>
+                        {selectedFis.TARIH || ''} · {selectedFis.BELGENO || ''}
+                      </Text>
+                    )}
+                  </View>
+                  <TouchableOpacity onPress={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Ionicons name="close" size={26} color={colors.text} />
+                  </TouchableOpacity>
                 </View>
-                {selectedFis && (
+                {selectedFis && !!selectedFis.ACIKLAMA && (
                   <View style={[{ padding: 12, backgroundColor: colors.primary + '08', borderBottomWidth: 1, borderBottomColor: colors.border }]}>
-                    <Text style={[{ fontSize: 13, fontWeight: '600', color: colors.text }]}>{selectedFis.BELGENO || ''}</Text>
-                    <Text style={[{ fontSize: 11, color: colors.textSecondary }]}>{selectedFis.TARIH || ''} · {selectedFis.ACIKLAMA || ''}</Text>
+                    <Text style={[{ fontSize: 11, color: colors.textSecondary }]} numberOfLines={2}>{selectedFis.ACIKLAMA}</Text>
                   </View>
                 )}
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>

@@ -1,25 +1,16 @@
 import React, { useState, useCallback } from 'react';
-import { Platform, TouchableOpacity, View, Text, TextInput, Modal, StyleSheet } from 'react-native';
+import { Platform, TouchableOpacity, View, Text, TextInput, Modal, StyleSheet, useColorScheme } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
 /**
  * DateField — Cross-platform date picker that renders:
- *  - iOS: inline `spinner` picker inside a small modal sheet with Confirm/Cancel.
+ *  - iOS: inline `spinner` picker inside a centered modal sheet with Confirm/Cancel.
  *  - Android: native system date picker dialog (opens when tapped).
  *  - Web: HTML5 `<input type="date">` styled as a TextInput.
  *
- * Props:
- *   value: string  — ISO date "YYYY-MM-DD"
- *   onChange: (next: string) => void
- *   label?: string
- *   minDate?: string  — optional ISO
- *   maxDate?: string  — optional ISO
- *   colors: any — theme colors (text, textSecondary, card, border, primary, surface)
- *
- * Behavior: Provides a TouchableOpacity (or native input on Web) showing the
- *   current value formatted as DD.MM.YYYY for TR locale, and triggers
- *   onChange with ISO YYYY-MM-DD when the user picks a date.
+ * 2026-06-01 — iOS visual fix: themeVariant + textColor + wider sheet so
+ * year column is no longer cut off; spinner text contrast fixed in dark mode.
  */
 export interface DateFieldProps {
   value: string;
@@ -40,7 +31,6 @@ export interface DateFieldProps {
 
 function parseIso(value: string): Date {
   if (!value) return new Date();
-  // Accept "YYYY-MM-DD" or "YYYY-MM-DD HH:mm:ss"
   const datePart = value.slice(0, 10);
   const [y, m, d] = datePart.split('-').map((v) => parseInt(v, 10));
   if (!y || !m || !d) return new Date();
@@ -64,6 +54,8 @@ function formatTr(value: string): string {
 export const DateField: React.FC<DateFieldProps> = ({ value, onChange, label, minDate, maxDate, colors }) => {
   const [show, setShow] = useState(false);
   const [tempDate, setTempDate] = useState<Date>(() => parseIso(value));
+  const scheme = useColorScheme();
+  const isDark = scheme === 'dark';
 
   const min = minDate ? parseIso(minDate) : undefined;
   const max = maxDate ? parseIso(maxDate) : undefined;
@@ -74,7 +66,6 @@ export const DateField: React.FC<DateFieldProps> = ({ value, onChange, label, mi
   }, [value]);
 
   const handleAndroidChange = useCallback((event: any, selected?: Date) => {
-    // Android: dialog is system-modal; "set" or "dismissed" arrives in event.type
     setShow(false);
     if (event?.type === 'set' && selected) {
       onChange(toIso(selected));
@@ -102,7 +93,8 @@ export const DateField: React.FC<DateFieldProps> = ({ value, onChange, label, mi
     );
   }
 
-  // ---- iOS: inline spinner inside a small bottom-sheet modal ----
+  // ---- iOS: inline spinner inside a centered card. Forces themeVariant+textColor
+  //      so year column is visible & contrast matches the app theme. ----
   if (Platform.OS === 'ios') {
     return (
       <View style={{ flex: 1 }}>
@@ -118,21 +110,25 @@ export const DateField: React.FC<DateFieldProps> = ({ value, onChange, label, mi
           <Ionicons name="calendar-outline" size={16} color={colors.primary} />
         </TouchableOpacity>
 
-        <Modal visible={show} transparent animationType="fade" onRequestClose={() => setShow(false)}>
+        <Modal visible={show} transparent animationType="fade" statusBarTranslucent onRequestClose={() => setShow(false)}>
           <View style={styles.overlay}>
             <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
               <Text style={[styles.sheetTitle, { color: colors.text }]}>{label || 'Tarih Seç'}</Text>
-              <DateTimePicker
-                value={tempDate}
-                mode="date"
-                display="spinner"
-                locale="tr-TR"
-                minimumDate={min}
-                maximumDate={max}
-                onChange={(_, sel) => sel && setTempDate(sel)}
-                themeVariant="light"
-                style={{ width: '100%' }}
-              />
+              <View style={{ alignItems: 'center', justifyContent: 'center', minHeight: 220 }}>
+                <DateTimePicker
+                  value={tempDate}
+                  mode="date"
+                  display="spinner"
+                  locale="tr-TR"
+                  minimumDate={min}
+                  maximumDate={max}
+                  onChange={(_, sel) => sel && setTempDate(sel)}
+                  themeVariant={isDark ? 'dark' : 'light'}
+                  // @ts-ignore textColor is iOS-only prop
+                  textColor={colors.text}
+                  style={{ width: 320, height: 220 }}
+                />
+              </View>
               <View style={styles.actions}>
                 <TouchableOpacity
                   onPress={() => setShow(false)}
@@ -194,12 +190,18 @@ const styles = StyleSheet.create({
     paddingVertical: 9, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1,
     fontSize: 14, fontWeight: '600',
   },
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', padding: 24 },
-  sheet: { borderRadius: 14, padding: 14, borderWidth: 1 },
-  sheetTitle: { fontSize: 15, fontWeight: '800', textAlign: 'center', marginBottom: 6 },
-  actions: { flexDirection: 'row', gap: 8, marginTop: 8 },
-  actionBtn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center', borderWidth: 1 },
-  actionTxt: { fontSize: 14, fontWeight: '700' },
+  overlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center', alignItems: 'center', padding: 16,
+  },
+  sheet: {
+    borderRadius: 16, padding: 16, borderWidth: 1,
+    width: '92%', maxWidth: 400, alignSelf: 'center',
+  },
+  sheetTitle: { fontSize: 16, fontWeight: '800', textAlign: 'center', marginBottom: 8 },
+  actions: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  actionBtn: { flex: 1, paddingVertical: 13, borderRadius: 10, alignItems: 'center', borderWidth: 1 },
+  actionTxt: { fontSize: 15, fontWeight: '700' },
 });
 
 export default DateField;

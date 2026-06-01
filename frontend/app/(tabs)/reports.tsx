@@ -1948,6 +1948,78 @@ export default function ReportsScreen() {
               </TouchableOpacity>
             </ScrollView>
 
+            {/* 2026-06-01 — DateTimePicker inline overlay (iOS modal stack fix):
+                Filter Modal'ının İÇİNDE absolute overlay olarak render
+                ediliyor; aksi halde iOS'ta filter modal'ın ARKASINDA açılıyordu. */}
+            {datePickerFor && (Platform.OS === 'web' ? (
+              <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 30, zIndex: 200 }]}>
+                <TouchableOpacity activeOpacity={1} style={StyleSheet.absoluteFillObject} onPress={() => setDatePickerFor(null)} />
+                <View style={{ backgroundColor: colors.surface, padding: 20, borderRadius: 16, width: '90%', maxWidth: 340, gap: 14 }}>
+                  <Text style={[{ fontSize: 15, fontWeight: '700', color: colors.text }]}>Tarih Seçin</Text>
+                  {React.createElement('input' as any, {
+                    type: 'date',
+                    value: String(filterValues[datePickerFor] || today()).split(' ')[0].split('T')[0],
+                    onChange: (e: any) => {
+                      const iso = String(e?.target?.value || '');
+                      if (iso) setFilterValues(prev => ({ ...prev, [datePickerFor]: iso }));
+                    },
+                    style: {
+                      fontSize: 16, padding: 12, borderRadius: 10,
+                      border: `1px solid ${colors.border}`, background: colors.background,
+                      color: colors.text, outline: 'none', width: '100%',
+                      boxSizing: 'border-box', fontFamily: 'inherit',
+                    },
+                  })}
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity style={{ flex: 1, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' }} onPress={() => setDatePickerFor(null)}>
+                      <Text style={[{ color: colors.text, fontWeight: '600' }]}>{t('cancel')}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={{ flex: 1, padding: 12, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center' }} onPress={() => setDatePickerFor(null)}>
+                      <Text style={[{ color: '#fff', fontWeight: '700' }]}>{t('ok')}</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            ) : (
+              // iOS / Android: wrap inline picker in a centered card overlay so
+              // iOS spinner doesn't appear behind the parent Filter Modal.
+              <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', alignItems: 'center', padding: 16, zIndex: 200 }]}>
+                <TouchableOpacity activeOpacity={1} style={StyleSheet.absoluteFillObject} onPress={() => setDatePickerFor(null)} />
+                <View style={{ backgroundColor: colors.surface, padding: 16, borderRadius: 16, borderWidth: 1, borderColor: colors.border, width: '92%', maxWidth: 400 }}>
+                  <Text style={[{ fontSize: 16, fontWeight: '800', color: colors.text, textAlign: 'center', marginBottom: 8 }]}>Tarih Seç</Text>
+                  <View style={{ alignItems: 'center', justifyContent: 'center', minHeight: 220 }}>
+                    <DateTimePicker
+                      value={filterValues[datePickerFor] ? new Date(filterValues[datePickerFor]) : new Date()}
+                      mode="date"
+                      display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+                      locale="tr-TR"
+                      themeVariant={(typeof window !== 'undefined' && false) ? 'light' : undefined}
+                      // @ts-ignore textColor is iOS-only
+                      textColor={colors.text}
+                      style={{ width: 320, height: 220 }}
+                      onChange={(event, selectedDate) => {
+                        if (Platform.OS === 'android') setDatePickerFor(null);
+                        if (event.type === 'set' && selectedDate) {
+                          const iso = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
+                          setFilterValues(prev => ({ ...prev, [datePickerFor]: iso }));
+                        }
+                      }}
+                    />
+                  </View>
+                  {Platform.OS === 'ios' && (
+                    <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                      <TouchableOpacity style={{ flex: 1, paddingVertical: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' }} onPress={() => setDatePickerFor(null)}>
+                        <Text style={[{ color: colors.text, fontWeight: '700' }]}>{t('cancel')}</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={{ flex: 1, paddingVertical: 12, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center' }} onPress={() => setDatePickerFor(null)}>
+                        <Text style={[{ color: '#fff', fontWeight: '700' }]}>{t('ok')}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              </View>
+            ))}
+
             {/* 2026-06-01 — Picker inline overlay (iOS modal stack fix v2):
                 Filter Modal'ının İÇİNDE absolute overlay olarak render
                 ediliyor; native sub-modal yok, iOS donması yaşanmıyor. */}
@@ -2012,59 +2084,8 @@ export default function ReportsScreen() {
       </Modal>
 
       {/* DATE PICKER MODAL */}
-      {datePickerFor && (Platform.OS === 'web' ? (
-        <Modal visible animationType="fade" transparent statusBarTranslucent={Platform.OS === "android"}>
-          <View style={[styles.modalOverlay, { justifyContent: 'center', alignItems: 'center', padding: 30 }]}>
-            <View style={{ backgroundColor: colors.card, padding: 20, borderRadius: 16, width: '90%', maxWidth: 340, gap: 14 }}>
-              <Text style={[{ fontSize: 15, fontWeight: '700', color: colors.text }]}>Tarih Seçin</Text>
-              {/* Native HTML <input type="date"> gives the browser calendar popup (no AM/PM) */}
-              {React.createElement('input' as any, {
-                type: 'date',
-                value: String(filterValues[datePickerFor] || today()).split(' ')[0].split('T')[0],
-                onChange: (e: any) => {
-                  const iso = String(e?.target?.value || '');
-                  if (iso) setFilterValues(prev => ({ ...prev, [datePickerFor]: iso }));
-                },
-                style: {
-                  fontSize: 16,
-                  padding: 12,
-                  borderRadius: 10,
-                  border: `1px solid ${colors.border}`,
-                  background: colors.background,
-                  color: colors.text,
-                  outline: 'none',
-                  width: '100%',
-                  boxSizing: 'border-box',
-                  fontFamily: 'inherit',
-                },
-              })}
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TouchableOpacity
-                  style={{ flex: 1, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: colors.border, alignItems: 'center' }}
-                  onPress={() => setDatePickerFor(null)}
-                ><Text style={[{ color: colors.text, fontWeight: '600' }]}>{t('cancel')}</Text></TouchableOpacity>
-                <TouchableOpacity
-                  style={{ flex: 1, padding: 12, borderRadius: 10, backgroundColor: colors.primary, alignItems: 'center' }}
-                  onPress={() => setDatePickerFor(null)}
-                ><Text style={[{ color: '#fff', fontWeight: '700' }]}>{t('ok')}</Text></TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-      ) : (
-        <DateTimePicker
-          value={filterValues[datePickerFor] ? new Date(filterValues[datePickerFor]) : new Date()}
-          mode="date"
-          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
-          onChange={(event, selectedDate) => {
-            if (Platform.OS === 'android') setDatePickerFor(null);
-            if (event.type === 'set' && selectedDate) {
-              const iso = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
-              setFilterValues(prev => ({ ...prev, [datePickerFor]: iso }));
-            }
-          }}
-        />
-      ))}
+      {/* 2026-06-01 — Eski standalone DateTimePicker (root level) kaldırıldı.
+          Artık Filter Modal'ının içinde inline overlay (iOS stack fix). */}
 
       {/* 2026-06-01 — Eski standalone Picker Modal kaldırıldı.
           Artık Filter Modal'ının içinde inline overlay (iOS stack fix). */}

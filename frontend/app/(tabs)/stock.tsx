@@ -183,6 +183,19 @@ export default function StockScreen() {
   })();
   const [extreStart, setExtreStart] = useState<string>(_initExtreDates.start);
   const [extreEnd, setExtreEnd] = useState<string>(_initExtreDates.end);
+  // 2026-06-01 — Stok ekstre için fetched range tracking. Kullanıcı önceki
+  // ayları seçtiğinde otomatik olarak backend'den /stock-extre ile yeniden
+  // çekiyoruz (cari modülündeki gibi). Tüm geçmiş POS DB'de cache'lenmiş.
+  const [extreFetchedRange, setExtreFetchedRange] = useState<{ start: string; end: string; stockId: any } | null>(null);
+  const [extreLoading, setExtreLoading] = useState(false);
+  const monthRangeFor = useCallback((iso: string) => {
+    const [y, m] = iso.slice(0, 10).split('-');
+    const yy = parseInt(y, 10); const mm = parseInt(m, 10);
+    const start = `${y}-${m}-01`;
+    const lastDay = new Date(yy, mm, 0).getDate();
+    const end = `${y}-${m}-${String(lastDay).padStart(2, '0')}`;
+    return { start, end };
+  }, []);
   // 2026-05-12 — Tarih seçimi DateField bileşeni içinde lokal state ile yönetiliyor.
 
   // Fiş detay modal (cari ile aynı yapı)
@@ -603,22 +616,67 @@ export default function StockScreen() {
   };
 
   // Detail
-  const openStockDetail = useCallback(async (stock: any) => {
+  const openStockDetail = useCallback(async (stock: any, sDate?: string, eDate?: string) => {
     setSelectedStock(stock); setDetailMiktar([]); setDetailExtre([]); setDetailLoading(true); setDetailTab('miktar');
     const stockId = stock.ID || stock.STOK_ID;
     if (!stockId || !activeTenantId) { setDetailLoading(false); return; }
+    // 2026-06-01 — Aylık fetch: kullanıcı tarih aralığı tek ay içindeyse tüm
+    // ayı çek; aksi halde kullanıcı aralığını kullan. Bu sayede ay içindeki
+    // herhangi bir alt aralık client-side filtrelenir.
+    const userStart = sDate || extreStart;
+    const userEnd = eDate || extreEnd;
+    const range = monthRangeFor(userStart);
+    const userStartMonth = userStart.slice(0, 7);
+    const userEndMonth = userEnd.slice(0, 7);
+    const fetchStart = userStartMonth === userEndMonth ? range.start : userStart;
+    const fetchEnd = userStartMonth === userEndMonth ? range.end : userEnd;
     try {
       const { token } = useAuthStore.getState();
-      const resp = await fetch(`${API_URL}/api/data/stock-detail`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ tenant_id: activeTenantId, stock_id: stockId }),
-      });
-      const data = await resp.json();
-      if (data.ok) { setDetailMiktar(data.miktar || []); setDetailExtre(data.extre || []); }
+      // Miktar tek seferde, ekstre tarih aralığı ile paralel
+      const [miktarResp, extreResp] = await Promise.all([
+        fetch(`${API_URL}/api/data/stock-detail`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ tenant_id: activeTenantId, stock_id: stockId }),
+        }),
+        fetch(`${API_URL}/api/data/stock-extre`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ tenant_id: activeTenantId, stok_id: stockId, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd }),
+        }),
+      ]);
+      const miktarJson = await miktarResp.json().catch(() => ({}));
+      const extreJson = await extreResp.json().catch(() => ({}));
+      if (miktarJson.ok) setDetailMiktar(miktarJson.miktar || []);
+      if (extreJson.ok) {
+        const rows = (extreJson.data || []).slice().sort((a: any, b: any) => {
+          const da = a.TARIH || ''; const db = b.TARIH || '';
+          return da.localeCompare(db);
+        });
+        setDetailExtre(rows);
+        setExtreFetchedRange({ start: fetchStart, end: fetchEnd, stockId });
+      } else if (miktarJson.ok) {
+        // fallback: stock-detail extre alanını kullan
+        setDetailExtre(miktarJson.extre || []);
+        setExtreFetchedRange({ start: fetchStart, end: fetchEnd, stockId });
+      }
     } catch (err) { console.error(err); }
     finally { setDetailLoading(false); }
-  }, [activeTenantId]);
+  }, [activeTenantId, extreStart, extreEnd, monthRangeFor]);
+
+  // 2026-06-01 — Tarih değişimi → eğer fetched range içinde → sadece client-side
+  // filtrele (filteredExtre useMemo). Dışındaysa → otomatik yeniden fetch.
+  React.useEffect(() => {
+    if (!selectedStock || !extreFetchedRange) return;
+    const stockId = selectedStock.ID || selectedStock.STOK_ID;
+    if (stockId !== extreFetchedRange.stockId) return;
+    if (extreStart >= extreFetchedRange.start && extreEnd <= extreFetchedRange.end) {
+      return; // İçeride → fetch yok
+    }
+    // Dışarıda → yeniden fetch (geçmiş ayları çekmek için)
+    openStockDetail(selectedStock, extreStart, extreEnd);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [extreStart, extreEnd]);
 
   const renderStockItem = useCallback(({ item }: { item: any }) => {
     const name = item.AD || t('product');
@@ -1606,22 +1664,19 @@ export default function StockScreen() {
                 StyleSheet.absoluteFillObject,
                 { backgroundColor: colors.surface, zIndex: 100 },
               ]}>
-                <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-                  <TouchableOpacity onPress={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }} style={{ marginRight: 8 }}>
-                    <Ionicons name="arrow-back" size={24} color={colors.text} />
-                  </TouchableOpacity>
-                  <View style={{ flex: 1 }}>
+                <View style={[styles.modalHeader, { borderBottomColor: colors.border, alignItems: 'center' }]}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
                     <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={1}>
                       Fiş Detayı
                     </Text>
                     {selectedFis && (
                       <Text style={[{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }]} numberOfLines={1}>
-                        {selectedFis.TARIH || ''} · {selectedFis.FIS_TURU || ''} · {selectedFis.BELGENO || ''}
+                        {selectedFis.TARIH || ''} · {selectedFis.FIS_TURU || ''}
                       </Text>
                     )}
                   </View>
-                  <TouchableOpacity onPress={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }}>
-                    <Ionicons name="close" size={24} color={colors.text} />
+                  <TouchableOpacity onPress={() => { setSelectedFis(null); setFisDetail([]); setFisTotals(null); }} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <Ionicons name="close" size={26} color={colors.text} />
                   </TouchableOpacity>
                 </View>
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
