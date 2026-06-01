@@ -335,32 +335,59 @@ export default function CustomersScreen() {
     return { start, end };
   }, []);
 
+  // 2026-06-01 — fetchExtreWithFallback: cache HIT → hızlı dön; cache MISS → POS
+  // (10sn timeout). Boş/timeout → boş dön; spinner uzun sürmez.
+  const fetchExtreWithFallback = useCallback(async (
+    url: string, body: Record<string, any>, token: string,
+  ): Promise<any> => {
+    try {
+      const r1 = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ ...body, cache_only: true }),
+      });
+      const d1 = await r1.json().catch(() => ({}));
+      if (d1.ok && Array.isArray(d1.data) && d1.data.length > 0) return d1;
+      if (d1.ok && Array.isArray(d1.details) && d1.details.length > 0) return d1;
+    } catch {}
+    try {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 10000);
+      const r2 = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+      clearTimeout(tid);
+      return await r2.json().catch(() => ({ ok: true, data: [], details: [] }));
+    } catch {
+      return { ok: true, data: [], details: [], totals: [] };
+    }
+  }, []);
+
   // Open ekstre — 2026-05-13 Cache-aware: tam ay fetch + client-side filter
   const openCariDetail = useCallback(async (cari: any, sDate?: string, eDate?: string) => {
     setSelectedCari(cari); setExtreRawData([]); setExtreLoading(true);
     const cariId = cari.KART || cari.ID;
     if (!cariId || !activeTenantId) { setExtreLoading(false); return; }
-    // 2026-05-13 — Her zaman aylık fetch yap; kullanıcı tarihini client-side filtrele.
-    // Bu sayede ay içindeki herhangi bir alt aralık seçiminde POS'a tekrar gitmez.
     const userStart = sDate || extreStart;
     const userEnd = eDate || extreEnd;
     const range = monthRangeFor(userStart);
-    // Eğer kullanıcı aralığı tek ay içindeyse → tam ayı fetch et; aksi halde
-    // (örn: Mart-Mayıs aralığı seçilirse) kullanıcının seçtiği aralığı kullan.
     const userStartMonth = userStart.slice(0, 7);
     const userEndMonth = userEnd.slice(0, 7);
     const fetchStart = userStartMonth === userEndMonth ? range.start : userStart;
     const fetchEnd = userStartMonth === userEndMonth ? range.end : userEnd;
-    // 2026-06-01 — Tüm tarih aralıklarında MySQL dataset_cache'ten çek
+    // 2026-06-01 — Cache HIT hızlı dön; MISS olursa POS'a 10sn timeout
     try {
       const { token } = useAuthStore.getState();
-      const resp = await fetch(`${API_URL}/api/data/cari-extre`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ tenant_id: activeTenantId, cari_id: cariId, doviz_ad: cari.DOVIZ_AD_ID || 1, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd, cache_only: true }),
-      });
-      const data = await resp.json();
+      const data = await fetchExtreWithFallback(
+        `${API_URL}/api/data/cari-extre`,
+        { tenant_id: activeTenantId, cari_id: cariId, doviz_ad: cari.DOVIZ_AD_ID || 1, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd },
+        token || '',
+      );
       if (data.ok && data.data) {
-        const sorted = [...data.data].sort((a: any, b: any) => {
+        const sorted = [...(data.data || [])].sort((a: any, b: any) => {
           const da = a.TARIH || ''; const db = b.TARIH || '';
           return da.localeCompare(db);
         });
@@ -370,7 +397,7 @@ export default function CustomersScreen() {
       }
     } catch (err) { console.error(err); }
     finally { setExtreLoading(false); }
-  }, [activeTenantId, extreStart, extreEnd, monthRangeFor]);
+  }, [activeTenantId, extreStart, extreEnd, monthRangeFor, fetchExtreWithFallback]);
 
   // Tarih değişimi → eğer fetched range içinde → sadece client-side filtrele
   // Dışındaysa → yeni fetch yap (otomatik)
@@ -378,12 +405,7 @@ export default function CustomersScreen() {
     if (!selectedCari || !extreFetchedRange) return;
     const cariId = selectedCari.KART || selectedCari.ID;
     if (cariId !== extreFetchedRange.cariId) return;
-    // Kullanıcı aralığı fetched range içinde mi?
-    if (extreStart >= extreFetchedRange.start && extreEnd <= extreFetchedRange.end) {
-      // İçeride → fetch yok, sadece filtrele (extreData useMemo zaten yeniden hesaplar)
-      return;
-    }
-    // Dışarıda → yeniden fetch (geçmiş ayları çekmek için POS sorgusu olabilir)
+    if (extreStart >= extreFetchedRange.start && extreEnd <= extreFetchedRange.end) return;
     openCariDetail(selectedCari, extreStart, extreEnd);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [extreStart, extreEnd]);
@@ -393,8 +415,6 @@ export default function CustomersScreen() {
   // Open fiş detail — iOS modal stack fix v2: Fiş Detay artık parent Cari Extre
   // Modal'ının İÇİNDE inline overlay olarak render ediliyor; native sub-modal yok.
   const openFisDetail = useCallback(async (row: any) => {
-    // 2026-05-12 — kart_extre_cari farklı POS sürümlerinde belge id'sini farklı
-    // alan adlarıyla döndürebiliyor: BELGE_ID, FIS_ID, KAYIT_ID, ID. Hepsini sırasıyla dene.
     const fisId = row.BELGE_ID || row.FIS_ID || row.KAYIT_ID || row.ID || row.BELGEID;
     if (!fisId || !activeTenantId) {
       showToast('Bu satırın fiş detayı bulunamadı');
@@ -404,23 +424,17 @@ export default function CustomersScreen() {
     setSelectedFis(row); setFisDetail([]); setFisTotals(null); setFisLoading(true);
     try {
       const { token } = useAuthStore.getState();
-      const resp = await fetch(`${API_URL}/api/data/fis-detail`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ tenant_id: activeTenantId, fis_id: fisId, cache_only: true }),
-      });
-      const data = await resp.json();
+      const data = await fetchExtreWithFallback(
+        `${API_URL}/api/data/fis-detail`,
+        { tenant_id: activeTenantId, fis_id: fisId },
+        token || '',
+      );
       if (data.ok) {
         setFisDetail(data.details || []);
         setFisTotals(data.totals && data.totals.length > 0 ? data.totals[0] : null);
-        if (!data.details || data.details.length === 0) {
-          showToast('Fiş detayı boş döndü');
-        }
-      } else {
-        showToast(data.detail || 'Fiş detayı yüklenemedi');
       }
     } catch (err) {
       console.error('Fis detail error:', err);
-      showToast('Fiş detayı yüklenirken hata oluştu');
     }
     finally { setFisLoading(false); }
   }, [activeTenantId]);

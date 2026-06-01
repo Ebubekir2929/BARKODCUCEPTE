@@ -214,6 +214,41 @@ export default function StockScreen() {
     });
   }, [detailExtre, extreStart, extreEnd]);
 
+  // 2026-06-01 — fetchWithTimeout: cache + POS fallback için; uzun bekleyiş yok.
+  // İlk önce cache_only=true ile dene (anında dön), boş gelirse POS'a 10sn timeout
+  const fetchExtreWithFallback = useCallback(async (
+    url: string,
+    body: Record<string, any>,
+    token: string,
+  ): Promise<any> => {
+    // 1) Hızlı cache check
+    try {
+      const r1 = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ ...body, cache_only: true }),
+      });
+      const d1 = await r1.json().catch(() => ({}));
+      if (d1.ok && Array.isArray(d1.data) && d1.data.length > 0) return d1;
+      if (d1.ok && Array.isArray(d1.details) && d1.details.length > 0) return d1;
+    } catch {}
+    // 2) POS fallback — 10sn timeout
+    try {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 10000);
+      const r2 = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+      clearTimeout(tid);
+      return await r2.json().catch(() => ({ ok: true, data: [], details: [] }));
+    } catch {
+      return { ok: true, data: [], details: [], totals: [] };
+    }
+  }, []);
+
   // Fiş detayını aç — iOS modal stack fix v2: Fiş Detay artık parent Stock
   // Detail Modal'ının ICINDE inline overlay olarak render ediliyor; native
   // modal sunum yok, dolayısıyla iOS donması yaşanmıyor.
@@ -230,28 +265,21 @@ export default function StockScreen() {
     setFisLoading(true);
     try {
       const { token } = useAuthStore.getState();
-      const resp = await fetch(`${API_URL}/api/data/fis-detail`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ tenant_id: activeTenantId, fis_id: fisId, cache_only: true }),
-      });
-      const data = await resp.json();
+      const data = await fetchExtreWithFallback(
+        `${API_URL}/api/data/fis-detail`,
+        { tenant_id: activeTenantId, fis_id: fisId },
+        token || '',
+      );
       if (data.ok) {
         setFisDetail(data.details || []);
         setFisTotals(data.totals && data.totals.length > 0 ? data.totals[0] : null);
-        if (!data.details || data.details.length === 0) {
-          showToast('Fiş detayı boş döndü');
-        }
-      } else {
-        showToast(data.detail || 'Fiş detayı yüklenemedi');
       }
     } catch (err) {
       console.error('Fis detail error:', err);
-      showToast('Fiş detayı yüklenirken hata oluştu');
     } finally {
       setFisLoading(false);
     }
-  }, [activeTenantId]);
+  }, [activeTenantId, fetchExtreWithFallback]);
 
   // Fetch price names
   useEffect(() => {
@@ -634,37 +662,35 @@ export default function StockScreen() {
     // zaten web DB'ye basılıyor, POS'a gerek yok. Cache hit = milisaniyeler.
     try {
       const { token } = useAuthStore.getState();
-      // Miktar tek seferde, ekstre tarih aralığı ile paralel
-      const [miktarResp, extreResp] = await Promise.all([
+      // Miktar tek seferde (her zaman cache+POS fallback); ekstre tarih aralığı ile
+      const [miktarResp, extreData] = await Promise.all([
         fetch(`${API_URL}/api/data/stock-detail`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
           body: JSON.stringify({ tenant_id: activeTenantId, stock_id: stockId }),
         }),
-        fetch(`${API_URL}/api/data/stock-extre`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ tenant_id: activeTenantId, stok_id: stockId, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd, cache_only: true }),
-        }),
+        fetchExtreWithFallback(
+          `${API_URL}/api/data/stock-extre`,
+          { tenant_id: activeTenantId, stok_id: stockId, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd },
+          token || '',
+        ),
       ]);
       const miktarJson = await miktarResp.json().catch(() => ({}));
-      const extreJson = await extreResp.json().catch(() => ({}));
       if (miktarJson.ok) setDetailMiktar(miktarJson.miktar || []);
-      if (extreJson.ok) {
-        const rows = (extreJson.data || []).slice().sort((a: any, b: any) => {
+      if (extreData.ok) {
+        const rows = (extreData.data || []).slice().sort((a: any, b: any) => {
           const da = a.TARIH || ''; const db = b.TARIH || '';
           return da.localeCompare(db);
         });
         setDetailExtre(rows);
         setExtreFetchedRange({ start: fetchStart, end: fetchEnd, stockId });
       } else if (miktarJson.ok) {
-        // fallback: stock-detail extre alanını kullan
         setDetailExtre(miktarJson.extre || []);
         setExtreFetchedRange({ start: fetchStart, end: fetchEnd, stockId });
       }
     } catch (err) { console.error(err); }
     finally { setDetailLoading(false); }
-  }, [activeTenantId, extreStart, extreEnd, monthRangeFor]);
+  }, [activeTenantId, extreStart, extreEnd, monthRangeFor, fetchExtreWithFallback]);
 
   // 2026-06-01 — Tarih değişimi → eğer fetched range içinde → sadece client-side
   // filtrele (filteredExtre useMemo). Dışındaysa → otomatik yeniden fetch.
