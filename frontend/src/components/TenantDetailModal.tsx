@@ -192,7 +192,10 @@ export const TenantDetailModal: React.FC<{
         style={[
           styles.container,
           { backgroundColor: colors.background },
-          Platform.OS === 'ios' && { paddingTop: Math.max(insets.top, 12) },
+          // 2026-06-01 — Hem iOS Dynamic Island/notch hem Android status bar
+          // için garantili top padding (header time/saat ile karışmasın).
+          Platform.OS === 'ios' && { paddingTop: Math.max(insets.top, 44) },
+          Platform.OS === 'android' && { paddingTop: Math.max(insets.top, 32) },
         ]}
         edges={['left', 'right']}
       >
