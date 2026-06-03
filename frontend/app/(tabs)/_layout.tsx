@@ -6,7 +6,6 @@ import { useLanguageStore } from '../../src/store/languageStore';
 import { Platform, useWindowDimensions, View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../src/store/authStore';
-import AnimatedTabBar from '../../src/components/AnimatedTabBar';
 // 2026-05-06 — flushPendingNotificationRoute kaldırıldı. Yeni mimari:
 // notificationTapHandler AsyncStorage'a yazar, dashboard.tsx useFocusEffect
 // içinde readPendingTap çağırarak okur. Burada hiçbir şey yapmaya gerek yok.
@@ -63,11 +62,24 @@ export default function TabLayout() {
 
   return (
     <Tabs
-      tabBar={(props) => <AnimatedTabBar {...props} />}
       screenOptions={{
         headerShown: false,
+        tabBarStyle: {
+          backgroundColor: colors.surface,
+          borderTopColor: colors.border,
+          borderTopWidth: 1,
+          height: (Platform.OS === 'ios' ? 65 : 60) + insets.bottom,
+          paddingTop: 8,
+          paddingBottom: Math.max(12, insets.bottom + 4),
+        },
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textSecondary,
+        tabBarLabelStyle: {
+          fontSize: Platform.OS === 'ios' ? 9 : 11,
+          fontWeight: '600',
+          ...(Platform.OS === 'ios' ? { marginTop: -2 } : {}),
+        },
+        tabBarItemStyle: Platform.OS === 'ios' ? { paddingHorizontal: 0 } : undefined,
       }}
     >
       <Tabs.Screen name="dashboard" options={{ title: t('dashboard'), tabBarIcon: renderDashboardIcon }} />
