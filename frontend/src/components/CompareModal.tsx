@@ -578,8 +578,10 @@ export const CompareModal: React.FC<{
       <SafeAreaView style={[
         styles.container,
         { backgroundColor: colors.background },
-        // iOS Dynamic Island / notch için fallback: insets.top en az 44 kabul et
-        Platform.OS === 'ios' && { paddingTop: Math.max(insets.top, 12) },
+        // 2026-06-01 — Hem iOS Dynamic Island / notch hem Android status bar
+        // için fallback: en az 44 padding ver, içerik üst kısma yapışmasın.
+        Platform.OS === 'ios' && { paddingTop: Math.max(insets.top, 44) },
+        Platform.OS === 'android' && { paddingTop: Math.max(insets.top, 32) },
         Platform.OS === 'web' && isDesktop && {
           width: '95%', maxWidth: 1400, height: '95%', maxHeight: 1000,
           alignSelf: 'center', marginVertical: 24, borderRadius: 16,
