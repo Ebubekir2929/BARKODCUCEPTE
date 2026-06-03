@@ -678,6 +678,24 @@ export const TenantDetailModal: React.FC<{
               </ScrollView>
             </View>
           )}
+
+          {/* 2026-06-01 — Boş veri durumu: hiç satış yoksa kullanıcıyı bilgilendir */}
+          {totals.total === 0 && branches.length <= 1 && Object.keys(productsByBranch).length === 0 && (
+            <View style={{
+              padding: 30, alignItems: 'center', justifyContent: 'center',
+              backgroundColor: colors.card, borderRadius: 12, borderWidth: 1,
+              borderColor: colors.border, marginTop: 10,
+            }}>
+              <Ionicons name="cube-outline" size={48} color={colors.textSecondary} style={{ marginBottom: 12 }} />
+              <Text style={{ color: colors.text, fontSize: 15, fontWeight: '700', marginBottom: 6, textAlign: 'center' }}>
+                Bu tarihte hareket yok
+              </Text>
+              <Text style={{ color: colors.textSecondary, fontSize: 12, textAlign: 'center', lineHeight: 18 }}>
+                Seçili gün için satış, fiş veya ürün hareketi kaydedilmemiş.{"\n"}
+                Tarih değiştirip tekrar deneyin.
+              </Text>
+            </View>
+          )}
         </ScrollView>
       </SafeAreaView>
     </Modal>
