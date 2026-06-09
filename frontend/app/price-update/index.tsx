@@ -357,11 +357,11 @@ export default function PriceUpdateScreen() {
       return b === code || k === code;
     });
     if (!product) {
-      showToast('❌ Ürün bulunamadı: ' + scannedBarcode);
+      showWarning('Bulunamadı', 'Bu barkoda sahip ürün yok: ' + scannedBarcode);
       return;
     }
     if (selectedIds.has(product.ID)) {
-      showToast('ℹ️ Zaten seçili: ' + (product.AD || product.BARKOD));
+      showWarning('Zaten Seçili', (product.AD || product.BARKOD) + ' listede mevcut');
       return;
     }
     setSelectedIds((prev) => {
@@ -371,7 +371,7 @@ export default function PriceUpdateScreen() {
     });
     setMode('bulk');
     setScanCount((c) => c + 1);
-    showToast('✅ Eklendi: ' + (product.AD || product.BARKOD));
+    showSuccess('Eklendi', product.AD || product.BARKOD);
   }, [stockList, selectedIds]);
 
   const openBulkEdit = () => {
