@@ -18,7 +18,17 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+// 2026-06-09 — Kamera modülü web'de crash yapabiliyor; lazy ve safe import.
+let CameraView: any = null;
+let useCameraPermissions: any = () => [null, async () => ({ granted: false })];
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const cam = require('expo-camera');
+  CameraView = cam.CameraView;
+  useCameraPermissions = cam.useCameraPermissions;
+} catch (e) {
+  console.warn('expo-camera not available:', (e as any)?.message);
+}
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAuthStore } from '../../src/store/authStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
@@ -859,6 +869,10 @@ export default function PriceUpdateScreen() {
                   barkod okutunca ürün otomatik seçili listeye eklenir. */}
               <TouchableOpacity
                 onPress={async () => {
+                  if (!CameraView) {
+                    showWarning('Kamera Desteği', 'Bu özellik native build gerektirir (web preview\'da çalışmaz). Lütfen TestFlight/APK ile test edin.');
+                    return;
+                  }
                   if (!cameraPermission?.granted) {
                     const res = await requestCameraPermission();
                     if (!res.granted) { showWarning('Kamera İzni', 'Barkod tarama için kamera izni gerekli'); return; }
@@ -1089,7 +1103,7 @@ export default function PriceUpdateScreen() {
               NewModal'ın İÇİNDE absolute overlay olarak render. */}
           {showScanner && (
             <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000', zIndex: 200 }]}>
-              {cameraPermission?.granted ? (
+              {CameraView && cameraPermission?.granted ? (
                 <CameraView
                   style={{ flex: 1 }}
                   barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'code128', 'code39', 'qr', 'upc_a', 'upc_e'] }}
