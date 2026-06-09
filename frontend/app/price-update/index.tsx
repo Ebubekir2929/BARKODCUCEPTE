@@ -18,6 +18,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAuthStore } from '../../src/store/authStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
@@ -90,6 +91,14 @@ export default function PriceUpdateScreen() {
   const [stockLoading, setStockLoading] = useState(false);
   const [stockSearch, setStockSearch] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
+  // 2026-06-09 — Barkod tarama state'i (iOS+Android: expo-camera).
+  // Yeni Güncelleme → "📷 Barkod Tara" → kamera açılır → barkod okunca
+  // ürün seçili listeye eklenir + toast ("Eklendi" veya "Bulunamadı").
+  const [showScanner, setShowScanner] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const lastScanRef = React.useRef<{ code: string; ts: number }>({ code: '', ts: 0 });
+  const [scanCount, setScanCount] = useState(0);
 
   // Stok ekranındaki gibi filtreler
   const [selectedGroup, setSelectedGroup] = useState<string>('all');
@@ -325,6 +334,36 @@ export default function PriceUpdateScreen() {
 
   // Bulk: prepare edit rows (Devam Et)
   // Seçili ürünleri editable rows'a aktar — kullanıcı her birine elle yeni fiyat girer
+  // 2026-06-09 — Barkod scan handler: ürünü stockData'da ara, varsa selectedIds'e ekle
+  const handleScannedBarcode = useCallback((scannedBarcode: string) => {
+    const now = Date.now();
+    // Aynı barkod 1.5sn içinde tekrar okunursa yoksay (duplicate scan)
+    if (scannedBarcode === lastScanRef.current.code && now - lastScanRef.current.ts < 1500) return;
+    lastScanRef.current = { code: scannedBarcode, ts: now };
+    const code = String(scannedBarcode).trim().toLowerCase();
+    const product = stockData.find((s) => {
+      const b = String(s.BARKOD || '').trim().toLowerCase();
+      const k = String(s.KOD || '').trim().toLowerCase();
+      return b === code || k === code;
+    });
+    if (!product) {
+      showToast('❌ Ürün bulunamadı: ' + scannedBarcode);
+      return;
+    }
+    if (selectedIds.has(product.ID)) {
+      showToast('ℹ️ Zaten seçili: ' + (product.AD || product.BARKOD));
+      return;
+    }
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.add(product.ID);
+      return next;
+    });
+    setMode('bulk');
+    setScanCount((c) => c + 1);
+    showToast('✅ Eklendi: ' + (product.AD || product.BARKOD));
+  }, [stockData, selectedIds]);
+
   const openBulkEdit = () => {
     if (selectedIds.size === 0) { showWarning('Seçim Yok', 'En az 1 ürün seçin'); return; }
     const rows = stockList
@@ -816,6 +855,21 @@ export default function PriceUpdateScreen() {
                 <Ionicons name="close" size={26} color={colors.text} />
               </TouchableOpacity>
               <Text style={[styles.headerTitle, { color: colors.text, flex: 1 }]}>Yeni Güncelleme</Text>
+              {/* 2026-06-09 — Barkod tarama butonu (iOS+Android). Kamera açılır,
+                  barkod okutunca ürün otomatik seçili listeye eklenir. */}
+              <TouchableOpacity
+                onPress={async () => {
+                  if (!cameraPermission?.granted) {
+                    const res = await requestCameraPermission();
+                    if (!res.granted) { showWarning('Kamera İzni', 'Barkod tarama için kamera izni gerekli'); return; }
+                  }
+                  setScanCount(0);
+                  setShowScanner(true);
+                }}
+                style={[styles.headerBtn, { paddingHorizontal: 8 }]}
+              >
+                <Ionicons name="barcode-outline" size={24} color={colors.primary} />
+              </TouchableOpacity>
               {mode === 'bulk' && selectedIds.size > 0 && (
                 <TouchableOpacity onPress={() => setSelectedIds(new Set())} style={styles.headerBtn}>
                   <Text style={{ color: colors.primary, fontWeight: '600' }}>Temizle</Text>
@@ -1029,6 +1083,56 @@ export default function PriceUpdateScreen() {
                 </View>
               </TouchableWithoutFeedback>
             </KeyboardAvoidingView>
+          )}
+
+          {/* 2026-06-09 — Barkod tarama inline overlay (iOS-safe).
+              NewModal'ın İÇİNDE absolute overlay olarak render. */}
+          {showScanner && (
+            <View style={[StyleSheet.absoluteFillObject, { backgroundColor: '#000', zIndex: 200 }]}>
+              {cameraPermission?.granted ? (
+                <CameraView
+                  style={{ flex: 1 }}
+                  barcodeScannerSettings={{ barcodeTypes: ['ean13', 'ean8', 'code128', 'code39', 'qr', 'upc_a', 'upc_e'] }}
+                  onBarcodeScanned={(result) => {
+                    if (result?.data) handleScannedBarcode(result.data);
+                  }}
+                />
+              ) : (
+                <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+                  <Ionicons name="camera-outline" size={64} color="#fff" />
+                  <Text style={{ color: '#fff', fontSize: 16, marginTop: 16, textAlign: 'center' }}>
+                    Kamera izni reddedildi. Telefon ayarlarından izin verin.
+                  </Text>
+                </View>
+              )}
+              {/* Üstte: kapat + sayaç */}
+              <View style={{ position: 'absolute', top: 50, left: 16, right: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <TouchableOpacity
+                  onPress={() => setShowScanner(false)}
+                  style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.65)', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Ionicons name="close" size={26} color="#fff" />
+                </TouchableOpacity>
+                <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', borderRadius: 22, paddingHorizontal: 14, paddingVertical: 10 }}>
+                  <Text style={{ color: '#fff', fontSize: 13, fontWeight: '700' }}>Barkod Tara · {scanCount} eklendi</Text>
+                  <Text style={{ color: '#cbd5e1', fontSize: 11 }}>Birden fazla okutabilirsiniz</Text>
+                </View>
+              </View>
+              {/* Altta: hedefleme çerçevesi + bitti butonu */}
+              <View pointerEvents="none" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 120, alignItems: 'center', justifyContent: 'center' }}>
+                <View style={{ width: 260, height: 160, borderWidth: 3, borderColor: '#22c55e', borderRadius: 16, backgroundColor: 'transparent' }} />
+              </View>
+              <View style={{ position: 'absolute', left: 16, right: 16, bottom: 40 }}>
+                <TouchableOpacity
+                  onPress={() => setShowScanner(false)}
+                  style={{ backgroundColor: colors.primary, padding: 16, borderRadius: 14, alignItems: 'center' }}
+                >
+                  <Text style={{ color: '#fff', fontWeight: '800', fontSize: 16 }}>
+                    Bitti ({selectedIds.size} ürün seçili)
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           )}
 
           {/* 2026-06-01 — Password Confirm inline overlay (NewModal içinde de
