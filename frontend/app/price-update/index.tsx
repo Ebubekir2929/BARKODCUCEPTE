@@ -351,7 +351,7 @@ export default function PriceUpdateScreen() {
     if (scannedBarcode === lastScanRef.current.code && now - lastScanRef.current.ts < 1500) return;
     lastScanRef.current = { code: scannedBarcode, ts: now };
     const code = String(scannedBarcode).trim().toLowerCase();
-    const product = stockData.find((s) => {
+    const product = stockList.find((s) => {
       const b = String(s.BARKOD || '').trim().toLowerCase();
       const k = String(s.KOD || '').trim().toLowerCase();
       return b === code || k === code;
@@ -372,7 +372,7 @@ export default function PriceUpdateScreen() {
     setMode('bulk');
     setScanCount((c) => c + 1);
     showToast('✅ Eklendi: ' + (product.AD || product.BARKOD));
-  }, [stockData, selectedIds]);
+  }, [stockList, selectedIds]);
 
   const openBulkEdit = () => {
     if (selectedIds.size === 0) { showWarning('Seçim Yok', 'En az 1 ürün seçin'); return; }
