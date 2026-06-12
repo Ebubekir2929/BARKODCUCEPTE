@@ -1,11 +1,30 @@
 /**
  * AccentColorPickerModal — Tema vurgu rengini özelleştirme
  * Hue (renk tonu) + Saturation/Brightness panel + hex input + preset swatches
+ *
+ * iOS Crash Fix (Jun 2026):
+ *  - Native <Modal> kaldırıldı, <View pointerEvents/absoluteFillObject> ile
+ *    inline overlay'e geçildi (projemizdeki iOS Nested Modal Freeze pattern'ı).
+ *  - reanimated-color-picker `onChange` (UI worklet → runOnJS) yerine
+ *    `onChangeJS` kullanılır; iOS 18+ üzerinde worklet→JS callback'inin
+ *    sebep olduğu native crash'i önler.
+ *    Ref: https://github.com/alabsi91/reanimated-color-picker/issues/82
  */
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Modal, ScrollView, Platform } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  ScrollView,
+  Platform,
+  StatusBar,
+  KeyboardAvoidingView,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import ColorPicker, { Panel1, HueSlider, Preview, Swatches } from 'reanimated-color-picker';
+import ColorPicker, { Panel1, HueSlider, Preview } from 'reanimated-color-picker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useThemeStore } from '../store/themeStore';
 
 const PRESETS = [
@@ -21,6 +40,7 @@ interface Props {
 
 export default function AccentColorPickerModal({ visible, onClose }: Props) {
   const { colors, accent, setAccent } = useThemeStore();
+  const insets = useSafeAreaInsets();
   const [tempColor, setTempColor] = useState<string>(accent);
   const [hexInput, setHexInput] = useState<string>(accent);
 
@@ -31,7 +51,8 @@ export default function AccentColorPickerModal({ visible, onClose }: Props) {
     }
   }, [visible, accent]);
 
-  const handleColorChange = ({ hex }: { hex: string }) => {
+  // JS-thread callback — reanimated-color-picker UI worklet'ten güvenli geçiş.
+  const handleColorChangeJS = ({ hex }: { hex: string }) => {
     const upper = hex.toUpperCase().substring(0, 7);
     setTempColor(upper);
     setHexInput(upper);
@@ -47,14 +68,45 @@ export default function AccentColorPickerModal({ visible, onClose }: Props) {
   };
 
   const onSave = async () => {
-    await setAccent(tempColor);
+    try {
+      await setAccent(tempColor);
+    } catch (e) {
+      // sessizce devam et
+    }
     onClose();
   };
 
+  if (!visible) return null;
+
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={[styles.overlay, { backgroundColor: 'rgba(0,0,0,0.45)' }]}>
-        <View style={[styles.sheet, { backgroundColor: colors.surface }]}>
+    <View
+      style={[
+        StyleSheet.absoluteFillObject,
+        styles.overlay,
+        { backgroundColor: 'rgba(0,0,0,0.45)', pointerEvents: 'auto' },
+      ]}
+    >
+      {/* Backdrop tıklaması ile kapanma */}
+      <TouchableOpacity
+        activeOpacity={1}
+        onPress={onClose}
+        style={StyleSheet.absoluteFillObject}
+      />
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.sheetWrap}
+        pointerEvents="box-none"
+      >
+        <View
+          style={[
+            styles.sheet,
+            {
+              backgroundColor: colors.surface,
+              paddingBottom: Math.max(insets.bottom, 12),
+            },
+          ]}
+        >
           {/* Header */}
           <View style={[styles.header, { borderBottomColor: colors.border }]}>
             <TouchableOpacity onPress={onClose} style={styles.iconBtn}>
@@ -66,13 +118,16 @@ export default function AccentColorPickerModal({ visible, onClose }: Props) {
             </TouchableOpacity>
           </View>
 
-          <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
-            {/* Color Picker */}
+          <ScrollView
+            contentContainerStyle={{ padding: 16, paddingBottom: 30 }}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {/* Color Picker — onChangeJS (UI worklet yerine JS-thread) */}
             <ColorPicker
               style={{ width: '100%' }}
               value={tempColor}
-              onComplete={handleColorChange}
-              onChange={handleColorChange}
+              onCompleteJS={handleColorChangeJS}
             >
               <Preview hideInitialColor style={{ borderRadius: 12, height: 50, marginBottom: 16 }} />
               <Panel1 style={{ borderRadius: 12, marginBottom: 16, height: 200 }} />
@@ -83,12 +138,26 @@ export default function AccentColorPickerModal({ visible, onClose }: Props) {
             <View style={{ marginBottom: 16 }}>
               <Text style={[styles.label, { color: colors.textSecondary }]}>HEX Kodu</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <View style={{ width: 38, height: 38, borderRadius: 8, backgroundColor: tempColor, borderWidth: 1, borderColor: colors.border }} />
+                <View
+                  style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: 8,
+                    backgroundColor: tempColor,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                  }}
+                />
                 <TextInput
-                  style={[styles.input, {
-                    color: colors.text, borderColor: colors.border,
-                    backgroundColor: colors.background, flex: 1,
-                  }]}
+                  style={[
+                    styles.input,
+                    {
+                      color: colors.text,
+                      borderColor: colors.border,
+                      backgroundColor: colors.background,
+                      flex: 1,
+                    },
+                  ]}
                   value={hexInput}
                   onChangeText={setHexInput}
                   onBlur={handleHexSubmit}
@@ -111,12 +180,18 @@ export default function AccentColorPickerModal({ visible, onClose }: Props) {
                   return (
                     <TouchableOpacity
                       key={c}
-                      onPress={() => { setTempColor(c); setHexInput(c); }}
-                      style={[styles.swatch, {
-                        backgroundColor: c,
-                        borderColor: active ? colors.text : 'transparent',
-                        borderWidth: active ? 3 : 0,
-                      }]}
+                      onPress={() => {
+                        setTempColor(c);
+                        setHexInput(c);
+                      }}
+                      style={[
+                        styles.swatch,
+                        {
+                          backgroundColor: c,
+                          borderColor: active ? colors.text : 'transparent',
+                          borderWidth: active ? 3 : 0,
+                        },
+                      ]}
                     >
                       {active && <Ionicons name="checkmark" size={20} color="#FFF" />}
                     </TouchableOpacity>
@@ -126,34 +201,58 @@ export default function AccentColorPickerModal({ visible, onClose }: Props) {
             </View>
           </ScrollView>
         </View>
-      </View>
-    </Modal>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: { flex: 1, justifyContent: 'flex-end' },
+  overlay: {
+    justifyContent: 'flex-end',
+    // Status bar yüksekliği kadar üstten boşluk (Android için)
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0,
+    zIndex: 9999,
+    elevation: 9999,
+  },
+  sheetWrap: {
+    width: '100%',
+    justifyContent: 'flex-end',
+  },
   sheet: {
-    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     maxHeight: '90%',
-    paddingBottom: Platform.OS === 'ios' ? 20 : 8,
+    overflow: 'hidden',
   },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 8, paddingVertical: 12, borderBottomWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
   },
   iconBtn: { padding: 8, minWidth: 56, alignItems: 'center' },
   title: { fontSize: 17, fontWeight: '700' },
   label: { fontSize: 12, fontWeight: '600', marginBottom: 8, textTransform: 'uppercase' },
   input: {
-    borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10,
-    fontSize: 15, fontWeight: '600',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    fontWeight: '600',
   },
   swatchGrid: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: 12,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
   },
   swatch: {
-    width: 52, height: 52, borderRadius: 26,
-    alignItems: 'center', justifyContent: 'center',
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

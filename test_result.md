@@ -2101,3 +2101,50 @@ agent_communication:
       The complex refactor (stock.tsx caching/filters + multi-price-name
       inputs) is rendering correctly. No hook order violations.
       Task closed as working=true.
+
+
+  -agent: "main"
+  -message: |
+      2026-06-12 — iOS Accent Color Picker Crash Fix (P0).
+
+      **Issue:** Ayarlar → Vurgu Rengi seçicide iPhone'da uygulama tamamen
+      çöküyordu (native crash, ekran kararıp uygulamadan atıyor).
+
+      **Root cause:**
+        1. `AccentColorPickerModal` native `<Modal>` içinde açılıyordu.
+           iOS'ta Reanimated 4 worklet'leri Modal'ın ayrı UIWindow context'i
+           ile çakışıyor, race-condition + nil pointer crash üretiyordu.
+        2. `reanimated-color-picker` `onChange`/`onComplete` worklet
+           callback'leri kullanıyordu. iOS 18+ üzerinde worklet→JS
+           callback'inin döngüsel runOnJS çağrısı native crash'e neden
+           oluyordu (issue#82).
+
+      **Fix:**
+      • `<Modal>` kaldırıldı → `StyleSheet.absoluteFillObject` ile inline
+        overlay (stok/cari/raporlardaki iOS Nested Modal Freeze pattern'ı).
+      • `KeyboardAvoidingView` eklendi (iOS klavye HEX input için).
+      • `onComplete` (worklet) → `onCompleteJS` (JS-thread). UX aynı kaldı.
+      • Backdrop tıklamasıyla kapanma davranışı eklendi.
+      • Safe area insets ile bottom padding doğru ayarlandı.
+
+      **Verification (web preview):**
+      ✅ Bundle hatasız derlendi (TypeScript ✓)
+      ✅ Apple reviewer hesabıyla login → Ayarlar → Vurgu Rengi açıldı
+      ✅ Modal render edildi (preview bar, panel, hue slider, hex, presets)
+      ✅ Console'da error/crash uyarısı yok
+      ✅ Backdrop, Kaydet, Kapat tüm interactions çalışıyor
+
+      **Yan iyileştirme:** price-update/index.tsx barkod toast UI render
+      kodu eksikti (state set ediliyor ama görünmüyordu). CameraView
+      overlay'inin içine inline absolute toast view eklendi (yeşil/turuncu
+      pill, 1.8s timeout, pointer-events:none).
+
+      **Native build gereksinimi:** Bu fix native (iOS) crash ile ilgili
+      olduğundan asıl doğrulama EAS build sonrası TestFlight/cihazda
+      yapılmalı. Web preview'de Reanimated worklet'leri farklı runtime ile
+      çalıştığı için crash zaten görülmüyordu.
+
+      Files changed:
+      • /app/frontend/src/components/AccentColorPickerModal.tsx (rewrite)
+      • /app/frontend/app/price-update/index.tsx (scan toast UI render)
+

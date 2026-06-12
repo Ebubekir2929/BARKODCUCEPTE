@@ -109,6 +109,14 @@ export default function PriceUpdateScreen() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const lastScanRef = React.useRef<{ code: string; ts: number }>({ code: '', ts: 0 });
   const [scanCount, setScanCount] = useState(0);
+  // 2026-06-12 — Inline scanner toast (Modal yerine View — iOS stack freeze fix)
+  const [scanToast, setScanToast] = useState<{ type: 'ok' | 'warn'; text: string } | null>(null);
+  const scanToastTimerRef = React.useRef<any>(null);
+  const showScanToast = useCallback((type: 'ok' | 'warn', text: string) => {
+    setScanToast({ type, text });
+    if (scanToastTimerRef.current) clearTimeout(scanToastTimerRef.current);
+    scanToastTimerRef.current = setTimeout(() => setScanToast(null), 1800);
+  }, []);
 
   // Stok ekranındaki gibi filtreler
   const [selectedGroup, setSelectedGroup] = useState<string>('all');
@@ -357,11 +365,11 @@ export default function PriceUpdateScreen() {
       return b === code || k === code;
     });
     if (!product) {
-      showWarning('Bulunamadı', 'Bu barkoda sahip ürün yok: ' + scannedBarcode);
+      showScanToast('warn', '❌ Bulunamadı: ' + scannedBarcode);
       return;
     }
     if (selectedIds.has(product.ID)) {
-      showWarning('Zaten Seçili', (product.AD || product.BARKOD) + ' listede mevcut');
+      showScanToast('warn', 'ℹ️ Zaten seçili');
       return;
     }
     setSelectedIds((prev) => {
@@ -371,7 +379,7 @@ export default function PriceUpdateScreen() {
     });
     setMode('bulk');
     setScanCount((c) => c + 1);
-    showSuccess('Eklendi', product.AD || product.BARKOD);
+    showScanToast('ok', '✅ Eklendi: ' + (product.AD || product.BARKOD));
   }, [stockList, selectedIds]);
 
   const openBulkEdit = () => {
@@ -1146,6 +1154,43 @@ export default function PriceUpdateScreen() {
                   </Text>
                 </TouchableOpacity>
               </View>
+              {/* 2026-06-12 — Inline scan feedback toast (Modal yerine View)
+                  iOS'ta CameraView üzerinde native Modal donma yapıyordu,
+                  bu yüzden state-driven absolute view kullanıyoruz. */}
+              {scanToast && (
+                <View
+                  pointerEvents="none"
+                  style={{
+                    position: 'absolute',
+                    left: 16,
+                    right: 16,
+                    bottom: 120,
+                    alignItems: 'center',
+                  }}
+                >
+                  <View
+                    style={{
+                      backgroundColor: scanToast.type === 'ok' ? 'rgba(22,163,74,0.95)' : 'rgba(234,88,12,0.95)',
+                      paddingHorizontal: 18,
+                      paddingVertical: 12,
+                      borderRadius: 24,
+                      maxWidth: '100%',
+                      shadowColor: '#000',
+                      shadowOpacity: 0.3,
+                      shadowRadius: 8,
+                      shadowOffset: { width: 0, height: 4 },
+                      elevation: 6,
+                    }}
+                  >
+                    <Text
+                      numberOfLines={2}
+                      style={{ color: '#fff', fontSize: 14, fontWeight: '700', textAlign: 'center' }}
+                    >
+                      {scanToast.text}
+                    </Text>
+                  </View>
+                </View>
+              )}
             </View>
           )}
 
