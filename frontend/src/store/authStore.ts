@@ -171,6 +171,23 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
           if (response.ok) {
             const freshUser = await response.json();
             await AsyncStorage.setItem('user', JSON.stringify(freshUser));
+            // 2026-06-09 — Sliding expiry: token'ı 30 günlüğüne yenile
+            // (kullanıcı pratikte hiç logout olmasın). Arka planda sessiz çağrı.
+            (async () => {
+              try {
+                const r = await fetch(`${API_URL}/api/auth/refresh`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${token}` },
+                });
+                if (r.ok) {
+                  const d = await r.json();
+                  if (d?.access_token) {
+                    await AsyncStorage.setItem('token', d.access_token);
+                    set({ token: d.access_token });
+                  }
+                }
+              } catch { /* sessiz */ }
+            })();
             set({ user: freshUser, token, isAuthenticated: true, isLoading: false });
           } else {
             // Token expired, use cached data as fallback

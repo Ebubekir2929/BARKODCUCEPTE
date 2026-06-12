@@ -403,6 +403,21 @@ async def get_me(current_user: dict = Depends(get_current_user)):
     return await build_user_response(current_user)
 
 
+# 2026-06-09 — Token auto-refresh: Frontend her app açılışında çağırır.
+# Mevcut token geçerli ise YENİ 30 günlük token döner (sliding expiry).
+# Bu sayede aktif kullanıcılar pratikte HİÇ logout olmaz.
+@router.post("/refresh")
+async def refresh_token(current_user: dict = Depends(get_current_user)):
+    """Issue a fresh 30-day token using the current valid one.
+    Sliding window — active users never logout."""
+    new_token = create_access_token({
+        "user_id": current_user["user_id"],
+        "email": current_user["email"],
+        "tenant_id": current_user.get("tenant_id"),
+    })
+    return {"access_token": new_token, "token_type": "bearer"}
+
+
 # === Tenant Management (MongoDB for additional tenants) ===
 
 @router.post("/tenants", response_model=UserResponse)
