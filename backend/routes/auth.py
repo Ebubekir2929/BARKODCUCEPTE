@@ -24,7 +24,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # JWT settings
 SECRET_KEY = os.environ.get("JWT_SECRET", "barkodcu-cepte-secret-key-2025")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_HOURS = 72
+ACCESS_TOKEN_EXPIRE_HOURS = 24 * 30  # 30 gün — mobile uygulamalar için endüstri standardı (önceden 72 saat = 3 gündü)
 
 security = HTTPBearer()
 
