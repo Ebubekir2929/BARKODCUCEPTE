@@ -2235,3 +2235,49 @@ agent_communication:
       • /app/frontend/src/components/SummaryCard.tsx (lastWeekLabel prop)
 
 
+
+  -agent: "main"
+  -message: |
+      2026-06-12 — CRITICAL: CompareModal'da Dün/Son 7 Gün/Bu Ay AYNI veriyi
+      döndürüyor sorunu nihai backend fix.
+
+      **Issue (kullanıcı raporu + ekran görüntüleri):**
+      CompareModal'da Dün (26 Haz) ve Son 7 Gün (21-27 Haz) seçildiğinde:
+      - Toplam farklı geliyordu (₺77.883,80 vs ₺411.803,74) ✓
+      - AMA ürün satırları TIPATIP AYNI: KAYISI 15.14 Kg her ikisinde de,
+        HURMA MEBRUM 12.56 Kg her ikisinde de, KAJU 5.61 Kg, vs. ✗
+
+      **Root cause (DB analizi ile):**
+      `dataset_cache_rows` tablosunda `hourly_stock_detail` için 24 günlük
+      (3 Haz - 26 Haz) veri vardı, her gün × 24 saat = 576 satır.
+      AMA `services/dataset_cache.py:lookup_rows_dataset`'in `skip_agg=True`
+      path'inde dedupe key'i şöyleydi:
+        key = (SAAT_ADI, STOK_ID, LOKASYON_ID)   # TARIH YOK!
+      ORDER BY updated_at DESC olduğu için her tarihteki "aynı saat+ürün+lok"
+      satırlarından sadece EN GÜNCEL push edileni (bugün) kalıyordu.
+      Sonuç: tüm tarihler için aynı 270 satır → data.py'deki post-filter
+      _row_in_range() de bunu kurtaramıyor çünkü dedupe ÖNCE oluyor.
+
+      **Fix (services/dataset_cache.py L818-822):**
+      Dedupe key'ine TARIH eklendi (sadece skip_agg=True path):
+        key = (TARIH[:10], SAAT_ADI, STOK_ID, LOKASYON_ID)
+      Böylece her gün ayrı bucket'a düşer; data.py'deki sdate≤TARIH≤edate
+      filtresi doğru çalışır.
+
+      **Önemli not:** Full-day-aggregate path'i (line 853+, skip_agg=False)
+      değiştirilmedi — dashboard hourly chart o yolu kullanır ve tek-gün
+      filter_date için zaten doğru çalışır (dedupe ile bugün = filter_date).
+
+      **Verification (production DB ile birebir):**
+      tenant=bfdb46f5... (576 günlük cache satırı)
+      ✅ lookup_rows_dataset(skip_agg=True) artık 576 satır döndürüyor (24 gün)
+      ✅ POST /api/data/hourly-detail-full:
+         Dün (26 Haz):       row_count=270 (1 gün)
+         Son 7 Gün (21-27):  row_count=1634 (6 gün gerçek dağılım:
+                              21:255, 22:210, 23:160, 24:273, 25:466, 26:270)
+      ✅ Backend restart sonrası canlı
+
+      Files changed:
+      • /app/backend/services/dataset_cache.py (dedupe key + TARIH, skip_agg path)
+
+

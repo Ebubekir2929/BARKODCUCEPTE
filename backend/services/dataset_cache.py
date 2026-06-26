@@ -816,6 +816,14 @@ async def lookup_rows_dataset(
                         except (TypeError, ValueError):
                             pass
                     key = (
+                        # 2026-06-12 — CRITICAL FIX: TARIH dedupe key'inde olmazsa
+                        # farklı tarihlerin (örn. 21-26 Haz) aynı saat+ürün+lok
+                        # satırları "aynı key" sayılıp sadece EN GÜNCEL PUSH
+                        # (bugün) kalıyordu. Sonuç: CompareModal'da Dün/Son 7 Gün
+                        # AYNI veriyi gösteriyordu (Toplam farklı, ürünler aynı).
+                        # TARIH eklenerek her gün ayrı bucket'a düşer; sonradaki
+                        # _row_in_range filtresi de doğru çalışır.
+                        str(d.get("TARIH") or "").strip()[:10],
                         (d.get("SAAT_ADI") or "").strip(),
                         str(d.get("STOK_ID") or ""),
                         str(d.get("LOKASYON_ID") or ""),
