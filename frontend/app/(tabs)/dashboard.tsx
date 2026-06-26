@@ -474,6 +474,20 @@ export default function DashboardScreen() {
     };
   }, [totals, sourceData]);
 
+  // 2026-06-12 — Kullanıcı isteği: kartlarda "Geçen hafta:" yerine gerçek
+  // tarih(ler) gösterilsin. Backend lastWeek = seçili aralığın 7 gün öncesi.
+  //   Tek gün: "19 Haz" (start - 7)
+  //   Aralık:  "24 Nis — 24 May" (start-7 ile end-7)
+  const lastWeekLabel = useMemo(() => {
+    const dayMs = 86400000;
+    const lwStart = new Date(filters.startDate.getTime() - 7 * dayMs);
+    const lwEnd = new Date(filters.endDate.getTime() - 7 * dayMs);
+    const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const sameDay = ymd(lwStart) === ymd(lwEnd);
+    const fmtShort = (d: Date) => d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' });
+    return sameDay ? fmtShort(lwStart) : `${fmtShort(lwStart)} — ${fmtShort(lwEnd)}`;
+  }, [filters.startDate, filters.endDate]);
+
   const maxHourAmount = useMemo(() => {
     const hours = effectiveHourlySales;
     if (hours.length === 0) return 1;
@@ -820,6 +834,7 @@ export default function DashboardScreen() {
               color={colors.cash}
               onPress={() => setSelectedCardType('cash')}
               lastWeekAmount={sourceData.weeklyComparison.lastWeek.cash}
+              lastWeekLabel={lastWeekLabel}
               changePercent={cardChangePercents.cash}
             />
             <SummaryCard
@@ -829,6 +844,7 @@ export default function DashboardScreen() {
               color={colors.primary}
               onPress={() => setSelectedCardType('card')}
               lastWeekAmount={sourceData.weeklyComparison.lastWeek.card}
+              lastWeekLabel={lastWeekLabel}
               changePercent={cardChangePercents.card}
             />
           </View>
@@ -840,6 +856,7 @@ export default function DashboardScreen() {
               color={colors.openAccount}
               onPress={() => setSelectedCardType('openAccount')}
               lastWeekAmount={sourceData.weeklyComparison.lastWeek.openAccount}
+              lastWeekLabel={lastWeekLabel}
               changePercent={cardChangePercents.openAccount}
             />
             <SummaryCard
@@ -849,6 +866,7 @@ export default function DashboardScreen() {
               color={colors.total}
               onPress={() => setSelectedCardType('total')}
               lastWeekAmount={sourceData.weeklyComparison.lastWeek.total}
+              lastWeekLabel={lastWeekLabel}
               changePercent={cardChangePercents.total}
             />
           </View>

@@ -12,6 +12,9 @@ interface SummaryCardProps {
   onPress?: () => void;
   subtitle?: string;
   lastWeekAmount?: number;
+  /** 2026-06-12 — "Geçen hafta:" yerine gerçek tarih(ler) gösterilsin
+   *  (örn. "19 Haz:" veya "24 Nis — 24 May:"). Verilmezse i18n fallback. */
+  lastWeekLabel?: string;
   changePercent?: number;
 }
 
@@ -23,6 +26,7 @@ export const SummaryCard: React.FC<SummaryCardProps> = ({
   onPress,
   subtitle,
   lastWeekAmount,
+  lastWeekLabel,
   changePercent,
 }) => {
   const { colors } = useThemeStore();
@@ -58,7 +62,9 @@ export const SummaryCard: React.FC<SummaryCardProps> = ({
       </Text>
       {lastWeekAmount !== undefined && (
         <View style={styles.lastWeekRow}>
-          <Text style={[styles.lastWeekLabel, { color: colors.textSecondary }]}>{t('last_week_colon')}</Text>
+          <Text style={[styles.lastWeekLabel, { color: colors.textSecondary }]} numberOfLines={1}>
+            {lastWeekLabel ? `${lastWeekLabel}:` : t('last_week_colon')}
+          </Text>
           <Text style={[styles.lastWeekValue, { color: colors.textSecondary }]}>
             ₺{lastWeekAmount.toLocaleString('tr-TR')}
           </Text>

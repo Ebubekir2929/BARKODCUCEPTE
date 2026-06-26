@@ -128,7 +128,11 @@ export const ProductHourlyDetailModal: React.FC<Props> = ({
         style={[
           styles.container,
           { backgroundColor: colors.background },
+          // 2026-06-12 — Android'de statusBarTranslucent=true olunca
+          // header status bar'a giriyordu (saat/notification ile çakışma).
+          // Hem iOS hem Android için top padding zorunlu.
           Platform.OS === 'ios' && { paddingTop: Math.max(insets.top, 12) },
+          Platform.OS === 'android' && { paddingTop: Math.max(insets.top, StatusBar.currentHeight || 24) },
         ]}
         edges={['left', 'right']}
       >

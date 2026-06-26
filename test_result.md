@@ -2197,3 +2197,41 @@ agent_communication:
       • /app/frontend/src/components/ProductHourlyDetailModal.tsx (periodLabel prop + header)
 
 
+
+  -agent: "main"
+  -message: |
+      2026-06-12 — Android ProductHourlyDetail status bar fix + Dashboard cards date label.
+
+      **Issue 1 (Android):** ProductHourlyDetailModal Android'de
+      `statusBarTranslucent=true` ile açıldığında header (yeşil bar)
+      status bar'a giriyordu — saat/notification ile çakışıyordu.
+      iOS'ta `paddingTop: max(insets.top, 12)` ile düzgün çalışıyordu
+      ama Android için padding yoktu.
+
+      **Fix:** SafeAreaView'a Android için de top padding eklendi:
+      `Platform.OS === 'android' && { paddingTop: Math.max(insets.top, StatusBar.currentHeight || 24) }`
+
+      **Issue 2 (Dashboard):** Nakit/KrediKartı/AçıkHesap/Toplam kartlarında
+      "Geçen hafta: ₺X" yazıyordu. Kullanıcı bunun yerine **gerçek tarihin**
+      gösterilmesini istedi (hem normal akışta hem tarih filtresi seçili
+      olduğunda — backend'in karşılaştırma yaptığı gün/aralık).
+
+      **Fix:**
+      • dashboard.tsx — yeni `lastWeekLabel` useMemo:
+        - Tek gün (start==end): "19 Haz" (start - 7 gün)
+        - Aralık: "24 Nis — 24 May" (her ikisi de -7 gün)
+      • 4 SummaryCard çağrısına `lastWeekLabel={lastWeekLabel}` prop'u eklendi
+      • SummaryCard.tsx — yeni `lastWeekLabel?: string` prop'u eklendi
+        Label render: `lastWeekLabel ? \`${lastWeekLabel}:\` : t('last_week_colon')` (fallback i18n)
+
+      **Verification (web preview):**
+      ✅ Dashboard yüklendi — kartlar artık "19 Haz: ₺0" gösteriyor (bugün 26 Haz)
+      ✅ Filtre değişimi de dinamik (filters.startDate/endDate dep'i)
+      ✅ TypeScript hatasız
+
+      Files changed:
+      • /app/frontend/src/components/ProductHourlyDetailModal.tsx (Android padding)
+      • /app/frontend/app/(tabs)/dashboard.tsx (lastWeekLabel useMemo + 4 cards prop)
+      • /app/frontend/src/components/SummaryCard.tsx (lastWeekLabel prop)
+
+
