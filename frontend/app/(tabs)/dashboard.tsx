@@ -476,16 +476,35 @@ export default function DashboardScreen() {
 
   // 2026-06-12 — Kullanıcı isteği: kartlarda "Geçen hafta:" yerine gerçek
   // tarih(ler) gösterilsin. Backend lastWeek = seçili aralığın 7 gün öncesi.
-  //   Tek gün: "19 Haz" (start - 7)
-  //   Aralık:  "24 Nis — 24 May" (start-7 ile end-7)
+  //   Tek gün:     "19 Haziran 2026" (start - 7)
+  //   Aynı ay:     "13 - 19 Haziran 2026"
+  //   Farklı ay:   "30 May - 5 Haz 2026"
+  //   Farklı yıl:  "30 Ara 2025 - 5 Oca 2026"
   const lastWeekLabel = useMemo(() => {
     const dayMs = 86400000;
     const lwStart = new Date(filters.startDate.getTime() - 7 * dayMs);
     const lwEnd = new Date(filters.endDate.getTime() - 7 * dayMs);
     const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const sameDay = ymd(lwStart) === ymd(lwEnd);
+    const fmtFull = (d: Date) => d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric' });
     const fmtShort = (d: Date) => d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' });
-    return sameDay ? fmtShort(lwStart) : `${fmtShort(lwStart)} — ${fmtShort(lwEnd)}`;
+
+    if (ymd(lwStart) === ymd(lwEnd)) {
+      // Tek gün: "19 Haziran 2026"
+      return fmtFull(lwStart);
+    }
+    if (lwStart.getFullYear() !== lwEnd.getFullYear()) {
+      // Farklı yıl: "30 Ara 2025 - 5 Oca 2026"
+      const fmtShortYr = (d: Date) => d.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric' });
+      return `${fmtShortYr(lwStart)} - ${fmtShortYr(lwEnd)}`;
+    }
+    if (lwStart.getMonth() === lwEnd.getMonth()) {
+      // Aynı ay: "13 - 19 Haziran 2026"
+      const sd = lwStart.toLocaleDateString('tr-TR', { day: '2-digit' });
+      const ed = lwEnd.toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric' });
+      return `${sd} - ${ed}`;
+    }
+    // Farklı ay, aynı yıl: "30 May - 5 Haz 2026"
+    return `${fmtShort(lwStart)} - ${lwEnd.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric' })}`;
   }, [filters.startDate, filters.endDate]);
 
   const maxHourAmount = useMemo(() => {
