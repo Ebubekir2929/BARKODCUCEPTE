@@ -31,12 +31,15 @@ interface Props {
   productHourByTenant: Record<string, Record<string, Record<string, Record<string, Cell>>>>;
   getTenantColor: (idx: number) => string;
   fmtTL: (n: number) => string;
+  /** 2026-06-12 — Kullanıcı tarih filtresinin bu ekranda da uygulandığını
+   *  görsün diye dönem etiketi gösterilir. */
+  periodLabel?: string;
 }
 
 const fmt2 = (n: number) => (Math.round(n * 100) / 100).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export const ProductHourlyDetailModal: React.FC<Props> = ({
-  visible, onClose, productName, snapshots, productHourByTenant, getTenantColor, fmtTL,
+  visible, onClose, productName, snapshots, productHourByTenant, getTenantColor, fmtTL, periodLabel,
 }) => {
   const { colors } = useThemeStore();
   const insets = useSafeAreaInsets();
@@ -134,7 +137,9 @@ export const ProductHourlyDetailModal: React.FC<Props> = ({
         {/* Header — ürün adı + kapat */}
         <View style={[styles.header, { backgroundColor: colors.primary }]}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.headerLabel}>SAATLİK ÜRÜN DETAYI</Text>
+            <Text style={styles.headerLabel}>
+              SAATLİK ÜRÜN DETAYI{periodLabel ? ` · ${periodLabel}` : ''}
+            </Text>
             <Text style={styles.headerTitle} numberOfLines={2}>{productName}</Text>
           </View>
           <TouchableOpacity

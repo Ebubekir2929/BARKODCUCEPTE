@@ -2148,3 +2148,52 @@ agent_communication:
       • /app/frontend/src/components/AccentColorPickerModal.tsx (rewrite)
       • /app/frontend/app/price-update/index.tsx (scan toast UI render)
 
+
+  -agent: "main"
+  -message: |
+      2026-06-12 — Compare Modal date filter not applied to product comparison (Bug fix).
+
+      **Issue:** Kullanıcı CompareModal'da tarih filtresi seçtiğinde üst
+      kartlar (financial) güncellendiği halde "Ürün Karşılaştırması" ve
+      "Ürünlerin Saatlik Satışları" tablolarında bugünkü veri görünmeye
+      devam ediyordu. Ayrıca ProductHourlyDetailModal'da hangi dönemin
+      gösterildiği belirsizdi.
+
+      **Root cause:**
+      1. `productHourByTenant` state'i, tarih değiştiğinde temizlenmiyordu;
+         yeni fetch ~25s sürebildiği için kullanıcı eski (bugünkü) veriyi
+         görüyordu.
+      2. Backend'in 60s in-memory TTL cache'i bazen aynı modal session'da
+         tekrar kullanılıyordu (cache key tarihe göre değişse de race condition
+         yaratabiliyordu).
+      3. ProductHourlyDetailModal başlığında periyod gösterilmiyordu.
+
+      **Fix (CompareModal.tsx):**
+      • useEffect başında `setProductHourByTenant({})` ile state temizleniyor
+        → eski veri anında kayboluyor, kullanıcı yeni veri yüklendiğini görüyor
+      • Body'ye `force_refresh: true` eklendi → backend memory cache bypass
+      • "Ürün Karşılaştırması" başlığına `periodLabel` (örn. "01 May — 31 May")
+        + phLoading durumunda "yükleniyor..." metni eklendi
+      • "Ürünlerin Saatlik Satışları" başlığına aynısı eklendi
+      • Pre-existing TS hatası düzeltildi (fresh tipi `birim` field eksikti)
+
+      **Fix (ProductHourlyDetailModal.tsx):**
+      • Yeni `periodLabel?: string` prop'u eklendi
+      • Header'da "SAATLİK ÜRÜN DETAYI · {periodLabel}" şeklinde gösteriliyor
+      • Böylece kullanıcı bu ekrana girdiğinde hangi tarih aralığını
+        gördüğünü net bilebiliyor (mevcut tarih filtresi parent'tan
+        gelmediği gibi, kendi date picker'ı da yok — gösterilmesi yeterli)
+
+      **Verification (web preview):**
+      ✅ "Bugün" preset → tarih: 26 Haz - 26 Haz
+      ✅ "Geçen Ay" preset tıklandı → tarih header güncellendi (01 May — 31 May)
+      ✅ "Filtre uygulanıyor..." spinner header'da görünüyor
+      ✅ "Temizle" butonu çıktı, eski "Bugün" preset deselect oldu
+      ✅ TypeScript hatasız derleniyor
+      ✅ "Geniş tarih aralığı (31 gün)" uyarı banner'ı çalışıyor
+
+      Files changed:
+      • /app/frontend/src/components/CompareModal.tsx (state clear + force_refresh + periodLabel UI)
+      • /app/frontend/src/components/ProductHourlyDetailModal.tsx (periodLabel prop + header)
+
+

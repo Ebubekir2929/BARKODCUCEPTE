@@ -369,10 +369,17 @@ export const CompareModal: React.FC<{
     const edate = fmtDate(endDate);
     let cancelled = false;
     setPhLoading(true);
+    // 2026-06-12 — Tarih değiştiğinde eski (bugünkü) veri ekrandan SİLİNMELİ;
+    // yoksa "Ürün Karşılaştırması" yeni veri gelene kadar eski tarihin
+    // verisini gösteriyor → kullanıcı "tarih filtresi çalışmıyor" diye
+    // raporluyor. TenantDetailModal'da zaten bu davranış var (line 109);
+    // burada da senkronize ediyoruz.
+    setProductHourByTenant({});
 
     (async () => {
       const CHUNK = 12; // tenants in parallel (max throughput)
-      const fresh: Record<string, Record<string, Record<string, Record<string, { qty: number; amount: number; iskonto: number; brut: number; kdv: number }>>>> = {};
+      type Cell = { qty: number; amount: number; iskonto: number; brut: number; kdv: number; birim: string };
+      const fresh: Record<string, Record<string, Record<string, Record<string, Cell>>>> = {};
 
       // Skip tenants that errored out in the snapshot fetch (they have no backend / aborted)
       const validSnapshots = snapshots.filter((s) => !s.error);
@@ -393,6 +400,9 @@ export const CompareModal: React.FC<{
                 date: sdate,
                 edate: edate,
                 lokasyon_id: null,
+                // Bellek cache'ini bypass et: kullanıcı tarihi değiştirdiyse
+                // backend'in TTL_FRESH=60s cache'i araya girmesin.
+                force_refresh: true,
               }),
             });
             clearTimeout(timer);
@@ -515,7 +525,7 @@ export const CompareModal: React.FC<{
           if (!tenantProductHourSum[s.tenant.tenant_id][name]) tenantProductHourSum[s.tenant.tenant_id][name] = {};
           Object.entries(hours).forEach(([h, cell]) => {
             const t = tenantProductHourSum[s.tenant.tenant_id][name];
-            if (!t[h]) t[h] = { qty: 0, amount: 0, iskonto: 0, brut: 0, kdv: 0 };
+            if (!t[h]) t[h] = { qty: 0, amount: 0, iskonto: 0, brut: 0, kdv: 0, birim: cell.birim || 'ad' };
             t[h].qty += cell.qty;
             t[h].amount += cell.amount;
             t[h].iskonto += cell.iskonto;
@@ -1031,9 +1041,14 @@ export const CompareModal: React.FC<{
                 <View style={[styles.sectionBox, { backgroundColor: colors.card, borderColor: colors.border, padding: 0 }]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14, paddingBottom: 8 }}>
                     <Ionicons name="list-outline" size={16} color={colors.primary} />
-                    <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0, flex: 1 }]} numberOfLines={1}>
-                      Ürün Karşılaştırması · Tüm Veri Kaynakları
-                    </Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]} numberOfLines={1}>
+                        Ürün Karşılaştırması · Tüm Veri Kaynakları
+                      </Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600', marginTop: 2 }} numberOfLines={1}>
+                        {periodLabel}{phLoading ? ' · yükleniyor...' : ''}
+                      </Text>
+                    </View>
                     <View style={{ backgroundColor: colors.primary + '18', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
                       <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>
                         {totalAvailable > allProductsRows.length ? `${allProductsRows.length}/${totalAvailable}` : `${allProductsRows.length}`} ürün
@@ -1200,9 +1215,14 @@ export const CompareModal: React.FC<{
                 <View style={[styles.sectionBox, { backgroundColor: colors.card, borderColor: colors.border, padding: 0 }]}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14, paddingBottom: 4 }}>
                     <Ionicons name="time-outline" size={16} color={colors.primary} />
-                    <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0, flex: 1 }]} numberOfLines={1}>
-                      Ürünlerin Saatlik Satışları · Veri Kaynağı + Lokasyon
-                    </Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]} numberOfLines={1}>
+                        Ürünlerin Saatlik Satışları · Veri Kaynağı + Lokasyon
+                      </Text>
+                      <Text style={{ color: colors.textSecondary, fontSize: 10, fontWeight: '600', marginTop: 2 }} numberOfLines={1}>
+                        {periodLabel}{phLoading ? ' · yükleniyor...' : ''}
+                      </Text>
+                    </View>
                     {phLoading && <ActivityIndicator size="small" color={colors.primary} />}
                     <View style={{ backgroundColor: colors.primary + '18', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
                       <Text style={{ color: colors.primary, fontSize: 11, fontWeight: '700' }}>
@@ -1361,6 +1381,7 @@ export const CompareModal: React.FC<{
         productHourByTenant={productHourByTenant}
         getTenantColor={getTenantColor}
         fmtTL={fmtTL}
+        periodLabel={periodLabel}
       />
       </View>
     </Modal>
