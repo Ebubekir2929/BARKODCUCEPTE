@@ -1410,6 +1410,7 @@ async def get_hourly_stock_detail(
                 f"[hourly-detail] returning cache result: {row_count} urun rows, total={total:.2f}"
             )
             return {
+                "ok": True,
                 "data": urun_only,
                 "row_count": row_count,
                 "hour_count": 1,
