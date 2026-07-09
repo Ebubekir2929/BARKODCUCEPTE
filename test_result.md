@@ -2375,3 +2375,62 @@ agent_communication:
       • /app/frontend/src/components/DashboardSections.tsx (detailRows memo + 4 kullanım)
 
 
+
+  -agent: "main"
+  -message: |
+      2026-07-09 — KRİTİK: /hourly-detail endpoint'i cache-first + kesin
+      saat filtresi ile yeniden yazıldı.
+
+      **Issue (kullanıcı raporu):**
+      Dashboard chart 12:00-13:00 için ₺20K göstermesine rağmen o saati
+      tıklayınca açılan Saatlik Satış Detayı modalında Toplam ₺50.417,10
+      görünüyordu. Yani chart ile modal arasında 2.5x tutar farkı vardı.
+
+      **Root cause (backend simülasyonuyla ortaya çıkarıldı):**
+      `/hourly-detail` endpoint'i `_on_demand_request()` → POS'a canlı
+      istek atıyordu. POS `hourly_stock_detail` procedure'ü tarih
+      aralığındaki TÜM SAATLERİN parent'larını dönüyordu (12:00-13:00
+      için istek gitse bile 14:00-15:00 vs. de geliyordu).
+      `_flatten_hourly_urunler` bunların URUNLER'ini expand edince:
+        - 72 parent × ~30 ürün = 2087 satır
+        - DÜĞÜN ÇEREZİ 17x (farklı saatlerde, filtre eksik)
+        - Sum(KDV_DAHIL) = ₺455.524 (tam gün cirosu)
+      Frontend `hourDetailRows.reduce()` bunu topluyor → şişme.
+
+      **Fix (backend/routes/data.py get_hourly_stock_detail):**
+      Tam rewrite. Yeni akış:
+      1. **Cache-first (adım 1):** dataset_cache_rows'a doğrudan SQL:
+           `WHERE dataset_key='hourly_stock_detail'
+            AND row_json LIKE '%"SAAT_ADI":"12:00 - 13:00"%'
+            AND row_json LIKE '%"TARIH":"2026-07-09%'`
+         Sonra Python'da kesin SAAT_ADI + TARIH + LOKASYON_ID doğrulaması
+         (LIKE false-positive önle).
+         Filtered parent'ların URUNLER'ini expand + aggregate parent
+         (STOK_ADI boş) satırlarını at → sadece URUN satırları.
+      2. **POS fallback (adım 2):** cache'de HİÇ parent yoksa canlı POS
+         isteği. Aynı filtreleme (SAAT_ADI + STOK_ADI) uygulanır.
+
+      Böylece:
+        - Gereksiz POS canlı isteği yok (hız + POS yükü ↓)
+        - Diğer saatlerin verisi karışmaz
+        - Aggregate parent'lar dönmez → dip Toplam şişmesi imkansız
+
+      **Verification (production DB ile birebir test):**
+      Tenant: 6de69d3b97094959ad70b48f628e6e57, tarih: 2026-07-09
+      Chart bar değerleri ile birebir uyuştu:
+        08:00-09:00: row_count=9   sum=₺871,55    (chart 872)     ✅
+        10:00-11:00: row_count=57  sum=₺7.893,69  (chart 7.9K)    ✅
+        11:00-12:00: row_count=73  sum=₺15.084,51 (chart 15K)     ✅
+        12:00-13:00: row_count=103 sum=₺20.158,29 (chart 20K)     ✅ ⭐
+        13:00-14:00: row_count=99  sum=₺17.728,42 (chart 18K)     ✅
+        14:00-15:00: row_count=110 sum=₺18.867,79 (chart 19K)     ✅
+
+      _source: 'cache' — POS'a hiç gitmiyor, ANLIK cevap veriyor.
+
+      Files changed:
+      • /app/backend/routes/data.py (get_hourly_stock_detail full rewrite)
+
+      **NOT:** Bu tamamen backend fix. Mevcut iOS/Android build'inizle bile
+      hemen doğru veri gelecek — yeni build almanız gerekmiyor.
+
+

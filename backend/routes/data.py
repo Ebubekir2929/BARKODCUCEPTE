@@ -1306,24 +1306,36 @@ async def get_hourly_stock_detail(
     body: dict,
     current_user: dict = Depends(get_current_user),
 ):
-    """On-demand: Hourly stock detail - products sold in a specific hour"""
+    """On-demand: Hourly stock detail - products sold in a specific hour.
+
+    2026-07-09 — REWRITE: Cache-first + kesin saat filtresi.
+
+    Önce dataset_cache_rows'tan bu saat+lokasyon için parent'ları çek,
+    URUNLER'i expand et. lookup_rows_dataset'in yanlış filtreleme
+    davranışlarına bel bağlamadan doğrudan SQL sorgusu yapılıyor.
+    Böylece:
+      - Yalnızca hedef saat gelir (12:00-13:00 istenirse 13:00-14:00 gelmez)
+      - Aggregate parent (STOK_ADI boş) hiç dönmez — sadece URUN satırları
+      - POS'a canlı istek atılmaz (cache'de veri varken gereksiz yavaşlık)
+
+    POS fallback: cache'de HİÇ satır yoksa POS'a canlı istek atılır.
+    """
     tenant_id = body.get("tenant_id", "")
     hour_label = body.get("hour_label", "")  # e.g. "10:00 - 11:00"
     filter_date = body.get("date", "")  # YYYY-MM-DD
     lokasyon_id = body.get("lokasyon_id")  # optional
-    
+
     if not tenant_id or not hour_label:
         raise HTTPException(status_code=400, detail="tenant_id ve hour_label gerekli")
-    
+
     if not filter_date:
         from datetime import date as date_cls
         filter_date = date_cls.today().strftime("%Y-%m-%d")
-    
+
     # Parse hour label: "10:00 - 11:00" → start_hour=10
     import re
     match = re.match(r'^\s*(\d{1,2})\s*:\s*00\s*-\s*(\d{1,2})\s*:\s*00\s*$', hour_label)
     if not match:
-        # Try simpler format: "10:00"
         match2 = re.match(r'^\s*(\d{1,2})\s*:\s*00\s*$', hour_label)
         if match2:
             start_hour = int(match2.group(1))
@@ -1331,24 +1343,105 @@ async def get_hourly_stock_detail(
             raise HTTPException(status_code=400, detail=f"Geçersiz saat formatı: {hour_label}")
     else:
         start_hour = int(match.group(1))
-    
+
+    canonical_hour = f"{start_hour:02d}:00 - {(start_hour+1) % 24:02d}:00"
+
+    # ── STEP 1: Cache-first — dataset_cache_rows'tan doğrudan çek ─────────
+    try:
+        pool = await get_data_pool()
+        params_sql = [tenant_id, f'%"SAAT_ADI":"{canonical_hour}"%', f'%"TARIH":"{filter_date}%']
+        where_extra = ""
+        if lokasyon_id:
+            where_extra = " AND row_json LIKE %s"
+            params_sql.append(f'%"LOKASYON_ID":{int(lokasyon_id)}%')
+
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    f"""
+                    SELECT row_json FROM dataset_cache_rows
+                    WHERE tenant_id=%s
+                      AND dataset_key='hourly_stock_detail'
+                      AND deleted_at IS NULL
+                      AND row_json LIKE %s
+                      AND row_json LIKE %s
+                      {where_extra}
+                    """,
+                    tuple(params_sql),
+                )
+                raw_rows = await cur.fetchall()
+
+        parents: list = []
+        for (rj,) in raw_rows:
+            try:
+                d = json.loads(rj) if isinstance(rj, (str, bytes)) else rj
+            except Exception:
+                continue
+            # Kesin saat + tarih doğrulaması (LIKE pattern false-positive önle)
+            saat = str(d.get("SAAT_ADI") or "").strip()
+            tarih = str(d.get("TARIH") or "")[:10]
+            if saat != canonical_hour:
+                continue
+            if tarih != filter_date:
+                continue
+            if lokasyon_id and str(d.get("LOKASYON_ID") or "") != str(int(lokasyon_id)):
+                continue
+            parents.append(d)
+
+        logger.info(
+            f"[hourly-detail] cache hit tenant={tenant_id} hour={canonical_hour} date={filter_date} "
+            f"parents={len(parents)} lokasyon={lokasyon_id}"
+        )
+
+        if parents:
+            # Aggregate parent (STOK_ADI boş) rows'ları at, sadece URUN satırlarını çıkart
+            flat = _flatten_hourly_urunler(parents)
+            # Sadece STOK_ADI dolu (gerçek URUN) satırları — aggregate parent'ları temizle
+            urun_only = [
+                r for r in flat
+                if isinstance(r, dict) and str(r.get("STOK_ADI") or "").strip()
+            ]
+            row_count = len(urun_only)
+            total = sum(
+                float(r.get("KDV_DAHIL_TOPLAM_TUTAR") or r.get("TOPLAM_TUTAR") or 0)
+                for r in urun_only
+            )
+            logger.info(
+                f"[hourly-detail] returning cache result: {row_count} urun rows, total={total:.2f}"
+            )
+            return {
+                "data": urun_only,
+                "row_count": row_count,
+                "hour_count": 1,
+                "_source": "cache",
+            }
+    except Exception as cache_err:
+        logger.warning(f"[hourly-detail] cache fetch failed: {cache_err}; falling back to POS")
+
+    # ── STEP 2: POS fallback — cache'de veri yoksa canlı istek ────────────
     params = {
         "sdate": f"{filter_date} {start_hour:02d}:00:00",
         "edate": f"{filter_date} {start_hour:02d}:59:59",
         "lokasyonID": int(lokasyon_id) if lokasyon_id else None,
     }
-    
+
     try:
         result = await _on_demand_request(tenant_id, "hourly_stock_detail", params)
-        # Flatten parent rows (SAAT+LOKASYON aggregates) into per-product rows
-        # by expanding the `URUNLER` array. Saatlik Satış Detayı modalında
-        # her ürün (STOK_ADI + BIRIM_ADI + MIKTAR + TUTAR) ayrı satır olarak
-        # gözüksün.
         try:
             if isinstance(result, dict):
                 d = result.get("data")
                 if isinstance(d, list) and d:
-                    result["data"] = _flatten_hourly_urunler(d)
+                    flat = _flatten_hourly_urunler(d)
+                    # Filter: sadece hedef saat + URUN satırları (aggregate at)
+                    filtered = [
+                        r for r in flat
+                        if isinstance(r, dict)
+                        and str(r.get("SAAT_ADI") or "").strip() == canonical_hour
+                        and str(r.get("STOK_ADI") or "").strip()
+                    ]
+                    result["data"] = filtered
+                    result["row_count"] = len(filtered)
+                    result["_source"] = "pos_live"
         except Exception as _unwrap_err:
             logger.debug(f"hourly-detail flatten skipped: {_unwrap_err}")
         return result
