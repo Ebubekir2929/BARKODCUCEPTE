@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView, ActivityIndicator, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
@@ -467,6 +467,20 @@ export const HourlyLocationSection: React.FC<{
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedItem, setSelectedItem] = useState<any | null>(null);
   const [expandedLoc, setExpandedLoc] = useState<string | null>(null);
+
+  // 2026-06-12 — Aggregate parent satırları (STOK_ADI boş) `detailData` içinde
+  // kalıyordu → dip Toplam ve KDV Kırılım şişiyordu. Dashboard'daki
+  // hourDetailRows fix'inin aynısını burada da uygula: filter'ı memoize et
+  // ve tüm reduce/map yerleri bunu kullansın.
+  const detailRows = useMemo(() => {
+    return (detailData || []).filter((p: any) => {
+      const ad = String(p?.STOK_ADI || '').trim();
+      const miktar = parseFloat(p?.TOPLAM_MIKTAR || '0');
+      const tutar = parseFloat(p?.KDV_DAHIL_TOPLAM_TUTAR || p?.TOPLAM_TUTAR || '0');
+      return ad && (miktar !== 0 || tutar !== 0);
+    });
+  }, [detailData]);
+
   // Derived data from /hourly-detail-full (preferred over `data` prop)
   const [derivedData, setDerivedData] = useState<any[] | null>(null);
   // Trigger to force re-fetch (auto-refresh tick or manual)
@@ -804,7 +818,16 @@ export const HourlyLocationSection: React.FC<{
                     {typeof selectedItem.hourAmount === 'number' && selectedItem.hourAmount > 0 && (
                       <View style={{ backgroundColor: colors.primary + '15', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 }}>
                         <Text style={{ fontSize: 12, fontWeight: '700', color: colors.primary }}>
-                          ₺{selectedItem.hourAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          ₺{(() => {
+                            // 2026-06-12 — Ürün detayları yüklendikten sonra üst badge'i
+                            // gerçek toplamla eşle (dip Toplam ile aynı olsun).
+                            const rowsTotal = detailRows.reduce(
+                              (s: number, p: any) => s + parseFloat(p.KDV_DAHIL_TOPLAM_TUTAR || p.TOPLAM_TUTAR || '0'),
+                              0,
+                            );
+                            const displayAmt = rowsTotal > 0 ? rowsTotal : selectedItem.hourAmount;
+                            return displayAmt.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                          })()}
                         </Text>
                       </View>
                     )}
@@ -817,14 +840,14 @@ export const HourlyLocationSection: React.FC<{
                   <ActivityIndicator size="large" color={colors.primary} />
                   <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>POS'tan veri alınıyor...</Text>
                 </View>
-              ) : detailData.length > 0 ? (
+              ) : detailRows.length > 0 ? (
                 <View style={[{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', marginTop: 12 }]}>
                   <View style={[{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 12, backgroundColor: colors.background }]}>
                     <Text style={[{ flex: 2.4, fontSize: 12, fontWeight: '700', color: colors.textSecondary }]}>Ürün</Text>
                     <Text style={[{ flex: 0.8, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>Miktar</Text>
                     <Text style={[{ flex: 1.8, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>Tutar</Text>
                   </View>
-                  {detailData.map((item: any, idx: number) => {
+                  {detailRows.map((item: any, idx: number) => {
                     const tutar = parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0');
                     const brut = parseFloat(item.BRUT_KDV_DAHIL_TOPLAM_TUTAR || '0');
                     const iskonto = parseFloat(item.GENEL_ISKONTO_TUTARI || item.ISKONTO_TUTARI || '0');
@@ -905,7 +928,7 @@ export const HourlyLocationSection: React.FC<{
                       adjustsFontSizeToFit
                       minimumFontScale={0.6}
                     >
-                      ₺{detailData.reduce((sum: number, item: any) => sum + parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0'), 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ₺{detailRows.reduce((sum: number, item: any) => sum + parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0'), 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </Text>
                   </View>
                 </View>

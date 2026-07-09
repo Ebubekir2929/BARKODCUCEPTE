@@ -2342,3 +2342,36 @@ agent_communication:
       • /app/frontend/src/components/DashboardSections.tsx (brüt açıklama chip)
 
 
+
+  -agent: "main"
+  -message: |
+      2026-07-09 — Aynı "aggregate parent şişme" fix'i Lokasyon Saatlik
+      Satışlar bölümünde de uygulandı.
+
+      **Issue:** Dashboard Saatlik Satışlar modal fix'inden sonra kullanıcı
+      "aynı problem Lokasyon Saatlik Satışlar → Saat Detayı modalında da
+      var" dedi. Doğru — DashboardSections.tsx içindeki `LocationHourly`
+      bileşeni de `/hourly-detail` çağırıyor ve dönen `detailData`
+      içinde aggregate parent satırlar var; 3 farklı yerde ham list
+      kullanılıyordu.
+
+      **Fix (src/components/DashboardSections.tsx):**
+      1. `useMemo` import edildi
+      2. `detailData` state'inin hemen ardına yeni `detailRows` useMemo
+         eklendi (STOK_ADI dolu + non-zero filter)
+      3. 3 kullanım yeri güncellendi:
+         • `detailData.length > 0 ?` → `detailRows.length > 0 ?`
+         • `detailData.map(...)` → `detailRows.map(...)`
+         • `detailData.reduce(...)` → `detailRows.reduce(...)`
+      4. Bonus — üst badge (`selectedItem.hourAmount`): ürün detayları
+         yüklendikten sonra `detailRows.reduce()` toplamıyla eşlenir
+         (böylece üst badge = dip Toplam tutarlı).
+
+      **Verification:**
+      ✅ TypeScript hatasız
+      ✅ Expo restart edildi, bundle temiz (HTTP 200)
+
+      Files changed:
+      • /app/frontend/src/components/DashboardSections.tsx (detailRows memo + 4 kullanım)
+
+
