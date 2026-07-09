@@ -92,6 +92,25 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
         <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]} numberOfLines={1}>Garson / Personel Satışları</Text>
       </View>
 
+      {/* 2026-06-12 — Kullanıcı sorusu: "Personel satışı toplam satıştan nasıl
+          yüksek oluyor?"
+          Bu bölüm POS'un PERAKENDE_SATIS_TUTARI alanını gösterir — kasa satış
+          BRÜT toplamı (iptal düşülmemiş). Dashboard'un üstündeki Toplam
+          kartı ise NETCIRO (iptal + iade düşülmüş net) kullanır.
+          Bu iki değerin farklı olması NORMAL. Kullanıcının kafası karışmasın
+          diye üst bilgi çubuğu ekliyoruz. */}
+      <View style={{
+        flexDirection: 'row', alignItems: 'center', gap: 6,
+        marginBottom: 10, paddingHorizontal: 10, paddingVertical: 6,
+        borderRadius: 8, backgroundColor: '#F59E0B12',
+        borderWidth: 1, borderColor: '#F59E0B33',
+      }}>
+        <Ionicons name="information-circle-outline" size={14} color="#F59E0B" />
+        <Text style={{ flex: 1, fontSize: 10, color: colors.textSecondary, lineHeight: 14 }}>
+          <Text style={{ fontWeight: '800', color: '#F59E0B' }}>Brüt satış</Text> · Kasa satış toplamı (iptaller dahildir). Dashboard üstündeki Toplam kartı iptaller düşülmüş nettir.
+        </Text>
+      </View>
+
       {/* Tab Switcher */}
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
         <TouchableOpacity

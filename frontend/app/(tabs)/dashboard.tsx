@@ -212,6 +212,21 @@ export default function DashboardScreen() {
   const [hourDetailProducts, setHourDetailProducts] = useState<any[]>([]);
   const [hourDetailLoading, setHourDetailLoading] = useState(false);
 
+  // 2026-06-12 — Aggregate parent satırları (STOK_ADI boş, sadece hour+lokasyon
+  // toplamları) `hourDetailProducts` içinde kalıyor. Ürün listesi bunları
+  // filtreyle atıyor ama diğer toplam/reduce hesapları TÜM listeyi topluyor
+  // → dip Toplam ve KDV Kırılım şişiyordu (kullanıcı raporu: 11:00-12:00 dilimi
+  // için ₺54.030 dip toplam, gerçekte gerektiğinden çok yüksek).
+  // Tek bir yerden filtrelenmiş listeyi türetip her hesapta onu kullan.
+  const hourDetailRows = useMemo(() => {
+    return (hourDetailProducts || []).filter((p: any) => {
+      const ad = String(p?.STOK_ADI || '').trim();
+      const miktar = parseFloat(p?.TOPLAM_MIKTAR || '0');
+      const tutar = parseFloat(p?.KDV_DAHIL_TOPLAM_TUTAR || p?.TOPLAM_TUTAR || '0');
+      return ad && (miktar !== 0 || tutar !== 0);
+    });
+  }, [hourDetailProducts]);
+
   // İptal detail state — 2026-05-06 yenilendi: artık standalone IptalDetailModal kullanılıyor
   // (eski selectedIptalItem/iptalDetailItems/iptalDetailLoading/fetchIptalDetail silindi).
   const [iptalDetailVisible, setIptalDetailVisible] = useState(false);
@@ -1887,7 +1902,10 @@ export default function DashboardScreen() {
             </View>
             {selectedHour && (
               <ScrollView style={[styles.modalBody, { backgroundColor: colors.surface }]} contentContainerStyle={styles.modalBodyContent} nestedScrollEnabled bounces showsVerticalScrollIndicator>
-                {/* Compact Hour Summary */}
+                {/* Compact Hour Summary — Toplam: filtrelenmiş ürün satırlarından
+                    hesapla (aggregate parent şişmelerini önle). Ürün fetch
+                    tamamlanmadan önce chart'tan gelen selectedHour.amount
+                    kullanılır (loading state). */}
                 <View style={[styles.hourDetailCompact, { backgroundColor: colors.primary + '10', borderColor: colors.border }]}>
                   <View style={styles.hourDetailCompactLeft}>
                     <Ionicons name="time-outline" size={28} color={colors.primary} />
@@ -1897,25 +1915,32 @@ export default function DashboardScreen() {
                     </View>
                   </View>
                   <Text style={[styles.hourDetailAmount, { color: colors.primary }]}>
-                    ₺{selectedHour.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                    ₺{(() => {
+                      const rowsTotal = hourDetailRows.reduce(
+                        (s: number, p: any) => s + parseFloat(p.KDV_DAHIL_TOPLAM_TUTAR || p.TOPLAM_TUTAR || '0'),
+                        0,
+                      );
+                      const displayAmt = rowsTotal > 0 ? rowsTotal : selectedHour.amount;
+                      return displayAmt.toLocaleString('tr-TR', { minimumFractionDigits: 2 });
+                    })()}
                   </Text>
                 </View>
 
                 {/* İskonto Bilgisi */}
                 {(() => {
                   // Sum from procedure fields (GENEL_ISKONTO_TUTARI is post-aggregated discount per row)
-                  const totalIskonto = hourDetailProducts.reduce((s: number, p: any) =>
+                  const totalIskonto = hourDetailRows.reduce((s: number, p: any) =>
                     s + parseFloat(p.GENEL_ISKONTO_TUTARI || p.ISKONTO_TUTARI || p.TOPLAM_ISKONTO || '0'), 0);
-                  const perakendeIskonto = hourDetailProducts.reduce((s: number, p: any) =>
+                  const perakendeIskonto = hourDetailRows.reduce((s: number, p: any) =>
                     s + parseFloat(p.PERAKENDE_GENEL_ISKONTO_TUTARI || p.PERAKENDE_ISKONTO_TUTARI || p.PERAKENDE_ISKONTO || '0'), 0);
-                  const erp12Iskonto = hourDetailProducts.reduce((s: number, p: any) =>
+                  const erp12Iskonto = hourDetailRows.reduce((s: number, p: any) =>
                     s + parseFloat(p.ERP12_GENEL_ISKONTO_TUTARI || p.ERP12_ISKONTO_TUTARI || p.ERP12_ISKONTO || '0'), 0);
                   // Total KDV
-                  const totalKdv = hourDetailProducts.reduce((s: number, p: any) =>
+                  const totalKdv = hourDetailRows.reduce((s: number, p: any) =>
                     s + parseFloat(p.KDV_TUTARI || p.TOPLAM_KDV || '0'), 0);
-                  const perakendeKdv = hourDetailProducts.reduce((s: number, p: any) =>
+                  const perakendeKdv = hourDetailRows.reduce((s: number, p: any) =>
                     s + parseFloat(p.PERAKENDE_KDV_TUTARI || p.PERAKENDE_KDV || '0'), 0);
-                  const erp12Kdv = hourDetailProducts.reduce((s: number, p: any) =>
+                  const erp12Kdv = hourDetailRows.reduce((s: number, p: any) =>
                     s + parseFloat(p.ERP12_KDV_TUTARI || p.ERP12_KDV || '0'), 0);
                   if (totalIskonto <= 0 && totalKdv <= 0) return null;
                   const fmt = (v: number) => v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -1984,7 +2009,7 @@ export default function DashboardScreen() {
                   const groups: Record<string, { rate: number; matrah: number; kdv: number; total: number; count: number }> = {};
                   let totalMatrah = 0;
                   let totalKdvAll = 0;
-                  for (const p of hourDetailProducts as any[]) {
+                  for (const p of hourDetailRows as any[]) {
                     const dahil = parseFloat(p.KDV_DAHIL_TOPLAM_TUTAR || p.TOPLAM_TUTAR || '0');
                     const kdv = parseFloat(p.KDV_TUTARI || p.TOPLAM_KDV || '0');
                     let matrah = parseFloat(
@@ -2087,22 +2112,16 @@ export default function DashboardScreen() {
                     <ActivityIndicator size="large" color={colors.primary} />
                     <Text style={[{ color: colors.textSecondary, marginTop: 12, fontSize: 14 }]}>POS'tan veri alınıyor...</Text>
                   </View>
-                ) : hourDetailProducts.length > 0 ? (
+                ) : hourDetailRows.length > 0 ? (
                   <View style={[{ borderRadius: 12, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' }]}>
                     <View style={[{ flexDirection: 'row', paddingVertical: 10, paddingHorizontal: 12, backgroundColor: colors.background }]}>
                       <Text style={[{ flex: 2.4, fontSize: 12, fontWeight: '700', color: colors.textSecondary }]}>{t('product')}</Text>
                       <Text style={[{ flex: 0.8, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'center' }]}>{t('quantity_short')}</Text>
                       <Text style={[{ flex: 1.8, fontSize: 12, fontWeight: '700', color: colors.textSecondary, textAlign: 'right' }]}>{t('amount_col')}</Text>
                     </View>
-                    {/* 2026-05-05 — Filter out phantom rows: payment-type rows leaking
-                        from the POS feed (LOKASYON='VERESİYE'/'NAKİT'/'KART' with empty
-                        STOK_ADI and 0 quantity). Only render real products. */}
-                    {hourDetailProducts.filter((p: any) => {
-                      const ad = (p.STOK_ADI || '').trim();
-                      const miktar = parseFloat(p.TOPLAM_MIKTAR || '0');
-                      const tutar = parseFloat(p.KDV_DAHIL_TOPLAM_TUTAR || p.TOPLAM_TUTAR || '0');
-                      return ad && (miktar !== 0 || tutar !== 0);
-                    }).map((item: any, idx: number) => {
+                    {/* 2026-06-12 — hourDetailRows already filtered (memo above)
+                        Aggregate parent satırları filtre dışı → sum'lar doğru olur */}
+                    {hourDetailRows.map((item: any, idx: number) => {
                       const tutar = parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0');
                       const brut = parseFloat(item.BRUT_KDV_DAHIL_TOPLAM_TUTAR || '0');
                       const iskonto = parseFloat(item.GENEL_ISKONTO_TUTARI || item.ISKONTO_TUTARI || '0');
@@ -2183,7 +2202,7 @@ export default function DashboardScreen() {
                         adjustsFontSizeToFit
                         minimumFontScale={0.6}
                       >
-                        ₺{hourDetailProducts.reduce((sum: number, item: any) => sum + parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0'), 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ₺{hourDetailRows.reduce((sum: number, item: any) => sum + parseFloat(item.KDV_DAHIL_TOPLAM_TUTAR || item.TOPLAM_TUTAR || '0'), 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                       </Text>
                     </View>
                   </View>

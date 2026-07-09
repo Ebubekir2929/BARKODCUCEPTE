@@ -2281,3 +2281,64 @@ agent_communication:
       • /app/backend/services/dataset_cache.py (dedupe key + TARIH, skip_agg path)
 
 
+
+  -agent: "main"
+  -message: |
+      2026-07-09 — İki KRİTİK data bug fix'i (Saatlik Detay dip Toplam + Garson brüt/net).
+
+      **Issue 1 (KRİTİK):** Saatlik Satış Detayı modalında dip **Toplam
+      şişiyordu** (kullanıcı ekran görüntüsü: 11:00-12:00 dilimi ürünler
+      ₺8-19 aralığında görünürken dip Toplam ₺54.030,17 — mantıksız).
+      Ayrıca üst kart Toplam vs KDV Kırılım Toplam da uyuşmuyordu.
+
+      **Root cause (DB analizi):**
+      `dataset_cache_rows.hourly_stock_detail` içinde çekilen satırların
+      TAMAMI **aggregate parent** (STOK_ADI boş, sadece hour+lokasyon
+      toplamları). Backend `_flatten_hourly_urunler`:
+        • URUNLER varsa: expand → ürün satırları
+        • URUNLER yoksa: **parent satırı olduğu gibi bırak** ← burası sorun
+      Sonuç: `hourDetailProducts` array'i hem ürün rows hem no-URUNLER
+      aggregate parent rows içeriyor. Ürün listesi filter (STOK_ADI kontrolü)
+      aggregate'leri saklıyor AMA:
+        • Dip Toplam `reduce(KDV_DAHIL_TOPLAM_TUTAR)`: TÜM satırları topluyor
+        • KDV Kırılım `for (p of hourDetailProducts)`: TÜM satırları topluyor
+        • Toplam İskonto/KDV üst kartlar: TÜM satırları topluyor
+      → Aggregate rows'un büyük toplam değerleri şişirme yapıyor.
+
+      **Fix (dashboard.tsx):**
+      1. `hourDetailRows` useMemo eklendi — filter'ı TEK yerde uygulayıp
+         her hesapta bu türetilmiş listeyi kullan
+      2. Aşağıdaki tüm yerler `hourDetailProducts` → `hourDetailRows`:
+         • Üst kart Toplam (line 1900)
+         • İskonto/KDV üst kartlar (line 1907-1919)
+         • KDV Kırılım (line 1987)
+         • Ürün listesi map (line 2100)
+         • Dip Toplam reduce (line 2186)
+         • hasProducts guard (line 2090)
+
+      Sonuç: 3 farklı yerde gösterilen "Toplam" değerleri artık birbiriyle
+      tutarlı. Aggregate parent şişirmesi ortadan kalktı.
+
+      **Issue 2:** "Personel Satışı > Toplam" — kullanıcı Garson (POS)
+      kartında ₺38.457 görürken Dashboard Toplam ₺34.231 gösteriyordu.
+
+      **Root cause:** POS'un `PERAKENDE_SATIS_TUTARI` alanı **brüt kasa satışı**
+      (iptaller dahil), `financial_data_location.TOPLAM` ise **NETCIRO**
+      (iptaller + iadeler düşülmüş). Bu ikisinin farklı olması POS
+      mimarisinde NORMAL — bug değil. Fark ≈ iptaller.
+
+      **Fix (DashboardSections.tsx):** Kullanıcı yanılmasın diye Garson /
+      Personel Satışları başlığının altına açıklayıcı uyarı chip'i eklendi:
+        "Brüt satış · Kasa satış toplamı (iptaller dahildir). Dashboard
+         üstündeki Toplam kartı iptaller düşülmüş nettir."
+
+      **Verification:**
+      ✅ TypeScript hatasız (mevcut pre-existing hariç)
+      ✅ Expo restart edildi, web preview bundle temiz
+      ✅ Kod-review ile 6 farklı reduce/map yeri incelendi
+
+      Files changed:
+      • /app/frontend/app/(tabs)/dashboard.tsx (hourDetailRows memo + 6 reduce/map)
+      • /app/frontend/src/components/DashboardSections.tsx (brüt açıklama chip)
+
+
