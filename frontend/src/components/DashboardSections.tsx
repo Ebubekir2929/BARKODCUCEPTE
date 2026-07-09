@@ -94,22 +94,46 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
 
       {/* 2026-06-12 — Kullanıcı sorusu: "Personel satışı toplam satıştan nasıl
           yüksek oluyor?"
-          Bu bölüm POS'un PERAKENDE_SATIS_TUTARI alanını gösterir — kasa satış
-          BRÜT toplamı (iptal düşülmemiş). Dashboard'un üstündeki Toplam
-          kartı ise NETCIRO (iptal + iade düşülmüş net) kullanır.
-          Bu iki değerin farklı olması NORMAL. Kullanıcının kafası karışmasın
-          diye üst bilgi çubuğu ekliyoruz. */}
-      <View style={{
-        flexDirection: 'row', alignItems: 'center', gap: 6,
-        marginBottom: 10, paddingHorizontal: 10, paddingVertical: 6,
-        borderRadius: 8, backgroundColor: '#F59E0B12',
-        borderWidth: 1, borderColor: '#F59E0B33',
-      }}>
-        <Ionicons name="information-circle-outline" size={14} color="#F59E0B" />
-        <Text style={{ flex: 1, fontSize: 10, color: colors.textSecondary, lineHeight: 14 }}>
-          <Text style={{ fontWeight: '800', color: '#F59E0B' }}>Brüt satış</Text> · Kasa satış toplamı (iptaller dahildir). Dashboard üstündeki Toplam kartı iptaller düşülmüş nettir.
-        </Text>
-      </View>
+          Cevap: garson_satis_ozet procedure'ünün ana alanı PERAKENDE_SATIS_TUTARI
+          → sadece KAPANAN (ödenmiş) fişlerin brüt kasa toplamı.
+          — İptaller BURADA YOKTUR (iptaller ayrı bir procedure'de).
+          — Açık fişler AYRI gösterilir.
+          — İade varsa (IADE_TUTARI) küçük chip olarak görünür.
+          Dashboard üstündeki Toplam kartı ise financial_data_location.TOPLAM
+          alanından farklı bir formülle hesaplanır → değerler farklılaşabilir. */}
+      {(() => {
+        const totalIade = detayRows.reduce((s: number, r: any) => s + parseFloat(r.IADE_TUTARI || '0'), 0);
+        return (
+          <>
+            <View style={{
+              flexDirection: 'row', alignItems: 'flex-start', gap: 6,
+              marginBottom: 10, paddingHorizontal: 10, paddingVertical: 6,
+              borderRadius: 8, backgroundColor: '#F59E0B12',
+              borderWidth: 1, borderColor: '#F59E0B33',
+            }}>
+              <Ionicons name="information-circle-outline" size={14} color="#F59E0B" style={{ marginTop: 1 }} />
+              <Text style={{ flex: 1, fontSize: 10, color: colors.textSecondary, lineHeight: 14 }}>
+                <Text style={{ fontWeight: '800', color: '#F59E0B' }}>Brüt satış</Text>
+                <Text> · Kapanan (ödenmiş) fişlerin ham kasa toplamıdır. Dashboard'daki Toplam farklı bir formülle hesaplanır — aradaki fark KDV, iade veya net-brüt tanımından kaynaklanabilir.</Text>
+              </Text>
+            </View>
+            {totalIade > 0 && (
+              <View style={{
+                flexDirection: 'row', alignItems: 'center', gap: 6,
+                marginBottom: 10, paddingHorizontal: 10, paddingVertical: 6,
+                borderRadius: 8, backgroundColor: '#DC262612',
+                borderWidth: 1, borderColor: '#DC262633',
+                alignSelf: 'flex-start',
+              }}>
+                <Ionicons name="return-down-back-outline" size={14} color="#DC2626" />
+                <Text style={{ fontSize: 11, color: '#DC2626', fontWeight: '700' }}>
+                  İade: ₺{totalIade.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </Text>
+              </View>
+            )}
+          </>
+        );
+      })()}
 
       {/* Tab Switcher */}
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
