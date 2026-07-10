@@ -335,11 +335,17 @@ export default function CustomersScreen() {
     return { start, end };
   }, []);
 
-  // 2026-06-01 — fetchExtreWithFallback: cache HIT → hızlı dön; cache MISS → POS
-  // (10sn timeout). Boş/timeout → boş dön; spinner uzun sürmez.
+  // 2026-07-10 — SWR: cache-first + arka planda POS refresh.
+  // - Cache HIT: veri anlık döner (~200ms), spinner kapanır.
+  //   Arka planda POS'a gidip fresh veri geldiğinde onSwrUpdate callback ile
+  //   UI otomatik yenilenir. Kullanıcı BEKLEMEZ.
+  // - Cache MISS: POS'a 10sn timeout. Timeout olursa boş dön.
   const fetchExtreWithFallback = useCallback(async (
     url: string, body: Record<string, any>, token: string,
+    onSwrUpdate?: (data: any) => void,
   ): Promise<any> => {
+    let cacheHit = false;
+    let cacheData: any = null;
     try {
       const r1 = await fetch(url, {
         method: 'POST',
@@ -347,9 +353,35 @@ export default function CustomersScreen() {
         body: JSON.stringify({ ...body, cache_only: true }),
       });
       const d1 = await r1.json().catch(() => ({}));
-      if (d1.ok && Array.isArray(d1.data) && d1.data.length > 0) return d1;
-      if (d1.ok && Array.isArray(d1.details) && d1.details.length > 0) return d1;
+      if (d1.ok && Array.isArray(d1.data) && d1.data.length > 0) { cacheHit = true; cacheData = d1; }
+      else if (d1.ok && Array.isArray(d1.details) && d1.details.length > 0) { cacheHit = true; cacheData = d1; }
     } catch {}
+
+    // Cache HIT — instant return + arka planda POS refresh (SWR)
+    if (cacheHit && cacheData) {
+      if (onSwrUpdate) {
+        (async () => {
+          try {
+            const ctrl = new AbortController();
+            const tid = setTimeout(() => ctrl.abort(), 15000);
+            const r2 = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              body: JSON.stringify(body),
+              signal: ctrl.signal,
+            });
+            clearTimeout(tid);
+            const fresh = await r2.json().catch(() => null);
+            if (fresh && fresh.ok && (Array.isArray(fresh.data) || Array.isArray(fresh.details))) {
+              onSwrUpdate(fresh);
+            }
+          } catch {}
+        })();
+      }
+      return cacheData;
+    }
+
+    // Cache MISS — POS'a 10sn (blocking)
     try {
       const ctrl = new AbortController();
       const tid = setTimeout(() => ctrl.abort(), 10000);
@@ -385,6 +417,17 @@ export default function CustomersScreen() {
         `${API_URL}/api/data/cari-extre`,
         { tenant_id: activeTenantId, cari_id: cariId, doviz_ad: cari.DOVIZ_AD_ID || 1, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd },
         token || '',
+        // 2026-07-10 — Arka plan POS refresh callback (SWR)
+        (fresh: any) => {
+          if (fresh && Array.isArray(fresh.data)) {
+            const sortedFresh = [...fresh.data].sort((a: any, b: any) => {
+              const da = a.TARIH || ''; const db = b.TARIH || '';
+              return da.localeCompare(db);
+            });
+            setExtreRawData(sortedFresh);
+            setExtreFromCache(false);
+          }
+        },
       );
       if (data.ok && data.data) {
         const sorted = [...(data.data || [])].sort((a: any, b: any) => {

@@ -1173,19 +1173,39 @@ export default function ReportsScreen() {
 
     try {
       const { token } = useAuthStore.getState();
-      // 2026-05-05 — Use the server-side fetch_all path. The backend
-      // (/api/data/report-run with fetch_all=true) parallel-fetches all
-      // pages in 8-page batches and caches the merged result for 3 min
-      // fresh / 15 min stale. Frontend stops doing its own pagination
-      // because Page-parameter detection was unreliable across endpoints.
+      // 2026-07-10 — SWR cache-first: Önce cache_only:true ile anlık dön (~200ms),
+      // sonra arkada gerçek POS fetch. Böylece kullanıcı raporu açtığında saniyede
+      // cevap alır, aynı zamanda arkada güncel veri gelirse UI yenilenir.
+      const bodyBase = {
+        tenant_id: activeTenantId,
+        dataset_key: selectedReport.datasetKey,
+        params: { ...baseParams, Page: 1, PageSize: pageSize },
+        fetch_all: true,
+      };
+      // 1) Instant cache-only fetch
+      let hadCache = false;
+      try {
+        const cacheResp = await fetch(`${API_URL}/api/data/report-run`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ ...bodyBase, cache_only: true }),
+          signal: controller.signal,
+        });
+        const cJson = await cacheResp.json().catch(() => ({}));
+        if (cJson?.ok && Array.isArray(cJson.data) && cJson.data.length > 0) {
+          const cacheRows = cJson.data.map(indexRow);
+          setReportData(cacheRows);
+          setLoadedPages(typeof cJson.pages === 'number' ? cJson.pages : 1);
+          setReportLoading(false);
+          setMoreLoading(false);
+          hadCache = true;
+        }
+      } catch { /* cache miss OK */ }
+
+      // 2) Full fetch (POS or backend fresh cache) — arkada
       const firstResp = await fetch(`${API_URL}/api/data/report-run`, {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({
-          tenant_id: activeTenantId,
-          dataset_key: selectedReport.datasetKey,
-          params: { ...baseParams, Page: 1, PageSize: pageSize },
-          fetch_all: true,
-        }),
+        body: JSON.stringify(bodyBase),
         signal: controller.signal,
       });
       const first = await firstResp.json();

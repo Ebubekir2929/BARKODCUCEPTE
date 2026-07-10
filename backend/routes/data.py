@@ -2002,9 +2002,9 @@ async def get_stock_detail(
         raise HTTPException(status_code=400, detail="tenant_id ve stock_id gerekli")
     
     try:
-        # 2026-06-01 — cache_only=True: sadece MySQL dataset_cache okur, POS'a gitmez
-        miktar_task = _on_demand_request(tenant_id, "stok_bilgi_miktar", {"ID": int(stock_id), "LOKASYON": 0}, timeout_sec=35, cache_only=cache_only)
-        extre_task = _on_demand_request(tenant_id, "stok_extre", {"ID": int(stock_id)}, timeout_sec=35, cache_only=cache_only)
+        # 2026-07-10 — Hız iyileştirmesi: POS timeout 35s → 10s
+        miktar_task = _on_demand_request(tenant_id, "stok_bilgi_miktar", {"ID": int(stock_id), "LOKASYON": 0}, timeout_sec=10, cache_only=cache_only)
+        extre_task = _on_demand_request(tenant_id, "stok_extre", {"ID": int(stock_id)}, timeout_sec=10, cache_only=cache_only)
         
         miktar_result, extre_result = await asyncio.gather(miktar_task, extre_task, return_exceptions=True)
         
@@ -2127,7 +2127,7 @@ async def get_cari_extre(
                 "TARIH_BITIS": tarih_bitis,
                 "DEVIR": devir,
             },
-            timeout_sec=45,
+            timeout_sec=10,  # 2026-07-10 — Hız iyileştirmesi: 45s → 10s
             skip_mysql_cache=force_refresh,
             cache_only=bool(body.get("cache_only", False)),
         )
@@ -2173,7 +2173,7 @@ async def get_stock_extre(
     try:
         result = await _on_demand_request(
             tenant_id, "stok_extre", {"ID": int(stok_id)},
-            timeout_sec=35, raw_cache=True,
+            timeout_sec=10, raw_cache=True,  # 2026-07-10 — 35s → 10s hız
             skip_mysql_cache=force_refresh,
             cache_only=bool(body.get("cache_only", False)),
         )
@@ -2621,6 +2621,7 @@ async def run_report(
     dataset_key = body.get("dataset_key", "")
     params = body.get("params", {})
     force_refresh = bool(body.get("force_refresh", False))
+    cache_only = bool(body.get("cache_only", False))  # 2026-07-10 — hız için ilk request cache-only
 
     if not tenant_id or not dataset_key:
         raise HTTPException(status_code=400, detail="tenant_id ve dataset_key gerekli")
@@ -2655,6 +2656,15 @@ async def run_report(
 
     if cached and age is not None and age < TTL_FRESH and not force_refresh:
         return {**cached["payload"], "_cache": "fresh", "_age": int(age)}
+
+    # 2026-07-10 — cache_only: Frontend'in ilk (instant) request'i için.
+    # Memory cache boşsa 30 dk yaş sınırıyla stale de kabul et, yoksa BOŞ dön.
+    # POS'a HİÇ gitme. Böylece kullanıcı raporu açtığında saniyede cevap alır.
+    # Frontend cache_only=false ile 2. isteği paralel yapar (SWR pattern).
+    if cache_only:
+        if cached and age is not None and age < TTL_STALE * 2:
+            return {**cached["payload"], "_cache": "stale-fast", "_age": int(age)}
+        return {"ok": True, "data": [], "pages": 0, "_cache": "miss", "_source": "cache_only"}
 
     async def _do_fetch() -> dict:
         try:

@@ -242,14 +242,17 @@ export default function StockScreen() {
     }
   }, [activeTenantId]);
 
-  // fetchWithTimeout: cache + POS fallback için
-  // İlk önce cache_only=true ile dene (anında dön), boş gelirse POS'a 10sn timeout
+  // 2026-07-10 — SWR: cache-first + arka planda POS refresh.
+  // Cache HIT → instant. Cache MISS → POS'a 10sn blocking.
   const fetchExtreWithFallback = useCallback(async (
     url: string,
     body: Record<string, any>,
     token: string,
+    onSwrUpdate?: (data: any) => void,
   ): Promise<any> => {
     // 1) Hızlı cache check
+    let cacheHit = false;
+    let cacheData: any = null;
     try {
       const r1 = await fetch(url, {
         method: 'POST',
@@ -257,9 +260,34 @@ export default function StockScreen() {
         body: JSON.stringify({ ...body, cache_only: true }),
       });
       const d1 = await r1.json().catch(() => ({}));
-      if (d1.ok && Array.isArray(d1.data) && d1.data.length > 0) return d1;
-      if (d1.ok && Array.isArray(d1.details) && d1.details.length > 0) return d1;
+      if (d1.ok && Array.isArray(d1.data) && d1.data.length > 0) { cacheHit = true; cacheData = d1; }
+      else if (d1.ok && Array.isArray(d1.details) && d1.details.length > 0) { cacheHit = true; cacheData = d1; }
     } catch {}
+
+    if (cacheHit && cacheData) {
+      // Arka planda POS'a git ve fresh geldiğinde UI güncelle
+      if (onSwrUpdate) {
+        (async () => {
+          try {
+            const ctrl = new AbortController();
+            const tid = setTimeout(() => ctrl.abort(), 15000);
+            const r2 = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+              body: JSON.stringify(body),
+              signal: ctrl.signal,
+            });
+            clearTimeout(tid);
+            const fresh = await r2.json().catch(() => null);
+            if (fresh && fresh.ok && (Array.isArray(fresh.data) || Array.isArray(fresh.details))) {
+              onSwrUpdate(fresh);
+            }
+          } catch {}
+        })();
+      }
+      return cacheData;
+    }
+
     // 2) POS fallback — 10sn timeout
     try {
       const ctrl = new AbortController();
@@ -698,6 +726,16 @@ export default function StockScreen() {
           `${API_URL}/api/data/stock-extre`,
           { tenant_id: activeTenantId, stok_id: stockId, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd },
           token || '',
+          // 2026-07-10 — SWR arka plan refresh
+          (fresh: any) => {
+            if (fresh && Array.isArray(fresh.data)) {
+              const sortedFresh = [...fresh.data].sort((a: any, b: any) => {
+                const da = a.TARIH || ''; const db = b.TARIH || '';
+                return da.localeCompare(db);
+              });
+              setDetailExtre(sortedFresh);
+            }
+          },
         ),
       ]);
       if (miktarJson.ok) setDetailMiktar(miktarJson.miktar || []);
