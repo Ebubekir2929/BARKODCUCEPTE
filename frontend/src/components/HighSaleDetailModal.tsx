@@ -32,6 +32,7 @@ export const HighSaleDetailModal: React.FC<Props> = ({
 }) => {
   const { colors } = useThemeStore();
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false); // SWR arka plan yenileme
   const [details, setDetails] = useState<any[]>([]);
   const [totals, setTotals] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -39,38 +40,73 @@ export const HighSaleDetailModal: React.FC<Props> = ({
   const apiBase = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
   const reset = useCallback(() => {
-    setDetails([]); setTotals(null); setError(null); setLoading(false);
+    setDetails([]); setTotals(null); setError(null); setLoading(false); setRefreshing(false);
   }, []);
 
+  // Modal kapatılınca state sıfırla (bir sonraki bildirimde eski veri görünmesin)
+  useEffect(() => {
+    if (!visible) reset();
+  }, [visible, reset]);
+
+  // 2026-06 — SWR akışı (İptal Detay modalıyla aynı desen):
+  //  1) Cache-only istek → anında render (header zaten push payload'undan dolu).
+  //  2) Detay cache'te yoksa allow_fetch=true ile SESSİZ arka plan isteği →
+  //     POS'tan taze fiş detayı gelir, UI bloklamadan güncellenir.
   useEffect(() => {
     if (!visible || !fisId || !tenantId) return;
     let cancelled = false;
+
+    const fetchDetail = async (allowFetch: boolean) => {
+      const { token: authToken } = useAuthStore.getState();
+      const r = await fetch(`${apiBase}/api/data/high-sale-detail`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken || ''}` },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          fis_id: fisId,
+          ...(allowFetch ? { allow_fetch: true } : {}),
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j?.detail || 'Fiş detayı alınamadı');
+      return j;
+    };
+
     (async () => {
       try {
         setLoading(true);
         setError(null);
-        const { token: authToken } = useAuthStore.getState();
-        // 2026-05-05 — Use /high-sale-detail which reads fis_gunluk_bildirim_feed
-        // from MySQL cache (the user is going to extend that dataset's rows
-        // with a `URUNLER` array). Falls back to fis_detay_toplam internally.
-        const r = await fetch(`${apiBase}/api/data/high-sale-detail`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken || ''}` },
-          body: JSON.stringify({ tenant_id: tenantId, fis_id: fisId }),
-        });
-        const j = await r.json();
+        // 1) Cache'ten anında göster
+        const cached = await fetchDetail(false);
         if (cancelled) return;
-        if (!r.ok || !j.ok) {
-          setError(j.detail || 'Fiş detayı alınamadı');
-          setLoading(false);
-          return;
+        const cachedDetails: any[] = Array.isArray(cached.details) ? cached.details : [];
+        const cachedTotals = Array.isArray(cached.totals) && cached.totals.length ? cached.totals[0] : null;
+        setDetails(cachedDetails);
+        setTotals(cachedTotals);
+        setLoading(false);
+
+        // 2) Detay eksikse arka planda POS'tan taze çek (sessiz)
+        if (cachedDetails.length === 0) {
+          setRefreshing(true);
+          try {
+            const fresh = await fetchDetail(true);
+            if (cancelled) return;
+            const freshDetails: any[] = Array.isArray(fresh.details) ? fresh.details : [];
+            if (freshDetails.length > 0) setDetails(freshDetails);
+            if (Array.isArray(fresh.totals) && fresh.totals.length) setTotals(fresh.totals[0]);
+          } catch {
+            // Cache pass zaten render edildi (hero push payload'undan dolu);
+            // sessiz yenileme hatasında sadece boş-detay durumu kalır.
+          } finally {
+            if (!cancelled) setRefreshing(false);
+          }
         }
-        setDetails(Array.isArray(j.details) ? j.details : []);
-        setTotals(Array.isArray(j.totals) && j.totals.length ? j.totals[0] : null);
       } catch (e: any) {
-        if (!cancelled) setError(String(e?.message || e));
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setError(String(e?.message || e));
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -239,8 +275,17 @@ export const HighSaleDetailModal: React.FC<Props> = ({
             <View style={{ paddingHorizontal: 16, gap: 8 }}>
               {details.length === 0 ? (
                 <View style={[styles.emptyWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  <Ionicons name="document-outline" size={28} color={colors.textSecondary} />
-                  <Text style={{ color: colors.textSecondary, marginTop: 6 }}>Detay satırı bulunamadı</Text>
+                  {refreshing ? (
+                    <>
+                      <ActivityIndicator size="small" color={'#10B981'} />
+                      <Text style={{ color: colors.textSecondary, marginTop: 8 }}>Ürün detayları POS&apos;tan getiriliyor…</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Ionicons name="document-outline" size={28} color={colors.textSecondary} />
+                      <Text style={{ color: colors.textSecondary, marginTop: 6 }}>Detay satırı bulunamadı</Text>
+                    </>
+                  )}
                 </View>
               ) : details.map((row: any, idx: number) => {
                 // 2026-05-05 — POS gönderdiği `DETAYLAR` JSON şeması.

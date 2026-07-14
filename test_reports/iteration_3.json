@@ -1,0 +1,50 @@
+{
+  "summary": "SWR (stale-while-revalidate) implementation for Yüksek Satış (high-sale) detail modal fully verified — backend + frontend both green. BACKEND (pytest, 6/6 pass, 33s total): (1) missing fis_id → 400 'tenant_id ve fis_id gerekli' ✓; (2) missing tenant_id → 400 ✓; (3) cache-only POST /api/data/high-sale-detail {tenant_id:'eecd5678f55d4db88e15230d70718a02', fis_id:999999} → 200 in 1.28s (<3s spec) with valid shape {ok:true, details:[], totals:[], _source} ✓; (4) allow_fetch=true → 200 in 25.92s — within the hard 25s asyncio.wait_for cap (spec required NOT ~60s), NO 500, valid shape ✓ — this is a MEASURABLE IMPROVEMENT over iteration_2 iptal-detail which took ~58-60s on same synthetic id; the wait_for wrapper works; (5) alt tenant regression → 200 empty, no 500 ✓; (6) /api/data/iptal-detail cache-only regression from iteration_2 → 200 in 1.88s ✓. FRONTEND (Playwright, 390x844 web preview): logged in as cakmak_ebubekir@hotmail.com/admin, injected @notification_pending_tap_v2 (receivedAt: Date.now()) with type='high_sale' + belgeno='TEST1'/amount=7500/fis_id=999999 → reloaded /dashboard: green 'Yüksek Satış' modal opened in <500ms showing ₺7.500,00 hero + #TEST1, KALEM 0/İNDİRİM ₺0.00/KDV ₺0.00 chips, ÜRÜNLER (0) empty-state 'Detay satırı bulunamadı' after SWR settled. Modal did NOT get stuck on full-screen loader, did NOT crash, and pending tap was cleared from localStorage. Reset-on-close verified end-to-end: closed modal via (360,35) coord tap on X icon → dashboard returned; injected SECOND tap with different fis_id=888888/belgeno='TESTB'/amount=9999 → reloaded → modal opened fresh showing #TESTB + ₺9.999,00 with NO trace of TESTA/5.000 (still_has_A=false). Regression: line_cancellation tap with iptal_id=1 opened red 'Fiş İptal' modal with #1, ₺0,00, 0 kalem, 'Detay satırı bulunamadı' — did NOT accidentally open the Yüksek Satış modal (type routing intact). No React Native red-screen errors, no console errors, only pre-existing deprecation warnings ('shadow*' style props, 'props.pointerEvents') and expo-notifications web warning (documented Expo Go limitation on web).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "expo-notifications on web", "issue": "Non-blocking warning '[expo-notifications] Listening to push token changes is not yet fully supported on web. Adding a listener will have no effect.' — expected on web preview, will work on native build. No action required for this iteration."},
+      {"component": "Deprecated style props (all screens)", "issue": "Repeating warnings '\"shadow*\" style props are deprecated. Use \"boxShadow\".' and 'props.pointerEvents is deprecated. Use style.pointerEvents' from RN-web. Pre-existing (not introduced by this iteration). Reference: dashboard.tsx + card components."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_high_sale_detail_swr.py",
+    "/app/backend/tests/test_iptal_detail_swr.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/tmp/i3_modal_open.png",
+    "/tmp/i3_modal_settled.png",
+    "/tmp/i3_A_open.png",
+    "/tmp/i3_A_closed.png",
+    "/tmp/i3_B_fresh.png",
+    "/tmp/i3_C_iptal.png"
+  ],
+  "action_items": [
+    "(Non-blocking, P3) Add testID='high-sale-detail-modal', testID='high-sale-detail-close', testID='high-sale-detail-empty', testID='high-sale-detail-refreshing', testID='high-sale-detail-belgeno' to HighSaleDetailModal so future test agents don't rely on text/coord selectors.",
+    "(Non-blocking, P3) Apply the same asyncio.wait_for(..., timeout=25) wrapper the high-sale-detail endpoint received (data.py L2591-2597) to /api/data/iptal-detail SWR revalidate (data.py ~L1645) — iteration_2 flagged that endpoint takes ~58-60s on cold POS. High-sale endpoint now proves the fix works (25.92s). This iteration verified only that iptal-detail cache-only is unaffected (1.88s), NOT the allow_fetch path.",
+    "(Non-blocking, from iteration_2) /app/frontend/app/(tabs)/dashboard.tsx is still 3507 lines — >700 line threshold, should be split. Not introduced this iteration."
+  ],
+  "critical_code_review_comments": [
+    "HighSaleDetailModal.tsx L42-49: reset() correctly clears details/totals/error/loading/refreshing on close (useEffect on !visible) — this is the state-reset fix under test and it works (verified: TESTB tap after TESTA close showed only TESTB, no leak).",
+    "HighSaleDetailModal.tsx L55-113: SWR effect is correct — cache-only fetch first (allowFetch=false), then if cachedDetails.length===0 sets refreshing=true and does allow_fetch=true fetch; cancellation flag guards state updates; silent failure on fresh-fetch error (cached shell already rendered). Deps array [visible, fisId, tenantId, apiBase] is correct.",
+    "routes/data.py L2517-2571: _parse_fis_detay_result helper extraction is clean, handles both [[details],[totals]] and {result_sets:[…]} shapes, normalizes column name variants (STOK_ADI/URUN_ADI, MIKTAR/QTY, KDV_DAHIL_NET_TUTAR/DAHIL_TUTAR/TUTAR, etc.) — good defensive coding.",
+    "routes/data.py L2589-2603: SWR revalidate correctly wraps _on_demand_request in asyncio.wait_for(timeout=25) — this is the improvement over iptal-detail. Measured wall time 25.92s confirms the outer cap is enforced and errors are caught (no 500).",
+    "routes/data.py L2371: allow_fetch = bool(body.get('allow_fetch', False)) → correct: defaults to False so old clients (no allow_fetch key) still get cache-only behaviour = no POS request = no cost.",
+    "routes/data.py L2372-2373: guard 'if not tenant_id or fis_id is None' — this correctly treats fis_id=0 as valid (rare but possible), unlike 'not fis_id'. Good.",
+    "MINOR (repeated from iteration_1/2): dashboard.tsx 3507 lines exceeds 700-line threshold."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_high_sale_detail_swr.py (NEW — 6 pytest cases, JUnit XML)"
+  ],
+  "success_rate": {"backend": "100% (6/6 pytest tests pass in 33s)", "frontend": "100% (modal opens <500ms, hero renders, empty-state after SWR settle, reset-on-close verified with different fis_id/belgeno, iptal-detail regression intact)"},
+  "seed_data_creation": "None. Injected @notification_pending_tap_v2 via localStorage.setItem (receivedAt: Date.now()) three times: TESTA/5000/high_sale, TESTB/9999/high_sale, iptal_id=1/line_cancellation.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "For high-sale-detail SWR tests: log in with cakmak_ebubekir@hotmail.com / admin (other account cakmak.ebubekir29@gmail.com still 401), inject @notification_pending_tap_v2 with receivedAt=Date.now() (NOT 0 — dashboard drops taps older than 1h), reload /dashboard. Modal reset-on-close works — safe to reopen with different fis_id in same session. On the web preview the SWR spinner 'Ürün detayları POS'tan getiriliyor…' does NOT reliably appear in screenshots because (a) cache-only pass returns in ~1.3s and (b) empty details + refreshing states are exclusive in the UI code — the empty-state placeholder appears fast enough that manual polling at 500ms may not catch the transition. If validating spinner specifically, use waitForFunction targeting the Turkish string within 2s of dashboard load. Backend wall-time for allow_fetch=true on synthetic fis_id=999999 = 25.92s (vs iptal-detail ~58-60s from iteration_2). Modal close button is at coord (360, 35) on 390-wide viewport — no testID yet.",
+  "rca_of_issue": "N/A — this iteration verifies a NEW FEATURE (SWR on /high-sale-detail + reset-on-close). Both the wall-time-capped SWR revalidate AND the state-reset-on-close behave exactly as spec'd. iteration_2 flagged that iptal-detail's SWR revalidate lacked an outer wait_for cap and could run ~60s; this iteration's high-sale-detail proves the fix pattern (asyncio.wait_for(..., timeout=25) at data.py L2591-2597) works — recommend applying the same wrapper to iptal-detail SWR in a follow-up."
+}

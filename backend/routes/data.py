@@ -2365,6 +2365,10 @@ async def get_high_sale_detail(
     """
     tenant_id = body.get("tenant_id", "")
     fis_id = body.get("fis_id")
+    # 2026-06 — SWR: frontend önce cache-only (allow_fetch yok) ister → anında
+    # döner. Detay yoksa allow_fetch=true ile arka plan isteği atar; o zaman
+    # POS'a request_create gider (25s sert limit).
+    allow_fetch = bool(body.get("allow_fetch", False))
     if not tenant_id or fis_id is None:
         raise HTTPException(status_code=400, detail="tenant_id ve fis_id gerekli")
 
@@ -2508,6 +2512,64 @@ async def get_high_sale_detail(
         )
 
         # Step 2 — fallback to fis_detay_toplam if URUNLER missing
+        # 2026-06 — parse+normalize ortak yardımcıya alındı (Step 2 cache
+        # fallback'i ve SWR POS revalidate adımı aynı şemayı kullanıyor).
+        def _parse_fis_detay_result(fb: dict) -> list:
+            fb_data = (fb.get("cache") or {}).get("data") or fb.get("data")
+            # `fis_detay_toplam` may return [[details], [totals]] or {result_sets:[…]}
+            parsed: list = []
+            if isinstance(fb_data, dict):
+                rs = fb_data.get("result_sets") or []
+                if isinstance(rs, list) and rs and isinstance(rs[0], list):
+                    parsed = rs[0]
+                elif "details" in fb_data and isinstance(fb_data["details"], list):
+                    parsed = fb_data["details"]
+            elif isinstance(fb_data, list):
+                if fb_data and isinstance(fb_data[0], list):
+                    parsed = fb_data[0]
+                else:
+                    parsed = fb_data
+            if not (parsed and isinstance(parsed, list) and isinstance(parsed[0], dict)):
+                return parsed if isinstance(parsed, list) else []
+            # 2026-05-06 — `fis_detay_toplam` farklı kolon adları kullanır
+            # (STOK / MIKTAR_FIS / BIRIM / TOPLAM_SATIR_ISKONTOSU). Modal'a
+            # gitmeden önce normalize edip feed schema'ya çevir.
+            normalized: list = []
+            for r in parsed:
+                if not isinstance(r, dict):
+                    continue
+                nr = dict(r)
+                # Stok adı
+                if not nr.get("STOK_ADI"):
+                    nr["STOK_ADI"] = (
+                        nr.get("STOK") or nr.get("STOK_AD") or
+                        nr.get("AD") or nr.get("ACIKLAMA") or ""
+                    )
+                # Stok kodu
+                if not nr.get("STOK_KODU"):
+                    nr["STOK_KODU"] = nr.get("STOK_KOD") or nr.get("KOD") or nr.get("BARKOD") or ""
+                # Miktar
+                if nr.get("MIKTAR") in (None, "", 0, "0", "0.000"):
+                    mf = nr.get("MIKTAR_FIS")
+                    if mf not in (None, "", 0, "0"):
+                        nr["MIKTAR"] = mf
+                # Birim
+                if not nr.get("BIRIM_ADI"):
+                    nr["BIRIM_ADI"] = nr.get("BIRIM") or ""
+                # İndirim (satır iskontosu)
+                if not nr.get("SATIR_ISKONTO_TUTARI"):
+                    nr["SATIR_ISKONTO_TUTARI"] = (
+                        nr.get("TOPLAM_SATIR_ISKONTOSU") or
+                        nr.get("ISKONTO_TUTARI") or nr.get("INDIRIM_TUTARI") or "0"
+                    )
+                # KDV dahil net tutar (modalin tercih ettiği)
+                if not nr.get("KDV_DAHIL_NET_TUTAR"):
+                    nr["KDV_DAHIL_NET_TUTAR"] = (
+                        nr.get("DAHIL_TUTAR") or nr.get("TUTAR") or "0"
+                    )
+                normalized.append(nr)
+            return normalized
+
         fallback_used = False
         if not details and fis_id_int is not None:
             fallback_used = True
@@ -2517,60 +2579,28 @@ async def get_high_sale_detail(
                     tenant_id, "fis_detay_toplam", {"FisId": fis_id_int},
                     timeout_sec=20, raw_cache=True, cache_only=True,
                 )
-                fb_data = (fb.get("cache") or {}).get("data") or fb.get("data")
-                # `fis_detay_toplam` may return [[details], [totals]] or {result_sets:[…]}
-                if isinstance(fb_data, dict):
-                    rs = fb_data.get("result_sets") or []
-                    if isinstance(rs, list) and rs and isinstance(rs[0], list):
-                        details = rs[0]
-                    elif "details" in fb_data and isinstance(fb_data["details"], list):
-                        details = fb_data["details"]
-                elif isinstance(fb_data, list):
-                    if fb_data and isinstance(fb_data[0], list):
-                        details = fb_data[0]
-                    else:
-                        details = fb_data
-                if details and isinstance(details, list) and isinstance(details[0], dict):
-                    # 2026-05-06 — `fis_detay_toplam` farklı kolon adları kullanır
-                    # (STOK / MIKTAR_FIS / BIRIM / TOPLAM_SATIR_ISKONTOSU). Modal'a
-                    # gitmeden önce normalize edip feed schema'ya çevir.
-                    normalized: list = []
-                    for r in details:
-                        if not isinstance(r, dict):
-                            continue
-                        nr = dict(r)
-                        # Stok adı
-                        if not nr.get("STOK_ADI"):
-                            nr["STOK_ADI"] = (
-                                nr.get("STOK") or nr.get("STOK_AD") or
-                                nr.get("AD") or nr.get("ACIKLAMA") or ""
-                            )
-                        # Stok kodu
-                        if not nr.get("STOK_KODU"):
-                            nr["STOK_KODU"] = nr.get("STOK_KOD") or nr.get("KOD") or nr.get("BARKOD") or ""
-                        # Miktar
-                        if nr.get("MIKTAR") in (None, "", 0, "0", "0.000"):
-                            mf = nr.get("MIKTAR_FIS")
-                            if mf not in (None, "", 0, "0"):
-                                nr["MIKTAR"] = mf
-                        # Birim
-                        if not nr.get("BIRIM_ADI"):
-                            nr["BIRIM_ADI"] = nr.get("BIRIM") or ""
-                        # İndirim (satır iskontosu)
-                        if not nr.get("SATIR_ISKONTO_TUTARI"):
-                            nr["SATIR_ISKONTO_TUTARI"] = (
-                                nr.get("TOPLAM_SATIR_ISKONTOSU") or
-                                nr.get("ISKONTO_TUTARI") or nr.get("INDIRIM_TUTARI") or "0"
-                            )
-                        # KDV dahil net tutar (modalin tercih ettiği)
-                        if not nr.get("KDV_DAHIL_NET_TUTAR"):
-                            nr["KDV_DAHIL_NET_TUTAR"] = (
-                                nr.get("DAHIL_TUTAR") or nr.get("TUTAR") or "0"
-                            )
-                        normalized.append(nr)
-                    details = normalized
+                details = _parse_fis_detay_result(fb)
             except Exception as e_fb:
                 logger.info(f"[high-sale-detail] fis_detay_toplam fallback failed: {e_fb}")
+
+        # 2026-06 — SWR revalidate adımı: cache'te detay yok VE frontend
+        # allow_fetch=true gönderdiyse (arka plan isteği), POS'tan taze çek.
+        # Sonuç MySQL cache'e yazılır → sonraki tıklamalar cache hit.
+        if not details and allow_fetch and fis_id_int is not None:
+            try:
+                fresh = await asyncio.wait_for(
+                    _on_demand_request(
+                        tenant_id, "fis_detay_toplam", {"FisId": fis_id_int},
+                        timeout_sec=20, raw_cache=True, skip_mysql_cache=True,
+                    ),
+                    timeout=25,
+                )
+                details = _parse_fis_detay_result(fresh)
+                logger.info(
+                    f"[high-sale-detail] SWR POS fetch fis_id={fis_id} items={len(details)}"
+                )
+            except Exception as e_swr:
+                logger.warning(f"[high-sale-detail] SWR POS fetch failed fis_id={fis_id}: {e_swr}")
 
         # 2026-05-13 — Aggregate KDV + İskonto + Kalem from DETAYLAR into
         # the totals row. The feed row itself only carries TUTAR / DETAY_TOPLAM_*
