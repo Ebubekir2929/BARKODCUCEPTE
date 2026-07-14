@@ -301,7 +301,9 @@ export default function DashboardScreen() {
         return;
       }
       const type = String(tap.type || '').toLowerCase();
-      const isIptal = (type === 'iptal' || type === 'iptal_satir' || type === 'cancel' || type === 'cancellation');
+      // 2026-06 — Backend satır iptalinde `line_cancellation`, fiş iptalinde
+      // `cancellation` gönderir. İkisi de aynı iptal detay modalını açar.
+      const isIptal = (type === 'iptal' || type === 'iptal_satir' || type === 'satir_iptal' || type === 'line_cancellation' || type === 'cancel' || type === 'cancellation');
       const isHighSale = (type === 'high_sale' || type === 'yuksek_satis');
       const isLowStock = (type === 'low_stock_summary' || type === 'eksi_stok' || type === 'low_stock');
       let resolvedTenantId = activeTenantId;
