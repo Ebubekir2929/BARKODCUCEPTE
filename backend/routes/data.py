@@ -1471,6 +1471,10 @@ async def get_iptal_detail(
     tenant_id = body.get("tenant_id", "")
     iptal_id = body.get("iptal_id")
     filter_date = body.get("date", "")
+    # 2026-06 — SWR: frontend önce cache-only (allow_fetch yok) ister → anında
+    # döner. Satır detayı eksikse allow_fetch=true ile arka plan isteği atar;
+    # o zaman POS'a request_create gider ve taze detay döner.
+    allow_fetch = bool(body.get("allow_fetch", False))
 
     if not tenant_id or iptal_id is None:
         raise HTTPException(status_code=400, detail="tenant_id ve iptal_id gerekli")
@@ -1568,6 +1572,7 @@ async def get_iptal_detail(
         # Step 1b — bireysel cache yoksa: günlük toplu cache'ten (IPTAL_ID=null)
         # bu IPTAL_ID'nin header'ını filtrele. Line items olmaz ama en azından
         # TUTAR, LOKASYON, PERSONEL gözükür.
+        bulk_result = None
         if not line_items and not header:
             bulk_params = {
                 "IPTAL_ID": None,
@@ -1630,6 +1635,29 @@ async def get_iptal_detail(
             # POS'a yeni request_create + MySQL write yapılmıyor. Sadece var olan
             # cache'i okuyoruz. Cache eksikse boş döner, kullanıcı uyarısı gösterilir.
             result = bulk_result if isinstance(bulk_result, dict) else result
+
+        # 2026-06 — SWR revalidate adımı: cache'te satır detayı yok VE frontend
+        # allow_fetch=true gönderdiyse (arka plan isteği), POS'tan taze çek.
+        # skip_mysql_cache=True → doğrudan request_create; sonuç MySQL'e yazılır,
+        # sonraki tıklamalar cache hit olur.
+        if not line_items and allow_fetch:
+            try:
+                fresh = await _on_demand_request(
+                    tenant_id, "iptal_detay", individual_params_with_date,
+                    timeout_sec=20, skip_mysql_cache=True,
+                )
+                fresh_items = _extract_line_items(fresh)
+                if fresh_items:
+                    line_items = fresh_items
+                    if isinstance(fresh, dict):
+                        result = fresh
+                if not header:
+                    header = _extract_header(fresh)
+                logger.info(
+                    f"[iptal-detail] SWR POS fetch IPTAL_ID={iptal_id} items={len(fresh_items)}"
+                )
+            except Exception as e:
+                logger.warning(f"[iptal-detail] SWR POS fetch failed IPTAL_ID={iptal_id}: {e}")
 
         # Return product rows + header info — modal uses header for LOKASYON/MASA/etc
         # 2026-05-13 — Normalize header.TUTAR from IPTAL_TUTAR (cache stores

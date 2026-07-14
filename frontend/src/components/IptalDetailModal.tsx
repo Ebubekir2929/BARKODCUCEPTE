@@ -62,6 +62,7 @@ export const IptalDetailModal: React.FC<Props> = ({
 }) => {
   const { colors } = useThemeStore();
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false); // SWR arka plan yenileme
   const [error, setError] = useState<string | null>(null);
   const [header, setHeader] = useState<Header | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
@@ -69,7 +70,7 @@ export const IptalDetailModal: React.FC<Props> = ({
   const apiBase = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
   const reset = useCallback(() => {
-    setHeader(null); setLines([]); setError(null); setLoading(false);
+    setHeader(null); setLines([]); setError(null); setLoading(false); setRefreshing(false);
   }, []);
 
   // Modal kapatılınca state sıfırla
@@ -77,38 +78,73 @@ export const IptalDetailModal: React.FC<Props> = ({
     if (!visible) reset();
   }, [visible, reset]);
 
-  // Modal açılınca POST /api/data/iptal-detail çağır
+  // 2026-06 — SWR akışı:
+  //  1) Cache-only istek → anında (~200ms) render. Header + varsa satırlar.
+  //  2) Satır detayı cache'te yoksa allow_fetch=true ile SESSİZ arka plan
+  //     isteği → POS'tan taze detay gelir, UI blokaj olmadan güncellenir.
   useEffect(() => {
     if (!visible || !iptalId || !tenantId) return;
     let cancelled = false;
+
+    const fetchDetail = async (allowFetch: boolean) => {
+      const { token } = useAuthStore.getState();
+      if (!token) throw new Error('Oturum bulunamadı');
+      const r = await fetch(`${apiBase}/api/data/iptal-detail`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          tenant_id: tenantId,
+          iptal_id: iptalId,
+          ...(allowFetch ? { allow_fetch: true } : {}),
+        }),
+      });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j?.detail || 'Fiş iptal detayı alınamadı');
+      return j;
+    };
+
     (async () => {
       try {
         setLoading(true);
         setError(null);
-        const { token } = useAuthStore.getState();
-        if (!token) {
-          setError('Oturum bulunamadı');
-          setLoading(false);
-          return;
-        }
-        const r = await fetch(`${apiBase}/api/data/iptal-detail`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ tenant_id: tenantId, iptal_id: iptalId }),
-        });
-        const j = await r.json();
+        // 1) Cache'ten anında göster
+        const cached = await fetchDetail(false);
         if (cancelled) return;
-        if (!r.ok || !j.ok) {
-          setError(j?.detail || 'Fiş iptal detayı alınamadı');
-          setLoading(false);
-          return;
+        const cachedHeader: Header | null =
+          (cached.header && typeof cached.header === 'object' && Object.keys(cached.header).length > 0)
+            ? cached.header : null;
+        const cachedLines: Line[] = Array.isArray(cached.data) ? cached.data : [];
+        setHeader(cachedHeader);
+        setLines(cachedLines);
+        const cacheHasAnything = !!cachedHeader || cachedLines.length > 0;
+        if (cacheHasAnything) setLoading(false);
+
+        // 2) Satır detayı eksikse arka planda POS'tan taze çek (sessiz)
+        if (cachedLines.length === 0) {
+          setRefreshing(true);
+          try {
+            const fresh = await fetchDetail(true);
+            if (cancelled) return;
+            const freshLines: Line[] = Array.isArray(fresh.data) ? fresh.data : [];
+            if (freshLines.length > 0) setLines(freshLines);
+            if (fresh.header && typeof fresh.header === 'object' && Object.keys(fresh.header).length > 0) {
+              setHeader(fresh.header);
+            }
+          } catch (e: any) {
+            // Cache'te hiçbir şey yoksa ve taze istek de başarısızsa → hata göster
+            if (!cancelled && !cacheHasAnything) {
+              setError(String(e?.message || e || 'Fiş iptal detayı alınamadı'));
+            }
+          } finally {
+            if (!cancelled) { setRefreshing(false); setLoading(false); }
+          }
         }
-        setHeader((j.header && typeof j.header === 'object') ? j.header : null);
-        setLines(Array.isArray(j.data) ? j.data : []);
       } catch (e: any) {
-        if (!cancelled) setError(String(e?.message || e || 'Bağlantı hatası'));
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setError(String(e?.message || e || 'Bağlantı hatası'));
+          setLoading(false);
+          setRefreshing(false);
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -226,8 +262,17 @@ export const IptalDetailModal: React.FC<Props> = ({
 
             {lines.length === 0 ? (
               <View style={[styles.emptyWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                <Ionicons name="document-outline" size={28} color={colors.textSecondary} />
-                <Text style={{ color: colors.textSecondary, marginTop: 6 }}>Detay satırı bulunamadı</Text>
+                {refreshing ? (
+                  <>
+                    <ActivityIndicator size="small" color={RED} />
+                    <Text style={{ color: colors.textSecondary, marginTop: 8 }}>Ürün detayları POS&apos;tan getiriliyor…</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="document-outline" size={28} color={colors.textSecondary} />
+                    <Text style={{ color: colors.textSecondary, marginTop: 6 }}>Detay satırı bulunamadı</Text>
+                  </>
+                )}
               </View>
             ) : (
               <View style={{ paddingHorizontal: 16, gap: 8 }}>
