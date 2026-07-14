@@ -1642,9 +1642,15 @@ async def get_iptal_detail(
         # sonraki tıklamalar cache hit olur.
         if not line_items and allow_fetch:
             try:
-                fresh = await _on_demand_request(
-                    tenant_id, "iptal_detay", individual_params_with_date,
-                    timeout_sec=20, skip_mysql_cache=True,
+                # asyncio.wait_for → sert 25s duvar limiti; _on_demand_request'in
+                # iç adımları (dataset_get + request_create+poll) toplamda 60s'e
+                # uzayabiliyor, spinner'ı dakikalarca bekletmeyelim.
+                fresh = await asyncio.wait_for(
+                    _on_demand_request(
+                        tenant_id, "iptal_detay", individual_params_with_date,
+                        timeout_sec=20, skip_mysql_cache=True,
+                    ),
+                    timeout=25,
                 )
                 fresh_items = _extract_line_items(fresh)
                 if fresh_items:
