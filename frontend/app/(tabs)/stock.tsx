@@ -29,6 +29,14 @@ import DateField from '../../src/components/DateField';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
+// 2026-07 — "Son güncelleme" rozeti için cache yaşı formatı
+const fmtAge = (sec: number): string => {
+  if (sec < 90) return 'az önce';
+  if (sec < 3600) return `${Math.round(sec / 60)} dk önce`;
+  if (sec < 86400) return `${Math.round(sec / 3600)} sa önce`;
+  return `${Math.round(sec / 86400)} gün önce`;
+};
+
 export default function StockScreen() {
   const { colors, isDark } = useThemeStore();
   const { t } = useLanguageStore();
@@ -187,6 +195,7 @@ export default function StockScreen() {
   // ayları seçtiğinde otomatik olarak backend'den /stock-extre ile yeniden
   // çekiyoruz (cari modülündeki gibi). Tüm geçmiş POS DB'de cache'lenmiş.
   const [extreFetchedRange, setExtreFetchedRange] = useState<{ start: string; end: string; stockId: any } | null>(null);
+  const [extreAgeSec, setExtreAgeSec] = useState<number | null>(null); // "son güncelleme" rozeti
   const [extreLoading, setExtreLoading] = useState(false);
   const monthRangeFor = useCallback((iso: string) => {
     const [y, m] = iso.slice(0, 10).split('-');
@@ -799,6 +808,7 @@ export default function StockScreen() {
                 return da.localeCompare(db);
               });
               setDetailExtre(sortedFresh);
+              setExtreAgeSec(0); // POS'tan taze geldi
             }
             done.e = true; check();
           },
@@ -812,6 +822,7 @@ export default function StockScreen() {
         });
         setDetailExtre(rows);
         setExtreFetchedRange({ start: fetchStart, end: fetchEnd, stockId });
+        setExtreAgeSec(typeof extreData.age_sec === 'number' ? extreData.age_sec : null);
       } else if (miktarJson.ok) {
         setDetailExtre(miktarJson.extre || []);
         setExtreFetchedRange({ start: fetchStart, end: fetchEnd, stockId });
@@ -1666,6 +1677,20 @@ export default function StockScreen() {
                       colors={colors}
                     />
                   </View>
+                  {/* 2026-07 — "Son güncelleme" rozeti: veri cache'ten mi taze mi */}
+                  {extreAgeSec != null && (
+                    <View style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start',
+                      paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
+                      backgroundColor: (extreAgeSec < 90 ? '#10B981' : colors.primary) + '15',
+                      marginBottom: 8,
+                    }}>
+                      <Ionicons name="time-outline" size={10} color={extreAgeSec < 90 ? '#10B981' : colors.primary} />
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: extreAgeSec < 90 ? '#10B981' : colors.primary }}>
+                        Son güncelleme: {fmtAge(extreAgeSec)}
+                      </Text>
+                    </View>
+                  )}
                   {detailExtre.length > 0 ? <></> : null}
 
                   {/* Sayım & Hareket özet — 2026-05-13 zenginleştirilmiş kart */}

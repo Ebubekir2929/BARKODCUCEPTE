@@ -2123,6 +2123,18 @@ async def get_cari_list_sync(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _norm_age_sec(a):
+    """2026-07 — MySQL `synced_at` TR saatinde (UTC+3) yazılıyor, container UTC
+    çalışıyor → ham fark ~-3 saat kayabilir. Negatifse +3h düzelt, 0'a kliple."""
+    try:
+        a = float(a)
+    except (TypeError, ValueError):
+        return None
+    if a < 0:
+        a += 10800
+    return max(0, int(a))
+
+
 @router.post("/cari-extre")
 async def get_cari_extre(
     body: dict,
@@ -2191,12 +2203,12 @@ async def get_cari_extre(
                 async with pool.acquire() as conn:
                     async with conn.cursor() as cur:
                         await cur.execute(
-                            """SELECT data_json, params_json FROM dataset_cache
+                            """SELECT data_json, params_json, synced_at FROM dataset_cache
                                WHERE tenant_id=%s AND dataset_key='kart_extre_cari'
                                ORDER BY synced_at DESC LIMIT 40""",
                             (tenant_id,),
                         )
-                        for blob, pjson in await cur.fetchall():
+                        for blob, pjson, synced in await cur.fetchall():
                             try:
                                 p = json.loads(pjson or "{}")
                                 if int(p.get("ID") or 0) != int(cari_id):
@@ -2206,6 +2218,13 @@ async def get_cari_extre(
                                 continue
                             if not isinstance(rows, list):
                                 continue
+                            # Cache yaşı (rozet için)
+                            age_sec = None
+                            try:
+                                if synced:
+                                    age_sec = int((datetime.now() - synced).total_seconds())
+                            except Exception:
+                                age_sec = None
                             filtered = [
                                 r for r in rows
                                 if isinstance(r, dict)
@@ -2221,6 +2240,7 @@ async def get_cari_extre(
                                 "data": _fix_large_ints(filtered),
                                 "_cache_hit": True,
                                 "_source": "mysql_date_agnostic",
+                                "_age_sec": age_sec,
                             }
                             break
             except Exception as e:
@@ -2229,6 +2249,8 @@ async def get_cari_extre(
         # Surface cache hit info to frontend
         if isinstance(result, dict):
             result["from_cache"] = bool(result.get("_cache_hit"))
+            # 2026-07 — "Son güncelleme" rozeti için cache yaşı (saniye)
+            result["age_sec"] = _norm_age_sec(result.get("_age_sec"))
         return result
     except HTTPException:
         raise
@@ -2265,6 +2287,7 @@ async def get_stock_extre(
 
     rows: list = []
     from_cache = False
+    age_sec = None
     try:
         result = await _on_demand_request(
             tenant_id, "stok_extre", {"ID": int(stok_id)},
@@ -2273,6 +2296,7 @@ async def get_stock_extre(
             cache_only=bool(body.get("cache_only", False)),
         )
         from_cache = bool(result.get("_cache_hit"))
+        age_sec = _norm_age_sec(result.get("_age_sec"))  # 2026-07 — "son güncelleme" rozeti
         cache_data = (result or {}).get("cache", {})
         rows = cache_data.get("data", []) or []
         if isinstance(rows, dict):
@@ -2302,6 +2326,7 @@ async def get_stock_extre(
         "total_rows": len(rows),
         "filtered_rows": len(filtered),
         "from_cache": from_cache,
+        "age_sec": age_sec,
         "tarih_baslangic": tarih_baslangic,
         "tarih_bitis": tarih_bitis,
     }

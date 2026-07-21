@@ -33,6 +33,14 @@ const getDefDates = () => {
   return { start: `${y}-${m}-01`, end: `${y}-${m}-${d}` };
 };
 
+// 2026-07 — "Son güncelleme" rozeti için cache yaşı formatı
+const fmtAge = (sec: number): string => {
+  if (sec < 90) return 'az önce';
+  if (sec < 3600) return `${Math.round(sec / 60)} dk önce`;
+  if (sec < 86400) return `${Math.round(sec / 3600)} sa önce`;
+  return `${Math.round(sec / 86400)} gün önce`;
+};
+
 export default function CustomersScreen() {
   const { colors, isDark } = useThemeStore();
   const { t } = useLanguageStore();
@@ -103,6 +111,7 @@ export default function CustomersScreen() {
   const [fisDetail, setFisDetail] = useState<any[]>([]);
   // 2026-05-13 — Ekstre cache durum göstergesi (badge)
   const [extreFromCache, setExtreFromCache] = useState<boolean>(false);
+  const [extreAgeSec, setExtreAgeSec] = useState<number | null>(null);
   const [fisTotals, setFisTotals] = useState<any | null>(null);
   const [fisLoading, setFisLoading] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
@@ -438,6 +447,7 @@ export default function CustomersScreen() {
             });
             setExtreRawData(sortedFresh);
             setExtreFromCache(false);
+            setExtreAgeSec(0); // POS'tan taze geldi
           }
           setExtreLoading(false);
         },
@@ -450,6 +460,7 @@ export default function CustomersScreen() {
         setExtreRawData(sorted);
         setExtreFetchedRange({ start: fetchStart, end: fetchEnd, cariId });
         setExtreFromCache(!!data.from_cache);
+        setExtreAgeSec(typeof data.age_sec === 'number' ? data.age_sec : null);
       }
       // _pending → POS isteği arka planda; spinner callback gelince kapanır.
       if (!data._pending) setExtreLoading(false);
@@ -860,7 +871,7 @@ export default function CustomersScreen() {
                               fontSize: 8, fontWeight: '800', letterSpacing: 0.3,
                               color: extreFromCache ? colors.success : colors.warning,
                             }}>
-                              {extreFromCache ? 'CACHE' : 'CANLI'}
+                              {(extreFromCache ? 'CACHE' : 'CANLI') + (extreAgeSec != null ? ` · ${fmtAge(extreAgeSec)}` : '')}
                             </Text>
                           </View>
                         )}
