@@ -357,31 +357,42 @@ export default function CustomersScreen() {
       else if (d1.ok && Array.isArray(d1.details) && d1.details.length > 0) { cacheHit = true; cacheData = d1; }
     } catch {}
 
+    // Arka plan POS isteği — bitince onSwrUpdate HER durumda çağrılır
+    // (başarıda fresh, hatada null) ki caller spinner'ı kapatabilsin.
+    const runBackground = () => {
+      (async () => {
+        let fresh: any = null;
+        try {
+          const ctrl = new AbortController();
+          const tid = setTimeout(() => ctrl.abort(), 25000);
+          const r2 = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(body),
+            signal: ctrl.signal,
+          });
+          clearTimeout(tid);
+          fresh = await r2.json().catch(() => null);
+        } catch {}
+        onSwrUpdate?.((fresh && fresh.ok) ? fresh : null);
+      })();
+    };
+
     // Cache HIT — instant return + arka planda POS refresh (SWR)
     if (cacheHit && cacheData) {
-      if (onSwrUpdate) {
-        (async () => {
-          try {
-            const ctrl = new AbortController();
-            const tid = setTimeout(() => ctrl.abort(), 15000);
-            const r2 = await fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-              body: JSON.stringify(body),
-              signal: ctrl.signal,
-            });
-            clearTimeout(tid);
-            const fresh = await r2.json().catch(() => null);
-            if (fresh && fresh.ok && (Array.isArray(fresh.data) || Array.isArray(fresh.details))) {
-              onSwrUpdate(fresh);
-            }
-          } catch {}
-        })();
-      }
+      if (onSwrUpdate) runBackground();
       return cacheData;
     }
 
-    // Cache MISS — POS'a 10sn (blocking)
+    // Cache MISS — 2026-07: kullanıcı BEKLETİLMEZ. Callback varsa POS isteği
+    // arka planda koşar, hemen _pending ile boş dönülür; veri gelince
+    // callback UI'ı günceller ve spinner'ı kapatır.
+    if (onSwrUpdate) {
+      runBackground();
+      return { ok: true, data: [], details: [], totals: [], _pending: true };
+    }
+
+    // Callback'siz eski davranış — POS'a 10sn (blocking)
     try {
       const ctrl = new AbortController();
       const tid = setTimeout(() => ctrl.abort(), 10000);
@@ -417,7 +428,8 @@ export default function CustomersScreen() {
         `${API_URL}/api/data/cari-extre`,
         { tenant_id: activeTenantId, cari_id: cariId, doviz_ad: cari.DOVIZ_AD_ID || 1, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd },
         token || '',
-        // 2026-07-10 — Arka plan POS refresh callback (SWR)
+        // 2026-07-10 — Arka plan POS refresh callback (SWR). fresh=null →
+        // sadece spinner'ı kapat (istek başarısız/boş; cache verisi korunur).
         (fresh: any) => {
           if (fresh && Array.isArray(fresh.data)) {
             const sortedFresh = [...fresh.data].sort((a: any, b: any) => {
@@ -427,6 +439,7 @@ export default function CustomersScreen() {
             setExtreRawData(sortedFresh);
             setExtreFromCache(false);
           }
+          setExtreLoading(false);
         },
       );
       if (data.ok && data.data) {
@@ -438,8 +451,9 @@ export default function CustomersScreen() {
         setExtreFetchedRange({ start: fetchStart, end: fetchEnd, cariId });
         setExtreFromCache(!!data.from_cache);
       }
-    } catch (err) { console.error(err); }
-    finally { setExtreLoading(false); }
+      // _pending → POS isteği arka planda; spinner callback gelince kapanır.
+      if (!data._pending) setExtreLoading(false);
+    } catch (err) { console.error(err); setExtreLoading(false); }
   }, [activeTenantId, extreStart, extreEnd, monthRangeFor, fetchExtreWithFallback]);
 
   // Tarih değişimi → eğer fetched range içinde → sadece client-side filtrele
@@ -471,16 +485,25 @@ export default function CustomersScreen() {
         `${API_URL}/api/data/fis-detail`,
         { tenant_id: activeTenantId, fis_id: fisId },
         token || '',
+        // 2026-07 — SWR: cache MISS'te POS isteği arka planda; gelince doldur.
+        (fresh: any) => {
+          if (fresh && Array.isArray(fresh.details)) {
+            setFisDetail(fresh.details);
+            setFisTotals(fresh.totals && fresh.totals.length > 0 ? fresh.totals[0] : null);
+          }
+          setFisLoading(false);
+        },
       );
       if (data.ok) {
         setFisDetail(data.details || []);
         setFisTotals(data.totals && data.totals.length > 0 ? data.totals[0] : null);
       }
+      if (!data._pending) setFisLoading(false);
     } catch (err) {
       console.error('Fis detail error:', err);
+      setFisLoading(false);
     }
-    finally { setFisLoading(false); }
-  }, [activeTenantId]);
+  }, [activeTenantId, fetchExtreWithFallback]);
 
   // Export functions
   const exportExtrePdf = async () => {

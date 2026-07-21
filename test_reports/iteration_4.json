@@ -1,0 +1,60 @@
+{
+  "summary": "Iteration 4 verifies speed/cache fixes for /api/data/cari-extre (date-agnostic fallback), /api/data/fis-detail (bildirim_feed fallback + 25s wait_for cap), and regression on /stock-extre + /stock-detail. BACKEND (pytest 8/9 pass, 33s wall): cari-extre cache_only for known cari 443847 → 200 in 0.98s ✓; unknown cari 99999999 cache_only → 200 in 0.77s empty (no hang) ✓; fis-detail cache_only for known fis 27560618 → 200 in 0.79s with details[2]+totals[1] (feed HIT confirmed from server log) ✓; fis-detail cache_only unknown fis_id=1 → 200 fast empty ✓; stock-extre cache_only stok 683703 → 200 fast valid list ✓; stock-detail cache_only → 200 fast ✓; 400 validations ✓. ONE FAILURE (RCA’d, HIGH priority): /api/data/fis-detail without cache_only for fis_id=1 → returns HTTP 500 with body '{\"detail\":\"\"}' after ~27s wall (the 25s asyncio.wait_for cap IS enforced, but the raised TimeoutError falls through the generic `except Exception` at data.py:2508 → HTTPException(500, str(e))). Frontend background SWR path will treat this as an error instead of empty. Should return 200 {ok:true, details:[], totals:[], from_cache:false, _timed_out:true}. FRONTEND (Playwright 390x844): logged in as cakmak_ebubekir@hotmail.com/admin (berk user — has_no_tenants:true). Dashboard renders (Nakit/KK/Açık Hesap/Toplam cards at ₺0), all 5 bottom tabs (Dashboard, Stok, Cariler, Raporlar, Ayarlar) switch without crash; empty-state 'Veri kaynağı seçilmedi' shown correctly on tabs requiring tenant (expected because logged-in user has no tenants — the credentials with tenant_id, cakmak.ebubekir29@gmail.com, was explicitly EXCLUDED by main agent). Notification tap injection regression: @notification_pending_tap_v2 type=high_sale, fis_id=27560618, amount=339, tenant=b9f4d960e43f462d9b77915577add71a, belgeno=TESTX, receivedAt=Date.now() → reload /dashboard opens green 'Yüksek Satış' modal in <500ms showing #TESTX + ₺339,00 hero + KALEM 0/İNDİRİM ₺0.00/KDV ₺0.00 + 'Detay satırı bulunamadı' (ÜRÜNLER 0) — modal did not hang or crash. Zero JS errors captured. LIMITATION: The four tenant-scoped end-to-end frontend flows (a-cari-detail spinner, b-stock-miktar+ekstre spinner, c-fis-detail-from-movement, d-tab smoke — item d passed) could not be fully exercised end-to-end because berk has no tenants; a tenanted account is required to see actual list rows. Deprecated packages detected: NONE (no expo-av / expo-barcode-scanner / expo-background-fetch imports). RN warnings noted: 'shadow*' style props deprecation + expo-notifications web listener limitation (pre-existing from iterations 1-3, not new).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/data/fis-detail",
+        "issue": "Without cache_only flag, when POS is offline the 25s asyncio.wait_for cap fires (working as designed), BUT the resulting asyncio.TimeoutError is caught by the generic `except Exception as e: raise HTTPException(500, str(e))` at data.py:2505-2509 → returns HTTP 500 with body '{\"detail\":\"\"}' (empty because TimeoutError has no message). Wall time observed 27.2s for fis_id=1 → status 500 empty. Frontend background SWR request will thus surface an error instead of gracefully falling back to empty. FIX: catch asyncio.TimeoutError explicitly and return 200 with ok:true + empty details/totals (optionally _timed_out:true). Reference: /app/backend/routes/data.py:2486-2509.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "cari-detail / stock-detail / fis-detail modals (spinner clears + background SWR settle)",
+        "issue": "COULD NOT VERIFY END-TO-END because the only permitted account (berk / cakmak_ebubekir@hotmail.com) has no tenants → Cariler/Stok/Raporlar tabs show 'Veri kaynağı seçilmedi' empty state (no list rows to tap). Verified only that the empty state renders without crash. To fully test spinner→background settle behaviour a tenanted account is required. Backend cache paths for these flows are verified independently (see backend tests).",
+        "affected_testIDs": []
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "expo-notifications on web", "issue": "Non-blocking warning '[expo-notifications] Listening to push token changes is not yet fully supported on web.' — pre-existing (iterations 1-3), expected on web preview, will work on native build. No action required."},
+      {"component": "Deprecated style props (dashboard + card components)", "issue": "Recurring warnings '\"shadow*\" style props are deprecated. Use \"boxShadow\".' from RN-web. Pre-existing (see iteration_3), not introduced by this iteration. Reference: dashboard.tsx card styles."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_extre_fis_speed.py",
+    "/app/test_reports/pytest/iter4_results.xml",
+    "/tmp/i4_10_dashboard.png",
+    "/tmp/i4_20_cariler.png",
+    "/tmp/i4_30_stok.png",
+    "/tmp/i4_40_raporlar.png",
+    "/tmp/i4_45_ayarlar.png",
+    "/tmp/i4_50_high_sale_modal.png"
+  ],
+  "action_items": [
+    "[HIGH] /app/backend/routes/data.py:2483-2509 — catch asyncio.TimeoutError explicitly in /api/data/fis-detail POS fallback and return 200 {ok:true, from_cache:false, details:[], totals:[], _timed_out:true} instead of raising HTTPException(500). Otherwise the background SWR path in stock.tsx/customers.tsx openFisDetail will show an error instead of the expected 'Fiş detayı bulunamadı' empty state after the 25s cap.",
+    "[P2] Provide a tenanted test account with password known to the testing agent (not cakmak.ebubekir29@gmail.com which is 401) so future testers can exercise Cariler/Stok tap→detail modal flows end-to-end. Alternatively expose a demo tenant on the berk user.",
+    "[P3 - carry-over] Add testIDs to Yüksek Satış / Fiş İptal / Cari Detay / Stok Detay modals (open, close, empty-state, refreshing indicator) and to cari/stock list rows so tap-to-detail flows have stable selectors instead of coord/text fallbacks (see iteration_3 action item)."
+  ],
+  "critical_code_review_comments": [
+    "data.py:2486-2490 — asyncio.wait_for(_on_demand_request(..., timeout_sec=20), timeout=25) enforces the outer cap as intended (observed 27.2s wall including parse), but see HIGH backend issue: the TimeoutError bubbles into a 500. Excellent that the cap is present; missing is a targeted `except asyncio.TimeoutError` branch that returns a 200 empty envelope instead.",
+    "data.py:2170-2227 — date-agnostic cache fallback is well-scoped (cache_only && empty rows only), pulls newest 40 kart_extre_cari blobs and Python-filters by requested date range; correct behaviour verified with cari 443847 (~1s) and unknown cari 99999999 (~0.8s, empty).",
+    "data.py:2310-2361 — _feed_fis_lookup reads the 8 newest fis_gunluk_bildirim_feed blobs and matches on FIS_ID with int+str comparison; parses DETAYLAR/URUNLER/ITEMS/LINES defensively; JSON string variant handled. Fis 27560618 correctly returns 2 details + 1 total in 0.8s.",
+    "data.py:2437-2473 — fis-detail feed fallback computes SATIR_TOPLAM/KDV_TOPLAM/SATIR_ISKONTO_TOPLAM/GENELTOPLAM from detail lines when the feed row lacks them. Note: uses `feed_row.get('TUTAR') or 0` for GENELTOPLAM primary — if TUTAR is 0 it falls to `round(satir_top,2)` (correct short-circuit).",
+    "data.py:2478-2482 — cache_only=True correctly short-circuits with 200 empty envelope before POS fallback — this is why unknown fis_id=1 with cache_only returns fast/empty (verified 0.7s).",
+    "MINOR carry-over: /app/backend/routes/data.py is 3042 lines (>700 threshold) — same as dashboard.tsx (3507 lines) from iteration_3."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_extre_fis_speed.py (NEW — 9 pytest cases, JUnit XML at /app/test_reports/pytest/iter4_results.xml)"
+  ],
+  "success_rate": {"backend": "89% (8/9 pytest — 1 HIGH: fis-detail POS-fallback returns 500 on 25s wait_for timeout instead of graceful 200 empty)", "frontend": "smoke passed — dashboard, 5 tabs, empty states, and high_sale notification tap modal all render without crash; deep tap-to-detail flows blocked by test-account tenant limitation (see integration issue)"},
+  "seed_data_creation": "None. Injected @notification_pending_tap_v2 via localStorage.setItem with receivedAt=Date.now() once for high_sale type (fis_id 27560618, amount 339, tenant b9f4d960e43f462d9b77915577add71a, belgeno TESTX).",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend cache-first speed tests live in /app/backend/tests/test_extre_fis_speed.py (session-scoped auth fixture, session-scoped requests.Session). Run: `pytest /app/backend/tests/test_extre_fis_speed.py -v --junitxml=/app/test_reports/pytest/iterN_results.xml`. The ONLY failing test — test_unknown_fis_without_cache_only_capped — asserts r.status_code != 500 AND elapsed<35s; currently gets 500 in 27s. After main agent adds `except asyncio.TimeoutError` returning 200-empty, that test should pass. For frontend tap-to-detail flows (cari ekstre / stok miktar+ekstre / fis detail from movement row) you need a tenanted account — berk has none. Notification tap injection recipe still works: localStorage.setItem('@notification_pending_tap_v2', JSON.stringify({type:'high_sale', fis_id:'X', amount:'N', tenant:'T', belgeno:'B', receivedAt: Date.now()})); then goto /dashboard. Login uses field name 'email' (NOT 'username') in POST /api/auth/login.",
+  "rca_of_issue": "BUG: /api/data/fis-detail without cache_only returns HTTP 500 with empty detail body when POS is offline. REPRODUCTION: `curl -X POST $BASE/api/data/fis-detail -H 'Authorization: Bearer $TOK' -H 'Content-Type: application/json' -d '{\"tenant_id\":\"b9f4d960e43f462d9b77915577add71a\",\"fis_id\":1}'` → after 27s: HTTP 500 body `{\"detail\":\"\"}`. ROOT CAUSE: data.py:2486 wraps _on_demand_request in asyncio.wait_for(timeout=25); when the POS relay is offline the inner call blocks past 25s and asyncio raises TimeoutError (which has no .args/.message → str(e)==''). The generic `except Exception as e: raise HTTPException(500, str(e))` at line 2507-2509 converts it to a 500 with empty detail. This is the ONLY reachable path since the try block wraps everything from line 2483 to 2504. MITIGATION: insert `except asyncio.TimeoutError: return {'ok': True, 'from_cache': False, 'details': [], 'totals': [], '_timed_out': True}` BEFORE the generic Exception handler (i.e. between line 2505 and 2507). Frontend openFisDetail SWR callbacks (customers.tsx/stock.tsx) already handle the null/empty-fresh case, so 200 empty will surface the correct 'Fiş detayı bulunamadı' UI state per spec (`must NOT be stuck forever`, `500s not acceptable`)."
+}

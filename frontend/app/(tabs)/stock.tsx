@@ -214,9 +214,13 @@ export default function StockScreen() {
     });
   }, [detailExtre, extreStart, extreEnd]);
 
-  // 2026-06-01 — fetchStockDetailWithFallback: stock-detail (miktar+extre) için
-  // cache HIT → anında dön; MISS → POS'a 10sn timeout. Aynı pattern.
-  const fetchStockDetailWithFallback = useCallback(async (stockId: any, token: string): Promise<any> => {
+  // 2026-07 — SWR: stock-detail (miktar+extre) cache-only hızlı yol + HER
+  // durumda arka plan POS isteği (taze miktar gelince callback UI'ı günceller).
+  // Cache MISS'te kullanıcı BEKLETİLMEZ (_pending döner).
+  const fetchStockDetailWithFallback = useCallback(async (
+    stockId: any, token: string, onUpdate?: (fresh: any) => void,
+  ): Promise<any> => {
+    let cacheJson: any = null;
     try {
       const r1 = await fetch(`${API_URL}/api/data/stock-detail`, {
         method: 'POST',
@@ -224,8 +228,38 @@ export default function StockScreen() {
         body: JSON.stringify({ tenant_id: activeTenantId, stock_id: stockId, cache_only: true }),
       });
       const d1 = await r1.json().catch(() => ({}));
-      if (d1.ok && (Array.isArray(d1.miktar) && d1.miktar.length > 0)) return d1;
+      if (d1.ok && (Array.isArray(d1.miktar) && d1.miktar.length > 0)) cacheJson = d1;
     } catch {}
+
+    const runBackground = () => {
+      (async () => {
+        let fresh: any = null;
+        try {
+          const ctrl = new AbortController();
+          const tid = setTimeout(() => ctrl.abort(), 25000);
+          const r2 = await fetch(`${API_URL}/api/data/stock-detail`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify({ tenant_id: activeTenantId, stock_id: stockId }),
+            signal: ctrl.signal,
+          });
+          clearTimeout(tid);
+          fresh = await r2.json().catch(() => null);
+        } catch {}
+        onUpdate?.((fresh && fresh.ok) ? fresh : null);
+      })();
+    };
+
+    if (cacheJson) {
+      // Cache HIT — anında dön + taze miktar arka planda gelsin (SWR)
+      if (onUpdate) runBackground();
+      return cacheJson;
+    }
+    if (onUpdate) {
+      runBackground();
+      return { ok: true, miktar: [], extre: [], _pending: true };
+    }
+    // Callback'siz eski davranış — 10sn blocking
     try {
       const ctrl = new AbortController();
       const tid = setTimeout(() => ctrl.abort(), 10000);
@@ -264,31 +298,42 @@ export default function StockScreen() {
       else if (d1.ok && Array.isArray(d1.details) && d1.details.length > 0) { cacheHit = true; cacheData = d1; }
     } catch {}
 
+    // Arka plan POS isteği — bitince onSwrUpdate HER durumda çağrılır
+    // (başarıda fresh, hatada null) ki caller spinner'ı kapatabilsin.
+    const runBackground = () => {
+      (async () => {
+        let fresh: any = null;
+        try {
+          const ctrl = new AbortController();
+          const tid = setTimeout(() => ctrl.abort(), 25000);
+          const r2 = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(body),
+            signal: ctrl.signal,
+          });
+          clearTimeout(tid);
+          fresh = await r2.json().catch(() => null);
+        } catch {}
+        onSwrUpdate?.((fresh && fresh.ok) ? fresh : null);
+      })();
+    };
+
     if (cacheHit && cacheData) {
       // Arka planda POS'a git ve fresh geldiğinde UI güncelle
-      if (onSwrUpdate) {
-        (async () => {
-          try {
-            const ctrl = new AbortController();
-            const tid = setTimeout(() => ctrl.abort(), 15000);
-            const r2 = await fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-              body: JSON.stringify(body),
-              signal: ctrl.signal,
-            });
-            clearTimeout(tid);
-            const fresh = await r2.json().catch(() => null);
-            if (fresh && fresh.ok && (Array.isArray(fresh.data) || Array.isArray(fresh.details))) {
-              onSwrUpdate(fresh);
-            }
-          } catch {}
-        })();
-      }
+      if (onSwrUpdate) runBackground();
       return cacheData;
     }
 
-    // 2) POS fallback — 10sn timeout
+    // Cache MISS — 2026-07: kullanıcı BEKLETİLMEZ. Callback varsa POS isteği
+    // arka planda koşar, hemen _pending ile boş dönülür; veri gelince
+    // callback UI'ı günceller ve spinner'ı kapatır.
+    if (onSwrUpdate) {
+      runBackground();
+      return { ok: true, data: [], details: [], totals: [], _pending: true };
+    }
+
+    // Callback'siz eski davranış — POS fallback 10sn (blocking)
     try {
       const ctrl = new AbortController();
       const tid = setTimeout(() => ctrl.abort(), 10000);
@@ -325,14 +370,22 @@ export default function StockScreen() {
         `${API_URL}/api/data/fis-detail`,
         { tenant_id: activeTenantId, fis_id: fisId },
         token || '',
+        // 2026-07 — SWR: cache MISS'te POS isteği arka planda; gelince doldur.
+        (fresh: any) => {
+          if (fresh && Array.isArray(fresh.details)) {
+            setFisDetail(fresh.details);
+            setFisTotals(fresh.totals && fresh.totals.length > 0 ? fresh.totals[0] : null);
+          }
+          setFisLoading(false);
+        },
       );
       if (data.ok) {
         setFisDetail(data.details || []);
         setFisTotals(data.totals && data.totals.length > 0 ? data.totals[0] : null);
       }
+      if (!data._pending) setFisLoading(false);
     } catch (err) {
       console.error('Fis detail error:', err);
-    } finally {
       setFisLoading(false);
     }
   }, [activeTenantId, fetchExtreWithFallback]);
@@ -718,15 +771,27 @@ export default function StockScreen() {
     // zaten web DB'ye basılıyor, POS'a gerek yok. Cache hit = milisaniyeler.
     try {
       const { token } = useAuthStore.getState();
-      // 2026-06-01 — Miktar artık cache+POS fallback ile (10sn timeout)
-      // ekstre yine fetchExtreWithFallback ile paralel
+      // 2026-07 — SWR: iki istek de cache'ten anında döner; cache boşsa POS
+      // isteği ARKA PLANDA (_pending) koşar ve callback UI'ı güncelleyip
+      // spinner'ı kapatır. Kullanıcı hiçbir durumda bekletilmez.
+      const flags = { m: false, e: false, ready: false };
+      const done = { m: false, e: false };
+      const check = () => {
+        if (!flags.ready) return;
+        if ((!flags.m || done.m) && (!flags.e || done.e)) setDetailLoading(false);
+      };
       const [miktarJson, extreData] = await Promise.all([
-        fetchStockDetailWithFallback(stockId, token || ''),
+        fetchStockDetailWithFallback(stockId, token || '', (freshM: any) => {
+          if (freshM && Array.isArray(freshM.miktar) && freshM.miktar.length > 0) {
+            setDetailMiktar(freshM.miktar);
+          }
+          done.m = true; check();
+        }),
         fetchExtreWithFallback(
           `${API_URL}/api/data/stock-extre`,
           { tenant_id: activeTenantId, stok_id: stockId, tarih_baslangic: fetchStart, tarih_bitis: fetchEnd },
           token || '',
-          // 2026-07-10 — SWR arka plan refresh
+          // 2026-07-10 — SWR arka plan refresh (fresh=null → sadece settle)
           (fresh: any) => {
             if (fresh && Array.isArray(fresh.data)) {
               const sortedFresh = [...fresh.data].sort((a: any, b: any) => {
@@ -735,6 +800,7 @@ export default function StockScreen() {
               });
               setDetailExtre(sortedFresh);
             }
+            done.e = true; check();
           },
         ),
       ]);
@@ -750,8 +816,11 @@ export default function StockScreen() {
         setDetailExtre(miktarJson.extre || []);
         setExtreFetchedRange({ start: fetchStart, end: fetchEnd, stockId });
       }
-    } catch (err) { console.error(err); }
-    finally { setDetailLoading(false); }
+      flags.m = !!miktarJson._pending;
+      flags.e = !!extreData._pending;
+      flags.ready = true;
+      check();
+    } catch (err) { console.error(err); setDetailLoading(false); }
   }, [activeTenantId, extreStart, extreEnd, monthRangeFor, fetchExtreWithFallback, fetchStockDetailWithFallback]);
 
   // 2026-06-01 — Tarih değişimi → eğer fetched range içinde → sadece client-side

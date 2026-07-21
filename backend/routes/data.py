@@ -2153,6 +2153,7 @@ async def get_cari_extre(
         tarih_bitis = date_cls.today().strftime("%Y-%m-%d")
     
     try:
+        cache_only = bool(body.get("cache_only", False))
         result = await _on_demand_request(
             tenant_id, "kart_extre_cari", {
                 "ID": int(cari_id),
@@ -2163,8 +2164,68 @@ async def get_cari_extre(
             },
             timeout_sec=10,  # 2026-07-10 — Hız iyileştirmesi: 45s → 10s
             skip_mysql_cache=force_refresh,
-            cache_only=bool(body.get("cache_only", False)),
+            cache_only=cache_only,
         )
+
+        # 2026-07 — Tarih-agnostik cache fallback: web tarafı cache'i kendi
+        # tarih aralığıyla yazıyor (örn. ay başı → bugün). Exact params miss
+        # olduğunda aynı cari ID'nin EN YENİ blob'unu bul, satırları istenen
+        # aralığa göre Python'da filtrele → cache-only pass anında döner,
+        # taze veri zaten arka plan SWR isteğiyle gelir.
+        _rows = result.get("data") if isinstance(result, dict) else None
+        if cache_only and not _rows:
+            def _row_dt(r: dict) -> str:
+                for k in ("TARIH", "TARIHI", "ISLEM_TARIHI", "FIS_TARIHI"):
+                    v = r.get(k)
+                    if v:
+                        s = str(v)[:10]
+                        if "." in s:  # "21.07.2026" → "2026-07-21"
+                            p = s.split(".")
+                            if len(p) == 3:
+                                return f"{p[2]}-{p[1]}-{p[0]}"
+                        return s
+                return ""
+            try:
+                from services.dataset_cache import get_data_pool as _gdp
+                pool = await _gdp()
+                async with pool.acquire() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            """SELECT data_json, params_json FROM dataset_cache
+                               WHERE tenant_id=%s AND dataset_key='kart_extre_cari'
+                               ORDER BY synced_at DESC LIMIT 40""",
+                            (tenant_id,),
+                        )
+                        for blob, pjson in await cur.fetchall():
+                            try:
+                                p = json.loads(pjson or "{}")
+                                if int(p.get("ID") or 0) != int(cari_id):
+                                    continue
+                                rows = json.loads(blob or "[]")
+                            except (TypeError, ValueError, json.JSONDecodeError):
+                                continue
+                            if not isinstance(rows, list):
+                                continue
+                            filtered = [
+                                r for r in rows
+                                if isinstance(r, dict)
+                                and ((not _row_dt(r)) or (tarih_baslangic <= _row_dt(r) <= tarih_bitis))
+                            ]
+                            logger.info(
+                                f"[cari-extre] date-agnostic cache HIT ID={cari_id} "
+                                f"blob_range={p.get('TARIH_BASLANGIC')}→{p.get('TARIH_BITIS')} "
+                                f"rows={len(rows)} filtered={len(filtered)}"
+                            )
+                            result = {
+                                "ok": True,
+                                "data": _fix_large_ints(filtered),
+                                "_cache_hit": True,
+                                "_source": "mysql_date_agnostic",
+                            }
+                            break
+            except Exception as e:
+                logger.debug(f"[cari-extre] date-agnostic fallback failed: {e}")
+
         # Surface cache hit info to frontend
         if isinstance(result, dict):
             result["from_cache"] = bool(result.get("_cache_hit"))
@@ -2246,6 +2307,60 @@ async def get_stock_extre(
     }
 
 
+async def _feed_fis_lookup(tenant_id: str, fis_id) -> tuple:
+    """2026-07 — `fis_gunluk_bildirim_feed` cache blob'larından FIS_ID eşleşen
+    satırı bulur ve DETAYLAR JSON'unu açar. Bugünün fişleri watcher tarafından
+    feed'e detaylarıyla basıldığı için POS'a gitmeden anında fiş detayı döner.
+    Returns (details: list, feed_row: dict) — bulunamazsa ([], {})."""
+    try:
+        fis_int = int(fis_id)
+    except (TypeError, ValueError):
+        fis_int = None
+    try:
+        from services.dataset_cache import get_data_pool as _gdp
+        pool = await _gdp()
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    """SELECT data_json FROM dataset_cache
+                       WHERE tenant_id=%s AND dataset_key=%s
+                       ORDER BY synced_at DESC LIMIT 8""",
+                    (tenant_id, "fis_gunluk_bildirim_feed"),
+                )
+                for (blob,) in await cur.fetchall():
+                    try:
+                        data = json.loads(blob or "[]")
+                    except Exception:
+                        continue
+                    if not isinstance(data, list):
+                        continue
+                    for r in data:
+                        if not isinstance(r, dict):
+                            continue
+                        fid = r.get("FIS_ID")
+                        try:
+                            match = fis_int is not None and int(fid) == fis_int
+                        except (TypeError, ValueError):
+                            match = False
+                        if not match and str(fid) != str(fis_id):
+                            continue
+                        raw = None
+                        for k in ("DETAYLAR", "URUNLER", "ITEMS", "LINES"):
+                            if k in r:
+                                raw = r[k]
+                                break
+                        if isinstance(raw, str):
+                            try:
+                                raw = json.loads(raw)
+                            except Exception:
+                                raw = None
+                        details = [el for el in raw if isinstance(el, dict)] if isinstance(raw, list) else []
+                        return details, r
+    except Exception as e:
+        logger.debug(f"[feed_fis_lookup] failed fis_id={fis_id}: {e}")
+    return [], {}
+
+
 @router.post("/fis-detail")
 async def get_fis_detail(
     body: dict,
@@ -2316,6 +2431,49 @@ async def get_fis_detail(
     except Exception as e:
         logger.warning(f"[fis-detail] cache lookup error: {e}")
     
+    # 1b) 2026-07 — Bildirim feed fallback: bugünün fişleri watcher tarafından
+    # `fis_gunluk_bildirim_feed`e DETAYLAR ile basılıyor. fis_detay_toplam
+    # cache'i yoksa buradan POS'a gitmeden anında dönebiliriz.
+    try:
+        feed_details, feed_row = await _feed_fis_lookup(tenant_id, fis_id)
+        if feed_details:
+            # UI'nin beklediği totals alanlarını (SATIR_TOPLAM, KDV_TOPLAM,
+            # GENELTOPLAM, SATIR_ISKONTO_TOPLAM) detay satırlarından hesapla.
+            satir_top = kdv_top = isk_top = 0.0
+            for d in feed_details:
+                try:
+                    satir_top += float(d.get("KDV_DAHIL_NET_TUTAR") or d.get("DAHIL_TUTAR") or d.get("TUTAR") or 0)
+                except (TypeError, ValueError):
+                    pass
+                try:
+                    kdv_top += float(d.get("KDV_TUTARI") or d.get("KDV_TUTAR") or 0)
+                except (TypeError, ValueError):
+                    pass
+                try:
+                    isk_top += float(d.get("SATIR_ISKONTO_TUTARI") or d.get("TOPLAM_ISKONTO_TUTARI") or 0)
+                except (TypeError, ValueError):
+                    pass
+            try:
+                genel = float(feed_row.get("TUTAR") or 0) or round(satir_top, 2)
+            except (TypeError, ValueError):
+                genel = round(satir_top, 2)
+            total_row = dict(feed_row)
+            total_row.pop("DETAYLAR", None)
+            total_row.setdefault("SATIR_TOPLAM", round(satir_top, 2))
+            total_row.setdefault("KDV_TOPLAM", round(kdv_top, 2))
+            total_row.setdefault("SATIR_ISKONTO_TOPLAM", round(isk_top, 2))
+            total_row.setdefault("GENELTOPLAM", genel)
+            logger.info(f"[fis-detail] feed HIT fis_id={fis_id} details={len(feed_details)}")
+            return {
+                "ok": True,
+                "from_cache": True,
+                "_source": "bildirim_feed",
+                "details": _fix_large_ints(feed_details),
+                "totals": _fix_large_ints([total_row]),
+            }
+    except Exception as e:
+        logger.debug(f"[fis-detail] feed fallback failed: {e}")
+
     # 2) Fallback — POS canlı sorgu (eski fişler için) — sadece cache_only=False ise
     cache_only_flag = bool(body.get("cache_only", False))
     if cache_only_flag:
@@ -2323,8 +2481,13 @@ async def get_fis_detail(
         logger.info(f"[fis-detail] cache_only=True ve cache MISS → boş dönülüyor fis_id={fis_id}")
         return {"ok": True, "from_cache": False, "details": [], "totals": []}
     try:
-        result = await _on_demand_request(tenant_id, "fis_detay_toplam", params,
-                                          timeout_sec=35, raw_cache=True)
+        # 2026-07 — 25s sert duvar limiti: POS çevrimdışıyken frontend'in
+        # arka plan isteği dakikalarca sürüklenmesin (SWR revalidate).
+        result = await asyncio.wait_for(
+            _on_demand_request(tenant_id, "fis_detay_toplam", params,
+                               timeout_sec=20, raw_cache=True),
+            timeout=25,
+        )
         cache = result.get("cache", {})
         data = cache.get("data", [])
         logger.info(f"[fis-detail] POS fallback fis_id={fis_id} data_type={type(data).__name__}")
