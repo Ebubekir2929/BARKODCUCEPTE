@@ -2504,6 +2504,11 @@ async def get_fis_detail(
         }
     except HTTPException:
         raise
+    except asyncio.TimeoutError:
+        # 2026-07 — POS 25s'te yanıt vermedi: hata değil, boş sonuç dön.
+        # Frontend "bulunamadı" gösterir; sonraki denemede cache dolmuş olabilir.
+        logger.warning(f"[fis-detail] POS fallback 25s timeout fis_id={fis_id}")
+        return {"ok": True, "from_cache": False, "_timed_out": True, "details": [], "totals": []}
     except Exception as e:
         logger.error(f"fis-detail POS fallback error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
