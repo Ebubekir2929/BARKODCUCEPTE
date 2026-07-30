@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from typing import Optional
 from pydantic import BaseModel
 import logging
+import json
 
 from routes.auth import get_current_user
 from services.dataset_cache import get_data_pool
@@ -113,6 +114,40 @@ class KasaCreate(BaseModel):
     tip: str = "K"  # K=Kasa B=Banka Ç=Çek kasası S=Senet kasası
 
 
+# ── Faz 2: Fatura/Fiş girişi ─────────────────────────────────────────────
+# FINANS_ISLEM_TURU eşlemesi (ERP12 dökümünden):
+#   47 Satış faturası (C F → borçlu=cari), 45 Alış faturası (F C → alacaklı=cari)
+#   71 Satış fişi, 69 Alış fişi
+FIS_TIPLERI = {
+    "satis_faturasi": {"ad": "Satış Faturası", "islem_turu": 47, "cari_taraf": "borclu"},
+    "alis_faturasi":  {"ad": "Alış Faturası",  "islem_turu": 45, "cari_taraf": "alacakli"},
+    "satis_fisi":     {"ad": "Satış Fişi",     "islem_turu": 71, "cari_taraf": "borclu"},
+    "alis_fisi":      {"ad": "Alış Fişi",      "islem_turu": 69, "cari_taraf": "alacakli"},
+}
+
+
+class FisSatir(BaseModel):
+    stok_id: int
+    barkod: Optional[str] = None
+    kod: Optional[str] = None
+    ad: str
+    miktar: float
+    fiyat: float               # KDV dahil birim fiyat
+    kdv: Optional[float] = None
+
+
+class FisCreate(BaseModel):
+    tenant_id: str
+    fis_tipi: str
+    cari_id: int
+    cari_ad: Optional[str] = None
+    odeme_tipi: str = "acik_hesap"  # nakit | kart | acik_hesap
+    kasa_id: Optional[int] = None
+    kasa_ad: Optional[str] = None
+    aciklama: Optional[str] = ""
+    satirlar: list
+
+
 @router.get("/turler")
 async def islem_turleri(current_user: dict = Depends(get_current_user)):
     return {"ok": True, "turler": [
@@ -160,8 +195,66 @@ async def islem_create(body: IslemCreate, current_user: dict = Depends(get_curre
     return {"ok": True, "id": islem_id, "durum": "bekliyor"}
 
 
+@router.post("/fis-create")
+async def fis_create(body: FisCreate, current_user: dict = Depends(get_current_user)):
+    """Fatura/Fiş girişi → kuyruk (islem_grubu='fis'). POS istemcisi
+    SEQUENS_VER + FIS/FIS_DETAY (+nakit/kart ise FINANS/FINANS_DETAY)
+    prosedürleriyle ERP12'ye aktarır — fiyat güncelleme akışıyla aynı desen."""
+    await _ensure_tables()
+    tip = FIS_TIPLERI.get(body.fis_tipi)
+    if not tip:
+        raise HTTPException(status_code=400, detail="Geçersiz fiş tipi")
+    satirlar = []
+    for s in (body.satirlar or []):
+        try:
+            satirlar.append(FisSatir(**s) if isinstance(s, dict) else s)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Geçersiz ürün satırı")
+    if not satirlar:
+        raise HTTPException(status_code=400, detail="En az bir ürün satırı gerekli")
+    if body.odeme_tipi in ("nakit", "kart") and not body.kasa_id:
+        raise HTTPException(status_code=400, detail="Nakit/Kart ödemede kasa seçimi zorunlu")
+    geneltoplam = round(sum(max(0.0, s.miktar) * max(0.0, s.fiyat) for s in satirlar), 2)
+    if geneltoplam <= 0:
+        raise HTTPException(status_code=400, detail="Fiş toplamı 0'dan büyük olmalı")
+
+    detay = {
+        "odeme_tipi": body.odeme_tipi,
+        "kasa_id": body.kasa_id,
+        "kasa_ad": body.kasa_ad,
+        "satirlar": [s.dict() for s in satirlar],
+        "geneltoplam": geneltoplam,
+    }
+    if tip["cari_taraf"] == "borclu":
+        borclu_id, borclu_ad = body.cari_id, body.cari_ad
+        alacakli_id, alacakli_ad = body.kasa_id, body.kasa_ad
+    else:
+        borclu_id, borclu_ad = body.kasa_id, body.kasa_ad
+        alacakli_id, alacakli_ad = body.cari_id, body.cari_ad
+
+    pool = await get_data_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """INSERT INTO mobil_islem_kuyrugu
+                   (tenant_id, islem_grubu, islem_turu, islem_turu_ad,
+                    kart_borclu, kart_borclu_ad, kart_alacakli, kart_alacakli_ad,
+                    tutar, aciklama, detay_json, olusturan)
+                   VALUES (%s,'fis',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (body.tenant_id, tip["islem_turu"], tip["ad"],
+                 borclu_id, borclu_ad, alacakli_id, alacakli_ad,
+                 geneltoplam, (body.aciklama or "")[:2000],
+                 json.dumps(detay, ensure_ascii=False),
+                 current_user.get("email", "")),
+            )
+            fis_id = cur.lastrowid
+        await conn.commit()
+    logger.info(f"[islem] fis id={fis_id} tip={body.fis_tipi} toplam={geneltoplam} satir={len(satirlar)}")
+    return {"ok": True, "id": fis_id, "durum": "bekliyor", "geneltoplam": geneltoplam}
+
+
 @router.get("/list")
-async def islem_list(tenant_id: str, limit: int = 50, current_user: dict = Depends(get_current_user)):
+async def islem_list(tenant_id: str, limit: int = 50, islem_grubu: str = "finans", current_user: dict = Depends(get_current_user)):
     await _ensure_tables()
     pool = await get_data_pool()
     async with pool.acquire() as conn:
@@ -169,11 +262,12 @@ async def islem_list(tenant_id: str, limit: int = 50, current_user: dict = Depen
             await cur.execute(
                 """SELECT id, islem_turu, islem_turu_ad, kart_borclu_ad, kart_alacakli_ad,
                           tutar, aciklama, vade_tarihi, cek_no, durum, erp_id, hata_mesaji,
-                          created_at, processed_at, (cek_resmi IS NOT NULL) AS resim_var
+                          created_at, processed_at, (cek_resmi IS NOT NULL) AS resim_var,
+                          detay_json
                    FROM mobil_islem_kuyrugu
-                   WHERE tenant_id=%s AND islem_grubu='finans'
+                   WHERE tenant_id=%s AND islem_grubu=%s
                    ORDER BY id DESC LIMIT %s""",
-                (tenant_id, min(int(limit), 200)),
+                (tenant_id, islem_grubu, min(int(limit), 200)),
             )
             cols = [c[0] for c in cur.description]
             rows = [dict(zip(cols, r)) for r in await cur.fetchall()]
@@ -183,21 +277,71 @@ async def islem_list(tenant_id: str, limit: int = 50, current_user: dict = Depen
                 r[k] = str(r[k])
         r["tutar"] = float(r["tutar"] or 0)
         r["resim_var"] = bool(r.get("resim_var"))
+        if r.get("detay_json"):
+            try:
+                r["detay"] = json.loads(r["detay_json"])
+            except Exception:
+                r["detay"] = None
+        r.pop("detay_json", None)
     return {"ok": True, "data": rows}
 
 
 @router.get("/kasalar")
 async def kasa_list(tenant_id: str, current_user: dict = Depends(get_current_user)):
+    """Kasa + banka kartları. 2026-07 — Öncelik: POS'un dataset olarak bastığı
+    kasa/banka listeleri (dataset_cache, fiyat güncelleme akışındaki gibi);
+    üzerine uygulamadan manuel eklenenler (mobil_kasa_kartlari) merge edilir."""
     await _ensure_tables()
+    out: list = []
+    seen: set = set()
     pool = await get_data_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
+            # 1) Dataset'ten (POS basar): dataset_key içinde kasa/banka geçen blob'lar
+            await cur.execute(
+                """SELECT dataset_key, data_json FROM dataset_cache
+                   WHERE tenant_id=%s AND (dataset_key LIKE %s OR dataset_key LIKE %s)
+                   ORDER BY synced_at DESC LIMIT 10""",
+                (tenant_id, "%kasa%", "%banka%"),
+            )
+            for dkey, blob in await cur.fetchall():
+                try:
+                    rows = json.loads(blob or "[]")
+                except Exception:
+                    continue
+                if isinstance(rows, dict):
+                    rs = rows.get("result_sets")
+                    rows = rs[0] if isinstance(rs, list) and rs else rows.get("data") or []
+                if not isinstance(rows, list):
+                    continue
+                varsayilan_tip = "B" if "banka" in str(dkey).lower() else "K"
+                for r in rows:
+                    if not isinstance(r, dict):
+                        continue
+                    kid = r.get("ID") or r.get("KART") or r.get("KART_ID") or r.get("KOD_ID")
+                    ad = (r.get("AD") or r.get("KASA_AD") or r.get("BANKA_AD")
+                          or r.get("UNVAN") or r.get("ACIKLAMA"))
+                    try:
+                        kid = int(kid)
+                    except (TypeError, ValueError):
+                        continue
+                    if kid in seen or not ad:
+                        continue
+                    seen.add(kid)
+                    out.append({"kart_id": kid, "ad": str(ad).strip(),
+                                "tip": str(r.get("TIP") or varsayilan_tip)[:4], "kaynak": dkey})
+            # 2) Manuel eklenenler (fallback / ek)
             await cur.execute(
                 "SELECT kart_id, ad, tip FROM mobil_kasa_kartlari WHERE tenant_id=%s ORDER BY ad",
                 (tenant_id,),
             )
-            rows = [{"kart_id": r[0], "ad": r[1], "tip": r[2]} for r in await cur.fetchall()]
-    return {"ok": True, "data": rows}
+            for r in await cur.fetchall():
+                if r[0] in seen:
+                    continue
+                seen.add(r[0])
+                out.append({"kart_id": r[0], "ad": r[1], "tip": r[2], "kaynak": "manuel"})
+    out.sort(key=lambda x: str(x["ad"]).lower())
+    return {"ok": True, "data": out}
 
 
 @router.post("/kasa-ekle")
