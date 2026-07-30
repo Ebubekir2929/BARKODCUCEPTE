@@ -1,21 +1,29 @@
 # -*- coding: utf-8 -*-
 """
-CLIENT.PY EKİ — Mobil İşlem Kuyruğu (Finans Tahsilat/Ödeme/Çek/Senet + Fiş) — 2026-07
+CLIENT.PY EKİ — Mobil İşlem Kuyruğu (Finans Tahsilat/Ödeme/Çek/Senet + Fiş + Sayım) — 2026-07 v2
+
+Fiyat güncelleme akışınızdaki ÇALIŞAN desenle birebir hizalandı:
+  • Yeni ID: mevcut `self._erp_next_sequence_id(cur, tablo, kod_pc)` metodunuz kullanılır
+    (SEQUENS_VER'i tüm resultset'leri tarayarak okuyan sağlam versiyon — yeniden yazılmadı).
+  • Her INSERT sonrası mevcut `self._exec_sequence_change(cur, kod_pc, id, kullanici, 1, tablo)`
+    çağrılır (SEQUNCES_DEGISIKLIK_AD — fiyat güncellemede yaptığınız gibi, islem=1=insert).
+  • INSERT sonrası rowcount'a güvenilmez → satır SELECT ile geri okunarak doğrulanır.
 
 KURULUM:
 1. Aşağıdaki metotları ana pencere sınıfınıza (price_update metotlarının yanına) ekleyin.
-2. __init__'e:  self._islem_busy = False
-                self.islem_timer = QTimer(self); self.islem_timer.timeout.connect(self.on_islem_tick)
-3. Ayarlara (DEFAULT_CFG):
-     "islem_enabled": True, "islem_interval_sec": 30,
-     "islem_kod_pc": 0, "islem_kullanici": 0,          # FK_PERSONEL
-     "islem_proje": 0, "islem_lokasyon": 0,
-4. Timer'ı price_update timer'ının başlatıldığı yerde başlatın:
-     if self.cfg.get("islem_enabled", True): self.islem_timer.start(30*1000)
+   (`_erp_next_sequence_id` ve `_exec_sequence_change` sınıfınızda ZATEN VAR — tekrar eklemeyin.)
+2. __init__'e (price_update_timer'ın kurulduğu yere):
+       self._islem_busy = False
+       self.islem_timer = QTimer(self)
+       self.islem_timer.timeout.connect(self.on_islem_tick)
+3. Ayarlar: KOD_PC ve KULLANICI için varsayılan olarak mevcut
+   `price_update_kod_pc` / `price_update_kullanici` değerleriniz kullanılır —
+   ek ayar girmenize gerek yok. Farklı olsun isterseniz DEFAULT_CFG'ye
+   `islem_kod_pc`, `islem_kullanici` ekleyin. `islem_proje`, `islem_lokasyon`
+   isteğe bağlı (varsayılan 0).
+4. Timer'ı price_update timer'ının start edildiği yerde başlatın:
+       if self.cfg.get("islem_enabled", True): self.islem_timer.start(30 * 1000)
 5. sync.php'ye sync_php_islem_ek.php içindeki 2 case eklenmiş olmalı.
-
-DİKKAT: SEQUENS_VER prosedürünüz yeni ID'yi nasıl döndürüyorsa `sequens_ver()`
-fonksiyonunu ona göre doğrulayın (varsayım: SELECT ile tek satır tek kolon döner).
 """
 import json
 import threading
@@ -49,12 +57,12 @@ def process_pending_islemler(self):
     items = resp.get("items", []) if isinstance(resp, dict) else []
     if not items:
         return
-    kod_pc = int(self.cfg.get("islem_kod_pc", 0) or 0)
-    kullanici = int(self.cfg.get("islem_kullanici", 0) or 0)
+    kod_pc = int(self.cfg.get("islem_kod_pc", 0) or self.cfg.get("price_update_kod_pc", 0) or 0)
+    kullanici = int(self.cfg.get("islem_kullanici", 0) or self.cfg.get("price_update_kullanici", 0) or 0)
     proje = int(self.cfg.get("islem_proje", 0) or 0)
     lokasyon = int(self.cfg.get("islem_lokasyon", 0) or 0)
     if kod_pc <= 0 or kullanici <= 0:
-        self.println("islem: islem_kod_pc / islem_kullanici ayarları girilmeli!")
+        self.println("islem: KOD_PC / KULLANICI ayarları girilmeli (price_update ayarlarından da okunur)!")
         return
     self.println(f"islem: {len(items)} bekleyen kayıt alındı.")
 
@@ -99,30 +107,10 @@ def process_pending_islemler(self):
         conn.close()
 
 
-def sequens_ver(self, conn, tablo: str, kod_pc: int) -> int:
-    """EXEC SEQUENS_VER — yeni ID rezerve eder.
-    NOT: Prosedürünüz sonucu SELECT ile döndürmüyorsa burayı uyarlamalısınız
-    (örn. OUTPUT parametresi veya sequence tablosundan SELECT)."""
-    cur = conn.cursor()
-    cur.execute("EXEC SEQUENS_VER @TABLO = ?, @KOD_PC = ?", tablo, kod_pc)
-    row = None
-    try:
-        row = cur.fetchone()
-    except Exception:
-        pass
-    while row is None and cur.nextset():
-        try:
-            row = cur.fetchone()
-        except Exception:
-            row = None
-    if not row:
-        raise RuntimeError(f"SEQUENS_VER({tablo}) ID döndürmedi — prosedür çıktısını kontrol edin.")
-    return int(row[0])
-
-
 def apply_finans_islem_to_erp(self, conn, item: Dict[str, Any], kod_pc: int,
                               kullanici: int, proje: int, lokasyon: int) -> int:
-    """Tahsilat/Ödeme/Çek/Senet → FINANS + FINANS_DETAY (profiler dökümünüzle birebir)."""
+    """Tahsilat/Ödeme/Çek/Senet → FINANS + FINANS_DETAY (profiler dökümünüzle birebir).
+    Yeni ID + değişiklik bildirimi: mevcut _erp_next_sequence_id / _exec_sequence_change."""
     qid = int(item["id"])
     tur = int(item["islem_turu"])
     tutar = float(item["tutar"] or 0)
@@ -132,18 +120,25 @@ def apply_finans_islem_to_erp(self, conn, item: Dict[str, Any], kod_pc: int,
     vade = item.get("vade_tarihi") or None  # 'YYYY-MM-DD' | None
 
     cur = conn.cursor()
-    finans_id = self.sequens_ver(conn, "FINANS", kod_pc)
+    finans_id = self._erp_next_sequence_id(cur, "FINANS", kod_pc)
     belgeno = f"MBL-{qid:010d}"
-    # KASA_AD: kasa tarafındaki kart (yön tablosuna göre borçlu ya da alacaklı kasadır;
-    # mobil uygulama kasa kartını doğru tarafa yerleştirmiş durumda)
-    kasa_ad = borclu if item.get("kart_borclu_ad") and "kasa" in str(item.get("kart_borclu_ad", "")).lower() else borclu
+    # KASA_AD = kasa/banka tarafındaki kart. Mobil uygulamanın yön tablosu:
+    # borçlu=KASA olan türler: 1 (Nakit Tahsilat), 7 (Havale Alma), 15 (Pos Tahsilat),
+    # 21 (Çek Girişi), 35 (Senet Girişi). Diğerlerinde (2, 8, 17, 31) kasa alacaklıdır.
+    KASA_BORCLU_TURLER = {1, 7, 15, 21, 35}
+    kasa_ad = borclu if tur in KASA_BORCLU_TURLER else alacakli
     cur.execute(
         """INSERT INTO FINANS(PROJE,BELGENO,TARIH,LOKASYON,KASA_AD,ID)
            VALUES (?,?,GETDATE(),?,?,?)""",
         proje, belgeno, lokasyon, kasa_ad, finans_id,
     )
+    # rowcount güvenilmez → gerçek satırı geri okuyarak doğrula (price_update deseni)
+    cur.execute("SELECT TOP 1 ID FROM FINANS WHERE ID = ?", finans_id)
+    if not cur.fetchone():
+        raise RuntimeError(f"FINANS satırı doğrulanamadı: ID={finans_id}")
+    self._exec_sequence_change(cur, kod_pc, finans_id, kullanici, 1, "FINANS")
 
-    detay_id = self.sequens_ver(conn, "FINANS_DETAY", kod_pc)
+    detay_id = self._erp_next_sequence_id(cur, "FINANS_DETAY", kod_pc)
     cur.execute(
         """INSERT INTO FINANS_DETAY(
              SECIM,FINANS_ISLEM_TURU,CARI_ADRES,DOVIZ_AD,ID,ACIKLAMA,KUR,FK_PROJE,
@@ -156,6 +151,7 @@ def apply_finans_islem_to_erp(self, conn, item: Dict[str, Any], kod_pc: int,
         alacakli, borclu, qid, finans_id,
         vade, belgeno, kullanici, tutar,
     )
+    self._exec_sequence_change(cur, kod_pc, detay_id, kullanici, 1, "FINANS_DETAY")
     # Çek/senet no + vergi no: ERP şemanızda ilgili kolonlar (ör. CEK_NO) varsa
     # buraya UPDATE ekleyin. Çek resmi MySQL'de (cek_resmi, base64) duruyor;
     # islem_poll'a {"include_resim":1} gönderirseniz gelir.
@@ -181,7 +177,7 @@ def apply_fis_islem_to_erp(self, conn, item: Dict[str, Any], kod_pc: int,
     fis_turu = fis_turu_map.get(islem_turu, 2)
 
     cur = conn.cursor()
-    fis_id = self.sequens_ver(conn, "FIS", kod_pc)
+    fis_id = self._erp_next_sequence_id(cur, "FIS", kod_pc)
     belgeno = f"MBL-{qid:08d}"
     cur.execute(
         """INSERT INTO FIS(ID,FIS_TURU,LOKASYON,CARI,CARI_ADRES,GONDERIM_ADRESI,PROJE,BELGENO,
@@ -207,9 +203,14 @@ def apply_fis_islem_to_erp(self, conn, item: Dict[str, Any], kod_pc: int,
         fis_id, fis_turu, lokasyon, cari, proje, belgeno, kullanici,
         geneltoplam, 0, geneltoplam, str(item.get("aciklama") or ""),
     )
+    # rowcount güvenilmez → gerçek satırı geri okuyarak doğrula (price_update deseni)
+    cur.execute("SELECT TOP 1 ID FROM FIS WHERE ID = ?", fis_id)
+    if not cur.fetchone():
+        raise RuntimeError(f"FIS satırı doğrulanamadı: ID={fis_id}")
+    self._exec_sequence_change(cur, kod_pc, fis_id, kullanici, 1, "FIS")
 
     for i, s in enumerate(satirlar):
-        d_id = self.sequens_ver(conn, "FIS_DETAY", kod_pc)
+        d_id = self._erp_next_sequence_id(cur, "FIS_DETAY", kod_pc)
         miktar = float(s.get("miktar") or 0)
         dahil_fiyat = float(s.get("fiyat") or 0)
         dahil_tutar = round(miktar * dahil_fiyat, 2)
@@ -245,16 +246,18 @@ def apply_fis_islem_to_erp(self, conn, item: Dict[str, Any], kod_pc: int,
             dahil_fiyat,      # YEREL_FIYAT
             str(s.get("kod") or ""),
         )
+        self._exec_sequence_change(cur, kod_pc, d_id, kullanici, 1, "FIS_DETAY")
 
     # Nakit/Kart ödeme → FINANS kaydı (örneğinizdeki FIS bağlantılı FINANS gibi)
     odeme = str(detay.get("odeme_tipi") or "acik_hesap")
     if odeme in ("nakit", "kart") and detay.get("kasa_id"):
-        f_id = self.sequens_ver(conn, "FINANS", kod_pc)
+        f_id = self._erp_next_sequence_id(cur, "FINANS", kod_pc)
         cur.execute(
             "INSERT INTO FINANS(PROJE,BELGENO,TARIH,LOKASYON,FIS,KASA_AD,ID) VALUES (?,?,GETDATE(),?,?,?,?)",
             proje, belgeno, lokasyon, fis_id, int(detay["kasa_id"]), f_id,
         )
-        fd_id = self.sequens_ver(conn, "FINANS_DETAY", kod_pc)
+        self._exec_sequence_change(cur, kod_pc, f_id, kullanici, 1, "FINANS")
+        fd_id = self._erp_next_sequence_id(cur, "FINANS_DETAY", kod_pc)
         cur.execute(
             """INSERT INTO FINANS_DETAY(ISLEM_TARIHI,ID,FINANS,KART_ALACAKLI,DOVIZ_AD,FIS,FK_PERSONEL,
                  TUTAR,ACIKLAMA,VADE_TARIHI,CARI_ADRES,KUR,KART_BORCLU,FINANS_ISLEM_TURU,SECIM,EXTERNAL_ID)
@@ -262,6 +265,7 @@ def apply_fis_islem_to_erp(self, conn, item: Dict[str, Any], kod_pc: int,
             fd_id, f_id, fis_id, fis_id, kullanici,
             geneltoplam, "", cari, islem_turu, qid,
         )
+        self._exec_sequence_change(cur, kod_pc, fd_id, kullanici, 1, "FINANS_DETAY")
     return fis_id
 
 
@@ -285,11 +289,12 @@ def apply_sayim_islem_to_erp(self, conn, item: Dict[str, Any], kod_pc: int,
     SAYIM_FIS_TURU = 5  # <-- Profiler dökümünüzdeki gerçek değerle değiştirin!
 
     cur = conn.cursor()
-    fis_id = self.sequens_ver(conn, "FIS", kod_pc)
+    fis_id = self._erp_next_sequence_id(cur, "FIS", kod_pc)
     belgeno = f"SYM-{qid:08d}"
     # FIS insert'i apply_fis_islem_to_erp'teki kolon şablonuyla aynıdır;
     # CARI=0, GENELTOPLAM=0, FIS_TURU=SAYIM_FIS_TURU olacak şekilde uyarlayın.
     # (Sayım fişinde cari ve tutar alanları kullanılmaz.)
+    # Her INSERT sonrası self._exec_sequence_change(cur, kod_pc, <id>, kullanici, 1, "<TABLO>") çağırmayı unutmayın.
     raise RuntimeError(
         "apply_sayim_islem_to_erp henüz uyarlanmadı — SQL Profiler ile ERP12 sayım "
         "fişi INSERT'lerini yakalayıp bu fonksiyonu doldurun. Kuyruk kaydı 'hata' "
@@ -297,9 +302,10 @@ def apply_sayim_islem_to_erp(self, conn, item: Dict[str, Any], kod_pc: int,
     )
     # Uyarlama sonrası örnek satır döngüsü:
     # for i, s in enumerate(satirlar):
-    #     d_id = self.sequens_ver(conn, "FIS_DETAY", kod_pc)
+    #     d_id = self._erp_next_sequence_id(cur, "FIS_DETAY", kod_pc)
     #     miktar = float(s.get("miktar") or 0)
     #     cur.execute("INSERT INTO FIS_DETAY(...) VALUES (...)",
     #                 d_id, fis_id, lokasyon, int(s.get("stok_id") or 0),
     #                 str(s.get("barkod") or ""), miktar, ...)
+    #     self._exec_sequence_change(cur, kod_pc, d_id, kullanici, 1, "FIS_DETAY")
     # return fis_id

@@ -2466,3 +2466,17 @@ agent_communication:
   - Test: curl (tümü/durum filtresi/yeniden-dene 404) ✅ + screenshot E2E
     (3 durumlu geçici kayıtlarla ekran + Yeniden Dene akışı) ✅.
     Geçici kayıtlar canlı DB'den silindi (kalan kayıt: 0).
+
+## 2026-07-30 — POS şablonu kullanıcının gerçek client.py ile hizalandı
+  - Kullanıcı client.py (5360 satır) + sync.php (2957 satır) yükledi.
+  - Doğrulanan: fiyat güncelleme akışı _erp_next_sequence_id (SEQUENS_VER tüm
+    resultset tarama) + _exec_sequence_change (SEQUNCES_DEGISIKLIK_AD, islem=1
+    insert/2 update) + INSERT sonrası SELECT-back doğrulama deseni kullanıyor.
+  - client_islem_ek.py v2: kendi sequens_ver() kaldırıldı → mevcut
+    _erp_next_sequence_id kullanılıyor; her INSERT sonrası _exec_sequence_change
+    eklendi (FINANS, FINANS_DETAY, FIS, FIS_DETAY); FINANS/FIS insert'lerine
+    SELECT-back doğrulama; KASA_AD düzeltmesi (KASA_BORCLU_TURLER={1,7,15,21,35});
+    KOD_PC/KULLANICI price_update_kod_pc/kullanici'dan fallback okunuyor.
+  - sync.php'de islem_poll/islem_mark HENÜZ YOK — kullanıcı ekleyecek
+    (case stili price_update_poll ile birebir uyumlu doğrulandı).
+  - README: DEFAULT_DATASET_DEFINITIONS adı düzeltildi, kurulum adımları güncellendi.

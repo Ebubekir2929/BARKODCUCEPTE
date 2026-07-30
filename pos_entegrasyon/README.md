@@ -15,16 +15,18 @@ POS client ──sync.php islem_mark──> durum=aktarildi + erp_id  (hata: dur
 1. **sync.php**: `sync_php_islem_ek.php` içindeki `islem_poll` ve `islem_mark`
    case'lerini switch bloğuna ekleyin (price_update case'lerinin yanına).
 2. **client.py**: `client_islem_ek.py` içindeki metotları sınıfa ekleyin,
-   dosya başındaki kurulum notlarını uygulayın (timer + cfg anahtarları:
-   `islem_kod_pc`, `islem_kullanici`, `islem_proje`, `islem_lokasyon`).
-3. **SEQUENS_VER doğrulaması**: `sequens_ver()` yeni ID'yi `SELECT` sonucu olarak
-   bekliyor — prosedürünüz farklı döndürüyorsa uyarlayın.
+   dosya başındaki kurulum notlarını uygulayın. KOD_PC/KULLANICI varsayılan
+   olarak mevcut `price_update_kod_pc` / `price_update_kullanici`
+   ayarlarınızdan okunur — ek ayar gerekmez.
+3. **Yeni ID + değişiklik bildirimi**: Fiyat güncellemede çalışan mevcut
+   `_erp_next_sequence_id` (SEQUENS_VER) ve `_exec_sequence_change`
+   (SEQUNCES_DEGISIKLIK_AD) metotlarınız aynen kullanılır — ek doğrulama gerekmez.
 4. **FIS_TURU eşlemesi**: `fis_turu_map = {47:2, 45:1, 71:4, 69:3}` varsayımını
    kendi kurulumunuza göre doğrulayın (örneğinizde satış faturası FIS_TURU=2 idi).
 
 ## Kasa/Banka Listesi Dataset'i
-client.py `DATASETS` listesine ekleyin (backend `%kasa%` / `%banka%` anahtar
-adlarını otomatik tanır, alanlar: ID + AD yeterli):
+client.py `DEFAULT_DATASET_DEFINITIONS` listesine ekleyin (backend `%kasa%` / `%banka%`
+anahtar adlarını otomatik tanır, alanlar: ID + AD yeterli):
 ```python
 {
     "dataset_key": "kasa_liste", "display_name": "Kasa Kartları",
