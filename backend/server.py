@@ -16,6 +16,7 @@ from routes.auth import router as auth_router, set_db as set_auth_db
 from routes.data import router as data_router
 from routes.notifications import router as notifications_router, ensure_tokens_table
 from routes.price_update import router as price_update_router
+from routes.islem import router as islem_router
 from services import init_patron_pool, init_data_pool, close_pools
 
 
@@ -70,6 +71,7 @@ api_router.include_router(auth_router)
 api_router.include_router(data_router)
 api_router.include_router(notifications_router)
 api_router.include_router(price_update_router)
+api_router.include_router(islem_router)
 
 # Include the router in the main app
 app.include_router(api_router)

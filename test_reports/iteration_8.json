@@ -1,0 +1,54 @@
+{
+  "summary": "Iteration 8 — Mobil Finans İşlem Kuyruğu (Phase 1). BACKEND: 9/9 pytest cases PASSED in 5.25s (/app/backend/tests/test_islem_kuyrugu.py). Verified: GET /api/islem/turler returns exactly 9 types with correct direction flags (type 1 K→C, type 2 C→K, type 21 cek_senet=true); GET /api/islem/kasalar returns ≥5 seeded kasa incl. kart_id 75923; POST /api/islem/create type 2 persists REVERSED direction (borclu=cari, alacakli=kasa) — main-agent's core assertion confirmed via GET /list; type 1 regression direction still K→C; 400 paths (Çek without vade, tutar=0, invalid tür 999) all return proper 400; Çek record type 21 with vade/cek_no/vergi_no persists correctly with durum='bekliyor'; unauthenticated POST returns 403. FRONTEND (390x844 web preview): logged in as cakmak_ebubekir@hotmail.com (tenants=[]) → /finans-islem loaded directly (see note below re Cariler header). Verified: header 'Finans İşlemi' + back arrow; all 9 türü chips render (Nakit Tahsilat, Pos Kartı ile Tahsilat, Havale Alma, Nakit Ödeme, Havale Yollama, Çek Girişi, Çek Çıkışı, Senet Girişi, Senet Çıkışı); Cari/Kasa selectors, Tutar/Açıklama inputs, dynamic Kaydet label ('Nakit Tahsilat Kaydet' / 'Çek Girişi Kaydet'); Çek chip → 'Çek Bilgileri' box with Vade/Çek No/Vergi No/Çek Resmi + 'Fotoğraf Çek'+'Galeriden Seç' buttons; switch back to Nakit Tahsilat → box disappears; Kasa sheet opens with empty-state msg 'Kayıtlı kasa kartı yok' + '+ Yeni Kasa Kartı Ekle' button → yeni kasa form renders with ID/ad inputs + 'Kasayı Ekle' submit; Cari sheet opens with search input + loading spinner (empty for account with no tenant); Kaydet with nothing selected → red toast 'Cari seçin' (no crash); SON İŞLEMLER shows 'Henüz işlem yok' (empty tenant expected). No red screen, no crash. Deprecated warning detected: 'props.pointerEvents is deprecated' — pre-existing from DashboardPdfExport (already flagged in iteration_7).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Cariler tab → İşlem button (navigate to /finans-islem)",
+        "issue": "For accounts with empty user.tenants (like cakmak_ebubekir@hotmail.com), the Cariler tab renders the 'Veri kaynağı seçilmedi' empty-state BEFORE the header block (customers.tsx line 640-648 early return), so the İşlem button is unreachable via UI navigation for this class of accounts. The Finans İşlemi screen itself works when opened directly. Consider either (a) rendering the header (with İşlem button) even in the empty-state branch, or (b) documenting that İşlem is only exposed for users with ≥1 tenant. Not a regression — this is expected behavior for accounts without tenants — flagged only because the review_request asked to test the header entry point.",
+        "affected_testIDs": []
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "finans-islem.tsx",
+        "issues": [
+          "No testID props on any interactive element (turler chips, cari/kasa selectors, tutar/aciklama inputs, kaydet button, çek fields, kasa sheet rows, cari sheet rows, kaydet-toast). Testing had to rely on Turkish text selectors + placeholder attributes. Recommend adding testID='finans-tur-{kod}', 'finans-cari-btn', 'finans-kasa-btn', 'finans-tutar-input', 'finans-vade-input', 'finans-kaydet-btn', 'finans-toast', 'kasa-add-toggle', 'kasa-add-submit' for stable regression."
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_islem_kuyrugu.py",
+    "/app/test_reports/pytest/iter8_results.xml"
+  ],
+  "action_items": [
+    "(Non-blocking) Add testID props to /app/frontend/app/finans-islem.tsx interactive elements for stable regression tests.",
+    "(Consider) Render the Cariler header (with İşlem button) inside the 'Veri kaynağı seçilmedi' empty-state branch of /app/frontend/app/(tabs)/customers.tsx (~line 640) so users with empty tenants can still reach /finans-islem if needed — or explicitly document that İşlem requires a tenant."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/routes/islem.py (219 lines): clean, well-commented, uses async MySQL pool, parameterized queries, proper auth guard via get_current_user, direction table matches the reversed-direction assertion exactly (type 2 borclu='cari', alacakli='kasa'). LGTM.",
+    "Auto-CREATE TABLE IF NOT EXISTS pattern is safe and idempotent — good for zero-downtime rollout.",
+    "kasa-ekle uses ON DUPLICATE KEY UPDATE — good, prevents duplicate seed errors.",
+    "Frontend finans-islem.tsx (477 lines) uses overlay Views (no native Modal) — complies with the iOS Modal ban. KeyboardAvoidingView, SafeAreaView(edges=['top']) present.",
+    "Image picker permission flow correctly handles both getPermission and requestPermission paths + openSettings on kalıcı red. Good pattern.",
+    "Direction placement logic in islem.py lines 135-140 matches ISLEM_TURLERI table exactly — verified via pytest."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_islem_kuyrugu.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 pytest cases)",
+    "frontend": "100% (12/12 UI checks — header, 9 chips, 5 labels, çek toggle, kasa sheet + add form, cari sheet, validation toast, empty-state list, screen navigation)"
+  },
+  "seed_data_creation": "Test cases inserted 3 TEST_-prefixed rows into mobil_islem_kuyrugu for tenant d5587c87a7f9476fa82b83f40accd6c7 (type 1, type 2, type 21) with durum='bekliyor'. These are safe test artifacts — POS Windows client will either aktarim to ERP12 or they can be cleaned up manually via `DELETE FROM mobil_islem_kuyrugu WHERE aciklama LIKE 'TEST_pytest%'`.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 8 — Mobil Finans İşlem Kuyruğu (Phase 1) end-to-end verified. Backend endpoints (turler/kasalar/create/list/kasa-ekle) all correct including direction reversal for type 2 and çek/senet validation. Frontend /finans-islem screen fully functional (chips, selectors, çek fields, kasa add form, validation toast). Known limitation flagged: Cariler header (and thus the İşlem entry button) is not rendered when the logged-in account has empty user.tenants — main agent may want to render the header inside the empty-state branch of customers.tsx if the İşlem button should be reachable regardless of tenant selection. Cleanup query for test rows: DELETE FROM mobil_islem_kuyrugu WHERE aciklama LIKE 'TEST_pytest%'.",
+  "rca_of_issue": "N/A — feature works as specified. The 'İşlem button not reachable via Cariler tab' observation is not a bug in the new feature but a pre-existing early-return pattern in customers.tsx that happens to prevent access for accounts with tenants=[]. Direct navigation to /finans-islem works fine."
+}

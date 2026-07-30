@@ -14,7 +14,7 @@ import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, router } from 'expo-router';
 import { ScrollFab } from '../../src/components/ScrollFab';
 import { useResponsive } from '../../src/hooks/useResponsive';
 import { DataTable, TableColumn } from '../../src/components/DataTable';
@@ -653,6 +653,18 @@ export default function CustomersScreen() {
       <ActiveSourceIndicator />
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>{t('customers')}</Text>
+        {/* 2026-07 — Finans işlemi (Tahsilat/Ödeme/Çek/Senet) ekranı */}
+        <TouchableOpacity
+          onPress={() => router.push('/finans-islem')}
+          style={{
+            flexDirection: 'row', alignItems: 'center', gap: 5,
+            paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10,
+            backgroundColor: colors.primary,
+          }}
+        >
+          <Ionicons name="swap-horizontal" size={15} color="#fff" />
+          <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>İşlem</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Summary */}
