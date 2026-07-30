@@ -2434,3 +2434,20 @@ agent_communication:
       hemen doğru veri gelecek — yeni build almanız gerekmiyor.
 
 
+
+## 2026-07-30 — Faz 2 doğrulama + Faz 3 Sayım Fişi (fork devamı)
+  - Faz 2 (fis-giris.tsx) testing_agent iterasyon 9: backend 9/9 pytest ✅,
+    UI etkileşimleri ✅. Login 401 sorunu: kullanıcı şifreyi 123456→1234567
+    değiştirmiş (SHA1 doğrulandı, test_credentials.md güncellendi, prod DB'ye
+    DOKUNULMADI). Ana ajan gerçek hesapla E2E happy-path doğruladı (belge #9).
+  - Faz 3 YENİ: /app/frontend/app/sayim-giris.tsx (sürekli barkod tarama —
+    kamera açık kalır, her okuma +1, barkod→ürün Map önbelleği; manuel arama;
+    +/- stepper; PDF; kaydet → POST /api/islem/sayim-create).
+    Backend: islem.py sayim-create endpoint (islem_grubu='sayim', islem_turu=0,
+    detay_json={lokasyon, satirlar, toplam_kalem, toplam_miktar}).
+    Giriş noktası: Stok sekmesi header'ına mor clipboard butonu.
+    POS rehberleri güncellendi (README sayım bölümü + apply_sayim_islem_to_erp
+    şablonu — bilerek hata fırlatır, kullanıcı Profiler ile uyarlayacak).
+  - testing_agent iterasyon 10: backend 8/8 pytest ✅, frontend tüm akışlar ✅,
+    canlı DB'deki tüm test kuyruk kayıtları silindi (POS'a test verisi gitmez).
+  - Test dosyaları: backend/tests/test_sayim_giris_kuyrugu.py, test_fis_giris_kuyrugu.py
