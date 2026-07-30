@@ -2451,3 +2451,18 @@ agent_communication:
   - testing_agent iterasyon 10: backend 8/8 pytest ✅, frontend tüm akışlar ✅,
     canlı DB'deki tüm test kuyruk kayıtları silindi (POS'a test verisi gitmez).
   - Test dosyaları: backend/tests/test_sayim_giris_kuyrugu.py, test_fis_giris_kuyrugu.py
+
+## 2026-07-30 — Kuyruk Durumu Ekranı
+  - YENİ: /app/frontend/app/kuyruk-durum.tsx — finans/fiş/sayım kuyruk
+    kayıtlarının POS aktarım durumu (bekliyor/aktarıldı/hata), durum özet
+    sayaçları (tıklanınca filtre), grup filtresi chip'leri, genişleyen detay
+    (satırlar, erp_id, hata mesajı), hata kayıtları için "Yeniden Dene"
+    (POST /api/islem/yeniden-dene → durum=bekliyor), pull-to-refresh.
+  - Backend: /api/islem/list artık islem_grubu='' (tümü) + durum filtresi
+    destekliyor, islem_grubu SELECT'e eklendi. Varsayılan 'finans' korundu
+    (finans-islem.tsx geri uyumlu). Yeni endpoint: POST /api/islem/yeniden-dene.
+  - Giriş noktaları: finans-islem, fis-giris, sayim-giris header sağ üst
+    list-circle ikonu → /kuyruk-durum.
+  - Test: curl (tümü/durum filtresi/yeniden-dene 404) ✅ + screenshot E2E
+    (3 durumlu geçici kayıtlarla ekran + Yeniden Dene akışı) ✅.
+    Geçici kayıtlar canlı DB'den silindi (kalan kayıt: 0).

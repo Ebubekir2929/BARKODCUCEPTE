@@ -312,20 +312,30 @@ async def sayim_create(body: SayimCreate, current_user: dict = Depends(get_curre
 
 
 @router.get("/list")
-async def islem_list(tenant_id: str, limit: int = 50, islem_grubu: str = "finans", current_user: dict = Depends(get_current_user)):
+async def islem_list(tenant_id: str, limit: int = 50, islem_grubu: str = "finans", durum: str = "", current_user: dict = Depends(get_current_user)):
+    """islem_grubu: 'finans'|'fis'|'sayim'|'' (boş = tümü). durum: ''|bekliyor|aktarildi|hata."""
     await _ensure_tables()
+    where = "tenant_id=%s"
+    params: list = [tenant_id]
+    if islem_grubu:
+        where += " AND islem_grubu=%s"
+        params.append(islem_grubu)
+    if durum:
+        where += " AND durum=%s"
+        params.append(durum)
+    params.append(min(int(limit), 200))
     pool = await get_data_pool()
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                """SELECT id, islem_turu, islem_turu_ad, kart_borclu_ad, kart_alacakli_ad,
+                f"""SELECT id, islem_grubu, islem_turu, islem_turu_ad, kart_borclu_ad, kart_alacakli_ad,
                           tutar, aciklama, vade_tarihi, cek_no, durum, erp_id, hata_mesaji,
                           created_at, processed_at, (cek_resmi IS NOT NULL) AS resim_var,
                           detay_json
                    FROM mobil_islem_kuyrugu
-                   WHERE tenant_id=%s AND islem_grubu=%s
+                   WHERE {where}
                    ORDER BY id DESC LIMIT %s""",
-                (tenant_id, islem_grubu, min(int(limit), 200)),
+                tuple(params),
             )
             cols = [c[0] for c in cur.description]
             rows = [dict(zip(cols, r)) for r in await cur.fetchall()]
@@ -342,6 +352,31 @@ async def islem_list(tenant_id: str, limit: int = 50, islem_grubu: str = "finans
                 r["detay"] = None
         r.pop("detay_json", None)
     return {"ok": True, "data": rows}
+
+
+@router.post("/yeniden-dene")
+async def yeniden_dene(body: dict, current_user: dict = Depends(get_current_user)):
+    """'hata' durumundaki kuyruk kaydını tekrar 'bekliyor' yapar → POS yeniden dener."""
+    await _ensure_tables()
+    tenant_id = str(body.get("tenant_id") or "")
+    kayit_id = int(body.get("id") or 0)
+    if not tenant_id or kayit_id <= 0:
+        raise HTTPException(status_code=400, detail="tenant_id ve id gerekli")
+    pool = await get_data_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """UPDATE mobil_islem_kuyrugu
+                   SET durum='bekliyor', hata_mesaji=NULL, processed_at=NULL
+                   WHERE tenant_id=%s AND id=%s AND durum='hata'""",
+                (tenant_id, kayit_id),
+            )
+            etkilenen = cur.rowcount
+        await conn.commit()
+    if etkilenen <= 0:
+        raise HTTPException(status_code=404, detail="Kayıt bulunamadı veya hata durumunda değil")
+    logger.info(f"[islem] yeniden-dene id={kayit_id}")
+    return {"ok": True, "id": kayit_id, "durum": "bekliyor"}
 
 
 @router.get("/kasalar")

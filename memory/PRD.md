@@ -21,6 +21,9 @@ POS istemcisi çekip ERP12'ye INSERT eder. Uygulama ERP'ye ASLA doğrudan yazmaz
 - **Faz 3 — Sayım Fişi** (`sayim-giris.tsx` + `POST /api/islem/sayim-create`):
   Sürekli barkod tarama (kamera açık kalır, her okuma +1, barkod önbelleği), manuel arama,
   +/- stepper, PDF → kuyruk (islem_grubu='sayim', islem_turu=0). Test: iterasyon 10 ✅
+- **Kuyruk Durumu Ekranı** (`kuyruk-durum.tsx` + `GET /api/islem/list?islem_grubu=&durum=` + `POST /api/islem/yeniden-dene`):
+  bekliyor/aktarıldı/hata rozetleri, özet sayaçlar, grup filtresi, detay genişletme, hata kaydını yeniden kuyruğa alma.
+  Giriş: finans-islem / fis-giris / sayim-giris header'larındaki list ikonu.
 - POS entegrasyon rehberleri: `/app/pos_entegrasyon/` (README + client_islem_ek.py + sync_php_islem_ek.php)
   — sayım aktarımı POS tarafında kullanıcının Profiler doğrulamasıyla uyarlanacak (şablon bilerek hata fırlatır).
 

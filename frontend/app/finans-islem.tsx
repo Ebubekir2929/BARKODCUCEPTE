@@ -220,7 +220,9 @@ export default function FinansIslemScreen() {
           <Ionicons name="arrow-back" size={24} color={colors.text} />
         </TouchableOpacity>
         <Text style={[styles.headerTitle, { color: colors.text }]}>Finans İşlemi</Text>
-        <View style={{ width: 24 }} />
+        <TouchableOpacity onPress={() => router.push('/kuyruk-durum')} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+          <Ionicons name="list-circle-outline" size={26} color={colors.text} />
+        </TouchableOpacity>
       </View>
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
