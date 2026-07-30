@@ -137,7 +137,7 @@ export const DashboardPdfExport: React.FC<Props> = ({
   if (!visible) return null;
 
   return (
-    <View style={styles.overlay} pointerEvents="auto">
+    <View style={[styles.overlay, { pointerEvents: 'auto' }] as any}>
       <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
       <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
         {/* Header */}
