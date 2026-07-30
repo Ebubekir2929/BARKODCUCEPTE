@@ -2480,3 +2480,18 @@ agent_communication:
   - sync.php'de islem_poll/islem_mark HENÜZ YOK — kullanıcı ekleyecek
     (case stili price_update_poll ile birebir uyumlu doğrulandı).
   - README: DEFAULT_DATASET_DEFINITIONS adı düzeltildi, kurulum adımları güncellendi.
+
+## 2026-07-30 — Hazır client.py + sync.php üretildi (kullanıcı için)
+  - Kullanıcı sayım Profiler dökümünü paylaştı: sayım hedefi SAYIM + SAYIM_DETAY
+    tabloları (FIS değil). apply_sayim_islem_to_erp gerçek insert'lerle dolduruldu
+    (CARPAN=1, STOK_BIRIM=1012, KAB=0, SERINO/PARTINO_ZORUNLU='0' vb. dökümle birebir).
+  - /app/pos_entegrasyon/client.py: kullanıcının 5360 satırlık dosyasının işlem
+    kuyruğu ENTEGRE EDİLMİŞ hali (5647 satır). Eklenenler: DEFAULT_CFG islem_*
+    anahtarları, _islem_busy, islem_timer (__init__), watchdog, on_islem_tick/
+    start/stop_islem_timer, process_pending_islemler + 3 apply metodu,
+    start/stop_auto_sync bağlantıları. ast.parse OK.
+  - /app/pos_entegrasyon/sync.php: kullanıcının 2957 satırlık dosyasına islem_poll
+    + islem_mark case'leri eklendi (3007 satır), price_update case'lerinin hemen ardında.
+  - ÖNEMLİ: kullanıcının cfg'sine "islem_lokasyon" (gerçek LOKASYON ID, dökümde
+    75919) girilmeli. KOD_PC/KULLANICI price_update ayarlarından fallback okunur.
+  - Yama betiği: /tmp/patch_pos.py (anchor asserts ile güvenli).

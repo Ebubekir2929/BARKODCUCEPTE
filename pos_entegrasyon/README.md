@@ -3,6 +3,25 @@
 Mobil uygulamadaki **Finans İşlemleri** (Tahsilat/Ödeme/Çek/Senet), **Fatura/Fiş Girişi**
 ve **Sayım Fişi** kayıtlarının ERP12'ye aktarımı — fiyat güncelleme akışıyla birebir aynı desen.
 
+## ⚡ HAZIR DOSYALAR (2026-07-30)
+Bu klasörde entegrasyonu **hazır olarak içeren** tam dosyalar var:
+- **`client.py`** — sizin yüklediğiniz client.py'nin işlem kuyruğu EKLENMİŞ hali.
+  Mevcut client.py'nizin yerine koyun (ayarlarınız cfg dosyasından okunduğu için korunur).
+- **`sync.php`** — sizin yüklediğiniz sync.php'nin `islem_poll` + `islem_mark`
+  case'leri EKLENMİŞ hali. Sunucudaki sync.php ile değiştirin.
+
+Yapılan eklemeler:
+- Timer otomatik: "Otomatik senkron" başlatıldığında işlem kuyruğu da 30 sn'de bir kontrol edilir
+  (watchdog dahil). KOD_PC/KULLANICI, mevcut fiyat güncelleme ayarlarınızdan okunur.
+- **ÖNEMLİ AYAR**: `islem_lokasyon` cfg değerini gerçek LOKASYON ID'nizle doldurun
+  (Profiler dökümünüzde 75919 idi). Ayar dosyanıza (cfg json) elle ekleyebilirsiniz:
+  `"islem_lokasyon": 75919` — girilmezse 0 gönderilir.
+- Sayım aktarımı Profiler dökümünüzle birebir: `SAYIM` + `SAYIM_DETAY` insert'leri,
+  SEQUENS_VER ile ID, her insert sonrası SEQUNCES_DEGISIKLIK_AD.
+
+`client_islem_ek.py` ve `sync_php_islem_ek.php` aynı eklemelerin yalnız-ek (snippet)
+versiyonlarıdır — dosyaları kendiniz elle birleştirmek isterseniz kullanın.
+
 ## Akış
 ```
 Mobil App ──POST──> backend ──INSERT──> MySQL kasacepteweb.mobil_islem_kuyrugu (durum=bekliyor)
@@ -57,15 +76,10 @@ Dataset basıldığı anda uygulamadaki kasa seçimi otomatik bu listeyi kullan�
 | detay_json | Fişlerde: {odeme_tipi, kasa_id, satirlar:[{stok_id,barkod,kod,ad,miktar,fiyat}], geneltoplam} — Sayımda: {lokasyon, satirlar:[{stok_id,barkod,kod,ad,miktar}], toplam_kalem, toplam_miktar} |
 | cek_resmi | base64 (yalnız `islem_poll`'a `{"include_resim":1}` eklerseniz gelir) |
 
-## Sayım Fişi (Faz 3) — Uyarlama Gerekli
+## Sayım Fişi (Faz 3)
 Mobil sayım ekranı kayıtları `islem_grubu='sayim'` olarak kuyruğa yazar.
-`client_islem_ek.py` içindeki `apply_sayim_islem_to_erp` şablonu **bilerek hata
-fırlatır**: ERP12'de sayım fişinin hangi tabloya girdiğini (SAYIM/SAYIM_DETAY mı,
-FIS_TURU=? ile FIS/FIS_DETAY mı) SQL Profiler ile doğrulayıp fonksiyonu doldurun.
-Uyarlanana dek sayım kayıtları kuyrukta `hata` durumuna düşer ve mesajında
-uyarlama talimatı görünür — veri kaybolmaz, uyarlama sonrası `durum='bekliyor'`
-yapıp yeniden işletebilirsiniz:
-```sql
-UPDATE mobil_islem_kuyrugu SET durum='bekliyor', hata_mesaji=NULL
-WHERE islem_grubu='sayim' AND durum='hata';
-```
+Aktarım hedefi (2026-07-30 Profiler dökümünüzden): **SAYIM + SAYIM_DETAY** tabloları.
+`apply_sayim_islem_to_erp` bu dökümle birebir dolduruldu — ek uyarlama gerekmez.
+Tek şart: `islem_lokasyon` ayarının gerçek LOKASYON ID'nizle dolu olması.
+Hata durumuna düşen kayıtlar mobil uygulamadaki **Kuyruk Durumu** ekranından
+"Yeniden Dene" ile tekrar kuyruğa alınabilir.
