@@ -1,0 +1,56 @@
+{
+  "summary": "Iteration 9 — Fatura/Fiş Girişi (Phase 2, /fis-giris + POST /api/islem/fis-create). BACKEND: 9/9 pytest cases PASSED in 7.30s (/app/backend/tests/test_fis_giris_kuyrugu.py). Verified: happy-path POST /api/islem/fis-create with satis_faturasi + açık_hesap (2 satır: 2×15.50 + 1×20.00) returns {ok:true, id:int, durum:'bekliyor', geneltoplam:51.00} and persists via GET /api/islem/list?islem_grubu=fis with islem_turu=47, islem_turu_ad='Satış Faturası', kart_borclu_ad=cari_ad (borclu-taraf), tutar=51.00, detay parsed from detay_json with satirlar[2] + geneltoplam=51.00; nakit+kasa path returns geneltoplam=30.00; validation → empty satirlar (400 'En az bir ürün satırı gerekli'), invalid fis_tipi (400 'Geçersiz fiş tipi'), odeme_tipi='nakit' without kasa_id (400 'Nakit/Kart ödemede kasa seçimi zorunlu'), odeme_tipi='kart' without kasa_id (400), miktar=0 & fiyat=0 → geneltoplam=0 (400 'Fiş toplamı 0'dan büyük olmalı'); auth guard returns 403 without token; GET /api/islem/kasalar returns ok:true (list may be seeded). FRONTEND (390×844 web preview, direct nav to /fis-giris): header 'Fatura / Fiş Girişi' + back arrow render; all 4 type chips (Satış/Alış Faturası, Satış/Alış Fişi) present and selectable — active chip highlights with type-color; CARİ selector 'Cari seçin…' opens bottom sheet with title 'Cari Seç' + search input + loading spinner (cari-list fetch triggered — API returned 400 for empty tenant which is EXPECTED for the hotmail test account with tenants=[], not a fis-giris regression); ÜRÜNLER (0) counter + 'Ürün adı / barkod ara…' button opens 'Ürün Ara' sheet with search field + 'Arama yapın…' empty state, submitting 'kola' triggers stock-list POST (empty result for empty-tenant account — expected); barkod scan button visible (green icon) — scanner is device-only (skipped per review_request note); ÖDEME TİPİ segmented (Nakit/Kart/Açık Hesap) works, selecting Nakit reveals 'Kasa/Banka seçin…' selector, switching to Açık Hesap hides it; AÇIKLAMA input renders; GENEL TOPLAM ₺0,00 updates dynamically; 'Satış Faturası Kaydet' button uses tip.renk color and label changes with selected type; empty save (no cari) → red toast 'Cari seçin' (validation guard working). No red screen, no crash. Sheets use custom absoluteFillObject overlays (per review note — not React Native Modal, correct). GMAİL ACCOUNT LOGIN ISSUE: cakmak.ebubekir29@gmail.com / 123456 returned 401 both via /api/auth/login curl and via UI login — this is the only tenant-bearing account listed in test_credentials.md; hotmail admin (tenants=[]) was used for backend tests (tenant_id is passed via body, code path is fully exercised) and for frontend rendering checks. Happy-path E2E save-and-see-success-screen could not be exercised via UI because both test accounts either lack tenant (hotmail) or fail login (gmail); recommend main-agent re-seed / verify the gmail password.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "UI end-to-end happy-path (login → stock → fis-giris → select cari/urun → save → success screen)",
+        "issue": "Could not execute end-to-end happy path via web preview because tenant-bearing account (cakmak.ebubekir29@gmail.com) rejects password '123456' with 401 in this environment, and the only alternative account (cakmak_ebubekir@hotmail.com / admin) has empty user.tenants → activeTenantId=='' → cari-list & stock-list return no data. Backend fis-create is fully verified via pytest with the correct tenant_id in the body. Main-agent should verify the gmail account credentials still work in the current MySQL patron DB (SHA1 seed drift?).",
+        "affected_testIDs": []
+      }
+    ],
+    "design_issues": [
+      {
+        "screen": "/app/frontend/app/fis-giris.tsx",
+        "issues": [
+          "Zero testID props on any interactive element (4 type chips, cari selector, ürün search button, barcode button, satır rows with miktar/fiyat inputs + trash, 3 ödeme chips, kasa selector, açıklama input, kaydet button, PDF/Yeni Fiş success buttons, all 3 sheet rows, cari/ürün search inputs, toast). Testing relied on Turkish text selectors. Recommend adding testID='fis-tip-{key}', 'fis-cari-btn', 'fis-urun-btn', 'fis-scan-btn', 'fis-odeme-{key}', 'fis-kasa-btn', 'fis-kaydet-btn', 'fis-satir-{i}-miktar', 'fis-satir-{i}-fiyat', 'fis-satir-{i}-sil', 'fis-toast', 'fis-success-pdf', 'fis-success-yeni' for stable regression."
+        ]
+      }
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_fis_giris_kuyrugu.py",
+    "/app/test_reports/pytest/iter9_results.xml"
+  ],
+  "action_items": [
+    "(Environmental) Verify /login accepts cakmak.ebubekir29@gmail.com / 123456 — currently returns 401 in this environment; test_credentials.md lists it as the tenant-bearing account required for full E2E UI testing.",
+    "(Non-blocking) Add testID props to /app/frontend/app/fis-giris.tsx interactive elements for stable regression tests (see design_issues)."
+  ],
+  "critical_code_review_comments": [
+    "/app/backend/routes/islem.py fis-create endpoint (lines 198-253): clean, parameterized SQL, validates fis_tipi/satirlar/kasa/toplam in the right order, computes geneltoplam server-side (source of truth), stores detay_json with satirlar & odeme_tipi & kasa. LGTM.",
+    "FIS_TIPLERI mapping (lines 121-126) matches ERP12 dökümü (47/45/71/69) and cari_taraf placement is correctly used in kart_borclu/kart_alacakli assignment.",
+    "/api/islem/list correctly parses detay_json into detay dict + pops the raw column — frontend can consume it directly.",
+    "/api/islem/kasalar merges dataset_cache blobs + manual kasa-ekle rows with a seen-set dedupe — good pattern for POS-basar data with fallback.",
+    "/app/frontend/app/fis-giris.tsx (470 lines): uses process.env.EXPO_PUBLIC_BACKEND_URL (correct), safe camera import (try/require + Platform check), useAuthStore.getState() for token in async handlers (avoids stale-closure). Uses custom overlay sheets (not RN Modal — complies with iOS ban). SafeAreaView(edges=['top']) + KeyboardAvoidingView present. FlatList used for large lists (cari/urun) with keyboardShouldPersistTaps='handled'. Ödeme validation happens client-side AND server-side. Good.",
+    "Minor: line 189 pdfYazdir template interpolates cari.ad / satir.ad directly into HTML without escaping — XSS risk is minimal (local Print.printAsync), but a tenant-supplied product name with '<script>' could execute in the print preview. Consider a tiny escape helper.",
+    "Minor: line 215 sends kasa_id=null when kasa is null; backend accepts Optional[int] so this is fine. odeme_tipi='acik_hesap' with no kasa_id is the default happy path — matches server contract.",
+    "No deprecated Expo packages detected (expo-camera, expo-print, expo-sharing are all current 2026-07)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_fis_giris_kuyrugu.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (9/9 pytest cases)",
+    "frontend": "~85% (all UI rendering & interaction wiring verified — 4 type chips selectable, cari/ürün/kasa sheets open with correct titles + search inputs, ödeme chip toggle shows/hides kasa selector, empty-save validation toast, GENEL TOPLAM formatter. Missed: full end-to-end save happy-path via UI because tenant-bearing gmail account rejects credentials — see integration_issues)"
+  },
+  "seed_data_creation": "Test cases inserted 2 rows into mobil_islem_kuyrugu (islem_grubu='fis') for tenant d5587c87a7f9476fa82b83f40accd6c7: satis_faturasi with 2 satır (51.00) and satis_fisi nakit with 1 satır (30.00), both durum='bekliyor'. Cleanup query: DELETE FROM mobil_islem_kuyrugu WHERE aciklama LIKE 'TEST_pytest_fis%' AND islem_grubu='fis'.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 9 — Fatura/Fiş Girişi (Phase 2) backend fully verified via pytest (9/9). Backend endpoints POST /api/islem/fis-create + GET /api/islem/list?islem_grubu=fis + GET /api/islem/kasalar all correct including direction (satis_faturasi → cari_taraf=borclu, alis_faturasi → cari_taraf=alacakli), server-side geneltoplam computation, detay_json round-trip with satırlar, and all 5 400-validation paths (empty satırlar, invalid fis_tipi, nakit/kart without kasa, total 0). Frontend UI rendering & interaction wiring verified via direct navigation to /fis-giris (4 type chips, cari/ürün/kasa sheets, ödeme chip toggle, validation toast). Note for next agent: gmail account cakmak.ebubekir29@gmail.com / 123456 currently returns 401 — hotmail admin has tenants=[] so cari/stock-list return empty data for it; the fis-create backend was tested with tenant_id in body directly. Cleanup for iteration 9 test rows: DELETE FROM mobil_islem_kuyrugu WHERE aciklama LIKE 'TEST_pytest_fis%'.",
+  "rca_of_issue": "N/A — Phase 2 feature (fis-giris) works as specified. The single flagged gap (UI end-to-end happy-path save) is blocked by an environmental account issue (gmail credentials rejected), not a feature bug. Backend contract is fully verified with the correct tenant_id via pytest."
+}
