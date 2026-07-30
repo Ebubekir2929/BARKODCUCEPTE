@@ -1040,6 +1040,10 @@ export default function StockScreen() {
           <TouchableOpacity style={[styles.iconBtn, { backgroundColor: colors.warning + '20' }]} onPress={() => router.push('/fis-giris')}>
             <Ionicons name="receipt-outline" size={20} color={colors.warning} />
           </TouchableOpacity>
+          {/* 2026-07 — Sayım fişi ekranı (Faz 3) */}
+          <TouchableOpacity style={[styles.iconBtn, { backgroundColor: '#8B5CF620' }]} onPress={() => router.push('/sayim-giris')}>
+            <Ionicons name="clipboard-outline" size={20} color="#8B5CF6" />
+          </TouchableOpacity>
           <TouchableOpacity style={[styles.iconBtn, { backgroundColor: colors.success + '20' }]} onPress={openScanner}>
             <Ionicons name="barcode-outline" size={20} color={colors.success} />
           </TouchableOpacity>

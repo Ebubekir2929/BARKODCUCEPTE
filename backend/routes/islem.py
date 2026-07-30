@@ -148,6 +148,22 @@ class FisCreate(BaseModel):
     satirlar: list
 
 
+# ── Faz 3: Sayım Fişi ────────────────────────────────────────────────────
+class SayimSatir(BaseModel):
+    stok_id: int
+    barkod: Optional[str] = None
+    kod: Optional[str] = None
+    ad: str
+    miktar: float
+
+
+class SayimCreate(BaseModel):
+    tenant_id: str
+    aciklama: Optional[str] = ""
+    lokasyon: Optional[int] = None
+    satirlar: list
+
+
 @router.get("/turler")
 async def islem_turleri(current_user: dict = Depends(get_current_user)):
     return {"ok": True, "turler": [
@@ -251,6 +267,48 @@ async def fis_create(body: FisCreate, current_user: dict = Depends(get_current_u
         await conn.commit()
     logger.info(f"[islem] fis id={fis_id} tip={body.fis_tipi} toplam={geneltoplam} satir={len(satirlar)}")
     return {"ok": True, "id": fis_id, "durum": "bekliyor", "geneltoplam": geneltoplam}
+
+
+@router.post("/sayim-create")
+async def sayim_create(body: SayimCreate, current_user: dict = Depends(get_current_user)):
+    """Sayım fişi → kuyruk (islem_grubu='sayim'). POS istemcisi sayılan
+    miktarları ERP12 sayım fişine (FIS/SAYIM yapınıza göre) aktarır."""
+    await _ensure_tables()
+    satirlar = []
+    for s in (body.satirlar or []):
+        try:
+            satirlar.append(SayimSatir(**s) if isinstance(s, dict) else s)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Geçersiz sayım satırı")
+    if not satirlar:
+        raise HTTPException(status_code=400, detail="En az bir ürün satırı gerekli")
+    if any(s.miktar < 0 for s in satirlar):
+        raise HTTPException(status_code=400, detail="Miktar negatif olamaz")
+
+    toplam_miktar = round(sum(s.miktar for s in satirlar), 3)
+    detay = {
+        "lokasyon": body.lokasyon,
+        "satirlar": [s.dict() for s in satirlar],
+        "toplam_kalem": len(satirlar),
+        "toplam_miktar": toplam_miktar,
+    }
+    pool = await get_data_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """INSERT INTO mobil_islem_kuyrugu
+                   (tenant_id, islem_grubu, islem_turu, islem_turu_ad,
+                    tutar, aciklama, detay_json, olusturan)
+                   VALUES (%s,'sayim',0,'Sayım Fişi',%s,%s,%s,%s)""",
+                (body.tenant_id, toplam_miktar, (body.aciklama or "")[:2000],
+                 json.dumps(detay, ensure_ascii=False),
+                 current_user.get("email", "")),
+            )
+            sayim_id = cur.lastrowid
+        await conn.commit()
+    logger.info(f"[islem] sayim id={sayim_id} kalem={len(satirlar)} miktar={toplam_miktar}")
+    return {"ok": True, "id": sayim_id, "durum": "bekliyor",
+            "toplam_kalem": len(satirlar), "toplam_miktar": toplam_miktar}
 
 
 @router.get("/list")

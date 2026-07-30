@@ -79,6 +79,8 @@ def process_pending_islemler(self):
                     erp_id = self.apply_finans_islem_to_erp(conn, item, kod_pc, kullanici, proje, lokasyon)
                 elif grubu == "fis":
                     erp_id = self.apply_fis_islem_to_erp(conn, item, kod_pc, kullanici, proje, lokasyon)
+                elif grubu == "sayim":
+                    erp_id = self.apply_sayim_islem_to_erp(conn, item, kod_pc, kullanici, proje, lokasyon)
                 else:
                     raise RuntimeError(f"Bilinmeyen islem_grubu: {grubu}")
                 conn.commit()
@@ -261,3 +263,43 @@ def apply_fis_islem_to_erp(self, conn, item: Dict[str, Any], kod_pc: int,
             geneltoplam, "", cari, islem_turu, qid,
         )
     return fis_id
+
+
+def apply_sayim_islem_to_erp(self, conn, item: Dict[str, Any], kod_pc: int,
+                             kullanici: int, proje: int, lokasyon: int) -> int:
+    """Sayım fişi (Faz 3) → ERP12 sayım yapınıza aktarım.
+    detay_json: {lokasyon, satirlar:[{stok_id,barkod,kod,ad,miktar}], toplam_kalem, toplam_miktar}
+
+    !!! ÖNEMLİ: ERP12'de sayım fişinin hangi tabloya girdiğini (SAYIM/SAYIM_DETAY
+    veya FIS_TURU=<sayım kodu> ile FIS/FIS_DETAY) SQL Profiler ile doğrulayın:
+    ERP'de elle bir sayım fişi kaydedip INSERT'leri yakalayın, aşağıdaki şablonu
+    ona göre uyarlayın. Şablon FIS tabanlı varsayımla yazıldı.
+    """
+    qid = int(item["id"])
+    detay = json.loads(item.get("detay_json") or "{}")
+    satirlar = detay.get("satirlar") or []
+    if not satirlar:
+        raise RuntimeError("detay_json.satirlar boş")
+
+    # ── VARSAYIM: sayım fişi = FIS_TURU=<SAYIM_FIS_TURU> ─ DOĞRULAYIN ──
+    SAYIM_FIS_TURU = 5  # <-- Profiler dökümünüzdeki gerçek değerle değiştirin!
+
+    cur = conn.cursor()
+    fis_id = self.sequens_ver(conn, "FIS", kod_pc)
+    belgeno = f"SYM-{qid:08d}"
+    # FIS insert'i apply_fis_islem_to_erp'teki kolon şablonuyla aynıdır;
+    # CARI=0, GENELTOPLAM=0, FIS_TURU=SAYIM_FIS_TURU olacak şekilde uyarlayın.
+    # (Sayım fişinde cari ve tutar alanları kullanılmaz.)
+    raise RuntimeError(
+        "apply_sayim_islem_to_erp henüz uyarlanmadı — SQL Profiler ile ERP12 sayım "
+        "fişi INSERT'lerini yakalayıp bu fonksiyonu doldurun. Kuyruk kaydı 'hata' "
+        f"durumuna düşecek, uyarlama sonrası tekrar denenebilir. (queue={qid}, belgeno={belgeno})"
+    )
+    # Uyarlama sonrası örnek satır döngüsü:
+    # for i, s in enumerate(satirlar):
+    #     d_id = self.sequens_ver(conn, "FIS_DETAY", kod_pc)
+    #     miktar = float(s.get("miktar") or 0)
+    #     cur.execute("INSERT INTO FIS_DETAY(...) VALUES (...)",
+    #                 d_id, fis_id, lokasyon, int(s.get("stok_id") or 0),
+    #                 str(s.get("barkod") or ""), miktar, ...)
+    # return fis_id

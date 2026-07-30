@@ -13,7 +13,7 @@
 - **Username**: admin
 - **Tenant ID**: d5587c87a7f9476fa82b83f40accd6c7
 - **Business Type**: restoran (has_tables=1)
-- **Password**: 123456 (SHA1 verified)
+- **Password**: 1234567 (SHA1 verified 2026-07 — user changed it from 123456; DO NOT overwrite in prod DB)
 
 ## 2026-05-21 — Apple App Store Reviewer Demo Account
 - **Email**: apple.review@barkodcucepte.com

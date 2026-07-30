@@ -1,7 +1,7 @@
 # POS Entegrasyonu — Mobil İşlem Kuyruğu (2026-07)
 
-Mobil uygulamadaki **Finans İşlemleri** (Tahsilat/Ödeme/Çek/Senet) ve **Fatura/Fiş Girişi**
-kayıtlarının ERP12'ye aktarımı — fiyat güncelleme akışıyla birebir aynı desen.
+Mobil uygulamadaki **Finans İşlemleri** (Tahsilat/Ödeme/Çek/Senet), **Fatura/Fiş Girişi**
+ve **Sayım Fişi** kayıtlarının ERP12'ye aktarımı — fiyat güncelleme akışıyla birebir aynı desen.
 
 ## Akış
 ```
@@ -48,9 +48,22 @@ Dataset basıldığı anda uygulamadaki kasa seçimi otomatik bu listeyi kullan�
 | Alan | Açıklama |
 |---|---|
 | id | Kuyruk ID — **FINANS_DETAY.EXTERNAL_ID'ye yazın (mükerrer önleme)** |
-| islem_grubu | 'finans' \| 'fis' |
-| islem_turu | FINANS_ISLEM_TURU kodu (1,2,15,17,21,31,35,45,47,69,71...) |
-| kart_borclu / kart_alacakli | Yön tablonuza göre yerleştirilmiş kart ID'leri |
-| tutar, aciklama, vade_tarihi, cek_no, vergi_no | Finans alanları |
-| detay_json | Fişlerde: {odeme_tipi, kasa_id, satirlar:[{stok_id,barkod,kod,ad,miktar,fiyat}], geneltoplam} |
+| islem_grubu | 'finans' \| 'fis' \| 'sayim' |
+| islem_turu | FINANS_ISLEM_TURU kodu (1,2,15,17,21,31,35,45,47,69,71...) — sayımda 0 |
+| kart_borclu / kart_alacakli | Yön tablonuza göre yerleştirilmiş kart ID'leri (sayımda NULL) |
+| tutar, aciklama, vade_tarihi, cek_no, vergi_no | Finans alanları (sayımda tutar=toplam miktar) |
+| detay_json | Fişlerde: {odeme_tipi, kasa_id, satirlar:[{stok_id,barkod,kod,ad,miktar,fiyat}], geneltoplam} — Sayımda: {lokasyon, satirlar:[{stok_id,barkod,kod,ad,miktar}], toplam_kalem, toplam_miktar} |
 | cek_resmi | base64 (yalnız `islem_poll`'a `{"include_resim":1}` eklerseniz gelir) |
+
+## Sayım Fişi (Faz 3) — Uyarlama Gerekli
+Mobil sayım ekranı kayıtları `islem_grubu='sayim'` olarak kuyruğa yazar.
+`client_islem_ek.py` içindeki `apply_sayim_islem_to_erp` şablonu **bilerek hata
+fırlatır**: ERP12'de sayım fişinin hangi tabloya girdiğini (SAYIM/SAYIM_DETAY mı,
+FIS_TURU=? ile FIS/FIS_DETAY mı) SQL Profiler ile doğrulayıp fonksiyonu doldurun.
+Uyarlanana dek sayım kayıtları kuyrukta `hata` durumuna düşer ve mesajında
+uyarlama talimatı görünür — veri kaybolmaz, uyarlama sonrası `durum='bekliyor'`
+yapıp yeniden işletebilirsiniz:
+```sql
+UPDATE mobil_islem_kuyrugu SET durum='bekliyor', hata_mesaji=NULL
+WHERE islem_grubu='sayim' AND durum='hata';
+```
