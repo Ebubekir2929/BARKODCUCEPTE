@@ -643,6 +643,21 @@ export default function CustomersScreen() {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
         <ActiveSourceIndicator />
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>{t('customers')}</Text>
+          {/* 2026-07 — İşlem butonu veri kaynağı yokken de erişilebilir olsun */}
+          <TouchableOpacity
+            onPress={() => router.push('/finans-islem')}
+            style={{
+              flexDirection: 'row', alignItems: 'center', gap: 5,
+              paddingHorizontal: 12, paddingVertical: 7, borderRadius: 10,
+              backgroundColor: colors.primary,
+            }}
+          >
+            <Ionicons name="swap-horizontal" size={15} color="#fff" />
+            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>İşlem</Text>
+          </TouchableOpacity>
+        </View>
         <View style={styles.emptyContainer}><Ionicons name="people-outline" size={48} color={colors.textSecondary} /><Text style={[{ color: colors.textSecondary }]}>Veri kaynağı seçilmedi</Text></View>
       </SafeAreaView>
     );
