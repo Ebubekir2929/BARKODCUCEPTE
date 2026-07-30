@@ -29,6 +29,7 @@ import { CompareModal } from '../../src/components/CompareModal';
 import { AcikHesapKisiDetail } from '../../src/components/AcikHesapKisiDetail';
 import { HighSaleDetailModal } from '../../src/components/HighSaleDetailModal';
 import { IptalDetailModal } from '../../src/components/IptalDetailModal';
+import { DashboardPdfExport } from '../../src/components/DashboardPdfExport';
 import { useLiveData } from '../../src/hooks/useLiveData';
 import { useResponsive } from '../../src/hooks/useResponsive';
 import { webStyles } from '../../src/styles/webModalStyles';
@@ -49,6 +50,7 @@ export default function DashboardScreen() {
 
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [showCompareModal, setShowCompareModal] = useState(false);
+  const [showPdfExport, setShowPdfExport] = useState(false); // 2026-07 — PDF dışa aktarma
   const [filters, setFilters] = useState({
     branchId: null as string | null,
     startDate: new Date(),
@@ -725,6 +727,13 @@ export default function DashboardScreen() {
             {user?.full_name || 'Kullanıcı'}
           </Text>
         </View>
+        <TouchableOpacity
+          style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border, marginRight: 8 }]}
+          onPress={() => setShowPdfExport(true)}
+          hitSlop={6}
+        >
+          <Ionicons name="document-text-outline" size={20} color={colors.primary} />
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border, marginRight: 8, position: 'relative' }]}
           onPress={() => setShowCompareModal(true)}
@@ -2465,6 +2474,19 @@ export default function DashboardScreen() {
         tenantId={iptalDetailTenantId || activeTenantId}
         iptalId={iptalDetailIptalId}
         tenantName={iptalDetailTenantName || user?.tenants?.find?.((x: any) => x.tenant_id === (iptalDetailTenantId || activeTenantId))?.name || ''}
+      />
+
+      {/* 2026-07 — Ana sayfa PDF dışa aktarma (bölüm seçimli) */}
+      <DashboardPdfExport
+        visible={showPdfExport}
+        onClose={() => setShowPdfExport(false)}
+        tenantName={user?.tenants?.find?.((x: any) => x.tenant_id === activeTenantId)?.name || ''}
+        dateLabel={`${filters.startDate.toLocaleDateString('tr-TR')} - ${filters.endDate.toLocaleDateString('tr-TR')}`}
+        totals={totals}
+        branchSales={sourceData?.branchSales || []}
+        hourlySales={effectiveHourlySales}
+        openTables={sourceData?.openTables || []}
+        iptalOzet={sourceData?.iptalOzet || []}
       />
     </SafeAreaView>
   );

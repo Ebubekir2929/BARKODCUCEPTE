@@ -1,0 +1,35 @@
+{
+  "summary": "Frontend-only verification of the new Ana sayfa PDF export overlay (DashboardPdfExport). Logged in as cakmak_ebubekir@hotmail.com on mobile viewport 390x844, dashboard renders correctly with THREE header buttons (PDF document icon, Karşılaştır AI, Filtre). Tapping the new PDF icon opens the 'PDF Dışa Aktar' bottom-sheet overlay with all 5 checkbox rows (Özet Kartlar, Lokasyon Bazlı Satışlar, Saatlik Satışlar, Açık Masalar, İptaller). Test account has no live sales data — 4 rows correctly display 'Veri yok' (dimmed/disabled) while Özet Kartlar remains active (count=4 fixed). Toggling the Özet Kartlar checkbox off/on updates visual state (checkmark + border color). Backdrop tap closes the overlay. Regression: Karşılaştır modal ('Veri Kaynağı Karşılaştırması') and Filtre modal still open normally. No console errors, no red screen, no crash. Export button was not clicked (per test instructions to avoid browser print dialog); it renders enabled (primary color) because Özet Kartlar has fixed count=4.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "DashboardPdfExport overlay", "issues": [
+        "New PDF icon button and DashboardPdfExport interactive elements (checkbox rows, X close, 'PDF Oluştur ve Paylaş' button) have NO testID attributes — testing had to rely on text/coordinate selectors. Recommend adding testID='dashboard-pdf-export-button', 'pdf-export-overlay', 'pdf-export-row-{key}', 'pdf-export-close', 'pdf-export-submit' for future regression stability."
+      ]}
+    ],
+    "react_native_issues": [
+      {"component": "DashboardPdfExport (View overlay)", "issue": "Warning in console: 'props.pointerEvents is deprecated. Use style.pointerEvents'. In /app/frontend/src/components/DashboardPdfExport.tsx line 140 the overlay <View> uses pointerEvents='auto' as a prop — should be moved to style.pointerEvents to satisfy the modern React Native API."}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(Optional / non-blocking) Add testID props to DashboardPdfExport (button, overlay, rows, close, submit) to enable stable automated regression tests.",
+    "(Minor) Migrate `pointerEvents='auto'` prop on the overlay View to `style={{ pointerEvents: 'auto' }}` in /app/frontend/src/components/DashboardPdfExport.tsx:140 to silence RN deprecation warning.",
+    "(Consider) Özet Kartlar row has a hard-coded count=4 so it is always enabled and the export button is always primary/enabled even when every totals value is 0. If the intent was 'grey when no data at all', gate `ozet.count` on `(totals.total > 0 || totals.cash > 0 || totals.card > 0 || totals.openAccount > 0)`. Current behavior is arguably correct (Özet with 0.00 is still a valid report), so this is a product decision — flagged for main agent awareness."
+  ],
+  "critical_code_review_comments": [
+    "DashboardPdfExport.tsx is 259 lines, well within limits and cleanly structured.",
+    "HTML string interpolation properly escapes user-visible strings via esc() helper — good.",
+    "expo-print + expo-sharing usage is correct: Print.printAsync on web, Print.printToFileAsync + Sharing.shareAsync on native.",
+    "Overlay uses absoluteFillObject + zIndex 9999 (no native Modal) — complies with the iOS Modal ban."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped)", "frontend": "100% (7/7 checks passed)"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 7 — verified the new Ana sayfa PDF export feature end-to-end on mobile web preview. All 7 checks (header layout, overlay open, 5 rows, veri-yok handling, checkbox toggle, backdrop close, Karşılaştır+Filtre regression) passed. Export button was not clicked (would trigger browser window.print) — verified only its enabled/rendered state. No testIDs on the new component; if future retests are needed, either add testIDs or use text selectors ('PDF Dışa Aktar', 'Özet Kartlar', 'PDF Oluştur ve Paylaş') + coordinate click at x≈118, y≈45 for the PDF header icon (leftmost of three header buttons).",
+  "rca_of_issue": "N/A — feature works as specified."
+}
