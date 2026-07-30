@@ -1,0 +1,28 @@
+{
+  "summary": "Bug-fix verification for user report 'cari listesinde aşağı doğru geldikçe bazen aralara boşluk atıyor' (random vertical gaps in Cariler list). Code-level fix confirmed: customers.tsx now imports FlatList from 'react-native' (line 4), the mobile branch uses <FlatList> (line 757) with initialNumToRender=15, maxToRenderPerBatch=12, windowSize=11, removeClippedSubviews on Android, updateCellsBatchingPeriod=40, and NO estimatedItemSize/drawDistance on the FlatList. Zero remaining '@shopify/flash-list' imports or <FlashList> JSX in customers.tsx (only a historical comment references it). listRef.scrollToOffset calls (filter reset line 304, ScrollFab up line 800, ScrollFab down line 803) are compatible with the new FlatList. Runtime verification with the only working account (cakmak_ebubekir@hotmail.com/admin — no tenant): app loads, dashboard renders 'HOŞ GELDINIZ, Fatih KONDAL', Cariler tab tap succeeds and renders the 'Veri kaynağı seçilmedi' empty branch (line 642-649) without any red screen, page errors, or FlashList/scrollToOffset console errors. LIMITATION: could not scroll a real cari list because this account has no tenant; the admin credentials in /app/memory/test_credentials.md (cakmak.ebubekir29@gmail.com/123456) returned 'Giriş Başarısız - Kullanıcı adı/e-posta veya şifre hatalı' on preview, so mid-scroll gap measurement / search-refilter / card-tap→ekstre modal could not be exercised against real data.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "OPTIONAL: main agent (or a follow-up manual run by the user on a device that has a real tenant/cari data) should scroll ~5-10 screens through Cariler on iOS+Android to confirm the reported gaps are gone in the wild — automated preview cannot reproduce because the only preview-usable account has no tenant.",
+    "OPTIONAL: refresh /app/memory/test_credentials.md — the listed admin account cakmak.ebubekir29@gmail.com/123456 currently returns 'login failed' on the preview URL. If the intent is that testing agents should be able to log in with a tenant-bearing account, a working credential should be added.",
+    "MINOR CLEANUP (non-blocking): stale FlashList references inside customers.tsx are now only in comments (lines 71, 297, 753, 802) — main agent may want to update these comments in a future pass so the file reflects reality."
+  ],
+  "critical_code_review_comments": [
+    "FlatList swap parameters match those already proven on stock.tsx (same fix, same numbers) — consistent with the referenced 2026-05-06 stock fix.",
+    "extraData={`${searchQuery}|${filterType}|${filterCities.length}|${filterGroups.length}`} is correctly passed so FlatList re-renders rows when filters mutate — good.",
+    "The 'isFiltering' spinner + forced scrollToOffset({offset:0}) on filter mutation (lines 301-307) was originally added to hide a FlashList quirk; it is harmless with FlatList and provides UX continuity, so no need to remove."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (skipped per request)", "frontend": "partial — code fix verified, empty-state runtime verified, real-data scroll not reproducible with available accounts"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Only cakmak_ebubekir@hotmail.com/admin works on the preview URL; it has no tenant so Cariler renders the 'Veri kaynağı seçilmedi' branch and the FlatList mobile branch (line 757) is never mounted at runtime. Admin credentials in test_credentials.md (cakmak.ebubekir29@gmail.com/123456) currently fail login on preview. For the customer-list gap fix, code review + no-crash smoke test is the strongest verification possible here.",
+  "rca_of_issue": "USER-REPORTED BUG (verified via code): @shopify/flash-list FlashList recycler leaves random empty vertical gaps between rows when a variable-height list is scrolled + mutated (search/filter). Same class of bug already known — fixed for stock list on 2026-05-06 by switching to react-native FlatList. FIX APPLIED (verified in this iteration): customers.tsx swapped FlashList → FlatList with initialNumToRender=15, maxToRenderPerBatch=12, windowSize=11, removeClippedSubviews (Android), updateCellsBatchingPeriod=40; estimatedItemSize & drawDistance removed. FlashList import gone. listRef.scrollToOffset (used by filter-reset effect and ScrollFab up/down) remains API-compatible with FlatList so no runtime error is introduced by the swap."
+}

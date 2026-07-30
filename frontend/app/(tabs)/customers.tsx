@@ -1,10 +1,9 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, Modal,
-  ScrollView, ActivityIndicator, Alert, RefreshControl, Platform, Keyboard,
+  ScrollView, ActivityIndicator, Alert, RefreshControl, Platform, Keyboard, FlatList,
 } from 'react-native';
 import { webStyles } from '../../src/styles/webModalStyles';
-import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
@@ -751,8 +750,16 @@ export default function CustomersScreen() {
         </View>
       ) : (
         <View style={{ flex: 1 }}>
-        <FlashList ref={listRef as any} data={filteredCaris} renderItem={renderCariItem} keyExtractor={(item, idx) => String(item.KART || item.ID || idx)} estimatedItemSize={120} extraData={`${searchQuery}|${filterType}|${filterCities.length}|${filterGroups.length}`} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
-          drawDistance={500}
+        {/* 2026-07 — FlashList → FlatList: recycler'ın kaydırma/filtre sırasında
+            aralara rastgele boşluk bırakma ("boşluk") hatası (stok listesinde
+            2026-05-06'da aynı geçişle çözülmüştü). FlatList değişken yükseklikli
+            satırları native işler. */}
+        <FlatList ref={listRef as any} data={filteredCaris} renderItem={renderCariItem} keyExtractor={(item: any, idx: number) => String(item.KART || item.ID || idx)} extraData={`${searchQuery}|${filterType}|${filterCities.length}|${filterGroups.length}`} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 100 }} showsVerticalScrollIndicator={false}
+          initialNumToRender={15}
+          maxToRenderPerBatch={12}
+          windowSize={11}
+          removeClippedSubviews={Platform.OS === 'android'}
+          updateCellsBatchingPeriod={40}
           onScroll={(e) => {
             const y = e.nativeEvent.contentOffset.y;
             const layoutH = e.nativeEvent.layoutMeasurement.height;
