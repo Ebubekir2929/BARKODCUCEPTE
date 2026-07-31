@@ -2450,6 +2450,7 @@ async def get_fis_detail(
                     "ok": True,
                     "from_cache": True,
                     "cached_at": str(cached.get("updated_at", "")),
+                    "age_sec": _norm_age_sec(cached.get("age_sec")),  # 2026-06 — tazelik rozeti
                     "details": _fix_large_ints(detail_rows) if isinstance(detail_rows, list) else [],
                     "totals": _fix_large_ints([total_row]) if total_row else [],
                 }
@@ -2497,6 +2498,7 @@ async def get_fis_detail(
                 "ok": True,
                 "from_cache": True,
                 "_source": "bildirim_feed",
+                "age_sec": 0,  # feed watcher tarafından canlıya yakın basılır
                 "details": _fix_large_ints(feed_details),
                 "totals": _fix_large_ints([total_row]),
             }
@@ -2527,6 +2529,7 @@ async def get_fis_detail(
         return {
             "ok": True,
             "from_cache": False,
+            "age_sec": 0,  # POS'tan taze geldi
             "request_uid": result.get("request_uid", ""),
             "details": _fix_large_ints(detail_rows) if isinstance(detail_rows, list) else [],
             "totals": _fix_large_ints([total_row]) if total_row else [],

@@ -15,6 +15,7 @@ import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { readPendingTap, clearPendingTap, NOTIFICATION_TAP_EVENT } from '../../src/services/notificationTapHandler';
 import { useFocusEffect } from 'expo-router';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
+import FreshnessBadge from '../../src/components/FreshnessBadge';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useLocalSearchParams, router } from 'expo-router';
 import * as Clipboard from 'expo-clipboard';
@@ -30,13 +31,7 @@ import { SkeletonRows } from '../../src/components/Skeleton';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
-// 2026-07 — "Son güncelleme" rozeti için cache yaşı formatı
-const fmtAge = (sec: number): string => {
-  if (sec < 90) return 'az önce';
-  if (sec < 3600) return `${Math.round(sec / 60)} dk önce`;
-  if (sec < 86400) return `${Math.round(sec / 3600)} sa önce`;
-  return `${Math.round(sec / 86400)} gün önce`;
-};
+// 2026-07 — "Son güncelleme" rozeti: bkz. src/components/FreshnessBadge
 
 export default function StockScreen() {
   const { colors, isDark } = useThemeStore();
@@ -211,6 +206,7 @@ export default function StockScreen() {
   // Fiş detay modal (cari ile aynı yapı)
   const [selectedFis, setSelectedFis] = useState<any | null>(null);
   const [fisDetail, setFisDetail] = useState<any[]>([]);
+  const [fisAgeSec, setFisAgeSec] = useState<number | null>(null); // fiş detay tazelik rozeti
   const [fisTotals, setFisTotals] = useState<any | null>(null);
   const [fisLoading, setFisLoading] = useState(false);
 
@@ -374,6 +370,7 @@ export default function StockScreen() {
     setFisDetail([]);
     setFisTotals(null);
     setFisLoading(true);
+    setFisAgeSec(null);
     try {
       const { token } = useAuthStore.getState();
       const data = await fetchExtreWithFallback(
@@ -385,6 +382,7 @@ export default function StockScreen() {
           if (fresh && Array.isArray(fresh.details)) {
             setFisDetail(fresh.details);
             setFisTotals(fresh.totals && fresh.totals.length > 0 ? fresh.totals[0] : null);
+            setFisAgeSec(typeof fresh.age_sec === 'number' ? fresh.age_sec : 0);
           }
           setFisLoading(false);
         },
@@ -392,6 +390,7 @@ export default function StockScreen() {
       if (data.ok) {
         setFisDetail(data.details || []);
         setFisTotals(data.totals && data.totals.length > 0 ? data.totals[0] : null);
+        if (typeof data.age_sec === 'number') setFisAgeSec(data.age_sec);
       }
       if (!data._pending) setFisLoading(false);
     } catch (err) {
@@ -1688,16 +1687,8 @@ export default function StockScreen() {
                   </View>
                   {/* 2026-07 — "Son güncelleme" rozeti: veri cache'ten mi taze mi */}
                   {extreAgeSec != null && (
-                    <View style={{
-                      flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start',
-                      paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6,
-                      backgroundColor: (extreAgeSec < 90 ? '#10B981' : colors.primary) + '15',
-                      marginBottom: 8,
-                    }}>
-                      <Ionicons name="time-outline" size={10} color={extreAgeSec < 90 ? '#10B981' : colors.primary} />
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: extreAgeSec < 90 ? '#10B981' : colors.primary }}>
-                        Son güncelleme: {fmtAge(extreAgeSec)}
-                      </Text>
+                    <View style={{ marginBottom: 8 }}>
+                      <FreshnessBadge ageSec={extreAgeSec} />
                     </View>
                   )}
                   {detailExtre.length > 0 ? <></> : null}
@@ -1885,6 +1876,11 @@ export default function StockScreen() {
                     <Text style={[{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }]} numberOfLines={1}>
                       {selectedFis.TARIH || ''} · {selectedFis.ACIKLAMA || ''}
                     </Text>
+                    {fisAgeSec != null && !fisLoading && (
+                      <View style={{ marginTop: 6 }}>
+                        <FreshnessBadge ageSec={fisAgeSec} />
+                      </View>
+                    )}
                   </View>
                 )}
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>

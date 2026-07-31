@@ -11,6 +11,7 @@ import { useAuthStore } from '../../src/store/authStore';
 import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
+import FreshnessBadge from '../../src/components/FreshnessBadge';
 import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import { useResponsive } from '../../src/hooks/useResponsive';
 import { webStyles } from '../../src/styles/webModalStyles';
@@ -879,6 +880,7 @@ export default function ReportsScreen() {
   const [reportLoading, setReportLoading] = useState(false);
   const [moreLoading, setMoreLoading] = useState(false);
   const [loadedPages, setLoadedPages] = useState(0);
+  const [reportAgeSec, setReportAgeSec] = useState<number | null>(null); // tazelik rozeti
   const [sortKey, setSortKey] = useState('');
   const [sortAsc, setSortAsc] = useState(true);
   const [searchFilter, setSearchFilter] = useState('');
@@ -1159,7 +1161,7 @@ export default function ReportsScreen() {
       return;
     }
 
-    setReportLoading(true); setReportData([]); setLoadedPages(0); setMoreLoading(false);
+    setReportLoading(true); setReportData([]); setLoadedPages(0); setMoreLoading(false); setReportAgeSec(null);
 
     // Precompute searchable text on each row ONCE so filter is O(1) per row later
     const indexRow = (row: any) => {
@@ -1197,6 +1199,7 @@ export default function ReportsScreen() {
           const cacheRows = cJson.data.map(indexRow);
           setReportData(cacheRows);
           setLoadedPages(typeof cJson.pages === 'number' ? cJson.pages : 1);
+          setReportAgeSec(typeof cJson._age === 'number' ? cJson._age : 0);
           setReportLoading(false);
           setMoreLoading(false);
           hadCache = true;
@@ -2252,6 +2255,9 @@ export default function ReportsScreen() {
                     ? `${processedData.length.toLocaleString('tr-TR')} yüklendi...`
                     : `${processedData.length.toLocaleString('tr-TR')} kayıt${debouncedSearch && processedData.length !== reportData.length ? ` · toplam ${reportData.length.toLocaleString('tr-TR')}` : ''}`}
               </Text>
+              {!reportLoading && !moreLoading && reportData.length > 0 && (
+                <FreshnessBadge ageSec={reportAgeSec} />
+              )}
               {isProcessing && !reportLoading && reportData.length > 0 && (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                   <ActivityIndicator size="small" color={colors.primary} />

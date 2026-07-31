@@ -62,5 +62,14 @@ POS istemcisi çekip ERP12'ye INSERT eder. Uygulama ERP'ye ASLA doğrudan yazmaz
 - ÖNEMLİ: Mobil `reports.tsx` defaultParams değişirse client.py `_report_prefetch_definitions()`
   da güncellenmeli (parametreler birebir eşleşmeli, boş/0 değerler norm'da düşer).
 
+## Tazelik Rozeti (FreshnessBadge) — 2026-06 (TAMAMLANDI)
+- `src/components/FreshnessBadge.tsx`: standart "Son güncelleme: X önce" rozeti
+  (<90sn → yeşil ⚡ "az önce", aksi → mavi 🕒). `fmtAge` buradan export edilir.
+- Kullanım yerleri: cari ekstre (compact, Güncel Bakiye yanı), stok ekstre,
+  fiş detayı modalları (customers + stock), rapor sonuç başlığı (reports.tsx).
+- Backend: `/fis-detail` artık `age_sec` döner (cache HIT → gerçek yaş, feed/POS → 0).
+  `/report-run` yanıtındaki `_age` frontend'te `reportAgeSec` state'ine bağlandı.
+- UI doğrulandı: cari ekstre "az önce" ✅, fiş detayı "3 sa önce" ✅.
+
 ## Test Kimlikleri
 Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 1234567 yapıldı).

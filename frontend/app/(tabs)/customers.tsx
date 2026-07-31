@@ -17,6 +17,7 @@ import * as FileSystem from 'expo-file-system';
 import { useFocusEffect, router } from 'expo-router';
 import { ScrollFab } from '../../src/components/ScrollFab';
 import { SkeletonRows } from '../../src/components/Skeleton';
+import FreshnessBadge from '../../src/components/FreshnessBadge';
 import { useResponsive } from '../../src/hooks/useResponsive';
 import { DataTable, TableColumn } from '../../src/components/DataTable';
 import DateField from '../../src/components/DateField';
@@ -33,13 +34,7 @@ const getDefDates = () => {
   return { start: `${y}-${m}-01`, end: `${y}-${m}-${d}` };
 };
 
-// 2026-07 — "Son güncelleme" rozeti için cache yaşı formatı
-const fmtAge = (sec: number): string => {
-  if (sec < 90) return 'az önce';
-  if (sec < 3600) return `${Math.round(sec / 60)} dk önce`;
-  if (sec < 86400) return `${Math.round(sec / 3600)} sa önce`;
-  return `${Math.round(sec / 86400)} gün önce`;
-};
+// 2026-07 — "Son güncelleme" rozeti: bkz. src/components/FreshnessBadge
 
 export default function CustomersScreen() {
   const { colors, isDark } = useThemeStore();
@@ -109,6 +104,7 @@ export default function CustomersScreen() {
   // Fiş
   const [selectedFis, setSelectedFis] = useState<any | null>(null);
   const [fisDetail, setFisDetail] = useState<any[]>([]);
+  const [fisAgeSec, setFisAgeSec] = useState<number | null>(null); // fiş detay tazelik rozeti
   // 2026-05-13 — Ekstre cache durum göstergesi (badge)
   const [extreFromCache, setExtreFromCache] = useState<boolean>(false);
   const [extreAgeSec, setExtreAgeSec] = useState<number | null>(null);
@@ -489,7 +485,7 @@ export default function CustomersScreen() {
       return;
     }
     Keyboard.dismiss();
-    setSelectedFis(row); setFisDetail([]); setFisTotals(null); setFisLoading(true);
+    setSelectedFis(row); setFisDetail([]); setFisTotals(null); setFisLoading(true); setFisAgeSec(null);
     try {
       const { token } = useAuthStore.getState();
       const data = await fetchExtreWithFallback(
@@ -501,6 +497,7 @@ export default function CustomersScreen() {
           if (fresh && Array.isArray(fresh.details)) {
             setFisDetail(fresh.details);
             setFisTotals(fresh.totals && fresh.totals.length > 0 ? fresh.totals[0] : null);
+            setFisAgeSec(typeof fresh.age_sec === 'number' ? fresh.age_sec : 0);
           }
           setFisLoading(false);
         },
@@ -508,6 +505,7 @@ export default function CustomersScreen() {
       if (data.ok) {
         setFisDetail(data.details || []);
         setFisTotals(data.totals && data.totals.length > 0 ? data.totals[0] : null);
+        if (typeof data.age_sec === 'number') setFisAgeSec(data.age_sec);
       }
       if (!data._pending) setFisLoading(false);
     } catch (err) {
@@ -890,25 +888,9 @@ export default function CustomersScreen() {
                         <Text style={{ fontSize: 10, fontWeight: '700', color: colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5 }}>
                           Güncel Bakiye
                         </Text>
-                        {/* 2026-05-13 — Cache durum rozeti (POS canlı sorgu mu, cache mi) */}
+                        {/* 2026-06 — Standart tazelik rozeti (FreshnessBadge) */}
                         {extreData.length > 0 && (
-                          <View style={{
-                            paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6,
-                            backgroundColor: extreFromCache ? (colors.success + '20') : (colors.warning + '20'),
-                            flexDirection: 'row', alignItems: 'center', gap: 3,
-                          }}>
-                            <Ionicons
-                              name={extreFromCache ? 'flash' : 'cloud-download-outline'}
-                              size={9}
-                              color={extreFromCache ? colors.success : colors.warning}
-                            />
-                            <Text style={{
-                              fontSize: 8, fontWeight: '800', letterSpacing: 0.3,
-                              color: extreFromCache ? colors.success : colors.warning,
-                            }}>
-                              {(extreFromCache ? 'CACHE' : 'CANLI') + (extreAgeSec != null ? ` · ${fmtAge(extreAgeSec)}` : '')}
-                            </Text>
-                          </View>
+                          <FreshnessBadge ageSec={extreAgeSec != null ? extreAgeSec : (extreFromCache ? null : 0)} compact />
                         )}
                       </View>
                       <Text style={{ fontSize: 22, fontWeight: '800', color: statusColor, marginTop: 2 }}>
@@ -1071,6 +1053,11 @@ export default function CustomersScreen() {
                     <Text style={[{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }]} numberOfLines={1}>
                       {selectedFis.TARIH || ''} · {selectedFis.ACIKLAMA || ''}
                     </Text>
+                    {fisAgeSec != null && !fisLoading && (
+                      <View style={{ marginTop: 6 }}>
+                        <FreshnessBadge ageSec={fisAgeSec} />
+                      </View>
+                    )}
                   </View>
                 )}
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
