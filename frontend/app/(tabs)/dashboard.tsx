@@ -58,7 +58,7 @@ export default function DashboardScreen() {
   });
 
   // Use live data hook with filter support (must be after filters state)
-  const { data: sourceData, isLoading: dataLoading, isRefreshing: dataRefreshing, error: dataError, lastSynced, refresh: refreshData, isLive, isFilterActive: isDataFiltered } = useLiveData(filters);
+  const { data: sourceData, isLoading: dataLoading, isRefreshing: dataRefreshing, error: dataError, lastSynced, refresh: refreshData, isLive, isFilterActive: isDataFiltered } = useLiveData(filters, { paused: showFilterModal });
 
   // User-configurable auto-refresh cadence (Settings → "Veri Yenileme Sıklığı")
   const refreshInterval = usePrefsStore((s) => s.refreshInterval);
@@ -76,11 +76,12 @@ export default function DashboardScreen() {
   useEffect(() => {
     if (!refreshInterval || refreshInterval <= 0) return; // 0 = manual only
     if (!isTabFocused) return; // pause while on another tab
+    if (showFilterModal) return; // 2026-07 bugfix: tarih seçilirken yenileme → çark bugüne sıfırlanıyordu
     const id = setInterval(() => {
       refreshData();
     }, refreshInterval * 1000);
     return () => clearInterval(id);
-  }, [refreshInterval, refreshData, isTabFocused]);
+  }, [refreshInterval, refreshData, isTabFocused, showFilterModal]);
 
   // Cache totals per data source - reset when source changes, update only with fresh data
   const [sourceTotals, setSourceTotals] = useState<Record<string, number>>({});
@@ -102,6 +103,7 @@ export default function DashboardScreen() {
   useEffect(() => {
     if (!user?.tenants || user.tenants.length === 0) return;
     if (!isTabFocused) return; // pause while on another tab — user explicitly asked
+    if (showFilterModal) return; // 2026-07 bugfix: tarih seçilirken re-render → çark bugüne sıfırlanıyordu
     const { token } = useAuthStore.getState();
     if (!token) return;
 
@@ -171,7 +173,7 @@ export default function DashboardScreen() {
       // Abort any pending fetches so we don't waste backend cycles
       ctrls.forEach(c => { try { c.abort(); } catch {} });
     };
-  }, [user?.tenants?.length, filters.startDate.getTime(), filters.endDate.getTime(), isTabFocused]);
+  }, [user?.tenants?.length, filters.startDate.getTime(), filters.endDate.getTime(), isTabFocused, showFilterModal]);
 
   // 🚀 ONE-TIME BACKGROUND PREFETCH: Warm stock-list + cari-list cache for ALL
   // tenants on app start so navigation to those tabs is instant. Fire-and-forget.

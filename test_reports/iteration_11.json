@@ -1,0 +1,33 @@
+{
+  "summary": "Iteration 11 — Filter modal date-reset bug (Turkish user report: 'tarih seçerken beni belli bir zaman sonra bugüne atıyor') is VERIFIED FIXED. Playwright test on mobile viewport (390x844) opened the FilterModal, typed 27/12/2025 into both start/end DD/MM/YYYY TextInputs, and observed the fields every 10s for 70s. Values remained '27/12/2025' at t+10, +20, +30, +40, +50, +60, +70s — NO reset to today. Apply then produced filter banner 'Tüm Şubeler · 27/12 - 27/12', 'Filtrelenmiş Veri / Otomatik yenileme durdu' indicator and dashboard totals Nakit=₺63,00 / Toplam=₺63,00 (matches backend cached financial_data for 2025-12-27, GENELTOPLAM=63.00). After Apply + additional 70s wait, banner + values STILL '27/12 - 27/12' / ₺63,00 (filter persisted, did not jump back to today). Backend GET /api/data/dashboard?sdate=2025-12-27&edate=2025-12-27 returned real cached day data (financial_data.row_count=1, GENELTOPLAM=63.00, financial_data_location.row_count=1) — backfilled dataset is intact and correctly per-day. All three refreshers (dashboard refreshData interval, useLiveData 30s interval via {paused}, fetchAllTotals 60s interval) are correctly paused while showFilterModal is true. No console errors, no red screen. Regression: dashboard live-mode indicator ('Canlı Veri · 1 dk') visible when modal is closed and no filter active — auto-refresh resumes normally.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/tmp/dashboard_after_login.png",
+    "/tmp/filter_modal_opened.png",
+    "/tmp/after_wait_70s.png",
+    "/tmp/after_apply.png",
+    "/tmp/after_apply_wait70.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "useLiveData paused option (src/hooks/useLiveData.ts:343-346, 590-607) correctly gates BOTH the initial fetch and the 30s interval — clean implementation.",
+    "dashboard.tsx L79 & L106 guards ('if (showFilterModal) return' + showFilterModal in deps) correctly pause the two dashboard-level intervals; deps arrays include showFilterModal so effect re-runs on close.",
+    "Minor: dashboard.tsx is 1600+ lines — consider splitting sections (OpenTables, KDV Breakdown, Hourly Chart) into subcomponents in a future refactor. Not related to current fix."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None — read-only test against live MySQL dataset_cache; user's prior backfill for 2025-12-27 was reused.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Bug fix for FilterModal date reset is verified end-to-end. Backfill data for 2025-12-27 is intact in dataset_cache (financial_data GENELTOPLAM=63.00). No further action needed on this bug. If new tests come, credentials remain cakmak.ebubekir29@gmail.com / 1234567, tenant d5587c87a7f9476fa82b83f40accd6c7.",
+  "rca_of_issue": "ROOT CAUSE: Three concurrent auto-refreshers (dashboard refreshInterval useEffect at dashboard.tsx L76-84, fetchAllTotals 60s interval at L103-176, and useLiveData's internal 30s setInterval in useLiveData.ts) called setState on the dashboard while the FilterModal was mounted. Each parent re-render caused FilterModal props (currentFilters) reference to churn; the modal's useEffect keyed on `visible` was fine, but the DateTimePicker spinner on iOS re-mounts on parent re-render, snapping the wheel back to `new Date()` (today). REPRO: open filter modal on dashboard, set start/end to 2025-12-27, wait >30s → date wheel jumps to today. FIX (verified): useLiveData now accepts {paused} and skips initial fetch + clears interval when paused; both dashboard useEffects short-circuit with 'if (showFilterModal) return' and include showFilterModal in deps. VERIFICATION: with modal open, dates held for full 70s across all three refresher tick boundaries."
+}

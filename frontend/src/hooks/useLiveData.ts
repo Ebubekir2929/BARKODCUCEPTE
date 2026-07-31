@@ -340,7 +340,10 @@ function transformApiData(apiData: any): DashboardData {
   };
 }
 
-export function useLiveData(filter?: DashboardFilter) {
+export function useLiveData(filter?: DashboardFilter, options?: { paused?: boolean }) {
+  // paused=true → tüm otomatik yenileme durur (örn. tarih seçim penceresi
+  // açıkken re-render'lar iOS tarih çarkını bugüne sıfırlıyordu — 2026-07 bugfix)
+  const paused = !!options?.paused;
   const { user, token } = useAuthStore();
   const { activeSource } = useDataSourceStore();
   const [data, setData] = useState<DashboardData>(EMPTY_DATA);
@@ -585,7 +588,7 @@ export function useLiveData(filter?: DashboardFilter) {
   }, [activeTenantId, token, activeSource, isFilterActive, filter?.branchId, filter?.startDate, filter?.endDate]);
 
   useEffect(() => {
-    fetchDashboard();
+    if (!paused) fetchDashboard();
 
     // Clear previous interval
     if (intervalRef.current) {
@@ -593,15 +596,15 @@ export function useLiveData(filter?: DashboardFilter) {
       intervalRef.current = null;
     }
 
-    // Only auto-refresh when filter is NOT active (real-time mode)
-    if (!isFilterActive) {
+    // Only auto-refresh when filter is NOT active (real-time mode) and not paused
+    if (!isFilterActive && !paused) {
       intervalRef.current = setInterval(fetchDashboard, 30000);
     }
 
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [fetchDashboard, isFilterActive]);
+  }, [fetchDashboard, isFilterActive, paused]);
 
   return {
     data,
