@@ -295,7 +295,46 @@ async def lookup_cached_report(
             )
             row = await cur.fetchone()
 
-            # 2) Fallback: fuzzy semantic match across recent entries.
+            # 2) Fallback A (2026-06 — Prefetch): params'ta ayırt edici tekil anahtar
+            # (ID / FisId / POS_ID / IPTAL_ID) varsa params_json LIKE filtresiyle
+            # doğrudan aday satırları bul. Tam ön yükleme (full prefetch) ile aynı
+            # dataset için YÜZLERCE cache satırı oluşabildiğinden, genel top-20
+            # taraması hedef ID'yi kaçırıyordu.
+            if not row:
+                like_clauses = []
+                like_args: list = []
+                for dk in ("ID", "FisId", "POS_ID", "IPTAL_ID"):
+                    v = (params or {}).get(dk)
+                    if isinstance(v, bool):
+                        continue
+                    try:
+                        iv = int(str(v).strip())
+                    except (TypeError, ValueError):
+                        continue
+                    # Kompakt JSON'da değerden sonra ',' veya '}' gelir — böylece
+                    # "ID":12 kalıbı "ID":123'e yanlış eşleşmez.
+                    like_clauses.append("(params_json LIKE %s OR params_json LIKE %s)")
+                    like_args.extend([f'%"{dk}":{iv},%', f'%"{dk}":{iv}}}%'])
+                if like_clauses:
+                    await cur.execute(
+                        f"""
+                        SELECT data_json, row_count, synced_at, params_json
+                        FROM dataset_cache
+                        WHERE tenant_id=%s AND dataset_key=%s AND {' AND '.join(like_clauses)}
+                        ORDER BY row_count DESC, synced_at DESC LIMIT 20
+                        """,
+                        (tenant_id, dataset_key, *like_args),
+                    )
+                    for cand in await cur.fetchall():
+                        try:
+                            cand_params = json.loads(cand[3] or "{}")
+                        except Exception:
+                            continue
+                        if _norm_dict(cand_params) == target_norm:
+                            row = cand
+                            break
+
+            # 3) Fallback B: fuzzy semantic match across recent entries.
             # Order by row_count DESC first because we may have multiple cache
             # rows for the same logical params (one written by POS sync.php with
             # its own hash, one written by our write_dataset_cache with our hash).

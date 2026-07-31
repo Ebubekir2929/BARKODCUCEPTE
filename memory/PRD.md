@@ -44,5 +44,23 @@ POS istemcisi çekip ERP12'ye INSERT eder. Uygulama ERP'ye ASLA doğrudan yazmaz
   sayım için ERP12 Profiler dökümü ile `apply_sayim_islem_to_erp` uyarlaması.
 - iOS/Android build: Emergent Publish butonu üzerinden.
 
+## Tam Ön Yükleme / Prefetch — 2026-06 (TAMAMLANDI)
+"Instagram tarzı" anında açılış için cache ısıtma sistemi:
+- **client.py**: `run_full_prefetch()` — 500 cari ekstresi (kart_extre_cari, ay başı→bugün),
+  2000 stok (stok_extre + stok_bilgi_miktar), bu ayın 3000 fiş detayı (fis_detay_toplam)
+  ve 6 raporun mobil-varsayılan parametreleri partiler halinde (25'lik, 1.5sn ara) web cache'e basılır.
+  Tetikleyiciler: uygulama açılışı (+3dk) ve her gece 03:00 (günde 1 kez, snapshot ile takip).
+  Manuel: Senkron sekmesinde "Tam Ön Yükleme (Prefetch)" / "Prefetch Durdur" butonları.
+  request_poll (mobil kullanıcı istekleri) HER ZAMAN önceliklidir (`_prefetch_wait_for_user_requests`).
+  Sabitler: `FULL_PREFETCH_*` (client.py ~satır 137).
+- **backend/services/dataset_cache.py**: `lookup_cached_report` Fallback A — params'ta
+  ID/FisId/POS_ID/IPTAL_ID varsa `params_json LIKE '%"ID":N,%'` filtresiyle hedef satır bulunur
+  (500+ cache satırında eski top-20 fuzzy taraması hedefi kaçırıyordu). Test edildi ✅
+- **backend/routes/data.py**: (1) `/cari-extre` tarih-agnostik fallback artık LIMIT 40 yerine
+  ID'ye LIKE filtreli sorgu; (2) `/report-run` cache_only artık memory-cache boşsa MySQL
+  dataset_cache'e bakar (`_cache: "mysql-prefetch"`). Curl E2E test edildi ✅
+- ÖNEMLİ: Mobil `reports.tsx` defaultParams değişirse client.py `_report_prefetch_definitions()`
+  da güncellenmeli (parametreler birebir eşleşmeli, boş/0 değerler norm'da düşer).
+
 ## Test Kimlikleri
 Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 1234567 yapıldı).

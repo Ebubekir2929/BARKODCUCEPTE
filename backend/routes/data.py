@@ -2202,11 +2202,15 @@ async def get_cari_extre(
                 pool = await _gdp()
                 async with pool.acquire() as conn:
                     async with conn.cursor() as cur:
+                        # 2026-06 — Prefetch: 500 cari cache'lendiğinde "son 40 blob"
+                        # taraması hedef cariyi kaçırıyordu. params_json LIKE ile
+                        # doğrudan bu carinin bloblarını buluruz.
                         await cur.execute(
                             """SELECT data_json, params_json, synced_at FROM dataset_cache
                                WHERE tenant_id=%s AND dataset_key='kart_extre_cari'
-                               ORDER BY synced_at DESC LIMIT 40""",
-                            (tenant_id,),
+                                 AND (params_json LIKE %s OR params_json LIKE %s)
+                               ORDER BY synced_at DESC LIMIT 10""",
+                            (tenant_id, f'%"ID":{int(cari_id)},%', f'%"ID":{int(cari_id)}}}%'),
                         )
                         for blob, pjson, synced in await cur.fetchall():
                             try:
@@ -2921,6 +2925,16 @@ async def run_report(
     if cache_only:
         if cached and age is not None and age < TTL_STALE * 2:
             return {**cached["payload"], "_cache": "stale-fast", "_age": int(age)}
+        # 2026-06 — Prefetch: POS client rapor varsayılanlarını gece/açılışta MySQL
+        # dataset_cache'e basıyor. Memory cache boşsa (backend restart vb.) MySQL'e
+        # bak — HIT olursa rapor yine anında açılır, POS'a gidilmez.
+        try:
+            mysql_cached = await lookup_cached_report(tenant_id, dataset_key, params, max_age_sec=86400)
+            if mysql_cached and isinstance(mysql_cached.get("data"), list) and mysql_cached["data"]:
+                payload = {"ok": True, "data": _fix_large_ints(mysql_cached["data"]), "pages": 1}
+                return {**payload, "_cache": "mysql-prefetch", "_age": int(mysql_cached.get("age_sec") or 0)}
+        except Exception as e:
+            logger.debug(f"[report-run] cache_only mysql lookup failed: {e}")
         return {"ok": True, "data": [], "pages": 0, "_cache": "miss", "_source": "cache_only"}
 
     async def _do_fetch() -> dict:

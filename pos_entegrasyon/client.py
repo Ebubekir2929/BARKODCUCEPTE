@@ -134,6 +134,27 @@ PREWARM_MONTHLY_FIS_DETAIL_FIS_LIMIT = 10000
 PREWARM_MONTHLY_FIS_DETAIL_MAX_PER_RUN = 60
 PREWARM_MONTHLY_FIS_DETAIL_FIS_TURU = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 19, 20, 21, 22)
 
+# ---------------------------------------------------------------------------
+# TAM ÖN YÜKLEME (Full Prefetch / Cache Isıtma) — 2026-06
+# "Instagram tarzı" anında açılış: tüm carilerin ekstresi, tüm stokların
+# ekstresi/miktarı, bu ayın fiş detayları ve rapor varsayılanları arka planda
+# sessizce web cache'e basılır. Mobil kullanıcı tıkladığında veri hazırdır.
+# İki tetikleyici vardır:
+#   1) Uygulama açılışı: açılıştan FULL_PREFETCH_STARTUP_DELAY_SEC sonra 1 kez.
+#   2) Gece FULL_PREFETCH_NIGHT_HOUR (03:xx) — günde 1 kez tam tarama.
+# Mobil kullanıcının anlık istekleri (request_poll) HER ZAMAN önceliklidir;
+# prefetch partiler halinde çalışır ve request_poll meşgulken bekler.
+FULL_PREFETCH_ENABLED = True
+FULL_PREFETCH_NIGHT_HOUR = 3                 # Gece 03:00-03:59 arası günde 1 kez
+FULL_PREFETCH_STARTUP_DELAY_SEC = 180        # Açılıştan 3 dk sonra (ilk senkron bitsin)
+FULL_PREFETCH_CARI_LIMIT = 500               # Taranacak cari sayısı
+FULL_PREFETCH_STOCK_LIMIT = 2000             # Taranacak stok sayısı
+FULL_PREFETCH_FIS_DETAIL_LIMIT = 3000        # Bu ayki fiş detayı üst sınırı
+FULL_PREFETCH_BATCH_SIZE = 25                # Her partide işlenecek kayıt
+FULL_PREFETCH_BATCH_SLEEP_SEC = 1.5          # Partiler arası nefes (POS SQL'i yormasın)
+FULL_PREFETCH_REPORTS_ENABLED = True         # Rapor varsayılanları da ısıtılsın
+FULL_PREFETCH_REPORT_MAX_PAGES = 6           # Sayfalı raporlarda en fazla kaç sayfa
+
 # Request beklemeden dataset_cache'e yazılacak özel dataset.
 # Açık masa detay ürün satırı satırı rows'a düşmez; POS_ID bazlı normal cache kaydı olarak tutulur.
 DIRECT_CACHE_ONDEMAND_KEYS = {"acik_masa_detay", "rap_acik_hesap_kisi_ozet_web", "rap_filtre_lookup", "fis_gunluk_bildirim_feed"}
@@ -1729,6 +1750,10 @@ class Main(QMainWindow):
         self._last_lookup_direct_sync_ts = 0.0
         self._last_extre_prewarm_ts = 0.0
         self._last_monthly_fis_detail_prewarm_ts = 0.0
+        self._full_prefetch_busy = False
+        self._full_prefetch_cancel = False
+        self._startup_prefetch_started = False
+        self._app_started_ts = time.time()
 
         self.setWindowTitle("KasaCepte Transfer Client")
         self.setMinimumSize(QSize(1180, 820))
@@ -1866,6 +1891,8 @@ class Main(QMainWindow):
                 self.start_price_update_timer(silent=started)
             if self.cfg.get("auto_sync_enabled", False) and self.cfg.get("islem_enabled", True) and not self.islem_timer.isActive():
                 self.start_islem_timer(silent=started)
+            # Tam ön yükleme (prefetch) zamanlayıcı kontrolü: açılış + gece 03:00
+            self._maybe_start_full_prefetch()
         except Exception as exc:
             self.println(f"Watchdog hata: {exc}")
 
@@ -2254,6 +2281,20 @@ class Main(QMainWindow):
         hb3.addStretch(1)
         v.addLayout(hb3)
 
+        hb4 = QHBoxLayout()
+        self.btn_full_prefetch = QPushButton("Tam Ön Yükleme (Prefetch)")
+        self.btn_full_prefetch.setToolTip(
+            "Tüm carilerin ekstresi, tüm stokların ekstresi/miktarı, bu ayın fiş detayları\n"
+            "ve rapor varsayılanlarını web cache'e basar. Mobil uygulama anında açılır.\n"
+            "Otomatik: uygulama açılışında + her gece 03:00'te çalışır."
+        )
+        self.btn_full_prefetch_stop = QPushButton("Prefetch Durdur")
+        hb4.addWidget(QLabel("Cache Isıtma:"))
+        hb4.addWidget(self.btn_full_prefetch)
+        hb4.addWidget(self.btn_full_prefetch_stop)
+        hb4.addStretch(1)
+        v.addLayout(hb4)
+
         v.addWidget(QLabel("Senkron Logu"))
         self.txt_log = QTextEdit()
         self.txt_log.setReadOnly(True)
@@ -2277,6 +2318,8 @@ class Main(QMainWindow):
         self.btn_open_health.clicked.connect(self.open_health_dashboard)
         self.btn_backfill.clicked.connect(self.on_backfill_clicked)
         self.btn_backfill_stop.clicked.connect(self.on_backfill_cancel)
+        self.btn_full_prefetch.clicked.connect(self.on_full_prefetch_clicked)
+        self.btn_full_prefetch_stop.clicked.connect(self.on_full_prefetch_cancel)
 
     def build_tray(self):
         style = self.style() or QApplication.style()
@@ -4531,6 +4574,405 @@ SELECT TOP {limit}
             f"stok_bilgi_ön_cache={stok_bilgi_pushed}, fiş_detay_ön_cache={fis_detail_pushed}"
         )
         return pushed + fis_detail_pushed + stok_bilgi_pushed
+
+    # ─────────────── Tam Ön Yükleme (Full Prefetch / Cache Isıtma) — 2026-06 ───────────────
+
+    def _maybe_start_full_prefetch(self):
+        """Watchdog (15sn) tarafından çağrılır. İki tetikleyici:
+        1) Açılış: uygulama başladıktan FULL_PREFETCH_STARTUP_DELAY_SEC sonra 1 kez.
+        2) Gece: her gün FULL_PREFETCH_NIGHT_HOUR saatinde 1 kez tam tarama."""
+        if not FULL_PREFETCH_ENABLED or self._full_prefetch_busy:
+            return
+        if not self.cfg.get("auto_sync_enabled", False):
+            return
+        now = datetime.now()
+
+        # 1) Açılış tetikleyicisi
+        if not self._startup_prefetch_started:
+            if (time.time() - self._app_started_ts) >= FULL_PREFETCH_STARTUP_DELAY_SEC:
+                self._startup_prefetch_started = True
+                self.start_full_prefetch(reason="startup")
+            return
+
+        # 2) Gece tetikleyicisi (günde 1 kez)
+        if now.hour == FULL_PREFETCH_NIGHT_HOUR:
+            snap = load_snapshots()
+            meta = snap.get("full_prefetch|state", {}) if isinstance(snap.get("full_prefetch|state", {}), dict) else {}
+            today_key = now.strftime("%Y-%m-%d")
+            if str(meta.get("last_night_run", "")) != today_key:
+                meta["last_night_run"] = today_key
+                snap["full_prefetch|state"] = meta
+                save_snapshots(snap)
+                self.start_full_prefetch(reason="nightly")
+
+    def start_full_prefetch(self, reason: str = "manual"):
+        """Tam ön yüklemeyi arka plan thread'inde başlatır. Sync lock KULLANMAZ —
+        request_poll ve auto_sync engellenmez; öncelik her zaman mobil kullanıcıdadır."""
+        if self._full_prefetch_busy:
+            self.println("Tam ön yükleme: zaten çalışıyor")
+            return
+        self._full_prefetch_busy = True
+        self._full_prefetch_cancel = False
+
+        def worker():
+            try:
+                self.run_full_prefetch(reason=reason)
+            except Exception as exc:
+                self.println(f"Tam ön yükleme hata: {exc}")
+                log(traceback.format_exc())
+            finally:
+                self._full_prefetch_busy = False
+
+        threading.Thread(target=worker, name="full_prefetch", daemon=True).start()
+
+    def on_full_prefetch_clicked(self):
+        self.start_full_prefetch(reason="manual")
+
+    def on_full_prefetch_cancel(self):
+        if self._full_prefetch_busy:
+            self._full_prefetch_cancel = True
+            self.println("Tam ön yükleme durdurma istendi; mevcut parti bitince durur.")
+        else:
+            self.println("Tam ön yükleme çalışmıyor.")
+
+    def _prefetch_wait_for_user_requests(self, max_wait_sec: float = 30.0):
+        """Mobil kullanıcının anlık istekleri (request_poll) işlenirken prefetch bekler."""
+        waited = 0.0
+        while self._request_poll_busy and waited < max_wait_sec:
+            time.sleep(0.5)
+            waited += 0.5
+
+    def load_all_cari_ids_for_prefetch(self, def_map: Dict[str, Any], limit: int = FULL_PREFETCH_CARI_LIMIT) -> List[Any]:
+        """TÜM carilerin ID listesi. Önce cari_bakiye_liste prosedürü (tüm kartlar),
+        boş dönerse hareket+bakiye listeleri birleşimi fallback olarak kullanılır."""
+        limit = max(1, int(limit or FULL_PREFETCH_CARI_LIMIT))
+        ids: List[Any] = []
+        seen = set()
+
+        liste_def = def_map.get("cari_bakiye_liste")
+        if liste_def and liste_def.get("enabled", True):
+            try:
+                rows = self.execute_dataset(liste_def, resolve_params(liste_def.get("params_template", {})))
+                for row in rows if isinstance(rows, list) else []:
+                    if not isinstance(row, dict):
+                        continue
+                    cid = self._first_row_value(row, ["ID", "CARI_ID", "KART", "CARI", "id"], None)
+                    if cid in (None, "", 0, "0"):
+                        continue
+                    key = str(cid)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    ids.append(cid)
+                    if len(ids) >= limit:
+                        break
+            except Exception as exc:
+                self.println(f"Tam ön yükleme: cari_bakiye_liste okunamadı: {exc}")
+
+        if not ids:
+            cari_def = def_map.get("kart_extre_cari") or {}
+            try:
+                moving = self.load_current_month_moving_cari_ids(cari_def.get("database", ""), limit)
+            except Exception:
+                moving = []
+            try:
+                balance = self.load_balance_cari_ids(cari_def.get("database", ""), limit)
+            except Exception:
+                balance = []
+            for cid in list(moving) + list(balance):
+                key = str(cid)
+                if key in seen:
+                    continue
+                seen.add(key)
+                ids.append(cid)
+                if len(ids) >= limit:
+                    break
+        return ids
+
+    def load_all_stock_ids_for_prefetch(self, def_map: Dict[str, Any], limit: int = FULL_PREFETCH_STOCK_LIMIT) -> List[Any]:
+        """TÜM stokların ID listesi. Önce stock_list prosedürü, boş dönerse
+        bu ay hareket gören + bakiyeli stoklar fallback olarak kullanılır."""
+        limit = max(1, int(limit or FULL_PREFETCH_STOCK_LIMIT))
+        ids: List[Any] = []
+        seen = set()
+
+        liste_def = def_map.get("stock_list")
+        if liste_def and liste_def.get("enabled", True):
+            try:
+                rows = self.execute_dataset(liste_def, resolve_params(liste_def.get("params_template", {})))
+                for row in rows if isinstance(rows, list) else []:
+                    if not isinstance(row, dict):
+                        continue
+                    sid = self._first_row_value(row, ["ID", "STOK_ID", "STOK", "id"], None)
+                    if sid in (None, "", 0, "0"):
+                        continue
+                    key = str(sid)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    ids.append(sid)
+                    if len(ids) >= limit:
+                        break
+            except Exception as exc:
+                self.println(f"Tam ön yükleme: stock_list okunamadı: {exc}")
+
+        if not ids:
+            stok_def = def_map.get("stok_extre") or {}
+            try:
+                moving = self.load_current_month_moving_stock_ids(stok_def.get("database", ""), min(limit, 5000))
+            except Exception:
+                moving = []
+            try:
+                balance = self.load_balance_stock_ids(stok_def.get("database", ""), limit)
+            except Exception:
+                balance = []
+            for sid in list(moving) + list(balance):
+                key = str(sid)
+                if key in seen:
+                    continue
+                seen.add(key)
+                ids.append(sid)
+                if len(ids) >= limit:
+                    break
+        return ids
+
+    def _report_prefetch_definitions(self) -> List[Dict[str, Any]]:
+        """Mobil uygulamanın rapor ekranındaki VARSAYILAN parametrelerle birebir aynı
+        parametre setleri. Böylece kullanıcı raporu açtığında backend MySQL cache'ten
+        (exact/fuzzy params match) anında yanıt verir; POS'a request_create gitmez.
+        NOT: Mobil taraftaki reports.tsx defaultParams değişirse burası da güncellenmeli."""
+        now = datetime.now()
+        today_s = now.strftime("%Y-%m-%d")
+        month_start = now.strftime("%Y-%m-01")
+        year_start = now.strftime("%Y-01-01")
+        stok_defaults = {
+            "Stoklar": "", "StokGrup": "", "StokCinsi": "", "StokMarka": "", "StokVergi": "",
+            "StokOzelKod1": "", "StokOzelKod2": "", "StokOzelKod3": "", "StokOzelKod4": "",
+            "StokOzelKod5": "", "StokOzelKod6": "", "StokOzelKod7": "", "StokOzelKod8": "", "StokOzelKod9": "",
+        }
+        return [
+            {
+                "dataset_key": "rap_satis_adet_kar_web",
+                "paged": True,
+                "params": {
+                    "BASTARIH": year_start, "BITTARIH": today_s,
+                    "KdvDahil": 1, "FisTipi": 0, "Pc_Ad": "", "Lokasyon": "",
+                    "MaliyetYoksaSatisGelsin": 0, "SarfFireGelmesin": 0,
+                    "Page": 1, "PageSize": 500, **stok_defaults,
+                },
+            },
+            {
+                "dataset_key": "rap_stok_envanter_web",
+                "paged": True,
+                "params": {
+                    "SONTARIH": today_s,
+                    "Lokasyon": "", "Durum": 0, "FiyatId": 0, "Aktif": "",
+                    "Tedarikci": "", "KdvDahil": 1, "LokasyonDagilim": 0,
+                    "Page": 1, "PageSize": 500, **stok_defaults,
+                },
+            },
+            {
+                "dataset_key": "rap_lm_gelir_tablosu",
+                "paged": False,
+                "params": {
+                    "BASTARIH": month_start, "BITTARIH": today_s,
+                    "KdvDahil": 0, "Lokasyon": "",
+                    "SatisGrupGoster": 1, "IadeGrupGoster": 1, "MaliyetGrupGoster": 1,
+                },
+            },
+            {
+                "dataset_key": "rap_personel_satis_ozet_web",
+                "paged": True,
+                "params": {
+                    "BASTARIH": month_start, "BITTARIH": today_s,
+                    "Personel": "", "BelgePersoneli": 1, "Lokasyon": "", "Proje": "", "Dovizler": "",
+                    "KdvDahil": 1, "FisTuru": "",
+                    "Cariler": "", "CariTur": "", "CariGrup": "",
+                    "CariOzelKod1": "", "CariOzelKod2": "", "CariOzelKod3": "", "CariOzelKod4": "", "CariOzelKod5": "",
+                    "Page": 1, "PageSize": 500, **stok_defaults,
+                },
+            },
+            {
+                "dataset_key": "rap_fis_kalem_listesi_web",
+                "paged": True,
+                "params": {
+                    "BASTARIH": month_start, "BITTARIH": today_s,
+                    "FisTuru": "", "FisAltTuru": "", "Lokasyon": "", "Proje": "", "BelgeNo": "",
+                    "Personel": "", "Cariler": "", "CariTur": "", "CariGrup": "", "Adresler": "", "Temsilci": "",
+                    "CariOzelKod1": "", "CariOzelKod2": "", "CariOzelKod3": "", "CariOzelKod4": "", "CariOzelKod5": "",
+                    "FisOzelKod1": "", "FisOzelKod2": "", "FisOzelKod3": "", "FisOzelKod4": "", "FisOzelKod5": "",
+                    "MinTutar": -99999999, "MaxTutar": 99999999,
+                    "Detayli": 0, "Page": 1, "PageSize": 500, **stok_defaults,
+                },
+            },
+            {
+                "dataset_key": "rap_cari_hesap_ekstresi_web",
+                "paged": True,
+                "params": {
+                    "BASTARIH": year_start, "BITTARIH": f"{today_s} 23:59:59",
+                    "BakiyeTip": 0, "Proje": "", "Lokasyon": "", "AktifDurum": "",
+                    "Cariler": "", "CariKodu": "", "CariAdi": "",
+                    "CariTur": "", "CariGrup": "", "Temsilci": "", "Sehir": "", "CariRut": "",
+                    "CariOzelKod1": "", "CariOzelKod2": "", "CariOzelKod3": "", "CariOzelKod4": "", "CariOzelKod5": "",
+                    "Detayli": 0, "BakiyeVermeyenHareketsizDevirlerGelmesin": 0,
+                    "MinBakiye": -99999999, "MaxBakiye": 99999999,
+                    "Page": 1, "PageSize": 500,
+                },
+            },
+        ]
+
+    def _prefetch_reports(self, def_map: Dict[str, Any], note: str) -> int:
+        """Rapor varsayılanlarını çalıştırıp cache'e basar. Sayfalı raporlarda
+        PageSize dolduğu sürece sonraki sayfalar da (üst sınırla) ısıtılır."""
+        if not FULL_PREFETCH_REPORTS_ENABLED:
+            return 0
+        pushed = 0
+        for rd in self._report_prefetch_definitions():
+            if self._full_prefetch_cancel:
+                break
+            dataset_key = rd["dataset_key"]
+            defn = def_map.get(dataset_key)
+            if not defn or not defn.get("enabled", True):
+                self.println(f"Tam ön yükleme: {dataset_key} tanımı yok/kapalı, atlandı.")
+                continue
+            base_params = dict(rd["params"])
+            paged = bool(rd.get("paged", False))
+            page_size = int(base_params.get("PageSize", 500) or 500)
+            max_pages = FULL_PREFETCH_REPORT_MAX_PAGES if paged else 1
+            for page in range(1, max_pages + 1):
+                if self._full_prefetch_cancel:
+                    break
+                self._prefetch_wait_for_user_requests()
+                params = dict(base_params)
+                if paged:
+                    params["Page"] = page
+                try:
+                    data = self.execute_dataset(defn, params)
+                    if self._push_direct_cache_dataset_if_changed(defn, params, data, note=note):
+                        pushed += 1
+                    row_count = normalize_row_count(data)
+                    if not paged or row_count < page_size:
+                        break
+                except Exception as exc:
+                    self.println(f"Tam ön yükleme rapor hata: {dataset_key} Page={page} -> {exc}")
+                    break
+        return pushed
+
+    def run_full_prefetch(self, reason: str = "manual"):
+        """TAM tarama: {FULL_PREFETCH_CARI_LIMIT} cari ekstresi, {FULL_PREFETCH_STOCK_LIMIT}
+        stok ekstresi + miktarı, bu ayın fiş detayları ve rapor varsayılanları.
+        Partiler halinde (throttled) çalışır; değişmeyen veri tekrar gönderilmez (hash)."""
+        started_at = time.time()
+        note = f"full_prefetch_{reason}"
+        self.println(f"🔥 Tam ön yükleme başladı ({reason}). Cari={FULL_PREFETCH_CARI_LIMIT}, Stok={FULL_PREFETCH_STOCK_LIMIT}")
+
+        defs = self.parse_dataset_defs()
+        def_map = {str(d.get("dataset_key", "")): d for d in defs if isinstance(d, dict) and d.get("dataset_key")}
+        stok_def = def_map.get("stok_extre")
+        stok_bilgi_def = def_map.get("stok_bilgi_miktar")
+        cari_def = def_map.get("kart_extre_cari")
+        fis_def = def_map.get("fis_detay_toplam")
+        bounds = self.current_month_bounds_for_sql()
+
+        items: List[Dict[str, Any]] = []
+
+        # 1) Tüm cariler → kart_extre_cari (ay başı → bugün; mobil varsayılanıyla aynı)
+        if cari_def and cari_def.get("enabled", True):
+            cari_ids = self.load_all_cari_ids_for_prefetch(def_map, FULL_PREFETCH_CARI_LIMIT)
+            for cid in cari_ids:
+                params = resolve_params(cari_def.get("params_template", {}))
+                params["ID"] = cid
+                params["TARIH_BASLANGIC"] = bounds["month_start_date"]
+                params["TARIH_BITIS"] = bounds["today_date"]
+                params.setdefault("DOVIZ_AD", 1)
+                params.setdefault("DEVIR", "Devreden")
+                items.append({"dataset_key": "kart_extre_cari", "defn": cari_def, "params": params, "ref_id": cid})
+            self.println(f"Tam ön yükleme: {len(cari_ids)} cari ekstresi listeye alındı.")
+
+        # 2) Tüm stoklar → stok_extre + stok_bilgi_miktar
+        stock_ids: List[Any] = []
+        if (stok_def and stok_def.get("enabled", True)) or (stok_bilgi_def and stok_bilgi_def.get("enabled", True)):
+            stock_ids = self.load_all_stock_ids_for_prefetch(def_map, FULL_PREFETCH_STOCK_LIMIT)
+            if stok_def and stok_def.get("enabled", True):
+                for sid in stock_ids:
+                    params = resolve_params(stok_def.get("params_template", {}))
+                    params["ID"] = sid
+                    items.append({"dataset_key": "stok_extre", "defn": stok_def, "params": params, "ref_id": sid})
+            if stok_bilgi_def and stok_bilgi_def.get("enabled", True):
+                for sid in stock_ids:
+                    for lok in (PREWARM_STOK_BILGI_MIKTAR_LOKASYON_IDS or [0]):
+                        params = resolve_params(stok_bilgi_def.get("params_template", {}))
+                        params["ID"] = sid
+                        params["LOKASYON"] = lok
+                        items.append({"dataset_key": "stok_bilgi_miktar", "defn": stok_bilgi_def, "params": params, "ref_id": sid})
+            self.println(f"Tam ön yükleme: {len(stock_ids)} stok (ekstre + bilgi/miktar) listeye alındı.")
+
+        # 3) Bu ayki fiş detayları → fis_detay_toplam
+        if fis_def and fis_def.get("enabled", True):
+            try:
+                fis_ids = self.load_current_month_fis_ids(fis_def.get("database", ""), FULL_PREFETCH_FIS_DETAIL_LIMIT)
+            except Exception as exc:
+                self.println(f"Tam ön yükleme: fiş listesi alınamadı: {exc}")
+                fis_ids = []
+            for fid in fis_ids:
+                params = resolve_params(fis_def.get("params_template", {}))
+                params["FisId"] = fid
+                items.append({"dataset_key": "fis_detay_toplam", "defn": fis_def, "params": params, "ref_id": fid})
+            self.println(f"Tam ön yükleme: {len(fis_ids)} fiş detayı listeye alındı.")
+
+        # 4) Parti parti işle — mobil istekler her zaman önce
+        total = len(items)
+        processed = 0
+        pushed = 0
+        errors = 0
+        for i in range(0, total, FULL_PREFETCH_BATCH_SIZE):
+            if self._full_prefetch_cancel:
+                self.println(f"Tam ön yükleme durduruldu. İşlenen={processed}/{total}")
+                break
+            self._prefetch_wait_for_user_requests()
+            batch = items[i:i + FULL_PREFETCH_BATCH_SIZE]
+            for item in batch:
+                if self._full_prefetch_cancel:
+                    break
+                processed += 1
+                try:
+                    data = self.execute_dataset(item["defn"], dict(item["params"]))
+                    if self._push_direct_cache_dataset_if_changed(item["defn"], dict(item["params"]), data, note=note):
+                        pushed += 1
+                except Exception as exc:
+                    errors += 1
+                    if errors <= 20:
+                        self.println(f"Tam ön yükleme hata: {item['dataset_key']} ID={item.get('ref_id')} -> {exc}")
+            if processed % 200 < FULL_PREFETCH_BATCH_SIZE and processed:
+                self.println(f"Tam ön yükleme ilerleme: {processed}/{total} (güncellenen {pushed}, hata {errors})")
+            time.sleep(FULL_PREFETCH_BATCH_SLEEP_SEC)
+
+        # 5) Raporlar
+        report_pushed = 0
+        if not self._full_prefetch_cancel:
+            report_pushed = self._prefetch_reports(def_map, note)
+
+        elapsed = int(time.time() - started_at)
+        snap = load_snapshots()
+        meta = snap.get("full_prefetch|state", {}) if isinstance(snap.get("full_prefetch|state", {}), dict) else {}
+        meta.update({
+            "last_completed_at": now_str(),
+            "last_reason": reason,
+            "last_total": total,
+            "last_processed": processed,
+            "last_pushed": pushed,
+            "last_report_pushed": report_pushed,
+            "last_errors": errors,
+            "last_elapsed_sec": elapsed,
+            "cancelled": bool(self._full_prefetch_cancel),
+        })
+        snap["full_prefetch|state"] = meta
+        save_snapshots(snap)
+
+        self.println(
+            f"✅ Tam ön yükleme bitti ({reason}). Toplam={total}, işlenen={processed}, "
+            f"güncellenen={pushed}, rapor={report_pushed}, hata={errors}, süre={elapsed}sn"
+        )
 
     def sync_direct_cache_ondemand_datasets(self, only_dataset_keys: Optional[set] = None):
         """
