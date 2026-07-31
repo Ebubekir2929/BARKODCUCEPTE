@@ -2508,3 +2508,18 @@ agent_communication:
     doğrulandı. Bildirim watcher'ları SonFisId bazlı → eski gün basımı bildirim
     tetiklemez.
   - ast.parse syntax OK. Yama betiği: /tmp/patch_backfill.py.
+
+## 2026-07-31 — Mobil işlem YETKİ sistemi (finans/fis/sayim)
+  - Backend islem.py: mobil_islem_yetkileri tablosu (_ensure_tables), _yetki_kontrol
+    → create/fis-create/sayim-create başında 403 (Türkçe mesaj), GET /api/islem/yetkiler.
+    Satır yoksa varsayılan: hepsi KAPALI (kullanıcı isteği).
+  - sync.php: islem_yetki_set case (CREATE TABLE IF NOT EXISTS + upsert).
+  - client.py: Ayarlar'a 3 checkbox (varsayılan kapalı), push_islem_yetkileri
+    (arka plan thread), kaydet + auto_sync başlangıcında sunucuya bildirim,
+    process_pending_islemler kapalı grupları işlemez (izinli filtresi).
+  - Frontend: finans-islem/fis-giris/sayim-giris ekranlarına yetki gate
+    (GET /yetkiler; null→spinner, false→kilit ekranı "İşleme Yetkiniz Yok").
+  - Test: curl (yetkisiz 403×3, yetki set sonrası fis ok + sayim 403) ✅,
+    screenshot (sayım kilitli / fiş açık) ✅. Test kayıtları + yetki satırı silindi
+    → canlı tenant şu an TÜM YETKİLER KAPALI (yeni client kurulunca açılacak).
+  - Yama betiği: /tmp/patch_yetki.py (4b/5 anchor çakışması elle düzeltildi).

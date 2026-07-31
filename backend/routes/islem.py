@@ -88,8 +88,44 @@ async def _ensure_tables():
                   UNIQUE KEY uq_tenant_kart (tenant_id, kart_id)
                 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_turkish_ci
             """)
+            await cur.execute("""
+                CREATE TABLE IF NOT EXISTS mobil_islem_yetkileri (
+                  tenant_id VARCHAR(64) PRIMARY KEY,
+                  finans TINYINT NOT NULL DEFAULT 0,
+                  fis TINYINT NOT NULL DEFAULT 0,
+                  sayim TINYINT NOT NULL DEFAULT 0,
+                  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) CHARACTER SET utf8mb4 COLLATE utf8mb4_turkish_ci
+            """)
         await conn.commit()
     _tables_ready = True
+
+
+YETKI_MESAJLARI = {
+    "finans": "Finans işlemleri için yetkiniz yok. POS istemcisi Ayarlar'dan 'Mobil Finans İşlemleri' açılmalıdır.",
+    "fis": "Fatura/Fiş girişi için yetkiniz yok. POS istemcisi Ayarlar'dan 'Mobil Fatura/Fiş Girişi' açılmalıdır.",
+    "sayim": "Sayım fişi için yetkiniz yok. POS istemcisi Ayarlar'dan 'Mobil Sayım Fişi' açılmalıdır.",
+}
+
+
+async def _yetki_getir(tenant_id: str) -> dict:
+    pool = await get_data_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT finans, fis, sayim FROM mobil_islem_yetkileri WHERE tenant_id=%s",
+                (tenant_id,),
+            )
+            row = await cur.fetchone()
+    if not row:
+        return {"finans": False, "fis": False, "sayim": False}
+    return {"finans": bool(row[0]), "fis": bool(row[1]), "sayim": bool(row[2])}
+
+
+async def _yetki_kontrol(tenant_id: str, alan: str):
+    yetkiler = await _yetki_getir(tenant_id)
+    if not yetkiler.get(alan):
+        raise HTTPException(status_code=403, detail=YETKI_MESAJLARI[alan])
 
 
 class IslemCreate(BaseModel):
@@ -171,9 +207,18 @@ async def islem_turleri(current_user: dict = Depends(get_current_user)):
     ]}
 
 
+@router.get("/yetkiler")
+async def yetkiler(tenant_id: str, current_user: dict = Depends(get_current_user)):
+    """POS istemcisinden açılan mobil işlem yetkileri (kapalıysa ekranlar kilitli)."""
+    await _ensure_tables()
+    y = await _yetki_getir(tenant_id)
+    return {"ok": True, **y}
+
+
 @router.post("/create")
 async def islem_create(body: IslemCreate, current_user: dict = Depends(get_current_user)):
     await _ensure_tables()
+    await _yetki_kontrol(body.tenant_id, "finans")
     tur = ISLEM_TURLERI.get(body.islem_turu)
     if not tur:
         raise HTTPException(status_code=400, detail="Geçersiz işlem türü")
@@ -217,6 +262,7 @@ async def fis_create(body: FisCreate, current_user: dict = Depends(get_current_u
     SEQUENS_VER + FIS/FIS_DETAY (+nakit/kart ise FINANS/FINANS_DETAY)
     prosedürleriyle ERP12'ye aktarır — fiyat güncelleme akışıyla aynı desen."""
     await _ensure_tables()
+    await _yetki_kontrol(body.tenant_id, "fis")
     tip = FIS_TIPLERI.get(body.fis_tipi)
     if not tip:
         raise HTTPException(status_code=400, detail="Geçersiz fiş tipi")
@@ -274,6 +320,7 @@ async def sayim_create(body: SayimCreate, current_user: dict = Depends(get_curre
     """Sayım fişi → kuyruk (islem_grubu='sayim'). POS istemcisi sayılan
     miktarları ERP12 sayım fişine (FIS/SAYIM yapınıza göre) aktarır."""
     await _ensure_tables()
+    await _yetki_kontrol(body.tenant_id, "sayim")
     satirlar = []
     for s in (body.satirlar or []):
         try:

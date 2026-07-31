@@ -2953,6 +2953,30 @@ try {
             respond(['ok' => true, 'success' => true, 'id' => $id, 'durum' => $durum]);
         }
 
+        case 'islem_yetki_set': {
+            $firm = require_firm($pdo, $tenantId);
+            verify_client_secret($firm);
+            $pdo->exec("CREATE TABLE IF NOT EXISTS mobil_islem_yetkileri (
+                tenant_id VARCHAR(64) PRIMARY KEY,
+                finans TINYINT NOT NULL DEFAULT 0,
+                fis TINYINT NOT NULL DEFAULT 0,
+                sayim TINYINT NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) CHARACTER SET utf8mb4 COLLATE utf8mb4_turkish_ci");
+            $finans = (int)($input['finans'] ?? 0) === 1 ? 1 : 0;
+            $fis = (int)($input['fis'] ?? 0) === 1 ? 1 : 0;
+            $sayim = (int)($input['sayim'] ?? 0) === 1 ? 1 : 0;
+            $stmt = $pdo->prepare(
+                "INSERT INTO mobil_islem_yetkileri (tenant_id, finans, fis, sayim)
+                 VALUES (?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE finans = VALUES(finans), fis = VALUES(fis), sayim = VALUES(sayim)"
+            );
+            $stmt->execute([$tenantId, $finans, $fis, $sayim]);
+            log_sync($pdo, $tenantId, null, 'islem_yetki_set', 'ok', null, null,
+                     ['finans' => $finans, 'fis' => $fis, 'sayim' => $sayim]);
+            respond(['ok' => true, 'finans' => $finans, 'fis' => $fis, 'sayim' => $sayim]);
+        }
+
         case 'cleanup_logs': {
             $firm = require_firm($pdo, $tenantId);
             verify_client_secret($firm);

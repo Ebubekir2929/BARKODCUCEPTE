@@ -45,6 +45,18 @@ POS client ──pyodbc──> ERP12 (SEQUENS_VER + FINANS/FINANS_DETAY | FIS/FI
 POS client ──sync.php islem_mark──> durum=aktarildi + erp_id  (hata: durum=hata + mesaj)
 ```
 
+## 🔐 Mobil İşlem Yetkileri — 2026-07-31
+Yeni özellikler (Finans/Fiş/Sayım) fiyat güncelleme gibi **client'tan yetkiye bağlı**:
+- client.py Ayarlar sekmesine 3 checkbox eklendi: "Mobil Finans İşlemleri",
+  "Mobil Fatura/Fiş Girişi", "Mobil Sayım Fişi" — **varsayılan KAPALI**.
+- "Kaydet" veya otomatik senkron başlangıcında yetkiler sunucuya bildirilir
+  (`islem_yetki_set` → `mobil_islem_yetkileri` tablosu).
+- Kapalı özellikte mobil ekran kilitlenir: "İşleme Yetkiniz Yok — POS
+  istemcisinden açılmalıdır" + backend API de 403 döner (çift koruma).
+- Client ayrıca kapalı grupların kuyruk kayıtlarını İŞLEMEZ (emniyet filtresi).
+- NOT: Yeni client.py + sync.php kurulup checkbox'lar açılana dek mobildeki
+  bu 3 ekran kilitli görünür.
+
 ## Kurulum Adımları
 1. **sync.php**: `sync_php_islem_ek.php` içindeki `islem_poll` ve `islem_mark`
    case'lerini switch bloğuna ekleyin (price_update case'lerinin yanına).

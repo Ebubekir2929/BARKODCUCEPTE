@@ -85,6 +85,21 @@ export default function FinansIslemScreen() {
     return { 'Content-Type': 'application/json', Authorization: `Bearer ${token || ''}` };
   };
 
+  // POS istemcisinden açılan yetki kontrolü (kapalıysa ekran kilitli)
+  const [yetki, setYetki] = useState<boolean | null>(null);
+  useEffect(() => {
+    let iptal = false;
+    if (!activeTenantId) { setYetki(false); return; }
+    (async () => {
+      try {
+        const r = await fetch(`${API_URL}/api/islem/yetkiler?tenant_id=${activeTenantId}`, { headers: authHeaders() });
+        const j = await r.json();
+        if (!iptal) setYetki(j.ok ? !!j.finans : false);
+      } catch { if (!iptal) setYetki(false); }
+    })();
+    return () => { iptal = true; };
+  }, [activeTenantId]);
+
   const loadKasalar = useCallback(async () => {
     try {
       const r = await fetch(`${API_URL}/api/islem/kasalar?tenant_id=${activeTenantId}`, { headers: authHeaders() });
@@ -211,6 +226,31 @@ export default function FinansIslemScreen() {
   };
 
   const inputStyle = [styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }];
+
+  if (yetki !== true) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={() => router.back()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Finans İşlemi</Text>
+          <View style={{ width: 24 }} />
+        </View>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 }}>
+          {yetki === null ? <ActivityIndicator size="large" color={colors.primary} /> : (
+            <>
+              <Ionicons name="lock-closed-outline" size={56} color={colors.textSecondary} />
+              <Text style={{ fontSize: 16, fontWeight: '800', color: colors.text }}>İşleme Yetkiniz Yok</Text>
+              <Text style={{ fontSize: 13, color: colors.textSecondary, textAlign: 'center', lineHeight: 19 }}>
+                Bu özellik POS istemcisinden{'\n'}(Ayarlar → &quot;Mobil Finans İşlemleri&quot;) açılmalıdır.
+              </Text>
+            </>
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>

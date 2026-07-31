@@ -886,6 +886,9 @@ DEFAULTS: Dict[str, Any] = {
     "price_update_kullanici": 0,
     "islem_enabled": True,
     "islem_interval_sec": 30,
+    "islem_finans_enabled": False,
+    "islem_fis_enabled": False,
+    "islem_sayim_enabled": False,
     "islem_proje": 0,
     "islem_lokasyon": 0,
     "dataset_definitions": DEFAULT_DATASET_DEFINITIONS,
@@ -1906,8 +1909,34 @@ class Main(QMainWindow):
         self.cfg["price_update_interval_sec"] = int(self.spin_price_interval.value())
         self.cfg["price_update_kod_pc"] = int(self.spin_price_kod_pc.value())
         self.cfg["price_update_kullanici"] = int(self.spin_price_kullanici.value())
+        self._islem_yetki_cfg_oku()
         self._set_run_at_boot(self.chk_boot.isChecked())
         save_cfg(self.cfg)
+
+    def _islem_yetki_cfg_oku(self):
+        self.cfg["islem_finans_enabled"] = self.chk_islem_finans.isChecked()
+        self.cfg["islem_fis_enabled"] = self.chk_islem_fis.isChecked()
+        self.cfg["islem_sayim_enabled"] = self.chk_islem_sayim.isChecked()
+
+    def push_islem_yetkileri(self, silent: bool = True):
+        """Yetkileri sunucuya bildirir — mobil uygulama kapalı özelliklerde
+        'işleme yetkiniz yok' mesajı gösterir. (Arka planda çalışır, UI kilitlenmez.)"""
+        def worker():
+            try:
+                self._price_update_post({
+                    "action": "islem_yetki_set",
+                    "finans": 1 if self.cfg.get("islem_finans_enabled", False) else 0,
+                    "fis": 1 if self.cfg.get("islem_fis_enabled", False) else 0,
+                    "sayim": 1 if self.cfg.get("islem_sayim_enabled", False) else 0,
+                }, timeout=30)
+                if not silent:
+                    f = "açık" if self.cfg.get("islem_finans_enabled") else "kapalı"
+                    fi = "açık" if self.cfg.get("islem_fis_enabled") else "kapalı"
+                    s = "açık" if self.cfg.get("islem_sayim_enabled") else "kapalı"
+                    self.println(f"islem yetkileri sunucuya bildirildi: finans={f} fis={fi} sayim={s}")
+            except Exception as exc:
+                self.println(f"islem yetkileri gönderilemedi (sonraki senkronda tekrar denenecek): {exc}")
+        threading.Thread(target=worker, name="islem_yetki_push", daemon=True).start()
 
     def _save_datasets_silent(self):
         defs = json.loads(self.txt_datasets.toPlainText())
@@ -2065,6 +2094,13 @@ class Main(QMainWindow):
         self.chk_price_update = QCheckBox("Mobil fiyat güncellemelerini uygula")
         self.chk_price_update.setChecked(bool(self.cfg.get("price_update_enabled", True)))
 
+        self.chk_islem_finans = QCheckBox("Mobil Finans İşlemleri (Tahsilat/Ödeme/Çek/Senet)")
+        self.chk_islem_finans.setChecked(bool(self.cfg.get("islem_finans_enabled", False)))
+        self.chk_islem_fis = QCheckBox("Mobil Fatura/Fiş Girişi")
+        self.chk_islem_fis.setChecked(bool(self.cfg.get("islem_fis_enabled", False)))
+        self.chk_islem_sayim = QCheckBox("Mobil Sayım Fişi")
+        self.chk_islem_sayim.setChecked(bool(self.cfg.get("islem_sayim_enabled", False)))
+
         self.spin_price_interval = QSpinBox()
         self.spin_price_interval.setRange(10, 3600)
         self.spin_price_interval.setValue(int(self.cfg.get("price_update_interval_sec", 30) or 30))
@@ -2097,6 +2133,9 @@ class Main(QMainWindow):
         form.addRow("", self.chk_auto)
         form.addRow("", self.chk_boot)
         form.addRow("", self.chk_price_update)
+        form.addRow("", self.chk_islem_finans)
+        form.addRow("", self.chk_islem_fis)
+        form.addRow("", self.chk_islem_sayim)
         form.addRow("Fiyat Güncelleme Aralığı (sn)", self.spin_price_interval)
         form.addRow("Fiyat KOD_PC", self.spin_price_kod_pc)
         form.addRow("Fiyat KULLANICI", self.spin_price_kullanici)
@@ -2380,6 +2419,8 @@ class Main(QMainWindow):
         self.cfg["price_update_interval_sec"] = int(self.spin_price_interval.value())
         self.cfg["price_update_kod_pc"] = int(self.spin_price_kod_pc.value())
         self.cfg["price_update_kullanici"] = int(self.spin_price_kullanici.value())
+        self._islem_yetki_cfg_oku()
+        self.push_islem_yetkileri(silent=False)
 
         self._set_run_at_boot(self.chk_boot.isChecked())
         save_cfg(self.cfg)
@@ -5197,7 +5238,15 @@ SELECT TOP {limit}
         if kod_pc <= 0 or kullanici <= 0:
             self.println("islem: KOD_PC / KULLANICI ayarları girilmeli (price_update ayarları da kullanılır)!")
             return
-        self.println(f"islem: {len(items)} bekleyen kayıt alındı.")
+        izinli = {
+            "finans": bool(self.cfg.get("islem_finans_enabled", False)),
+            "fis": bool(self.cfg.get("islem_fis_enabled", False)),
+            "sayim": bool(self.cfg.get("islem_sayim_enabled", False)),
+        }
+        items = [it for it in items if izinli.get(str(it.get("islem_grubu") or "finans"), False)]
+        if not items:
+            return
+        self.println(f"islem: {len(items)} yetkili bekleyen kayıt işlenecek.")
 
         conn = self.get_connection()
         try:
@@ -5515,6 +5564,7 @@ SELECT TOP {limit}
         self.start_request_timer(silent=True)
         self.start_price_update_timer(silent=True)
         self.start_islem_timer(silent=True)
+        self.push_islem_yetkileri(silent=True)
         self.println(f"Otomatik senkron başladı. ({sec} sn)")
         self.println(f"Açık masalar canlı izleniyor. ({LIVE_OPEN_TABLES_INTERVAL_SEC} sn)")
         self.cfg["auto_sync_enabled"] = True
@@ -5529,6 +5579,7 @@ SELECT TOP {limit}
         self.start_request_timer(silent=True)
         self.start_price_update_timer(silent=True)
         self.start_islem_timer(silent=True)
+        self.push_islem_yetkileri(silent=True)
         self.println(f"Autorun auto sync başladı. ({sec} sn)")
         self.println(f"Autorun açık masa canlı izlemesi başladı. ({LIVE_OPEN_TABLES_INTERVAL_SEC} sn)")
         QTimer.singleShot(1000, self.on_tick)
