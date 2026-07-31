@@ -16,6 +16,7 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system';
 import { useFocusEffect, router } from 'expo-router';
 import { ScrollFab } from '../../src/components/ScrollFab';
+import { SkeletonRows } from '../../src/components/Skeleton';
 import { useResponsive } from '../../src/hooks/useResponsive';
 import { DataTable, TableColumn } from '../../src/components/DataTable';
 import DateField from '../../src/components/DateField';
@@ -995,13 +996,7 @@ export default function CustomersScreen() {
 
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
               {extreLoading ? (
-                <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-                  <ActivityIndicator size="large" color={colors.primary} />
-                  <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_statement')}</Text>
-                  <Text style={[{ fontSize: 11, color: colors.textSecondary, marginTop: 4, paddingHorizontal: 24, textAlign: 'center' }]}>
-                    Geçmiş tarihler ilk seferinde POS'tan getiriliyor (30-60 sn). Sonraki açılışlar anında olacak.
-                  </Text>
-                </View>
+                <SkeletonRows count={9} note={"Geçmiş tarihler ilk seferinde POS'tan getiriliyor (30-60 sn). Sonraki açılışlar anında olacak."} />
               ) : extreData.length > 0 ? (
                 extreData.map((row: any, idx: number) => {
                   const borc = parseFloat(row.BORC || '0');
@@ -1080,7 +1075,7 @@ export default function CustomersScreen() {
                 )}
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
                   {fisLoading ? (
-                    <View style={{ alignItems: 'center', paddingVertical: 40 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>{t('loading_receipt')}</Text></View>
+                    <SkeletonRows count={7} note={t('loading_receipt')} />
                   ) : fisDetail.length > 0 ? (
                     <>
                       {fisDetail.map((item: any, idx: number) => (

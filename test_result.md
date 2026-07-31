@@ -2557,3 +2557,12 @@ agent_communication:
     showFilterModal guard + deps. Modal açıkken tüm otomatik yenileme durur.
   - testing_agent iterasyon 11: 70sn beklemeli test → tarih alanları sıfırlanmadı,
     filtre 27/12/2025 kalıcı (₺63,00), kapatınca canlı mod normal döndü. VERIFIED ✅
+
+## 2026-08-01 — Skeleton (iskelet yükleme) görünümü
+  - YENİ: /app/frontend/src/components/Skeleton.tsx (SkeletonBlock pulse animasyonu
+    + SkeletonRows liste şablonu, Animated native driver).
+  - Uygulanan noktalar: stock.tsx (stok ekstre/miktar detailLoading + fiş detay
+    fisLoading), customers.tsx (cari ekstre extreLoading + fiş detay fisLoading),
+    reports.tsx (rapor sonuç reportLoading). Spinner'lar kaldırıldı.
+  - Self-test: cari ekstrede önbelleksiz aralık (2025-02) yenilendi → skeleton
+    satırları ekran görüntüsüyle doğrulandı ✓; cache'li açılış anında geldi (SWR ✓).

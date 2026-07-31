@@ -19,6 +19,7 @@ import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as XLSX from 'xlsx';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { SkeletonRows } from '../../src/components/Skeleton';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 

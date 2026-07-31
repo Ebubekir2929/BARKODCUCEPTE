@@ -26,6 +26,7 @@ import { useResponsive } from '../../src/hooks/useResponsive';
 import { DataTable, TableColumn } from '../../src/components/DataTable';
 import { NegativeStockModal } from '../../src/components/NegativeStockModal';
 import DateField from '../../src/components/DateField';
+import { SkeletonRows } from '../../src/components/Skeleton';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -1888,10 +1889,7 @@ export default function StockScreen() {
                 )}
                 <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 30 }}>
                   {fisLoading ? (
-                    <View style={{ alignItems: 'center', paddingVertical: 40 }}>
-                      <ActivityIndicator size="large" color={colors.primary} />
-                      <Text style={[{ color: colors.textSecondary, marginTop: 12 }]}>Yükleniyor...</Text>
-                    </View>
+                    <SkeletonRows count={7} note="Fiş detayı POS'tan getiriliyor…" />
                   ) : fisDetail.length > 0 ? (
                     <View style={{ padding: 12 }}>
                       {fisDetail.map((item: any, idx: number) => (
