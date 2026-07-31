@@ -1615,11 +1615,27 @@ def resolve_params(params_template: Dict[str, Any]) -> Dict[str, Any]:
 # ─────────────── Geçmiş Veri Basma (Backfill) — 2026-07 ───────────────
 # Günlük scope'lu datasetler (sunucu cache_lookup sdate gününe göre AYRI saklar,
 # bugünün verisi ezilmez).
-BACKFILL_DATASET_KEYS = [
-    "financial_data", "financial_data_location", "hourly_data", "hourly_location_data",
-    "hourly_stock_detail", "cancel_data", "top10_stock_movements", "down10_stock_movements",
-    "iptal_ozet", "iptal_detay", "garson_satis_ozet", "fis_gunluk_bildirim_feed",
-]
+# Kural: enabled + mode != ondemand + tarih placeholder'ı içeren + hariç listesinde olmayan
+# TÜM datasetler otomatik dahil edilir (yeni tarih bazlı dataset eklerseniz o da girer).
+# HARİÇ: raporlar (rap_*), fis_gunluk_bildirim_feed, acik_masalar, acik_masa_detay.
+BACKFILL_EXCLUDE_KEYS = {"fis_gunluk_bildirim_feed", "acik_masalar", "acik_masa_detay"}
+BACKFILL_EXCLUDE_PREFIXES = ("rap_",)
+BACKFILL_DATE_PLACEHOLDERS = {
+    "{today_start}", "{today_end}", "{now}", "{now_date}",
+    "{yesterday_start}", "{yesterday_end}", "{month_start}",
+}
+
+
+def is_backfill_dataset(defn: Dict[str, Any]) -> bool:
+    key = str(defn.get("dataset_key") or "")
+    if not key or key in BACKFILL_EXCLUDE_KEYS or key.startswith(BACKFILL_EXCLUDE_PREFIXES):
+        return False
+    if not defn.get("enabled", True):
+        return False
+    if str(defn.get("mode") or "") == "ondemand":
+        return False  # ID bazlı on-demand sorgular geçmişe basılamaz
+    tmpl = defn.get("params_template") or {}
+    return any(isinstance(v, str) and v in BACKFILL_DATE_PLACEHOLDERS for v in tmpl.values())
 
 
 def resolve_params_for_day(params_template: Dict[str, Any], day: datetime) -> Dict[str, Any]:
@@ -5489,8 +5505,8 @@ SELECT TOP {limit}
         if gun_sayisi > 366:
             QMessageBox.warning(self, "Backfill", "En fazla 366 günlük aralık seçin.")
             return
-        defs = {str(d.get("dataset_key")): d for d in (self.cfg.get("dataset_definitions") or [])}
-        hedef_adlari = [k for k in BACKFILL_DATASET_KEYS if k in defs and defs[k].get("enabled", True)]
+        defs = self.cfg.get("dataset_definitions") or []
+        hedef_adlari = [str(d.get("dataset_key")) for d in defs if is_backfill_dataset(d)]
         if QMessageBox.question(
             self, "Geçmiş Veri Basma",
             f"{d1} → {d2} ({gun_sayisi} gün) aralığındaki günlük raporlar ERP'den okunup sunucuya basılacak.\n"
@@ -5511,8 +5527,8 @@ SELECT TOP {limit}
 
     def _run_backfill_job(self, d1, d2):
         try:
-            defs = {str(d.get("dataset_key")): d for d in (self.cfg.get("dataset_definitions") or [])}
-            hedefler = [defs[k] for k in BACKFILL_DATASET_KEYS if k in defs and defs[k].get("enabled", True)]
+            defs = self.cfg.get("dataset_definitions") or []
+            hedefler = [d for d in defs if is_backfill_dataset(d)]
             if not hedefler:
                 self.println("backfill: uygun dataset bulunamadı.")
                 return

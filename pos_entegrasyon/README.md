@@ -27,15 +27,16 @@ versiyonlarıdır — dosyaları kendiniz elle birleştirmek isterseniz kullanı
 Başlangıç/bitiş tarihi seçin → **Geçmiş Veriyi Bas (Backfill)** → seçilen aralıktaki
 her gün için günlük raporlar ERP'den okunup sunucuya basılır (en yeni günden geriye).
 
-- Basılan datasetler: financial_data, financial_data_location, hourly_data,
-  hourly_location_data, hourly_stock_detail, cancel_data, top10/down10_stock_movements,
-  iptal_ozet, iptal_detay, garson_satis_ozet, fis_gunluk_bildirim_feed.
+- Basılan datasetler **otomatik seçilir**: tarih parametresi olan ({today_start} vb.)
+  ve on-demand olmayan TÜM aktif datasetler. Sizin yapılandırmanızla: financial_data,
+  financial_data_location, hourly_data, hourly_location_data, hourly_stock_detail,
+  cancel_data, top10/down10_stock_movements, iptal_ozet, iptal_detay, garson_satis_ozet (11 adet).
+  **HARİÇ**: raporlar (rap_*), fis_gunluk_bildirim_feed, acik_masalar, acik_masa_detay
+  ve ID bazlı on-demand sorgular. İleride eklediğiniz tarih bazlı dataset otomatik dahil olur.
 - **Güvenli**: sync.php her günü `sdate` gününe göre AYRI cache'te saklar —
   bugünün verisi ezilmez, mobil uygulama geçmiş tarih raporlarını anında cache'ten okur.
 - İlerleme Senkron Logu'nda satır satır görünür; **Backfill Durdur** ile iptal edilebilir.
 - En fazla 366 günlük aralık; her push arası 0.15 sn bekleme (ERP'yi yormaz).
-- Not: Bildirimler SonFisId takibi yaptığı için eski günleri basmak bildirim tetiklemez;
-  yine de istemezseniz `BACKFILL_DATASET_KEYS` listesinden `fis_gunluk_bildirim_feed`'i çıkarın.
 
 ## Akış
 ```

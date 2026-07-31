@@ -2535,3 +2535,13 @@ agent_communication:
   - Frontend price-update/index.tsx: yetki gate (kilit ekranı) eklendi.
   - Test: fiyat=0 → POST 403 + ekran kilitli ✓ (screenshot); satır yok → fiyat:true ✓.
     Test yetki satırı silindi (canlıda fiyat güncelleme açık kalıyor).
+
+## 2026-07-31 — Backfill dataset seçimi kullanıcı isteğine göre güncellendi
+  - Sabit BACKFILL_DATASET_KEYS listesi kaldırıldı → is_backfill_dataset(defn)
+    kuralı: enabled + mode!=ondemand + tarih placeholder içeren + hariç
+    (rap_* prefix, fis_gunluk_bildirim_feed, acik_masalar, acik_masa_detay) olmayan.
+  - Kullanıcının paylaştığı gerçek 31 dataset config'iyle simülasyon: tam 11
+    dataset seçiliyor (financial_data, financial_data_location, hourly_data,
+    hourly_location_data, cancel_data, top10, down10, iptal_ozet, iptal_detay,
+    garson_satis_ozet, hourly_stock_detail) — kullanıcının istediği kümeyle birebir.
+  - ast.parse OK.
