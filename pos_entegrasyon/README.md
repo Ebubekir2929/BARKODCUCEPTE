@@ -22,6 +22,21 @@ Yapılan eklemeler:
 `client_islem_ek.py` ve `sync_php_islem_ek.php` aynı eklemelerin yalnız-ek (snippet)
 versiyonlarıdır — dosyaları kendiniz elle birleştirmek isterseniz kullanın.
 
+## 🕓 Geçmiş Veri Basma (Backfill) — 2026-07-30
+`client.py`'ye eklendi: **4) Senkron** sekmesinde "Geçmiş Tarih Aralığı" satırı.
+Başlangıç/bitiş tarihi seçin → **Geçmiş Veriyi Bas (Backfill)** → seçilen aralıktaki
+her gün için günlük raporlar ERP'den okunup sunucuya basılır (en yeni günden geriye).
+
+- Basılan datasetler: financial_data, financial_data_location, hourly_data,
+  hourly_location_data, hourly_stock_detail, cancel_data, top10/down10_stock_movements,
+  iptal_ozet, iptal_detay, garson_satis_ozet, fis_gunluk_bildirim_feed.
+- **Güvenli**: sync.php her günü `sdate` gününe göre AYRI cache'te saklar —
+  bugünün verisi ezilmez, mobil uygulama geçmiş tarih raporlarını anında cache'ten okur.
+- İlerleme Senkron Logu'nda satır satır görünür; **Backfill Durdur** ile iptal edilebilir.
+- En fazla 366 günlük aralık; her push arası 0.15 sn bekleme (ERP'yi yormaz).
+- Not: Bildirimler SonFisId takibi yaptığı için eski günleri basmak bildirim tetiklemez;
+  yine de istemezseniz `BACKFILL_DATASET_KEYS` listesinden `fis_gunluk_bildirim_feed`'i çıkarın.
+
 ## Akış
 ```
 Mobil App ──POST──> backend ──INSERT──> MySQL kasacepteweb.mobil_islem_kuyrugu (durum=bekliyor)

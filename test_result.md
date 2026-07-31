@@ -2495,3 +2495,16 @@ agent_communication:
   - ÖNEMLİ: kullanıcının cfg'sine "islem_lokasyon" (gerçek LOKASYON ID, dökümde
     75919) girilmeli. KOD_PC/KULLANICI price_update ayarlarından fallback okunur.
   - Yama betiği: /tmp/patch_pos.py (anchor asserts ile güvenli).
+
+## 2026-07-30 — Client'a Geçmiş Veri Basma (Backfill) eklendi
+  - /app/pos_entegrasyon/client.py (5780 satır): "4) Senkron" sekmesine
+    QDateEdit başlangıç/bitiş + "Geçmiş Veriyi Bas (Backfill)" + "Backfill Durdur".
+  - Mantık: resolve_params_for_day() gün-bazlı placeholder çözümü
+    ({today_start}→gün 00:00, {now}/{today_end}→gün 23:59). Her gün için
+    BACKFILL_DATASET_KEYS (12 günlük dataset) execute_dataset + push_dataset.
+    En yeni günden geriye, gün başına 0.15sn bekleme, iptal bayrağı, max 366 gün.
+  - Güvenlik: sync.php cache_lookup_array günlük datasetleri sdate gününe göre
+    AYRI cache'te saklıyor (scope=daily, day=...) → bugünün verisi ezilmez,
+    doğrulandı. Bildirim watcher'ları SonFisId bazlı → eski gün basımı bildirim
+    tetiklemez.
+  - ast.parse syntax OK. Yama betiği: /tmp/patch_backfill.py.

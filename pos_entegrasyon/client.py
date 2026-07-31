@@ -28,11 +28,12 @@ import pyodbc
 import requests
 
 from PySide6.QtCore import Qt, QTimer, QSize, Signal, Slot
+from PySide6.QtCore import QDate
 from PySide6.QtGui import QAction, QClipboard
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTextEdit, QMessageBox, QFormLayout, QComboBox, QCheckBox, QSpinBox,
-    QTabWidget, QDialog, QDialogButtonBox, QSystemTrayIcon, QMenu, QProgressDialog, QStyle, QInputDialog
+    QTabWidget, QDialog, QDialogButtonBox, QSystemTrayIcon, QMenu, QProgressDialog, QStyle, QInputDialog, QDateEdit
 )
 
 try:
@@ -1608,6 +1609,37 @@ def resolve_params(params_template: Dict[str, Any]) -> Dict[str, Any]:
     return {k: resolve_placeholders(v) for k, v in (params_template or {}).items()}
 
 
+# ─────────────── Geçmiş Veri Basma (Backfill) — 2026-07 ───────────────
+# Günlük scope'lu datasetler (sunucu cache_lookup sdate gününe göre AYRI saklar,
+# bugünün verisi ezilmez).
+BACKFILL_DATASET_KEYS = [
+    "financial_data", "financial_data_location", "hourly_data", "hourly_location_data",
+    "hourly_stock_detail", "cancel_data", "top10_stock_movements", "down10_stock_movements",
+    "iptal_ozet", "iptal_detay", "garson_satis_ozet", "fis_gunluk_bildirim_feed",
+]
+
+
+def resolve_params_for_day(params_template: Dict[str, Any], day: datetime) -> Dict[str, Any]:
+    """resolve_placeholders'ın belirli bir GÜN için çalışan versiyonu."""
+    day_start = day.strftime("%Y-%m-%d 00:00:00")
+    day_end = day.strftime("%Y-%m-%d 23:59:59")
+    prev = day - timedelta(days=1)
+    mapping = {
+        "{now}": day_end,
+        "{today_start}": day_start,
+        "{today_end}": day_end,
+        "{now_date}": day.strftime("%Y-%m-%d"),
+        "{month_start}": day.replace(day=1).strftime("%Y-%m-%d"),
+        "{yesterday_start}": prev.strftime("%Y-%m-%d 00:00:00"),
+        "{yesterday_end}": prev.strftime("%Y-%m-%d 23:59:59"),
+    }
+    out: Dict[str, Any] = {}
+    for k, v in (params_template or {}).items():
+        out[k] = mapping.get(v, v) if isinstance(v, str) else v
+    return out
+
+
+
 def ordered_param_values(defn: Dict[str, Any], params: Dict[str, Any]) -> List[Any]:
     order = defn.get("params_order") or list(params.keys())
     return [params.get(name) for name in order]
@@ -1671,6 +1703,8 @@ class Main(QMainWindow):
         self._request_poll_busy = False
         self._price_update_busy = False
         self._islem_busy = False
+        self._backfill_busy = False
+        self._backfill_cancel = False
         self._ondemand_update_busy = False
         self._last_secret_register_try = 0.0
         self._last_lookup_direct_sync_ts = 0.0
@@ -2143,6 +2177,26 @@ class Main(QMainWindow):
         hb2.addWidget(self.btn_open_health)
         v.addLayout(hb2)
 
+        hb3 = QHBoxLayout()
+        self.dt_backfill_start = QDateEdit()
+        self.dt_backfill_start.setCalendarPopup(True)
+        self.dt_backfill_start.setDisplayFormat("yyyy-MM-dd")
+        self.dt_backfill_start.setDate(QDate.currentDate().addDays(-7))
+        self.dt_backfill_end = QDateEdit()
+        self.dt_backfill_end.setCalendarPopup(True)
+        self.dt_backfill_end.setDisplayFormat("yyyy-MM-dd")
+        self.dt_backfill_end.setDate(QDate.currentDate().addDays(-1))
+        self.btn_backfill = QPushButton("Geçmiş Veriyi Bas (Backfill)")
+        self.btn_backfill_stop = QPushButton("Backfill Durdur")
+        hb3.addWidget(QLabel("Geçmiş Tarih Aralığı:"))
+        hb3.addWidget(self.dt_backfill_start)
+        hb3.addWidget(QLabel("→"))
+        hb3.addWidget(self.dt_backfill_end)
+        hb3.addWidget(self.btn_backfill)
+        hb3.addWidget(self.btn_backfill_stop)
+        hb3.addStretch(1)
+        v.addLayout(hb3)
+
         v.addWidget(QLabel("Senkron Logu"))
         self.txt_log = QTextEdit()
         self.txt_log.setReadOnly(True)
@@ -2164,6 +2218,8 @@ class Main(QMainWindow):
         self.btn_flush_offline.clicked.connect(self.flush_offline_queue_async)
         self.btn_clean_logs.clicked.connect(self.cleanup_server_logs)
         self.btn_open_health.clicked.connect(self.open_health_dashboard)
+        self.btn_backfill.clicked.connect(self.on_backfill_clicked)
+        self.btn_backfill_stop.clicked.connect(self.on_backfill_cancel)
 
     def build_tray(self):
         style = self.style() or QApplication.style()
@@ -5367,6 +5423,83 @@ SELECT TOP {limit}
             )
             self._exec_sequence_change(cur, kod_pc, d_id, kullanici, 1, "SAYIM_DETAY")
         return sayim_id
+
+
+    # ─────────────── Geçmiş Veri Basma (Backfill) ───────────────
+    def on_backfill_clicked(self):
+        if self._backfill_busy:
+            QMessageBox.information(self, "Backfill", "Backfill zaten çalışıyor.")
+            return
+        d1 = self.dt_backfill_start.date().toPython()
+        d2 = self.dt_backfill_end.date().toPython()
+        if d1 > d2:
+            d1, d2 = d2, d1
+        gun_sayisi = (d2 - d1).days + 1
+        if gun_sayisi > 366:
+            QMessageBox.warning(self, "Backfill", "En fazla 366 günlük aralık seçin.")
+            return
+        defs = {str(d.get("dataset_key")): d for d in (self.cfg.get("dataset_definitions") or [])}
+        hedef_adlari = [k for k in BACKFILL_DATASET_KEYS if k in defs and defs[k].get("enabled", True)]
+        if QMessageBox.question(
+            self, "Geçmiş Veri Basma",
+            f"{d1} → {d2} ({gun_sayisi} gün) aralığındaki günlük raporlar ERP'den okunup sunucuya basılacak.\n"
+            f"Datasetler ({len(hedef_adlari)}): {', '.join(hedef_adlari)}\n\n"
+            f"Sunucu her günü ayrı saklar; bugünün verisi ETKİLENMEZ. Başlatılsın mı?",
+        ) != QMessageBox.Yes:
+            return
+        self._backfill_busy = True
+        self._backfill_cancel = False
+        threading.Thread(target=self._run_backfill_job, args=(d1, d2), name="backfill", daemon=True).start()
+
+    def on_backfill_cancel(self):
+        if self._backfill_busy:
+            self._backfill_cancel = True
+            self.println("backfill: durdurma istendi — mevcut işlem bitince duracak.")
+        else:
+            self.println("backfill: çalışan işlem yok.")
+
+    def _run_backfill_job(self, d1, d2):
+        try:
+            defs = {str(d.get("dataset_key")): d for d in (self.cfg.get("dataset_definitions") or [])}
+            hedefler = [defs[k] for k in BACKFILL_DATASET_KEYS if k in defs and defs[k].get("enabled", True)]
+            if not hedefler:
+                self.println("backfill: uygun dataset bulunamadı.")
+                return
+            toplam_gun = (d2 - d1).days + 1
+            self.println(f"backfill BAŞLADI: {d1} → {d2} ({toplam_gun} gün × {len(hedefler)} dataset)")
+            ok = 0
+            hata = 0
+            islenen = 0
+            gun = d2  # en yeni günden geriye doğru
+            while gun >= d1:
+                if self._backfill_cancel:
+                    self.println("backfill: kullanıcı durdurdu.")
+                    break
+                day_dt = datetime(gun.year, gun.month, gun.day)
+                for defn in hedefler:
+                    if self._backfill_cancel:
+                        break
+                    key = str(defn.get("dataset_key"))
+                    try:
+                        params = resolve_params_for_day(defn.get("params_template", {}), day_dt)
+                        rows = self.execute_dataset(defn, params)
+                        say = len(rows) if isinstance(rows, list) else 1
+                        self.push_dataset(defn, params, rows)
+                        ok += 1
+                        self.println(f"backfill {gun} {key}: {say} satır ✓")
+                    except Exception as exc:
+                        hata += 1
+                        self.println(f"backfill {gun} {key} HATA: {str(exc)[:200]}")
+                    time.sleep(0.15)
+                islenen += 1
+                gun = gun - timedelta(days=1)
+            self.println(f"backfill BİTTİ: {islenen}/{toplam_gun} gün işlendi, {ok} başarılı push, {hata} hata.")
+        except Exception as exc:
+            self.println(f"backfill genel hata: {exc}")
+            log(traceback.format_exc())
+        finally:
+            self._backfill_busy = False
+            self._backfill_cancel = False
 
     def on_tick(self):
         self._run_background("auto_sync", self._auto_sync_job, use_sync_lock=True, error_title="")
