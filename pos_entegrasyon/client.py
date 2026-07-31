@@ -1928,12 +1928,14 @@ class Main(QMainWindow):
                     "finans": 1 if self.cfg.get("islem_finans_enabled", False) else 0,
                     "fis": 1 if self.cfg.get("islem_fis_enabled", False) else 0,
                     "sayim": 1 if self.cfg.get("islem_sayim_enabled", False) else 0,
+                    "fiyat": 1 if self.cfg.get("price_update_enabled", True) else 0,
                 }, timeout=30)
                 if not silent:
                     f = "açık" if self.cfg.get("islem_finans_enabled") else "kapalı"
                     fi = "açık" if self.cfg.get("islem_fis_enabled") else "kapalı"
                     s = "açık" if self.cfg.get("islem_sayim_enabled") else "kapalı"
-                    self.println(f"islem yetkileri sunucuya bildirildi: finans={f} fis={fi} sayim={s}")
+                    p = "açık" if self.cfg.get("price_update_enabled", True) else "kapalı"
+                    self.println(f"islem yetkileri sunucuya bildirildi: finans={f} fis={fi} sayim={s} fiyat={p}")
             except Exception as exc:
                 self.println(f"islem yetkileri gönderilemedi (sonraki senkronda tekrar denenecek): {exc}")
         threading.Thread(target=worker, name="islem_yetki_push", daemon=True).start()

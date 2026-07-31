@@ -46,9 +46,10 @@ POS client ──sync.php islem_mark──> durum=aktarildi + erp_id  (hata: dur
 ```
 
 ## 🔐 Mobil İşlem Yetkileri — 2026-07-31
-Yeni özellikler (Finans/Fiş/Sayım) fiyat güncelleme gibi **client'tan yetkiye bağlı**:
-- client.py Ayarlar sekmesine 3 checkbox eklendi: "Mobil Finans İşlemleri",
-  "Mobil Fatura/Fiş Girişi", "Mobil Sayım Fişi" — **varsayılan KAPALI**.
+Yeni özellikler (Finans/Fiş/Sayım) VE fiyat güncelleme **client'tan yetkiye bağlı**:
+- client.py Ayarlar sekmesinde 4 kontrol: "Mobil fiyat güncellemelerini uygula"
+  (mevcut kutu), "Mobil Finans İşlemleri", "Mobil Fatura/Fiş Girişi",
+  "Mobil Sayım Fişi" — yeni 3 kutu **varsayılan KAPALI**, fiyat varsayılan AÇIK.
 - "Kaydet" veya otomatik senkron başlangıcında yetkiler sunucuya bildirilir
   (`islem_yetki_set` → `mobil_islem_yetkileri` tablosu).
 - Kapalı özellikte mobil ekran kilitlenir: "İşleme Yetkiniz Yok — POS

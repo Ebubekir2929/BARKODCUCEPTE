@@ -2523,3 +2523,15 @@ agent_communication:
     screenshot (sayım kilitli / fiş açık) ✅. Test kayıtları + yetki satırı silindi
     → canlı tenant şu an TÜM YETKİLER KAPALI (yeni client kurulunca açılacak).
   - Yama betiği: /tmp/patch_yetki.py (4b/5 anchor çakışması elle düzeltildi).
+
+## 2026-07-31 — Fiyat güncelleme de yetki sistemine bağlandı
+  - mobil_islem_yetkileri tablosuna fiyat kolonu (DEFAULT 1 + ALTER migration).
+  - Satır yoksa varsayılan: fiyat=AÇIK (mevcut davranış korunur, kullanıcı yeni
+    client'ı kurana kadar fiyat güncelleme çalışmaya devam eder); finans/fis/sayim=KAPALI.
+  - price_update.py: create + bulk-adjust başına _yetki_kontrol(tenant,'fiyat') → 403.
+  - client.py: push_islem_yetkileri artık fiyat=price_update_enabled checkbox'ını
+    da gönderiyor (mevcut kutu yeniden kullanıldı, yeni kutu eklenmedi).
+  - sync.php: islem_yetki_set fiyat alanı (gönderilmezse 1) + ALTER try/catch.
+  - Frontend price-update/index.tsx: yetki gate (kilit ekranı) eklendi.
+  - Test: fiyat=0 → POST 403 + ekran kilitli ✓ (screenshot); satır yok → fiyat:true ✓.
+    Test yetki satırı silindi (canlıda fiyat güncelleme açık kalıyor).

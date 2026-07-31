@@ -90,6 +90,23 @@ export default function PriceUpdateScreen() {
   }, [user?.tenants, activeSource]);
 
   // === STATE ===
+  // POS istemcisinden açılan yetki kontrolü (kapalıysa ekran kilitli)
+  const [yetki, setYetki] = useState<boolean | null>(null);
+  useEffect(() => {
+    let iptal = false;
+    if (!activeTenantId || !token) { setYetki(false); return; }
+    (async () => {
+      try {
+        const r = await fetch(`${API_URL}/api/islem/yetkiler?tenant_id=${activeTenantId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const j = await r.json();
+        if (!iptal) setYetki(j.ok ? !!j.fiyat : false);
+      } catch { if (!iptal) setYetki(false); }
+    })();
+    return () => { iptal = true; };
+  }, [activeTenantId, token]);
+
   const [activeTab, setActiveTab] = useState<'pending' | 'applied' | 'cancelled'>('pending');
   const [items, setItems] = useState<PendingUpdate[]>([]);
   const [counts, setCounts] = useState({ pending: 0, applied: 0, failed: 0, cancelled: 0 });
@@ -791,6 +808,32 @@ export default function PriceUpdateScreen() {
       </KeyboardAvoidingView>
     );
   };
+
+  if (yetki !== true) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+        <View style={[styles.header, { backgroundColor: colors.surface, borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.headerBtn}>
+            <Ionicons name="arrow-back" size={24} color={colors.text} />
+          </TouchableOpacity>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>Fiyat Güncelleme</Text>
+          </View>
+        </View>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12 }}>
+          {yetki === null ? <ActivityIndicator size="large" color={colors.primary} /> : (
+            <>
+              <Ionicons name="lock-closed-outline" size={56} color={colors.textSecondary} />
+              <Text style={{ fontSize: 16, fontWeight: '800', color: colors.text }}>İşleme Yetkiniz Yok</Text>
+              <Text style={{ fontSize: 13, color: colors.textSecondary, textAlign: 'center', lineHeight: 19 }}>
+                Bu özellik POS istemcisinden{'\n'}(Ayarlar → &quot;Mobil fiyat güncellemelerini uygula&quot;) açılmalıdır.
+              </Text>
+            </>
+          )}
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>

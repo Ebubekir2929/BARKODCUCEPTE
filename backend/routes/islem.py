@@ -94,9 +94,17 @@ async def _ensure_tables():
                   finans TINYINT NOT NULL DEFAULT 0,
                   fis TINYINT NOT NULL DEFAULT 0,
                   sayim TINYINT NOT NULL DEFAULT 0,
+                  fiyat TINYINT NOT NULL DEFAULT 1,
                   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_turkish_ci
             """)
+            # Eski tabloya fiyat kolonu ekle (varsayılan 1 = mevcut davranış korunur)
+            try:
+                await cur.execute(
+                    "ALTER TABLE mobil_islem_yetkileri ADD COLUMN fiyat TINYINT NOT NULL DEFAULT 1"
+                )
+            except Exception:
+                pass
         await conn.commit()
     _tables_ready = True
 
@@ -105,6 +113,7 @@ YETKI_MESAJLARI = {
     "finans": "Finans işlemleri için yetkiniz yok. POS istemcisi Ayarlar'dan 'Mobil Finans İşlemleri' açılmalıdır.",
     "fis": "Fatura/Fiş girişi için yetkiniz yok. POS istemcisi Ayarlar'dan 'Mobil Fatura/Fiş Girişi' açılmalıdır.",
     "sayim": "Sayım fişi için yetkiniz yok. POS istemcisi Ayarlar'dan 'Mobil Sayım Fişi' açılmalıdır.",
+    "fiyat": "Fiyat güncelleme için yetkiniz yok. POS istemcisi Ayarlar'dan 'Mobil fiyat güncellemelerini uygula' açılmalıdır.",
 }
 
 
@@ -113,13 +122,14 @@ async def _yetki_getir(tenant_id: str) -> dict:
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT finans, fis, sayim FROM mobil_islem_yetkileri WHERE tenant_id=%s",
+                "SELECT finans, fis, sayim, fiyat FROM mobil_islem_yetkileri WHERE tenant_id=%s",
                 (tenant_id,),
             )
             row = await cur.fetchone()
     if not row:
-        return {"finans": False, "fis": False, "sayim": False}
-    return {"finans": bool(row[0]), "fis": bool(row[1]), "sayim": bool(row[2])}
+        # Kayıt yoksa: yeni özellikler kapalı, fiyat güncelleme AÇIK (mevcut davranış)
+        return {"finans": False, "fis": False, "sayim": False, "fiyat": True}
+    return {"finans": bool(row[0]), "fis": bool(row[1]), "sayim": bool(row[2]), "fiyat": bool(row[3])}
 
 
 async def _yetki_kontrol(tenant_id: str, alan: str):

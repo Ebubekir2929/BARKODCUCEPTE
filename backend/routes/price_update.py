@@ -210,6 +210,8 @@ async def create_price_updates(
     tenant_id = current_user.get("tenant_id") or ""
     if not tenant_id:
         raise HTTPException(status_code=400, detail="Tenant ID bulunamadı. Önce veri kaynağı tanımlayın.")
+    from routes.islem import _yetki_kontrol
+    await _yetki_kontrol(tenant_id, "fiyat")
     await _verify_password(user_id, data.password)
 
     import uuid
@@ -258,6 +260,8 @@ async def bulk_adjust(
     tenant_id = current_user.get("tenant_id") or ""
     if not tenant_id:
         raise HTTPException(status_code=400, detail="Tenant ID bulunamadı.")
+    from routes.islem import _yetki_kontrol
+    await _yetki_kontrol(tenant_id, "fiyat")
     await _verify_password(user_id, data.password)
 
     import uuid

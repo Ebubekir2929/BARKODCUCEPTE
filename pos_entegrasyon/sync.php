@@ -2961,20 +2961,25 @@ try {
                 finans TINYINT NOT NULL DEFAULT 0,
                 fis TINYINT NOT NULL DEFAULT 0,
                 sayim TINYINT NOT NULL DEFAULT 0,
+                fiyat TINYINT NOT NULL DEFAULT 1,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             ) CHARACTER SET utf8mb4 COLLATE utf8mb4_turkish_ci");
+            try {
+                $pdo->exec("ALTER TABLE mobil_islem_yetkileri ADD COLUMN fiyat TINYINT NOT NULL DEFAULT 1");
+            } catch (Throwable $e) { /* kolon zaten var */ }
             $finans = (int)($input['finans'] ?? 0) === 1 ? 1 : 0;
             $fis = (int)($input['fis'] ?? 0) === 1 ? 1 : 0;
             $sayim = (int)($input['sayim'] ?? 0) === 1 ? 1 : 0;
+            $fiyat = isset($input['fiyat']) ? ((int)$input['fiyat'] === 1 ? 1 : 0) : 1;
             $stmt = $pdo->prepare(
-                "INSERT INTO mobil_islem_yetkileri (tenant_id, finans, fis, sayim)
-                 VALUES (?, ?, ?, ?)
-                 ON DUPLICATE KEY UPDATE finans = VALUES(finans), fis = VALUES(fis), sayim = VALUES(sayim)"
+                "INSERT INTO mobil_islem_yetkileri (tenant_id, finans, fis, sayim, fiyat)
+                 VALUES (?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE finans = VALUES(finans), fis = VALUES(fis), sayim = VALUES(sayim), fiyat = VALUES(fiyat)"
             );
-            $stmt->execute([$tenantId, $finans, $fis, $sayim]);
+            $stmt->execute([$tenantId, $finans, $fis, $sayim, $fiyat]);
             log_sync($pdo, $tenantId, null, 'islem_yetki_set', 'ok', null, null,
-                     ['finans' => $finans, 'fis' => $fis, 'sayim' => $sayim]);
-            respond(['ok' => true, 'finans' => $finans, 'fis' => $fis, 'sayim' => $sayim]);
+                     ['finans' => $finans, 'fis' => $fis, 'sayim' => $sayim, 'fiyat' => $fiyat]);
+            respond(['ok' => true, 'finans' => $finans, 'fis' => $fis, 'sayim' => $sayim, 'fiyat' => $fiyat]);
         }
 
         case 'cleanup_logs': {
