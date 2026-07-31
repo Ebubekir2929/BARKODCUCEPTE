@@ -2545,3 +2545,15 @@ agent_communication:
     hourly_location_data, cancel_data, top10, down10, iptal_ozet, iptal_detay,
     garson_satis_ozet, hourly_stock_detail) — kullanıcının istediği kümeyle birebir.
   - ast.parse OK.
+
+## 2026-08-01 — BUG FIX: Tarih seçerken bugüne sıfırlanma (iterasyon 11)
+  - Kullanıcı: "tarih seçerken belli bir zaman sonra bugüne atıyor" + "backfill
+    eski verileri bugünkü tarihle atmış" şikayeti.
+  - Araştırma: dataset_cache DOĞRU (financial_data sdate=2025-12-27 kendi günü
+    altında). Backfill hatasız. Gerçek hata: FilterModal açıkken 3 arka plan
+    yenileyici (useLiveData 30sn, dashboard refreshInterval, fetchAllTotals 60sn)
+    re-render tetikleyip iOS tarih çarkını value'ya (bugüne) sıfırlıyordu.
+  - Fix: useLiveData(filter, {paused}) opsiyonu; dashboard iki useEffect'e
+    showFilterModal guard + deps. Modal açıkken tüm otomatik yenileme durur.
+  - testing_agent iterasyon 11: 70sn beklemeli test → tarih alanları sıfırlanmadı,
+    filtre 27/12/2025 kalıcı (₺63,00), kapatınca canlı mod normal döndü. VERIFIED ✅
