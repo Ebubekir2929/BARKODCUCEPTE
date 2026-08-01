@@ -5710,6 +5710,11 @@ SELECT TOP {limit}
 
         conn = self.get_connection()
         try:
+            # 2026-06 — FK düzeltmesi: islem_proje / islem_lokasyon ayarları (vars. 0)
+            # PROJE/LOKASYON tablolarında yoksa FK_FINANS_PROJE / FK_FIS_LOKASYON /
+            # FK_SAYIM_LOKASYON ihlali oluşuyordu. Geçerli bir ID'ye çözümle.
+            proje = self._erp_resolve_fk_id(conn, "PROJE", proje, "islem_proje")
+            lokasyon = self._erp_resolve_fk_id(conn, "LOKASYON", lokasyon, "islem_lokasyon")
             for item in items:
                 qid = int(item.get("id") or 0)
                 try:
@@ -5747,6 +5752,26 @@ SELECT TOP {limit}
                     self.println(f"islem HATA: queue={qid} -> {msg}")
         finally:
             conn.close()
+
+    def _erp_resolve_fk_id(self, conn, table: str, configured: int, setting_name: str) -> int:
+        """Ayarlanan ID tabloda varsa onu, yoksa tablodaki EN KÜÇÜK ID'yi döndürür.
+        (FK ihlallerini önler — 2026-06 FK_FINANS_PROJE/FK_FIS_LOKASYON düzeltmesi)"""
+        cur = conn.cursor()
+        try:
+            if configured:
+                cur.execute(f"SELECT TOP 1 ID FROM {table} WHERE ID = ?", configured)
+                if cur.fetchone():
+                    return int(configured)
+            cur.execute(f"SELECT MIN(ID) FROM {table}")
+            row = cur.fetchone()
+            if row and row[0] is not None:
+                resolved = int(row[0])
+                if resolved != int(configured or 0):
+                    self.println(f"islem: {setting_name}={configured} {table} tablosunda yok → {resolved} kullanılıyor.")
+                return resolved
+        except Exception as exc:
+            self.println(f"islem: {table} ID çözümleme hatası: {exc}")
+        return int(configured or 0)
 
     def apply_finans_islem_to_erp(self, conn, item: Dict[str, Any], kod_pc: int,
                                   kullanici: int, proje: int, lokasyon: int) -> int:
@@ -5801,6 +5826,13 @@ SELECT TOP {limit}
         if not satirlar:
             raise RuntimeError("detay_json.satirlar boş")
         geneltoplam = float(detay.get("geneltoplam") or item.get("tutar") or 0)
+        # 2026-06 — İskonto/KDV alanları (mobil hesaplar, backend doğrular)
+        satir_toplam = float(detay.get("satir_toplam") or geneltoplam)
+        satir_isk_toplam = float(detay.get("satir_iskonto_toplam") or 0)
+        fis_isk_oran = float(detay.get("fis_iskonto_oran") or 0)
+        fis_isk_tutar = float(detay.get("fis_iskonto_tutar") or 0)
+        kdv_toplam = float(detay.get("kdv_toplam") or 0)
+        net_satir_toplam = round(satir_toplam - satir_isk_toplam, 2)
         cari = int(item.get("kart_borclu") or item.get("kart_alacakli") or 0)
         islem_turu = int(item["islem_turu"])  # 47/45/71/69
         # FIS_TURU eşleme (örneğinizde satış faturası FIS_TURU=2 idi) — DOĞRULAYIN:
@@ -5827,12 +5859,14 @@ SELECT TOP {limit}
                  MUHASEBELESTI,PAREKENDE_KDV_KULLAN,SATILDIGI_PAZAR_YERI,ODEMEMNIN_YAPILDIGI_TARIH,
                  GONDERIM_TARIHI,SEVK_NEDENI,ASIL_SATICI_CARISI,HAREKET_TARIHI,SATIR_STOPAJ_TOPLAM,
                  ALIS_BELGE_NO,ALIS_BELGE_NO_2,ALIS_BELGE_NO_3,ALIS_BELGE_NO_4,ALIS_BELGE_NO_5,E_FATURA_TIPI)
-               VALUES (?,?,?,?,0,0,?,?,GETDATE(),GETDATE(),1,1.00,?,?,0,'',0,0,?,0,0,?,GETDATE(),17,?,
+               VALUES (?,?,?,?,0,0,?,?,GETDATE(),GETDATE(),1,1.00,?,?,?,?,?,0,?,0,0,?,GETDATE(),17,?,
                        '1',1,1.00,1,'','0',0,0,0,0,'','0',0,0,0,0,0,0,0,0,'0',0,0,0,0,0,0,0,0,0,0,0,0,2,1,
                        '1',1,'','','','','',GETDATE(),GETDATE(),'0','0','',GETDATE(),GETDATE(),0,0,GETDATE(),0,
                        '','','','','',0)""",
             fis_id, fis_turu, lokasyon, cari, proje, belgeno, kullanici,
-            geneltoplam, 0, geneltoplam, str(item.get("aciklama") or ""),
+            net_satir_toplam, satir_isk_toplam,
+            (f"{fis_isk_oran:g}" if fis_isk_oran > 0 else ""), fis_isk_tutar,
+            kdv_toplam, geneltoplam, str(item.get("aciklama") or ""),
         )
         cur.execute("SELECT TOP 1 ID FROM FIS WHERE ID = ?", fis_id)
         if not cur.fetchone():
@@ -5843,7 +5877,13 @@ SELECT TOP {limit}
             d_id = self._erp_next_sequence_id(cur, "FIS_DETAY", kod_pc)
             miktar = float(s.get("miktar") or 0)
             dahil_fiyat = float(s.get("fiyat") or 0)
-            dahil_tutar = round(miktar * dahil_fiyat, 2)
+            brut_tutar = round(miktar * dahil_fiyat, 2)
+            isk_oran = min(100.0, max(0.0, float(s.get("iskonto") or 0)))
+            isk_tutar = round(brut_tutar * isk_oran / 100.0, 2)
+            dahil_tutar = round(brut_tutar - isk_tutar, 2)   # iskonto sonrası net (KDV dahil)
+            kdv_oran = max(0.0, float(s.get("kdv") or 0))
+            satir_kdv = round(dahil_tutar * kdv_oran / (100.0 + kdv_oran), 2) if kdv_oran > 0 else 0.0
+            kdv_matrah = round(dahil_tutar - satir_kdv, 2)
             cur.execute(
                 """INSERT INTO FIS_DETAY(ID,FIS,LOKASYON,STOK,STOK_CINSI,STOK_BIRIM,BARKOD,KOLI_BARKODU,
                      DOVIZ_AD,CARPAN,KAB,MIKTAR_FIS,MIKTAR_BEDELSIZ,MIKTAR_GIRIS,MIKTAR_CIKIS,ANLASMA_FIYAT,
@@ -5860,8 +5900,8 @@ SELECT TOP {limit}
                      PARTI_NO_SON_KULLANMA_TARIHI,BUNDLE_DETAY,FK_GIDER_YERI,KT_BUNDLE_FIYAT,
                      SATIR_STOPAJ_TUTAR,URETIM_TARIHI,FK_E_FATURA_SATIR_TIPI)
                    VALUES (?,?,?,?,1,1012,?,'',1,1.0,0,?,0,?,?,0,
-                     ?,?,?,?,'',0,0,0,1.00,0,1,0,0,'0',?,?,0,0,'','0',0,0,0,0,0,
-                     ?,0,0,?,0,0,?,0,0,'','0',?,'0','',?,'',0,0,0,1.0,1,'',0,0,0,0,'0',1,'',0,1016,0,0,'0',
+                     ?,?,?,?,?,?,0,0,1.00,0,1,0,0,'0',?,?,0,0,'','0',0,0,?,0,0,
+                     ?,?,0,?,0,0,?,0,0,'','0',?,'0','',?,'',0,0,0,1.0,1,'',0,0,0,0,'0',1,'',0,1016,0,0,'0',
                      0,0,0,'',GETDATE(),0,0,0,0,GETDATE(),0)""",
                 d_id, fis_id, lokasyon, int(s.get("stok_id") or 0),
                 str(s.get("barkod") or ""),
@@ -5869,8 +5909,12 @@ SELECT TOP {limit}
                 miktar if fis_turu in (1, 3) else 0,          # alışta MIKTAR_GIRIS
                 miktar if fis_turu in (2, 4) else 0,          # satışta MIKTAR_CIKIS
                 dahil_fiyat, dahil_fiyat, dahil_tutar, dahil_tutar,
+                (f"{isk_oran:g}" if isk_oran > 0 else ""),    # ISKONTO (oran metni)
+                isk_tutar,                                    # ISKONTO_HESAP (satır iskonto tutarı)
                 kullanici, i,
-                dahil_tutar,      # TOPLAM_KDV_MATRAHI (yaklaşık — ERP yeniden hesaplar)
+                isk_tutar,        # TOPLAM_SATIR_ISKONTOSU
+                kdv_matrah,       # TOPLAM_KDV_MATRAHI (net - kdv)
+                satir_kdv,        # TOPLAM_KDV
                 dahil_fiyat,      # HESAPLANAN_FIYAT
                 dahil_fiyat,      # LISTE_FIYATI
                 dahil_fiyat,      # YEREL_FIYAT

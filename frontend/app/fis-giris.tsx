@@ -8,8 +8,9 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView,
-  ActivityIndicator, Platform, KeyboardAvoidingView, FlatList,
+  ActivityIndicator, Platform, FlatList,
 } from 'react-native';
+import { KeyboardAwareScrollView, KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -43,7 +44,7 @@ const ODEMELER = [
   { key: 'acik_hesap', ad: 'Açık Hesap', icon: 'book-outline' },
 ];
 
-interface Satir { stok_id: number; barkod: string; kod: string; ad: string; miktar: number; fiyat: number }
+interface Satir { stok_id: number; barkod: string; kod: string; ad: string; miktar: number; fiyat: number; iskonto: number; kdv: number }
 
 const fmt = (n: number) => '₺' + (n || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -67,6 +68,9 @@ export default function FisGirisScreen() {
   const [kasa, setKasa] = useState<{ kart_id: number; ad: string } | null>(null);
   const [aciklama, setAciklama] = useState('');
   const [satirlar, setSatirlar] = useState<Satir[]>([]);
+  // 2026-06 — Genel iskonto (%) veya manuel toplam (₺) girişi
+  const [genelIskOranStr, setGenelIskOranStr] = useState('');
+  const [manuelToplamStr, setManuelToplamStr] = useState('');
 
   const [urunAra, setUrunAra] = useState('');
   const [urunler, setUrunler] = useState<any[]>([]);
@@ -104,7 +108,41 @@ export default function FisGirisScreen() {
     return () => { iptal = true; };
   }, [activeTenantId]);
 
-  const toplam = useMemo(() => satirlar.reduce((s, r) => s + r.miktar * r.fiyat, 0), [satirlar]);
+  // 2026-06 — İskonto & KDV hesapları:
+  // brüt satır → satır iskontosu → net → genel iskonto (% veya manuel toplam) → final.
+  const hesap = useMemo(() => {
+    const araToplam = satirlar.reduce((s, r) => s + r.miktar * r.fiyat, 0);
+    const satirIsk = satirlar.reduce((s, r) => s + r.miktar * r.fiyat * (Math.min(100, Math.max(0, r.iskonto)) / 100), 0);
+    const netSatir = araToplam - satirIsk;
+    const manuel = parseFloat(manuelToplamStr.replace(',', '.'));
+    const oran = Math.min(100, Math.max(0, parseFloat(genelIskOranStr.replace(',', '.')) || 0));
+    let fisIskTutar = 0;
+    let genelToplam = netSatir;
+    if (!isNaN(manuel) && manuelToplamStr.trim() !== '') {
+      genelToplam = Math.max(0, manuel);
+      fisIskTutar = Math.max(0, netSatir - genelToplam);
+    } else if (oran > 0) {
+      fisIskTutar = netSatir * oran / 100;
+      genelToplam = netSatir - fisIskTutar;
+    }
+    const pay = netSatir > 0 ? genelToplam / netSatir : 1;
+    const toplamKdv = satirlar.reduce((s, r) => {
+      const net = r.miktar * r.fiyat * (1 - Math.min(100, Math.max(0, r.iskonto)) / 100) * pay;
+      return s + (r.kdv > 0 ? net * r.kdv / (100 + r.kdv) : 0);
+    }, 0);
+    return {
+      araToplam, satirIsk, netSatir, fisIskTutar, genelToplam,
+      fisIskOran: (!isNaN(manuel) && manuelToplamStr.trim() !== '' && netSatir > 0)
+        ? (fisIskTutar / netSatir) * 100 : oran,
+      toplamKdv,
+    };
+  }, [satirlar, genelIskOranStr, manuelToplamStr]);
+  const toplam = hesap.genelToplam;
+
+  const satirKdvOran = (u: any): number => {
+    const k = parseFloat(String(u.KDV ?? u.KDV_ORAN ?? u.KDVORAN ?? u.VERGI ?? '')) || 0;
+    return k > 0 && k <= 100 ? k : 20;
+  };
 
   const urunAraYap = useCallback(async (q: string) => {
     if (!q.trim() || !activeTenantId) return;
@@ -132,6 +170,7 @@ export default function FisGirisScreen() {
       return [...prev, {
         stok_id: id, barkod: String(u.BARKOD || ''), kod: String(u.KOD || ''),
         ad: String(u.AD || ''), miktar: 1, fiyat: parseFloat(u.FIYAT || '0') || 0,
+        iskonto: 0, kdv: satirKdvOran(u),
       }];
     });
     setShowUrunSecim(false); setUrunAra(''); setUrunler([]);
@@ -202,9 +241,18 @@ export default function FisGirisScreen() {
       <h2>${tip.ad}</h2>
       <div class="sub">Belge: MBL-${String(kayitId).padStart(8, '0')} · ${new Date().toLocaleString('tr-TR')}<br/>
       Cari: <b>${cari?.ad || '-'}</b> · Ödeme: ${ODEMELER.find((o) => o.key === odeme)?.ad}${kasa ? ` (${kasa.ad})` : ''}</div>
-      <table><thead><tr><th>Ürün</th><th>Barkod</th><th class="t">Miktar</th><th class="t">Fiyat</th><th class="t">Tutar</th></tr></thead><tbody>
-      ${satirlar.map((s) => `<tr><td>${s.ad}</td><td>${s.barkod}</td><td class="t">${s.miktar}</td><td class="t">${fmt(s.fiyat)}</td><td class="t">${fmt(s.miktar * s.fiyat)}</td></tr>`).join('')}
-      <tr><td colspan="4"><b>GENEL TOPLAM</b></td><td class="t"><b>${fmt(toplam)}</b></td></tr>
+      <table><thead><tr><th>Ürün</th><th>Barkod</th><th class="t">Miktar</th><th class="t">Fiyat</th><th class="t">İsk %</th><th class="t">KDV</th><th class="t">Tutar</th></tr></thead><tbody>
+      ${satirlar.map((s) => {
+        const brut = s.miktar * s.fiyat;
+        const net = brut * (1 - Math.min(100, Math.max(0, s.iskonto)) / 100);
+        const kdvT = s.kdv > 0 ? net * s.kdv / (100 + s.kdv) : 0;
+        return `<tr><td>${s.ad}</td><td>${s.barkod}</td><td class="t">${s.miktar}</td><td class="t">${fmt(s.fiyat)}</td><td class="t">${s.iskonto > 0 ? '%' + s.iskonto : '-'}</td><td class="t">${fmt(kdvT)}</td><td class="t">${fmt(net)}</td></tr>`;
+      }).join('')}
+      <tr><td colspan="6">Ara Toplam</td><td class="t">${fmt(hesap.araToplam)}</td></tr>
+      ${hesap.satirIsk > 0 ? `<tr><td colspan="6">Satır İskontoları</td><td class="t">−${fmt(hesap.satirIsk)}</td></tr>` : ''}
+      ${hesap.fisIskTutar > 0 ? `<tr><td colspan="6">Genel İskonto (%${hesap.fisIskOran.toFixed(2)})</td><td class="t">−${fmt(hesap.fisIskTutar)}</td></tr>` : ''}
+      <tr><td colspan="6">Toplam KDV (dahil)</td><td class="t">${fmt(hesap.toplamKdv)}</td></tr>
+      <tr><td colspan="6"><b>GENEL TOPLAM</b></td><td class="t"><b>${fmt(toplam)}</b></td></tr>
       </tbody></table></body></html>`;
     try {
       if (Platform.OS === 'web') await Print.printAsync({ html });
@@ -229,6 +277,9 @@ export default function FisGirisScreen() {
           cari_id: cari.id, cari_ad: cari.ad,
           odeme_tipi: odeme, kasa_id: kasa?.kart_id || null, kasa_ad: kasa?.ad || null,
           aciklama, satirlar,
+          fis_iskonto_oran: Math.round(hesap.fisIskOran * 10000) / 10000,
+          fis_iskonto_tutar: Math.round(hesap.fisIskTutar * 100) / 100,
+          kdv_toplam: Math.round(hesap.toplamKdv * 100) / 100,
         }),
       });
       const j = await r.json();
@@ -239,7 +290,7 @@ export default function FisGirisScreen() {
     setBusy(false);
   };
 
-  const yeniFis = () => { setSatirlar([]); setAciklama(''); setSonKayit(null); };
+  const yeniFis = () => { setSatirlar([]); setAciklama(''); setSonKayit(null); setGenelIskOranStr(''); setManuelToplamStr(''); };
 
   const inputStyle = [styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }];
 
@@ -296,8 +347,8 @@ export default function FisGirisScreen() {
           </TouchableOpacity>
         </View>
       ) : (
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView bottomOffset={24} style={{ flex: 1 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
           <View style={styles.turGrid}>
             {TIPLER.map((t2) => (
               <TouchableOpacity key={t2.key} onPress={() => setTip(t2)}
@@ -328,28 +379,53 @@ export default function FisGirisScreen() {
             </TouchableOpacity>
           </View>
 
-          {satirlar.map((s, i) => (
-            <View key={`${s.stok_id}-${i}`} style={[styles.satirRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }} numberOfLines={1}>{s.ad}</Text>
-                <Text style={{ fontSize: 10, color: colors.textSecondary }}>{s.barkod || s.kod}</Text>
+          {satirlar.map((s, i) => {
+            const brut = s.miktar * s.fiyat;
+            const net = brut * (1 - Math.min(100, Math.max(0, s.iskonto)) / 100);
+            const kdvTut = s.kdv > 0 ? net * s.kdv / (100 + s.kdv) : 0;
+            const guncelle = (alan: keyof Satir, v: string) =>
+              setSatirlar((p) => p.map((x, xi) => xi === i ? { ...x, [alan]: parseFloat(v.replace(',', '.')) || 0 } : x));
+            return (
+              <View key={`${s.stok_id}-${i}`} style={[styles.satirRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }} numberOfLines={1}>{s.ad}</Text>
+                    <Text style={{ fontSize: 10, color: colors.textSecondary }}>{s.barkod || s.kod}</Text>
+                  </View>
+                  <Text style={{ fontSize: 13, fontWeight: '800', color: colors.text }}>{fmt(net)}</Text>
+                  <TouchableOpacity onPress={() => setSatirlar((p) => p.filter((_, xi) => xi !== i))} hitSlop={8}>
+                    <Ionicons name="trash-outline" size={17} color="#EF4444" />
+                  </TouchableOpacity>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, marginTop: 8 }}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.satirEtiket, { color: colors.textSecondary }]}>MİKTAR</Text>
+                    <TextInput style={[styles.miniInput, { width: '100%', borderColor: colors.border, color: colors.text }]}
+                      value={String(s.miktar)} keyboardType="decimal-pad" onChangeText={(v) => guncelle('miktar', v)} />
+                  </View>
+                  <View style={{ flex: 1.3 }}>
+                    <Text style={[styles.satirEtiket, { color: colors.textSecondary }]}>FİYAT ₺</Text>
+                    <TextInput style={[styles.miniInput, { width: '100%', borderColor: colors.border, color: colors.text }]}
+                      value={String(s.fiyat)} keyboardType="decimal-pad" onChangeText={(v) => guncelle('fiyat', v)} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.satirEtiket, { color: '#F59E0B' }]}>İSK %</Text>
+                    <TextInput style={[styles.miniInput, { width: '100%', borderColor: s.iskonto > 0 ? '#F59E0B' : colors.border, color: colors.text }]}
+                      value={s.iskonto ? String(s.iskonto) : ''} placeholder="0" placeholderTextColor={colors.textSecondary}
+                      keyboardType="decimal-pad" onChangeText={(v) => guncelle('iskonto', v)} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.satirEtiket, { color: colors.textSecondary }]}>KDV %</Text>
+                    <TextInput style={[styles.miniInput, { width: '100%', borderColor: colors.border, color: colors.text }]}
+                      value={String(s.kdv)} keyboardType="decimal-pad" onChangeText={(v) => guncelle('kdv', v)} />
+                  </View>
+                </View>
+                <Text style={{ fontSize: 10, color: colors.textSecondary, marginTop: 5 }}>
+                  {s.iskonto > 0 ? `Brüt ${fmt(brut)} − isk. ${fmt(brut - net)} → ` : ''}KDV: {fmt(kdvTut)} (dahil)
+                </Text>
               </View>
-              <TextInput
-                style={[styles.miniInput, { borderColor: colors.border, color: colors.text }]}
-                value={String(s.miktar)} keyboardType="decimal-pad"
-                onChangeText={(v) => setSatirlar((p) => p.map((x, xi) => xi === i ? { ...x, miktar: parseFloat(v.replace(',', '.')) || 0 } : x))}
-              />
-              <TextInput
-                style={[styles.miniInput, { width: 74, borderColor: colors.border, color: colors.text }]}
-                value={String(s.fiyat)} keyboardType="decimal-pad"
-                onChangeText={(v) => setSatirlar((p) => p.map((x, xi) => xi === i ? { ...x, fiyat: parseFloat(v.replace(',', '.')) || 0 } : x))}
-              />
-              <Text style={{ width: 70, textAlign: 'right', fontSize: 12, fontWeight: '800', color: colors.text }}>{fmt(s.miktar * s.fiyat)}</Text>
-              <TouchableOpacity onPress={() => setSatirlar((p) => p.filter((_, xi) => xi !== i))} hitSlop={8}>
-                <Ionicons name="trash-outline" size={17} color="#EF4444" />
-              </TouchableOpacity>
-            </View>
-          ))}
+            );
+          })}
 
           {/* Ödeme tipi */}
           <Text style={[styles.label, { color: colors.textSecondary }]}>ÖDEME TİPİ</Text>
@@ -374,23 +450,63 @@ export default function FisGirisScreen() {
           <Text style={[styles.label, { color: colors.textSecondary }]}>AÇIKLAMA</Text>
           <TextInput style={inputStyle} value={aciklama} onChangeText={setAciklama} placeholder="İsteğe bağlı" placeholderTextColor={colors.textSecondary} />
 
-          {/* Toplam + kaydet */}
-          <View style={[styles.toplamRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textSecondary }}>GENEL TOPLAM</Text>
-            <Text style={{ fontSize: 20, fontWeight: '900', color: colors.text }}>{fmt(toplam)}</Text>
+          {/* Toplamlar: ara toplam, iskontolar, KDV, düzenlenebilir genel toplam */}
+          <View style={[styles.toplamPanel, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.toplamSatir}>
+              <Text style={{ fontSize: 12, color: colors.textSecondary }}>Ara Toplam</Text>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }}>{fmt(hesap.araToplam)}</Text>
+            </View>
+            {hesap.satirIsk > 0 && (
+              <View style={styles.toplamSatir}>
+                <Text style={{ fontSize: 12, color: '#F59E0B' }}>Satır İskontoları</Text>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#F59E0B' }}>−{fmt(hesap.satirIsk)}</Text>
+              </View>
+            )}
+            <View style={[styles.toplamSatir, { alignItems: 'center' }]}>
+              <Text style={{ fontSize: 12, color: '#F59E0B' }}>Genel İskonto %</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <TextInput
+                  style={[styles.miniInput, { width: 64, borderColor: hesap.fisIskTutar > 0 ? '#F59E0B' : colors.border, color: colors.text }]}
+                  value={genelIskOranStr} placeholder="0" placeholderTextColor={colors.textSecondary}
+                  keyboardType="decimal-pad"
+                  onChangeText={(v) => { setGenelIskOranStr(v); setManuelToplamStr(''); }}
+                />
+                {hesap.fisIskTutar > 0 && (
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#F59E0B' }}>−{fmt(hesap.fisIskTutar)}</Text>
+                )}
+              </View>
+            </View>
+            <View style={styles.toplamSatir}>
+              <Text style={{ fontSize: 12, color: colors.textSecondary }}>Toplam KDV (dahil)</Text>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text }}>{fmt(hesap.toplamKdv)}</Text>
+            </View>
+            <View style={[styles.toplamSatir, { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10, marginTop: 4, alignItems: 'center' }]}>
+              <Text style={{ fontSize: 13, fontWeight: '800', color: colors.textSecondary }}>GENEL TOPLAM</Text>
+              <TextInput
+                style={[styles.toplamInput, { borderColor: manuelToplamStr ? colors.primary : colors.border, color: colors.text }]}
+                value={manuelToplamStr !== '' ? manuelToplamStr : String(Math.round(toplam * 100) / 100)}
+                keyboardType="decimal-pad" selectTextOnFocus
+                onChangeText={(v) => { setManuelToplamStr(v); setGenelIskOranStr(''); }}
+              />
+            </View>
+            {manuelToplamStr !== '' && hesap.fisIskTutar > 0 && (
+              <Text style={{ fontSize: 10, color: '#F59E0B', textAlign: 'right', marginTop: 2 }}>
+                Manuel toplam → %{hesap.fisIskOran.toFixed(2)} genel iskonto uygulandı
+              </Text>
+            )}
           </View>
           <TouchableOpacity onPress={kaydet} disabled={busy} style={[styles.kaydetBtn, { backgroundColor: tip.renk, opacity: busy ? 0.6 : 1 }]}>
             {busy ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />}
             <Text style={{ color: '#fff', fontSize: 15, fontWeight: '800' }}>{busy ? 'Kaydediliyor…' : `${tip.ad} Kaydet`}</Text>
           </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
       )}
 
       {/* Ürün arama sheet */}
       {showUrunSecim && (
         <View style={styles.overlay}>
           <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={() => setShowUrunSecim(false)} />
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.sheetTitle, { color: colors.text }]}>Ürün Ara</Text>
             <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16 }}>
@@ -419,6 +535,7 @@ export default function FisGirisScreen() {
               />
             )}
           </View>
+          </KeyboardAvoidingView>
         </View>
       )}
 
@@ -426,6 +543,7 @@ export default function FisGirisScreen() {
       {showCariSecim && (
         <View style={styles.overlay}>
           <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={() => setShowCariSecim(false)} />
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.sheetTitle, { color: colors.text }]}>Cari Seç</Text>
             <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text, marginHorizontal: 16 }]}
@@ -441,6 +559,7 @@ export default function FisGirisScreen() {
                 )} />
             )}
           </View>
+          </KeyboardAvoidingView>
         </View>
       )}
 
@@ -498,8 +617,11 @@ const styles = StyleSheet.create({
   secBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 13, borderRadius: 10, borderWidth: 1.5 },
   input: { borderWidth: 1, borderRadius: 10, padding: 12, fontSize: 14 },
   miniInput: { width: 52, borderWidth: 1, borderRadius: 8, padding: 6, fontSize: 12, textAlign: 'center' },
-  satirRow: { flexDirection: 'row', alignItems: 'center', gap: 6, padding: 10, borderRadius: 10, borderWidth: 1, marginTop: 8 },
-  toplamRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14, borderRadius: 12, borderWidth: 1, marginTop: 18 },
+  satirRow: { padding: 10, borderRadius: 10, borderWidth: 1, marginTop: 8 },
+  satirEtiket: { fontSize: 9, fontWeight: '800', letterSpacing: 0.4, marginBottom: 3 },
+  toplamPanel: { padding: 14, borderRadius: 12, borderWidth: 1, marginTop: 18, gap: 8 },
+  toplamSatir: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  toplamInput: { borderWidth: 1.5, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, fontSize: 18, fontWeight: '900', minWidth: 130, textAlign: 'right' },
   kaydetBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 15, borderRadius: 12, marginTop: 12 },
   overlay: { ...StyleSheet.absoluteFillObject, zIndex: 999, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' },

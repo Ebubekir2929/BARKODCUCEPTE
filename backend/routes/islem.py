@@ -179,7 +179,8 @@ class FisSatir(BaseModel):
     ad: str
     miktar: float
     fiyat: float               # KDV dahil birim fiyat
-    kdv: Optional[float] = None
+    kdv: Optional[float] = None    # KDV oranı (%)
+    iskonto: Optional[float] = 0   # Satır iskonto oranı (%)
 
 
 class FisCreate(BaseModel):
@@ -192,6 +193,9 @@ class FisCreate(BaseModel):
     kasa_ad: Optional[str] = None
     aciklama: Optional[str] = ""
     satirlar: list
+    fis_iskonto_oran: Optional[float] = 0    # Genel (fiş) iskonto %
+    fis_iskonto_tutar: Optional[float] = 0   # Genel iskonto tutarı (₺; oran yerine)
+    kdv_toplam: Optional[float] = None       # Mobilde hesaplanan toplam KDV
 
 
 # ── Faz 3: Sayım Fişi ────────────────────────────────────────────────────
@@ -286,15 +290,40 @@ async def fis_create(body: FisCreate, current_user: dict = Depends(get_current_u
         raise HTTPException(status_code=400, detail="En az bir ürün satırı gerekli")
     if body.odeme_tipi in ("nakit", "kart") and not body.kasa_id:
         raise HTTPException(status_code=400, detail="Nakit/Kart ödemede kasa seçimi zorunlu")
-    geneltoplam = round(sum(max(0.0, s.miktar) * max(0.0, s.fiyat) for s in satirlar), 2)
+    # 2026-06 — İskonto/KDV: satır brütü → satır iskontoları → genel iskonto → final
+    satir_toplam = round(sum(max(0.0, s.miktar) * max(0.0, s.fiyat) for s in satirlar), 2)
+    satir_iskonto_toplam = round(sum(
+        max(0.0, s.miktar) * max(0.0, s.fiyat) * min(100.0, max(0.0, s.iskonto or 0)) / 100.0
+        for s in satirlar), 2)
+    net_satir = round(satir_toplam - satir_iskonto_toplam, 2)
+    fis_isk_oran = min(100.0, max(0.0, body.fis_iskonto_oran or 0))
+    fis_isk_tutar = round(max(0.0, body.fis_iskonto_tutar or 0), 2)
+    if fis_isk_tutar <= 0 and fis_isk_oran > 0:
+        fis_isk_tutar = round(net_satir * fis_isk_oran / 100.0, 2)
+    fis_isk_tutar = min(fis_isk_tutar, net_satir)
+    geneltoplam = round(net_satir - fis_isk_tutar, 2)
     if geneltoplam <= 0:
         raise HTTPException(status_code=400, detail="Fiş toplamı 0'dan büyük olmalı")
+    # Toplam KDV: mobil hesapladıysa onu al, yoksa satır KDV oranlarından (dahil fiyat) çöz
+    if body.kdv_toplam is not None:
+        kdv_toplam = round(max(0.0, body.kdv_toplam), 2)
+    else:
+        pay = (geneltoplam / net_satir) if net_satir > 0 else 1.0
+        kdv_toplam = round(sum(
+            (max(0.0, s.miktar) * max(0.0, s.fiyat) * (1 - min(100.0, max(0.0, s.iskonto or 0)) / 100.0) * pay)
+            * (s.kdv or 0) / (100.0 + (s.kdv or 0)) if (s.kdv or 0) > 0 else 0.0
+            for s in satirlar), 2)
 
     detay = {
         "odeme_tipi": body.odeme_tipi,
         "kasa_id": body.kasa_id,
         "kasa_ad": body.kasa_ad,
         "satirlar": [s.dict() for s in satirlar],
+        "satir_toplam": satir_toplam,
+        "satir_iskonto_toplam": satir_iskonto_toplam,
+        "fis_iskonto_oran": fis_isk_oran,
+        "fis_iskonto_tutar": fis_isk_tutar,
+        "kdv_toplam": kdv_toplam,
         "geneltoplam": geneltoplam,
     }
     if tip["cari_taraf"] == "borclu":

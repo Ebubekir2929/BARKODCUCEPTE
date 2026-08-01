@@ -62,14 +62,33 @@ POS istemcisi çekip ERP12'ye INSERT eder. Uygulama ERP'ye ASLA doğrudan yazmaz
 - ÖNEMLİ: Mobil `reports.tsx` defaultParams değişirse client.py `_report_prefetch_definitions()`
   da güncellenmeli (parametreler birebir eşleşmeli, boş/0 değerler norm'da düşer).
 
-## Tazelik Rozeti (FreshnessBadge) — 2026-06 (TAMAMLANDI)
-- `src/components/FreshnessBadge.tsx`: standart "Son güncelleme: X önce" rozeti
+## Tazelik Rozeti (FreshnessBadge) — 2026-06 (TAMAMLANDI)- `src/components/FreshnessBadge.tsx`: standart "Son güncelleme: X önce" rozeti
   (<90sn → yeşil ⚡ "az önce", aksi → mavi 🕒). `fmtAge` buradan export edilir.
 - Kullanım yerleri: cari ekstre (compact, Güncel Bakiye yanı), stok ekstre,
   fiş detayı modalları (customers + stock), rapor sonuç başlığı (reports.tsx).
 - Backend: `/fis-detail` artık `age_sec` döner (cache HIT → gerçek yaş, feed/POS → 0).
   `/report-run` yanıtındaki `_age` frontend'te `reportAgeSec` state'ine bağlandı.
 - UI doğrulandı: cari ekstre "az önce" ✅, fiş detayı "3 sa önce" ✅.
+
+## İşlem Ekranları Büyük Güncelleme — 2026-06 (TAMAMLANDI, v1.0.41 / build 45)
+1) **FK hataları düzeltildi (client.py)**: `islem_proje`/`islem_lokasyon` (vars. 0)
+   PROJE/LOKASYON tablosunda yoksa `_erp_resolve_fk_id` en küçük geçerli ID'yi kullanır
+   → FK_FINANS_PROJE / FK_FIS_LOKASYON / FK_SAYIM_LOKASYON ihlalleri çözüldü.
+   Kuyruktaki hatalı kayıtlar "Yeniden Dene" ile aktarılabilir.
+2) **Klavye deneyimi**: `react-native-keyboard-controller@1.18.5` eklendi (Expo Go SDK 54
+   destekli). Root `_layout.tsx` KeyboardProvider ile sarıldı. finans-islem, fis-giris,
+   sayim-giris: KeyboardAwareScrollView + sheet'ler KC KeyboardAvoidingView ile sarıldı
+   → inputlar klavye altında kalmıyor.
+3) **Fiş girişi iskonto/KDV**: satır bazlı İSK% ve KDV% alanları, satır altında brüt/isk/KDV
+   bilgisi; toplam paneli: Ara Toplam, Satır İskontoları, Genel İskonto % (tutarı otomatik),
+   Toplam KDV (dahil), DÜZENLENEBİLİR Genel Toplam (manuel toplam → otomatik genel iskonto).
+   Hesap zinciri doğrulandı (467,50 → %10 satır + %5 genel = 399,71; KDV 66,62 ✓).
+   Backend `fis-create`: fis_iskonto_oran/tutar, kdv_toplam, satır iskonto/kdv alanları;
+   client.py FIS/FIS_DETAY insert'leri iskonto+KDV kolonlarını dolduruyor
+   (SATIR_ISKONTO_TOPLAM, FIS_ISKONTO_ORAN/TOPLAM, KDV_TOPLAM, ISKONTO_HESAP, TOPLAM_KDV...).
+4) **Sayım**: ürün seçince MİKTAR SORAN dialog (+/-, autofocus, Ekle/Vazgeç); arama sheet'i
+   açık kalır. PDF çıktısı fiş tarafında iskonto/KDV kolonlarıyla güncellendi.
+   NOT: Kullanıcı Windows'ta YENİ client.py kurmalı (FK fix + prefetch birlikte).
 
 ## Test Kimlikleri
 Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 1234567 yapıldı).

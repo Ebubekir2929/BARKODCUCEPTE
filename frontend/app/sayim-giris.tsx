@@ -8,9 +8,10 @@
  */
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView,
-  ActivityIndicator, Platform, KeyboardAvoidingView, FlatList,
+  View, Text, StyleSheet, TextInput, TouchableOpacity,
+  ActivityIndicator, Platform, FlatList,
 } from 'react-native';
+import { KeyboardAwareScrollView, KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -54,6 +55,9 @@ export default function SayimGirisScreen() {
   const [urunler, setUrunler] = useState<any[]>([]);
   const [urunBusy, setUrunBusy] = useState(false);
   const [showUrunSecim, setShowUrunSecim] = useState(false);
+  // 2026-06 — Ürün seçince miktar soran dialog (kullanıcı isteği)
+  const [miktarSor, setMiktarSor] = useState<any | null>(null);
+  const [miktarStr, setMiktarStr] = useState('1');
   const [showScanner, setShowScanner] = useState(false);
   const [sonOkunan, setSonOkunan] = useState<string>('');
   const [busy, setBusy] = useState(false);
@@ -249,8 +253,8 @@ export default function SayimGirisScreen() {
           </TouchableOpacity>
         </View>
       ) : (
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView bottomOffset={24} style={{ flex: 1 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
           {/* Büyük tarama butonu — sayımın ana aksiyonu */}
           <TouchableOpacity onPress={scannerAc} style={[styles.scanBigBtn, { backgroundColor: '#8B5CF6' }]}>
             <Ionicons name="barcode-outline" size={28} color="#fff" />
@@ -317,14 +321,14 @@ export default function SayimGirisScreen() {
             {busy ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />}
             <Text style={{ color: '#fff', fontSize: 15, fontWeight: '800' }}>{busy ? 'Kaydediliyor…' : 'Sayım Fişini Kaydet'}</Text>
           </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
       )}
 
       {/* Ürün arama sheet */}
       {showUrunSecim && (
         <View style={styles.overlay}>
           <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={() => setShowUrunSecim(false)} />
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.sheetTitle, { color: colors.text }]}>Ürün Ara</Text>
             <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 16 }}>
@@ -346,7 +350,7 @@ export default function SayimGirisScreen() {
                 ListEmptyComponent={<Text style={{ color: colors.textSecondary, fontSize: 12, padding: 16 }}>Arama yapın…</Text>}
                 renderItem={({ item: u }: any) => (
                   <TouchableOpacity style={[styles.sheetRow, { borderBottomColor: colors.border }]}
-                    onPress={() => { satirEkle(u, 1); showToast(`✓ ${u.AD} eklendi`); }}>
+                    onPress={() => { setMiktarSor(u); setMiktarStr('1'); }}>
                     <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }} numberOfLines={1}>{u.AD}</Text>
                     <Text style={{ color: colors.textSecondary, fontSize: 11 }}>{u.BARKOD || u.KOD}</Text>
                   </TouchableOpacity>
@@ -354,6 +358,55 @@ export default function SayimGirisScreen() {
               />
             )}
           </View>
+          </KeyboardAvoidingView>
+        </View>
+      )}
+
+      {/* Miktar sorma dialoğu — ürün seçilince açılır */}
+      {miktarSor && (
+        <View style={[styles.overlay, { justifyContent: 'center', alignItems: 'center', zIndex: 1500 }]}>
+          <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={() => setMiktarSor(null)} />
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ width: '85%' }}>
+            <View style={[styles.miktarDialog, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Text style={{ fontSize: 14, fontWeight: '800', color: colors.text }} numberOfLines={2}>{miktarSor.AD}</Text>
+              <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>{miktarSor.BARKOD || miktarSor.KOD}</Text>
+              <Text style={[styles.label, { color: colors.textSecondary }]}>SAYILAN MİKTAR</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <TouchableOpacity style={[styles.stepBtn, { width: 42, height: 42, borderColor: colors.border }]}
+                  onPress={() => setMiktarStr((v) => String(Math.max(0, (parseFloat(v.replace(',', '.')) || 0) - 1)))}>
+                  <Ionicons name="remove" size={20} color={colors.text} />
+                </TouchableOpacity>
+                <TextInput
+                  style={[styles.input, { flex: 1, textAlign: 'center', fontSize: 20, fontWeight: '900', backgroundColor: colors.card, borderColor: '#8B5CF6', color: colors.text }]}
+                  value={miktarStr} onChangeText={setMiktarStr} keyboardType="decimal-pad" autoFocus selectTextOnFocus
+                  onSubmitEditing={() => {
+                    const m = parseFloat(miktarStr.replace(',', '.')) || 0;
+                    if (m > 0) { satirEkle(miktarSor, m); showToast(`✓ ${miktarSor.AD} → ${m}`); }
+                    setMiktarSor(null);
+                  }}
+                />
+                <TouchableOpacity style={[styles.stepBtn, { width: 42, height: 42, borderColor: colors.border }]}
+                  onPress={() => setMiktarStr((v) => String((parseFloat(v.replace(',', '.')) || 0) + 1))}>
+                  <Ionicons name="add" size={20} color={colors.text} />
+                </TouchableOpacity>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+                <TouchableOpacity style={[styles.kaydetBtn, { flex: 1, marginTop: 0, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }]}
+                  onPress={() => setMiktarSor(null)}>
+                  <Text style={{ color: colors.text, fontWeight: '700' }}>Vazgeç</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.kaydetBtn, { flex: 1, marginTop: 0, backgroundColor: '#8B5CF6' }]}
+                  onPress={() => {
+                    const m = parseFloat(miktarStr.replace(',', '.')) || 0;
+                    if (m > 0) { satirEkle(miktarSor, m); showToast(`✓ ${miktarSor.AD} → ${m}`); }
+                    setMiktarSor(null);
+                  }}>
+                  <Ionicons name="checkmark" size={18} color="#fff" />
+                  <Text style={{ color: '#fff', fontWeight: '800' }}>Ekle</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       )}
 
@@ -407,6 +460,7 @@ const styles = StyleSheet.create({
   sheet: { borderTopLeftRadius: 20, borderTopRightRadius: 20, borderWidth: 1, paddingVertical: 12, paddingBottom: 28 },
   sheetTitle: { fontSize: 16, fontWeight: '800', paddingHorizontal: 16, marginBottom: 10 },
   sheetRow: { paddingHorizontal: 16, paddingVertical: 11, borderBottomWidth: 1 },
+  miktarDialog: { borderRadius: 16, borderWidth: 1, padding: 18 },
   scanClose: { position: 'absolute', top: 50, right: 20, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 22, padding: 9 },
   scanInfo: { position: 'absolute', top: 52, left: 20, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 12, maxWidth: '65%' },
   scanDone: { position: 'absolute', bottom: 46, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: '#8B5CF6', paddingHorizontal: 22, paddingVertical: 13, borderRadius: 26 },

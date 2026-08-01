@@ -8,8 +8,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView,
-  ActivityIndicator, Image, Platform, KeyboardAvoidingView, Linking, FlatList,
+  ActivityIndicator, Image, Platform, Linking, FlatList,
 } from 'react-native';
+import { KeyboardAwareScrollView, KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -265,8 +266,8 @@ export default function FinansIslemScreen() {
         </TouchableOpacity>
       </View>
 
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
+      <KeyboardAwareScrollView bottomOffset={24} style={{ flex: 1 }}
+        contentContainerStyle={{ padding: 16, paddingBottom: 60 }} keyboardShouldPersistTaps="handled">
           {/* İşlem türü */}
           <Text style={[styles.label, { color: colors.textSecondary }]}>İŞLEM TÜRÜ</Text>
           <View style={styles.turGrid}>
@@ -385,13 +386,13 @@ export default function FinansIslemScreen() {
               </View>
             </View>
           ))}
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScrollView>
 
       {/* Cari seçim overlay */}
       {showCariSecim && (
         <View style={styles.overlay}>
           <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={() => setShowCariSecim(false)} />
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.sheetTitle, { color: colors.text }]}>Cari Seç</Text>
             <TextInput
@@ -422,6 +423,7 @@ export default function FinansIslemScreen() {
               />
             )}
           </View>
+          </KeyboardAvoidingView>
         </View>
       )}
 
@@ -429,6 +431,7 @@ export default function FinansIslemScreen() {
       {showKasaSecim && (
         <View style={styles.overlay}>
           <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={() => { setShowKasaSecim(false); setShowKasaEkle(false); }} />
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.sheetTitle, { color: colors.text }]}>{tur.kasaEtiket} Seç</Text>
             <ScrollView style={{ maxHeight: 300 }}>
@@ -462,6 +465,7 @@ export default function FinansIslemScreen() {
               </TouchableOpacity>
             )}
           </View>
+          </KeyboardAvoidingView>
         </View>
       )}
 

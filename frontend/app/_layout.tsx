@@ -7,6 +7,7 @@ import { useAuthStore } from '../src/store/authStore';
 import { useLanguageStore } from '../src/store/languageStore';
 import { View, ActivityIndicator, StyleSheet, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 import * as NavigationBar from 'expo-navigation-bar';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
@@ -160,14 +161,16 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar
-        style={isDark ? 'light' : 'dark'}
-        backgroundColor={isDark ? '#000000' : '#FFFFFF'}
-        translucent={false}
-      />
-      {/* 2026-05-15 — iOS APNs notification response için yedek köprü */}
-      <NotificationResponseBridge />
-      <AppShell />
+      <KeyboardProvider>
+        <StatusBar
+          style={isDark ? 'light' : 'dark'}
+          backgroundColor={isDark ? '#000000' : '#FFFFFF'}
+          translucent={false}
+        />
+        {/* 2026-05-15 — iOS APNs notification response için yedek köprü */}
+        <NotificationResponseBridge />
+        <AppShell />
+      </KeyboardProvider>
     </SafeAreaProvider>
   );
 }
