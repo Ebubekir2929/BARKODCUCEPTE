@@ -9,6 +9,7 @@ import {
   Dimensions,
   RefreshControl,
   Platform,
+  PixelRatio,
   ActivityIndicator,
   DeviceEventEmitter,
   Pressable,
@@ -46,7 +47,11 @@ export default function DashboardScreen() {
   const { user, isAuthenticated } = useAuthStore();
   const { t } = useLanguageStore();
   const { activeSource, setActiveSource } = useDataSourceStore();
-  const { isXLarge, isWideWeb, isDesktop } = useResponsive();
+  const { isXLarge, isWideWeb, isDesktop, width: winWidth } = useResponsive();
+  // 2026-06 — Dar ekran/büyük sistem fontu: başlıkta buton etiketlerini gizle,
+  // "Hoş geldiniz + isim" alanı ezilmesin (kullanıcı bildirimi: harf harf kırılma).
+  // Font ölçeği (erişilebilirlik büyük yazı) genişliği efektif olarak daraltır.
+  const compactHeader = (winWidth / Math.max(1, PixelRatio.getFontScale())) < 400;
 
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [showCompareModal, setShowCompareModal] = useState(false);
@@ -719,12 +724,21 @@ export default function DashboardScreen() {
       {/* Header */}
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <View style={{ flex: 1, marginRight: 8 }}>
-          <Text style={[styles.greeting, { color: colors.textSecondary }]}>{t('welcome_greeting')}</Text>
+          <Text
+            style={[styles.greeting, { color: colors.textSecondary }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.7}
+            maxFontSizeMultiplier={1.2}
+          >
+            {t('welcome_greeting')}
+          </Text>
           <Text
             style={[styles.userName, { color: colors.text }]}
             numberOfLines={1}
             adjustsFontSizeToFit
             minimumFontScale={0.7}
+            maxFontSizeMultiplier={1.2}
           >
             {user?.full_name || 'Kullanıcı'}
           </Text>
@@ -742,7 +756,9 @@ export default function DashboardScreen() {
           hitSlop={6}
         >
           <Ionicons name="git-compare-outline" size={20} color={colors.primary} />
-          <Text style={[styles.filterText, { color: colors.primary }]}>{t('compare')}</Text>
+          {!compactHeader && (
+            <Text style={[styles.filterText, { color: colors.primary }]} maxFontSizeMultiplier={1.2}>{t('compare')}</Text>
+          )}
           <View style={{
             position: 'absolute', top: -6, right: -6,
             backgroundColor: '#8B5CF6',
@@ -758,7 +774,9 @@ export default function DashboardScreen() {
           onPress={() => setShowFilterModal(true)}
         >
           <Ionicons name="filter" size={20} color={colors.primary} />
-          <Text style={[styles.filterText, { color: colors.primary }]}>{t('filter_short')}</Text>
+          {!compactHeader && (
+            <Text style={[styles.filterText, { color: colors.primary }]} maxFontSizeMultiplier={1.2}>{t('filter_short')}</Text>
+          )}
         </TouchableOpacity>
       </View>
 
