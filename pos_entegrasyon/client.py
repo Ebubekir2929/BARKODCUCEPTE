@@ -5687,6 +5687,8 @@ SELECT TOP {limit}
 
     # ─────────────── Mobil İşlem Kuyruğu — ERP12 aktarım metotları ───────────────
     def process_pending_islemler(self):
+        # 2026-06 — Kaynak listeleri (lokasyon/banka) periyodik olarak web'e basılır
+        self._push_islem_kaynaklar_if_due()
         resp = self._price_update_post({"action": "islem_poll", "limit": 50}, timeout=60)
         items = resp.get("items", []) if isinstance(resp, dict) else []
         if not items:
@@ -5707,6 +5709,7 @@ SELECT TOP {limit}
         if not items:
             return
         self.println(f"islem: {len(items)} yetkili bekleyen kayıt işlenecek.")
+        basarili: List[Dict[str, Any]] = []
 
         conn = self.get_connection()
         try:
@@ -5741,6 +5744,7 @@ SELECT TOP {limit}
                     conn.commit()
                     self._price_update_post({"action": "islem_mark", "id": qid, "erp_id": erp_id}, timeout=30)
                     self.println(f"islem OK: queue={qid} grubu={grubu} erp_id={erp_id}")
+                    basarili.append(item)
                 except Exception as exc:
                     try:
                         conn.rollback()
@@ -5774,7 +5778,7 @@ SELECT TOP {limit}
         return int(configured or 0)
 
     def apply_finans_islem_to_erp(self, conn, item: Dict[str, Any], kod_pc: int,
-                                  kullanici: int, proje: int, lokasyon: int) -> int:
+                                  kullanici: int, proje: int, lokasyon: int, fis_ref: int = 0) -> int:
         """Tahsilat/Ödeme/Çek/Senet -> FINANS + FINANS_DETAY."""
         qid = int(item["id"])
         tur = int(item["islem_turu"])
@@ -5808,10 +5812,10 @@ SELECT TOP {limit}
                  FK_FINANS_ACIKLAMA,VADE_TARIHI,BELGENO,FIS,TAKSIT_SAYISI,FK_PERSONEL,
                  MUHASEBELESTI,TUTAR,TAKSIT_FISI,TAHSILID,BANKA_POS_TAKSIT)
                VALUES (0,?,0,1,?,?,1,?,0,?,?,?,?,0,
-                       COALESCE(?, GETDATE()),?,0,1,?,'0',?,0,0,0)""",
+                       COALESCE(?, GETDATE()),?,?,1,?,'0',?,0,0,0)""",
             tur, detay_id, aciklama, proje,
             alacakli, borclu, qid, finans_id,
-            vade, belgeno, kullanici, tutar,
+            vade, belgeno, int(fis_ref or 0), kullanici, tutar,
         )
         self._exec_sequence_change(cur, kod_pc, detay_id, kullanici, 1, "FINANS_DETAY")
         return finans_id
@@ -5833,6 +5837,10 @@ SELECT TOP {limit}
         fis_isk_tutar = float(detay.get("fis_iskonto_tutar") or 0)
         kdv_toplam = float(detay.get("kdv_toplam") or 0)
         net_satir_toplam = round(satir_toplam - satir_isk_toplam, 2)
+        # 2026-06 — Mobilde seçilen lokasyon (varsa) kullanılır
+        lok_m = int(detay.get("lokasyon") or 0)
+        if lok_m:
+            lokasyon = self._erp_resolve_fk_id(conn, "LOKASYON", lok_m, "mobil_lokasyon")
         cari = int(item.get("kart_borclu") or item.get("kart_alacakli") or 0)
         islem_turu = int(item["islem_turu"])  # 47/45/71/69
         # FIS_TURU eşleme (örneğinizde satış faturası FIS_TURU=2 idi) — DOĞRULAYIN:
@@ -5922,24 +5930,28 @@ SELECT TOP {limit}
             )
             self._exec_sequence_change(cur, kod_pc, d_id, kullanici, 1, "FIS_DETAY")
 
-        # Nakit/Kart ödeme -> FIS bağlantılı FINANS kaydı
+        # 2026-06 — Nakit/Kart ödeme → fişle BİRLİKTE doğru FINANS kaydı (yoksa cari
+        # hesabına tahsilat/ödeme işlenmez). Açık hesapta finans yazılmaz (borç kalır).
         odeme = str(detay.get("odeme_tipi") or "acik_hesap")
-        if odeme in ("nakit", "kart") and detay.get("kasa_id"):
-            f_id = self._erp_next_sequence_id(cur, "FINANS", kod_pc)
-            cur.execute(
-                "INSERT INTO FINANS(PROJE,BELGENO,TARIH,LOKASYON,FIS,KASA_AD,ID) VALUES (?,?,GETDATE(),?,?,?,?)",
-                proje, belgeno, lokasyon, fis_id, int(detay["kasa_id"]), f_id,
-            )
-            self._exec_sequence_change(cur, kod_pc, f_id, kullanici, 1, "FINANS")
-            fd_id = self._erp_next_sequence_id(cur, "FINANS_DETAY", kod_pc)
-            cur.execute(
-                """INSERT INTO FINANS_DETAY(ISLEM_TARIHI,ID,FINANS,KART_ALACAKLI,DOVIZ_AD,FIS,FK_PERSONEL,
-                     TUTAR,ACIKLAMA,VADE_TARIHI,CARI_ADRES,KUR,KART_BORCLU,FINANS_ISLEM_TURU,SECIM,EXTERNAL_ID)
-                   VALUES (GETDATE(),?,?,?,1,?,?,?,?,GETDATE(),0,1,?,?,0,?)""",
-                fd_id, f_id, fis_id, fis_id, kullanici,
-                geneltoplam, "", cari, islem_turu, qid,
-            )
-            self._exec_sequence_change(cur, kod_pc, fd_id, kullanici, 1, "FINANS_DETAY")
+        kasa_kart = int(detay.get("kasa_id") or 0)
+        if odeme in ("nakit", "kart") and kasa_kart > 0:
+            tahsilat_yonu = islem_turu in (47, 69)  # satış / alış iade → para bize gelir
+            if tahsilat_yonu:
+                f_tur = 15 if odeme == "kart" else 1   # Pos Tahsilat / Nakit Tahsilat
+                f_borclu, f_alacakli = kasa_kart, cari  # borçlu=KASA, alacaklı=CARİ
+            else:
+                f_tur = 2                               # Nakit Ödeme (kartla ödeme de 2)
+                f_borclu, f_alacakli = cari, kasa_kart  # borçlu=CARİ, alacaklı=KASA
+            synth = {
+                "id": qid,
+                "islem_turu": f_tur,
+                "tutar": geneltoplam,
+                "kart_borclu": f_borclu,
+                "kart_alacakli": f_alacakli,
+                "aciklama": f"{belgeno} fatura {'tahsilatı' if tahsilat_yonu else 'ödemesi'} ({odeme})",
+                "vade_tarihi": None,
+            }
+            self.apply_finans_islem_to_erp(conn, synth, kod_pc, kullanici, proje, lokasyon, fis_ref=fis_id)
         return fis_id
 
     def apply_sayim_islem_to_erp(self, conn, item: Dict[str, Any], kod_pc: int,
@@ -5952,6 +5964,10 @@ SELECT TOP {limit}
         if not satirlar:
             raise RuntimeError("detay_json.satirlar boş")
         aciklama = str(item.get("aciklama") or "")
+        # 2026-06 — Mobilde seçilen lokasyon (varsa) kullanılır
+        lok_m = int(detay.get("lokasyon") or 0)
+        if lok_m:
+            lokasyon = self._erp_resolve_fk_id(conn, "LOKASYON", lok_m, "mobil_lokasyon")
 
         cur = conn.cursor()
         sayim_id = self._erp_next_sequence_id(cur, "SAYIM", kod_pc)

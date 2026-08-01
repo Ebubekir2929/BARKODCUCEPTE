@@ -14,6 +14,7 @@ import { KeyboardAwareScrollView, KeyboardAvoidingView } from 'react-native-keyb
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import LokasyonSecici, { Lokasyon } from '../src/components/LokasyonSecici';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useThemeStore } from '../src/store/themeStore';
@@ -68,6 +69,7 @@ export default function FisGirisScreen() {
   const [kasa, setKasa] = useState<{ kart_id: number; ad: string } | null>(null);
   const [aciklama, setAciklama] = useState('');
   const [satirlar, setSatirlar] = useState<Satir[]>([]);
+  const [lokasyon, setLokasyon] = useState<Lokasyon | null>(null);
   // 2026-06 — Genel iskonto (%) veya manuel toplam (₺) girişi
   const [genelIskOranStr, setGenelIskOranStr] = useState('');
   const [manuelToplamStr, setManuelToplamStr] = useState('');
@@ -277,6 +279,7 @@ export default function FisGirisScreen() {
           cari_id: cari.id, cari_ad: cari.ad,
           odeme_tipi: odeme, kasa_id: kasa?.kart_id || null, kasa_ad: kasa?.ad || null,
           aciklama, satirlar,
+          lokasyon: lokasyon?.id || null,
           fis_iskonto_oran: Math.round(hesap.fisIskOran * 10000) / 10000,
           fis_iskonto_tutar: Math.round(hesap.fisIskTutar * 100) / 100,
           kdv_toplam: Math.round(hesap.toplamKdv * 100) / 100,
@@ -446,6 +449,9 @@ export default function FisGirisScreen() {
               <Ionicons name="chevron-down" size={16} color={colors.textSecondary} />
             </TouchableOpacity>
           )}
+
+          <LokasyonSecici apiUrl={API_URL} tenantId={activeTenantId || ''} headers={authHeaders()}
+            value={lokasyon} onChange={setLokasyon} colors={colors} />
 
           <Text style={[styles.label, { color: colors.textSecondary }]}>AÇIKLAMA</Text>
           <TextInput style={inputStyle} value={aciklama} onChangeText={setAciklama} placeholder="İsteğe bağlı" placeholderTextColor={colors.textSecondary} />

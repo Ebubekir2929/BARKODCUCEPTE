@@ -90,5 +90,23 @@ POS istemcisi çekip ERP12'ye INSERT eder. Uygulama ERP'ye ASLA doğrudan yazmaz
    açık kalır. PDF çıktısı fiş tarafında iskonto/KDV kolonlarıyla güncellendi.
    NOT: Kullanıcı Windows'ta YENİ client.py kurmalı (FK fix + prefetch birlikte).
 
+## İşlem Akışı Geliştirmeleri 2 — 2026-06 (TAMAMLANDI)
+1) **Aktarım sonrası anında bakiye tazeleme**: client.py `_islem_refresh_after_apply` —
+   başarılı aktarım sonrası cari_bakiye_liste + stock_list + etkilenen carilerin ekstresi
+   + etkilenen stokların ekstre/miktarı hemen web cache'e basılır.
+2) **Lokasyon seçimi**: POS client `lokasyon_list` push eder (10 dk'da bir,
+   `_push_islem_kaynaklar_if_due`). Backend `GET /api/islem/kaynak-liste?key=`.
+   Mobil `LokasyonSecici` bileşeni sayım + fiş ekranlarında chip'lerle sorar;
+   payload `lokasyon` → client.py apply_fis/apply_sayim mobil lokasyonu kullanır (FK doğrulamalı).
+3) **Banka kartları otomatik**: Havale (7/8) → `banka_hesap_list`, Pos (15) → `banka_pos_list`
+   (BANKA join'li SELECT, fallback'li). finans-islem türe göre otomatik liste gösterir;
+   kart_id sezgisi: KART→KART_ID→FK_KART→KASA→ID. Kullanıcı gerçek POS verisiyle DOĞRULAMALI.
+4) **Fiş + Finans birlikte**: apply_fis'te nakit→FINANS tur 1 (satış/alış iade) veya 2 (alış/satış iade),
+   kart→tur 15; borçlu/alacaklı ISLEM_TURLERI eşlemesiyle; apply_finans yeniden kullanılır
+   (fis_ref=FIS id, EXTERNAL_ID=queue id → mükerrer korumalı). Açık hesapta finans yazılmaz.
+   Eski hatalı inline FINANS bloğu kaldırıldı (KART_ALACAKLI=fis_id ve tür=47 yazıyordu).
+DİKKAT: search_replace bazı düzenlemeleri sessizce kaybetti bu oturumda — kritik
+değişikliklerden sonra grep ile doğrulama yapıldı; gelecekte de doğrulayın.
+
 ## Test Kimlikleri
 Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 1234567 yapıldı).

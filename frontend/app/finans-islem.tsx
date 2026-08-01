@@ -109,6 +109,39 @@ export default function FinansIslemScreen() {
     } catch {}
   }, [activeTenantId]);
 
+  // 2026-06 — Havale → BANKA_HESAP, Pos → BANKA_POS kartları OTOMATİK gelir
+  const [bankalar, setBankalar] = useState<any[]>([]);
+  const bankaKaynak = tur.kod === 15 ? 'banka_pos_list' : (tur.kod === 7 || tur.kod === 8) ? 'banka_hesap_list' : '';
+
+  const loadBankalar = useCallback(async (key: string) => {
+    try {
+      const r = await fetch(`${API_URL}/api/islem/kaynak-liste?tenant_id=${activeTenantId}&key=${key}`, { headers: authHeaders() });
+      const j = await r.json();
+      if (j.ok && Array.isArray(j.data)) {
+        const liste = j.data.map((b: any) => {
+          const kartId = Number(b.KART ?? b.KART_ID ?? b.FK_KART ?? b.KASA ?? b.ID) || 0;
+          const parcalar = [b.BANKA_ADI, b.HESAP_ADI ?? b.ADI ?? b.AD ?? b.TANIM ?? b.HESAP_NO, b.TIP ?? b.TUR]
+            .map((x: any) => (x == null ? '' : String(x).trim()))
+            .filter((x: string) => x && x !== '0' && x !== '1');
+          return {
+            kart_id: kartId,
+            ad: parcalar.join(' · ') || `Kart ${kartId}`,
+            tip: key === 'banka_pos_list' ? 'BANKA POS' : 'BANKA HESAP',
+          };
+        }).filter((b: any) => b.kart_id > 0);
+        setBankalar(liste);
+        return;
+      }
+    } catch {}
+    setBankalar([]);
+  }, [activeTenantId]);
+
+  useEffect(() => {
+    setKasa(null);
+    if (bankaKaynak) loadBankalar(bankaKaynak); else setBankalar([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bankaKaynak]);
+
   const loadIslemler = useCallback(async () => {
     try {
       const r = await fetch(`${API_URL}/api/islem/list?tenant_id=${activeTenantId}&limit=30`, { headers: authHeaders() });
@@ -435,12 +468,14 @@ export default function FinansIslemScreen() {
           <View style={[styles.sheet, { backgroundColor: colors.surface, borderColor: colors.border }]}>
             <Text style={[styles.sheetTitle, { color: colors.text }]}>{tur.kasaEtiket} Seç</Text>
             <ScrollView style={{ maxHeight: 300 }}>
-              {kasalar.length === 0 && (
+              {(bankaKaynak && bankalar.length > 0 ? bankalar : kasalar).length === 0 && (
                 <Text style={{ color: colors.textSecondary, fontSize: 12, padding: 16 }}>
-                  Kayıtlı kasa kartı yok — aşağıdan ERP12 kart ID&apos;si ile ekleyin.
+                  {bankaKaynak
+                    ? 'Banka kartları henüz gelmedi (POS client listeyi 10 dk\'da bir gönderir) — kayıtlı kasalardan seçin veya ekleyin.'
+                    : 'Kayıtlı kasa kartı yok — aşağıdan ERP12 kart ID\'si ile ekleyin.'}
                 </Text>
               )}
-              {kasalar.map((k) => (
+              {(bankaKaynak && bankalar.length > 0 ? bankalar : kasalar).map((k) => (
                 <TouchableOpacity
                   key={k.kart_id}
                   style={[styles.sheetRow, { borderBottomColor: colors.border }]}

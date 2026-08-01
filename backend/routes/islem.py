@@ -193,6 +193,7 @@ class FisCreate(BaseModel):
     kasa_ad: Optional[str] = None
     aciklama: Optional[str] = ""
     satirlar: list
+    lokasyon: Optional[int] = None           # Mobilde seçilen lokasyon (ERP LOKASYON.ID)
     fis_iskonto_oran: Optional[float] = 0    # Genel (fiş) iskonto %
     fis_iskonto_tutar: Optional[float] = 0   # Genel iskonto tutarı (₺; oran yerine)
     kdv_toplam: Optional[float] = None       # Mobilde hesaplanan toplam KDV
@@ -318,6 +319,7 @@ async def fis_create(body: FisCreate, current_user: dict = Depends(get_current_u
         "odeme_tipi": body.odeme_tipi,
         "kasa_id": body.kasa_id,
         "kasa_ad": body.kasa_ad,
+        "lokasyon": body.lokasyon,
         "satirlar": [s.dict() for s in satirlar],
         "satir_toplam": satir_toplam,
         "satir_iskonto_toplam": satir_iskonto_toplam,
@@ -395,6 +397,36 @@ async def sayim_create(body: SayimCreate, current_user: dict = Depends(get_curre
     logger.info(f"[islem] sayim id={sayim_id} kalem={len(satirlar)} miktar={toplam_miktar}")
     return {"ok": True, "id": sayim_id, "durum": "bekliyor",
             "toplam_kalem": len(satirlar), "toplam_miktar": toplam_miktar}
+
+
+_KAYNAK_KEYS = {"lokasyon_list", "banka_hesap_list", "banka_pos_list"}
+
+
+@router.get("/kaynak-liste")
+async def kaynak_liste(tenant_id: str, key: str, current_user: dict = Depends(get_current_user)):
+    """2026-06 — POS client'ın bastığı yardımcı listeler (lokasyon, banka hesap/pos).
+    Mobil: sayım/fiş lokasyon seçimi + havale/pos işlemlerinde banka kartı seçimi."""
+    if key not in _KAYNAK_KEYS:
+        raise HTTPException(status_code=400, detail="Geçersiz kaynak anahtarı")
+    pool = await get_data_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """SELECT data_json, synced_at FROM dataset_cache
+                   WHERE tenant_id=%s AND dataset_key=%s
+                   ORDER BY synced_at DESC LIMIT 1""",
+                (tenant_id, key),
+            )
+            row = await cur.fetchone()
+    if not row:
+        return {"ok": True, "data": [], "kaynak": key, "not": "POS client henüz listeyi göndermedi"}
+    try:
+        data = json.loads(row[0] or "[]")
+    except Exception:
+        data = []
+    if isinstance(data, dict):
+        data = data.get("rows") or data.get("result_sets", [[]])[0] or []
+    return {"ok": True, "data": data, "kaynak": key, "synced_at": str(row[1] or "")}
 
 
 @router.get("/list")

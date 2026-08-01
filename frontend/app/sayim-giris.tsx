@@ -19,6 +19,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useThemeStore } from '../src/store/themeStore';
 import { useAuthStore } from '../src/store/authStore';
+import LokasyonSecici, { Lokasyon } from '../src/components/LokasyonSecici';
 import { useDataSourceStore } from '../src/store/dataSourceStore';
 
 // Kamera web'de crash yapabiliyor — lazy/safe import (fis-giris deseni)
@@ -55,6 +56,7 @@ export default function SayimGirisScreen() {
   const [urunler, setUrunler] = useState<any[]>([]);
   const [urunBusy, setUrunBusy] = useState(false);
   const [showUrunSecim, setShowUrunSecim] = useState(false);
+  const [lokasyon, setLokasyon] = useState<Lokasyon | null>(null);
   // 2026-06 — Ürün seçince miktar soran dialog (kullanıcı isteği)
   const [miktarSor, setMiktarSor] = useState<any | null>(null);
   const [miktarStr, setMiktarStr] = useState('1');
@@ -189,7 +191,7 @@ export default function SayimGirisScreen() {
     try {
       const r = await fetch(`${API_URL}/api/islem/sayim-create`, {
         method: 'POST', headers: authHeaders(),
-        body: JSON.stringify({ tenant_id: activeTenantId, aciklama, satirlar }),
+        body: JSON.stringify({ tenant_id: activeTenantId, aciklama, satirlar, lokasyon: lokasyon?.id || null }),
       });
       const j = await r.json();
       if (!r.ok || !j.ok) throw new Error(j?.detail || 'Kaydedilemedi');
@@ -312,6 +314,9 @@ export default function SayimGirisScreen() {
               </TouchableOpacity>
             </View>
           ))}
+
+          <LokasyonSecici apiUrl={API_URL} tenantId={activeTenantId || ''} headers={authHeaders()}
+            value={lokasyon} onChange={setLokasyon} colors={colors} />
 
           <Text style={[styles.label, { color: colors.textSecondary }]}>AÇIKLAMA</Text>
           <TextInput style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
