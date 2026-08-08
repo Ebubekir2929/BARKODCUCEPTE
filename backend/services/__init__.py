@@ -86,7 +86,7 @@ async def init_patron_pool():
                 charset='utf8',
                 autocommit=True,
                 minsize=1,
-                maxsize=5,
+                maxsize=10,
                 pool_recycle=280,
                 connect_timeout=5,
             ), timeout=8)
@@ -117,7 +117,7 @@ async def init_data_pool():
             charset='utf8mb4',
             autocommit=True,
             minsize=1,
-            maxsize=5,
+            maxsize=15,
             pool_recycle=280,
             connect_timeout=5,
         ), timeout=8)
