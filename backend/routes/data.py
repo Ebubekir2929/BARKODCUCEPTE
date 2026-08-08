@@ -315,26 +315,35 @@ async def fetch_dataset(pool, tenant_id: str, dataset_key: str, filter_date: Opt
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             if filter_date:
-                # Fetch all records for this key and filter by date in Python
+                # 2026-06 — Önce SADECE hafif kolonları çek (blob YOK), tarihi
+                # Python'da eşle, sonra yalnız eşleşen kaydın blob'unu al.
+                # (Eski hali tüm günlerin MB'lık bloblarını taşıyordu — tünelde çok yavaş.)
                 await cur.execute("""
-                    SELECT data_json, row_count, synced_at, updated_at, params_json
+                    SELECT id, params_json
                     FROM dataset_cache 
                     WHERE tenant_id = %s AND dataset_key = %s
                     ORDER BY updated_at DESC
                 """, (tenant_id, dataset_key))
-                rows = await cur.fetchall()
-                
-                # Find the row matching the filter_date
-                row = None
-                for r in rows:
+                meta_rows = await cur.fetchall()
+
+                match_id = None
+                for rid, pjson in meta_rows:
                     try:
-                        params = json.loads(r[4]) if r[4] else {}
+                        params = json.loads(pjson) if pjson else {}
                         sdate_val = params.get('sdate', '')
                         if sdate_val and sdate_val.startswith(filter_date):
-                            row = r
+                            match_id = rid
                             break
                     except (json.JSONDecodeError, TypeError):
                         continue
+
+                row = None
+                if match_id is not None:
+                    await cur.execute("""
+                        SELECT data_json, row_count, synced_at, updated_at, params_json
+                        FROM dataset_cache WHERE id = %s
+                    """, (match_id,))
+                    row = await cur.fetchone()
             else:
                 # Get latest (real-time mode)
                 await cur.execute("""
@@ -509,21 +518,50 @@ async def get_dashboard_data(
             edate = sdate
         
         if sdate == edate:
-            # Single date
-            for key in dashboard_keys:
-                result[key] = await fetch_dataset(pool, tenant_id, key, sdate)
-                result[key].pop("params", None)
+            # Single date — 2026-06: tünel gecikmesine karşı PARALEL çekim
+            fetched = await asyncio.gather(
+                *[fetch_dataset(pool, tenant_id, key, sdate) for key in dashboard_keys]
+            )
+            for key, item in zip(dashboard_keys, fetched):
+                item.pop("params", None)
+                result[key] = item
         else:
-            # Date range - fetch ALL records once and filter/aggregate in Python
+            # Date range — 2026-06: önce hafif kolonlar (blob YOK), tarih aralığına
+            # uyan kayıtlar belirlenir, sonra sadece onların blob'ları çekilir.
+            key_ph = ",".join(["%s"] * len(dashboard_keys))
             async with pool.acquire() as conn:
                 async with conn.cursor() as cur:
-                    await cur.execute("""
-                        SELECT dataset_key, data_json, row_count, synced_at, updated_at, params_json
+                    await cur.execute(f"""
+                        SELECT id, dataset_key, params_json
                         FROM dataset_cache 
-                        WHERE tenant_id = %s
+                        WHERE tenant_id = %s AND dataset_key IN ({key_ph})
                         ORDER BY updated_at DESC
-                    """, (tenant_id,))
-                    all_rows = await cur.fetchall()
+                    """, (tenant_id, *dashboard_keys))
+                    meta_rows = await cur.fetchall()
+
+            match_ids = []
+            for rid, dk, pjson in meta_rows:
+                try:
+                    params = json.loads(pjson) if pjson else {}
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                sdate_val = params.get('sdate', '') if isinstance(params, dict) else ''
+                if not sdate_val:
+                    continue
+                if sdate <= sdate_val[:10] <= edate:
+                    match_ids.append(rid)
+
+            all_rows = []
+            if match_ids:
+                id_ph = ",".join(["%s"] * len(match_ids))
+                async with pool.acquire() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(f"""
+                            SELECT dataset_key, data_json, row_count, synced_at, updated_at, params_json
+                            FROM dataset_cache WHERE id IN ({id_ph})
+                            ORDER BY updated_at DESC
+                        """, tuple(match_ids))
+                        all_rows = await cur.fetchall()
             
             # Group rows by dataset_key, filtered by date range
             from collections import defaultdict
@@ -574,13 +612,15 @@ async def get_dashboard_data(
                     **meta,
                 }
     else:
-        # Single date or real-time
+        # Single date or real-time — 2026-06: PARALEL çekim
         filter_date = sdate if sdate else None
-        for key in dashboard_keys:
-            result[key] = await fetch_dataset(pool, tenant_id, key, filter_date)
-            # Remove params from response to reduce size
-            if "params" in result[key]:
-                del result[key]["params"]
+        fetched = await asyncio.gather(
+            *[fetch_dataset(pool, tenant_id, key, filter_date) for key in dashboard_keys]
+        )
+        for key, item in zip(dashboard_keys, fetched):
+            if "params" in item:
+                del item["params"]
+            result[key] = item
     
     # --- Fetch last week data for comparison ---
     try:
