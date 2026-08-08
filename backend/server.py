@@ -36,6 +36,23 @@ set_auth_db(db)
 # Create the main app without a prefix
 app = FastAPI()
 
+# 2026-08 — MySQL sunucusuna ulaşılamadığında net 503 mesajı (sonsuz bekleme
+# ve anlamsız 500 yerine). Kök neden: kullanıcının MySQL VPS'i yanıt vermeyebilir.
+from fastapi.responses import JSONResponse as _JSONResponse
+from fastapi import Request as _Request
+
+
+@app.exception_handler(RuntimeError)
+async def _runtime_error_handler(request: _Request, exc: RuntimeError):
+    msg = str(exc)
+    if "ulaşılamıyor" in msg:
+        return _JSONResponse(status_code=503, content={
+            "ok": False,
+            "detail": "Veritabanı sunucusuna şu anda ulaşılamıyor. Lütfen birazdan tekrar deneyin.",
+            "kod": "DB_UNREACHABLE",
+        })
+    return _JSONResponse(status_code=500, content={"ok": False, "detail": msg[:200]})
+
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
@@ -207,7 +224,11 @@ async def startup():
         except Exception as e:
             logging.error(f"Failed to start notification watcher: {e}")
 
-    asyncio.create_task(_init_pools_bg())
+    # 2026-08 — KRİTİK: task referansı saklanmalı! Referanssız create_task GC
+    # tarafından yarıda YOK EDİLİYORDU ("Task was destroyed but it is pending!")
+    # → havuzlar kurulamıyor, tüm istekler sonsuza dek askıda kalıyordu
+    # (kullanıcı: "kasacepteye erişemiyorum").
+    app.state.init_pools_task = asyncio.create_task(_init_pools_bg())
     logging.info("App startup complete; DB pools initializing in background.")
 
 

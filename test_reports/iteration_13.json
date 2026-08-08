@@ -1,0 +1,48 @@
+{
+  "summary": "Iteration 13 — Graceful degradation VERIFIED end-to-end. User's MySQL VPS (185.223.77.132:3306) confirmed unresponsive (TCP accepts, no MySQL handshake greeting — server-side outage on user's VPS, not fixable here). Backend fail-fast behavior works: 4/5 pytest tests PASSED. POST /api/auth/login correctly returns HTTP 503 with JSON {ok:false, detail:'Veritabanı sunucusuna şu anda ulaşılamıyor. Lütfen birazdan tekrar deneyin.', kod:'DB_UNREACHABLE'}. Circuit breaker excellent: repeated attempts return in 0.04–0.15s (attempt 1: 0.15s, attempt 2: 0.04s, attempt 3: 0.04s). Backend stays alive during login storms (GET /api/ = 0.12s, post-storm 0.04s, no zombies). Frontend (mobile viewport 390x844): login screen renders cleanly, credentials cakmak.ebubekir29@gmail.com/1234567 trigger a fast, user-friendly error modal ('Giriş Başarısız — Veritabanı sunucusuna şu anda ulaşılamıyor...') within ~6s — NO infinite spinner, NO blank page, NO console pageerror. All acceptance criteria from the review request met. One minor concern flagged below regarding the first probe after the 20s circuit-breaker window elapses.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/auth/login",
+        "issue": "When the 20s circuit-breaker cache (_FAIL_CACHE_SEC) expires, the very next request re-probes MySQL and blocks up to ~20s (wait_for(15s) + connect_timeout overhead) before returning 503. Subsequent requests within the new 20s window are instant again. So a user attempting login exactly at the reset boundary can experience one slow response every ~20-35s. Recommendation: reduce asyncio.wait_for timeout in services/__init__.py from 15s to 3-5s (and connect_timeout from 10s to 3s) so the periodic reset-probe becomes near-instant. Not a regression from prior fixes — the app is bounded and never hangs indefinitely — but worth tightening for perceived UX. Reference: /app/backend/services/__init__.py:35,46 and :63,74"
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter13_fail_fast.py",
+    "/app/test_reports/pytest/iter13_results.xml",
+    "/tmp/iter13_load.png",
+    "/tmp/iter13_after_login.png"
+  ],
+  "action_items": [
+    "OPTIONAL (UX polish): In /app/backend/services/__init__.py reduce `asyncio.wait_for(..., timeout=15)` to timeout=3 and aiomysql `connect_timeout=10` to 3 for both init_patron_pool and init_data_pool. This shrinks the worst-case probe from ~20s to ~3s at the circuit-breaker reset boundary. Circuit breaker cache (20s) can stay as-is.",
+    "COMMUNICATION: Notify the user that their VPS MySQL server (185.223.77.132:3306) is unreachable — TCP port accepts connections but the server never sends a MySQL handshake greeting. This is a server-side outage on their infrastructure (mysqld crashed, firewall change, or resource exhaustion). No fix possible from this environment; the app now degrades gracefully with a clear Turkish error message.",
+    "NO CODE CHANGE REQUIRED for the reported bug — the fixes E1 applied (task reference, wait_for, init locks, 20s failure circuit-breaker, RuntimeError handler → 503 DB_UNREACHABLE) all work as intended."
+  ],
+  "critical_code_review_comments": [
+    "services/__init__.py: init_patron_pool and init_data_pool both call aiomysql.create_pool with connect_timeout=10 wrapped in asyncio.wait_for(timeout=15). Since the MySQL handshake stalls (not TCP), aiomysql waits the full connect_timeout=10 for the auth handshake then wait_for(15) provides the outer bound. Consider dropping both to 3s for faster fail-fast.",
+    "services/__init__.py: The `_FAIL_CACHE_SEC = 20` circuit breaker constant is well-chosen but could be exposed via env var for tuning without code change.",
+    "server.py:231: `app.state.init_pools_task = asyncio.create_task(_init_pools_bg())` — the critical GC-safety fix is correctly applied and documented in comments.",
+    "server.py:45-54: Global RuntimeError → 503 handler is a good defensive net but relies on substring match 'ulaşılamıyor'. Consider raising a dedicated exception class (e.g. `DBUnreachableError(RuntimeError)`) and matching on isinstance instead of message content to prevent silent regressions if the message wording changes.",
+    "Deprecation warnings observed on web (non-blocking, informational): 'shadow* style props are deprecated. Use boxShadow' (react-native-web), 'props.pointerEvents is deprecated', 'Animated: useNativeDriver not supported on web'. These are expected on web preview and pre-existing."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter13_fail_fast.py (new — regression test suite for fail-fast + circuit breaker + backend liveness)"
+  ],
+  "success_rate": {
+    "backend": "80% (4/5 tests passed — the 1 'fail' is my >20s threshold on the first cold-probe attempt; behaviorally the endpoint STILL returned 503 correctly with kod=DB_UNREACHABLE, just slower than my strict assertion. Not a functional bug — see minor issue.)",
+    "frontend": "100% (login screen renders, error modal appears fast, no hang, no red screen)"
+  },
+  "seed_data_creation": "None — no writes to any live database. No /api/islem/* endpoints called (ERP queue safety respected).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "MySQL at 185.223.77.132:3306 is currently unreachable (TCP OK, no handshake). If it recovers, run: `python3 -c \"import socket,time;s=socket.socket();s.settimeout(5);s.connect(('185.223.77.132',3306));s.settimeout(3);print(s.recv(50)[:20])\"` — if bytes are returned, MySQL is back and full login flow should work (credentials cakmak.ebubekir29@gmail.com / 1234567, tenant d5587c87a7f9476fa82b83f40accd6c7). Circuit breaker auto-recovers on the next request after the 20s window elapses — NO backend restart needed. Reusable regression test at /app/backend/tests/test_iter13_fail_fast.py.",
+  "rca_of_issue": "ROOT CAUSE (confirmed by E1 and re-verified this iteration): User's remote MySQL server at 185.223.77.132:3306 is in a half-broken state — the TCP listener accepts connections (SYN-ACK completes in ~0.12s) but mysqld never writes the initial handshake greeting packet. Raw socket recv() times out. This is a server-side issue on the USER'S VPS (likely mysqld hung, out-of-memory, hitting max_connections, or an iptables/hosts.allow change). Fixable only by the user on their VPS (restart mysqld, check /var/log/mysql/error.log, verify slow queries, check disk/RAM). SECONDARY BUGS E1 FIXED (verified working this iteration): (1) `asyncio.create_task(_init_pools_bg())` now saved to `app.state.init_pools_task` so the task is not garbage-collected mid-flight (previously caused 'Task was destroyed but it is pending!' and every request hanging forever); (2) `asyncio.wait_for(..., timeout=15)` around `aiomysql.create_pool` prevents the pool init coroutine from blocking indefinitely; (3) `_FAIL_CACHE_SEC=20` circuit breaker in services/__init__.py short-circuits repeated attempts to ~0ms; (4) global RuntimeError → HTTP 503 handler in server.py returns clear Turkish JSON `{kod: DB_UNREACHABLE}` instead of a generic 500. MITIGATION FOR USER: contact them with the diagnosis; they must fix their MySQL VPS. The app now degrades gracefully — no infinite spinner, backend stays alive, error message is user-friendly."
+}
