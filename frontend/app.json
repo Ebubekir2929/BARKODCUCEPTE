@@ -2,7 +2,7 @@
   "expo": {
     "name": "Barkodcu Cepte",
     "slug": "barkodcu-cepte",
-    "version": "1.0.41",
+    "version": "1.0.42",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "barkodcucepte",
@@ -25,7 +25,7 @@
     },
     "android": {
       "package": "com.cakmakebubekir.barkodcucepte",
-      "versionCode": 45,
+      "versionCode": 46,
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
