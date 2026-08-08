@@ -10,6 +10,7 @@ TLS ile uzak 3308'e taşır. aiomysql yerel porta bağlanır.
 """
 import asyncio
 import logging
+import socket
 import ssl
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,22 @@ logger = logging.getLogger(__name__)
 LOCAL_TUNNEL_PORT = 13306
 _server = None
 _lock = asyncio.Lock()
+
+
+def _make_uplink_socket() -> socket.socket:
+    """DPI/DDoS korumasına dayanıklı uplink soketi:
+    - SO_KEEPALIVE: ölü bağlantıyı 60 sn içinde tespit eder (sonsuz askı yerine hata)
+    - TCP_NODELAY: küçük MySQL paketlerinde gecikmeyi azaltır"""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    for opt, val in (("TCP_KEEPIDLE", 30), ("TCP_KEEPINTVL", 10),
+                     ("TCP_KEEPCNT", 3), ("TCP_NODELAY", 1)):
+        try:
+            s.setsockopt(socket.IPPROTO_TCP, getattr(socket, opt), val)
+        except (AttributeError, OSError):
+            pass
+    s.setblocking(False)
+    return s
 
 
 async def _pipe(src: asyncio.StreamReader, dst: asyncio.StreamWriter):
@@ -52,12 +69,20 @@ async def ensure_tunnel(remote_host: str, remote_port: int) -> int:
         ctx.set_ciphers("AES256-SHA:AES128-SHA:@SECLEVEL=1")
 
         async def handle(client_r, client_w):
+            sock = _make_uplink_socket()
             try:
+                loop = asyncio.get_running_loop()
+                await asyncio.wait_for(loop.sock_connect(sock, (remote_host, remote_port)), timeout=10)
                 remote_r, remote_w = await asyncio.wait_for(
-                    asyncio.open_connection(remote_host, remote_port, ssl=ctx), timeout=10
+                    asyncio.open_connection(sock=sock, ssl=ctx, server_hostname="mysql-tls"),
+                    timeout=10,
                 )
             except Exception as exc:
                 logger.error(f"TLS tünel uplink hatası {remote_host}:{remote_port} -> {exc!r}")
+                try:
+                    sock.close()
+                except Exception:
+                    pass
                 try:
                     client_w.close()
                 except Exception:

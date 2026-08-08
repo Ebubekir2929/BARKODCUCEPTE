@@ -87,6 +87,7 @@ async def init_patron_pool():
                 autocommit=True,
                 minsize=1,
                 maxsize=5,
+                pool_recycle=280,
                 connect_timeout=5,
             ), timeout=8)
         except (asyncio.TimeoutError, OSError) as exc:
@@ -117,6 +118,7 @@ async def init_data_pool():
             autocommit=True,
             minsize=1,
             maxsize=5,
+            pool_recycle=280,
             connect_timeout=5,
         ), timeout=8)
         except (asyncio.TimeoutError, OSError) as exc:
