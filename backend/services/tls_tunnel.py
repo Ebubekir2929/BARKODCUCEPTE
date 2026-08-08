@@ -18,6 +18,9 @@ logger = logging.getLogger(__name__)
 LOCAL_TUNNEL_PORT = 13306
 _server = None
 _lock = asyncio.Lock()
+# 2026-06 — DDoS korumasını tetiklememek için aynı anda en fazla 2 yeni TLS
+# el sıkışması yapılır (burst halinde açılan uplink'ler black-hole ediliyordu).
+_connect_sem = asyncio.Semaphore(2)
 
 
 def _make_uplink_socket() -> socket.socket:
@@ -72,11 +75,12 @@ async def ensure_tunnel(remote_host: str, remote_port: int) -> int:
             sock = _make_uplink_socket()
             try:
                 loop = asyncio.get_running_loop()
-                await asyncio.wait_for(loop.sock_connect(sock, (remote_host, remote_port)), timeout=10)
-                remote_r, remote_w = await asyncio.wait_for(
-                    asyncio.open_connection(sock=sock, ssl=ctx, server_hostname="mysql-tls"),
-                    timeout=10,
-                )
+                async with _connect_sem:
+                    await asyncio.wait_for(loop.sock_connect(sock, (remote_host, remote_port)), timeout=10)
+                    remote_r, remote_w = await asyncio.wait_for(
+                        asyncio.open_connection(sock=sock, ssl=ctx, server_hostname="mysql-tls"),
+                        timeout=10,
+                    )
             except Exception as exc:
                 logger.error(f"TLS tünel uplink hatası {remote_host}:{remote_port} -> {exc!r}")
                 try:

@@ -519,9 +519,12 @@ async def get_dashboard_data(
         
         if sdate == edate:
             # Single date — 2026-06: tünel gecikmesine karşı PARALEL çekim
-            fetched = await asyncio.gather(
-                *[fetch_dataset(pool, tenant_id, key, sdate) for key in dashboard_keys]
-            )
+            # (en fazla 4 eşzamanlı — bağlantı patlamasını önler)
+            _sem = asyncio.Semaphore(4)
+            async def _fetch_one(k):
+                async with _sem:
+                    return await fetch_dataset(pool, tenant_id, k, sdate)
+            fetched = await asyncio.gather(*[_fetch_one(key) for key in dashboard_keys])
             for key, item in zip(dashboard_keys, fetched):
                 item.pop("params", None)
                 result[key] = item
@@ -612,11 +615,13 @@ async def get_dashboard_data(
                     **meta,
                 }
     else:
-        # Single date or real-time — 2026-06: PARALEL çekim
+        # Single date or real-time — 2026-06: PARALEL çekim (en fazla 4 eşzamanlı)
         filter_date = sdate if sdate else None
-        fetched = await asyncio.gather(
-            *[fetch_dataset(pool, tenant_id, key, filter_date) for key in dashboard_keys]
-        )
+        _sem2 = asyncio.Semaphore(4)
+        async def _fetch_one2(k):
+            async with _sem2:
+                return await fetch_dataset(pool, tenant_id, k, filter_date)
+        fetched = await asyncio.gather(*[_fetch_one2(key) for key in dashboard_keys])
         for key, item in zip(dashboard_keys, fetched):
             if "params" in item:
                 del item["params"]

@@ -132,7 +132,7 @@ _POS_FILES = {"client.py": "text/x-python", "sync.php": "application/octet-strea
 @app.get("/api/sistem-durum", include_in_schema=False)
 async def sistem_durum():
     import services as _svc
-    out = {"surum": "2026-06-08-poolfix-v2", "patron": None, "data": None}
+    out = {"surum": "2026-06-08-v3-staged-tls", "patron": None, "data": None}
     for ad in ("patron", "data"):
         p = getattr(_svc, f"{ad}_pool", None)
         if p is not None:
