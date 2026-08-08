@@ -523,7 +523,11 @@ async def get_dashboard_data(
             _sem = asyncio.Semaphore(4)
             async def _fetch_one(k):
                 async with _sem:
-                    return await fetch_dataset(pool, tenant_id, k, sdate)
+                    try:
+                        return await asyncio.wait_for(fetch_dataset(pool, tenant_id, k, sdate), timeout=20)
+                    except asyncio.TimeoutError:
+                        logger.warning(f"[dashboard] {k} zaman aşımı (20s) — boş dönülüyor")
+                        return {"data": [], "row_count": 0, "synced_at": None, "updated_at": None}
             fetched = await asyncio.gather(*[_fetch_one(key) for key in dashboard_keys])
             for key, item in zip(dashboard_keys, fetched):
                 item.pop("params", None)
@@ -620,7 +624,11 @@ async def get_dashboard_data(
         _sem2 = asyncio.Semaphore(4)
         async def _fetch_one2(k):
             async with _sem2:
-                return await fetch_dataset(pool, tenant_id, k, filter_date)
+                try:
+                    return await asyncio.wait_for(fetch_dataset(pool, tenant_id, k, filter_date), timeout=20)
+                except asyncio.TimeoutError:
+                    logger.warning(f"[dashboard] {k} zaman aşımı (20s) — boş dönülüyor")
+                    return {"data": [], "row_count": 0, "synced_at": None, "updated_at": None}
         fetched = await asyncio.gather(*[_fetch_one2(key) for key in dashboard_keys])
         for key, item in zip(dashboard_keys, fetched):
             if "params" in item:

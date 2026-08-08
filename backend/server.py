@@ -130,9 +130,9 @@ _POS_FILES = {"client.py": "text/x-python", "sync.php": "application/octet-strea
 
 # 2026-06 — Canlı teşhis: sürüm + havuz doluluk durumu (Railway hang debug)
 @app.get("/api/sistem-durum", include_in_schema=False)
-async def sistem_durum():
+async def sistem_durum(derin: int = 0):
     import services as _svc
-    out = {"surum": "2026-06-08-v3-staged-tls", "patron": None, "data": None}
+    out = {"surum": "2026-06-08-v4-derin", "patron": None, "data": None}
     for ad in ("patron", "data"):
         p = getattr(_svc, f"{ad}_pool", None)
         if p is not None:
@@ -142,6 +142,33 @@ async def sistem_durum():
         out["tunel_aktif"] = _tun is not None
     except Exception:
         out["tunel_aktif"] = False
+    if derin:
+        import asyncio as _aio
+        import time as _t
+        # Veri havuzundan bağlantı alıp SELECT 1 dene — nerede takıldığını ölçer
+        try:
+            t0 = _t.monotonic()
+            pool = await _aio.wait_for(_svc.get_data_pool(), timeout=10)
+            out["derin_pool_al"] = round(_t.monotonic() - t0, 2)
+            t0 = _t.monotonic()
+            conn = await _aio.wait_for(pool.acquire(), timeout=8)
+            out["derin_acquire"] = round(_t.monotonic() - t0, 2)
+            try:
+                t0 = _t.monotonic()
+                async with conn.cursor() as cur:
+                    await _aio.wait_for(cur.execute("SELECT 1"), timeout=8)
+                    await cur.fetchone()
+                out["derin_select1"] = round(_t.monotonic() - t0, 2)
+                t0 = _t.monotonic()
+                async with conn.cursor() as cur:
+                    await _aio.wait_for(cur.execute(
+                        "SELECT id, params_json FROM dataset_cache WHERE tenant_id='d5587c87a7f9476fa82b83f40accd6c7' AND dataset_key='hourly_data' ORDER BY updated_at DESC"), timeout=10)
+                    rows = await cur.fetchall()
+                out["derin_meta_sorgu"] = {"sure": round(_t.monotonic() - t0, 2), "satir": len(rows)}
+            finally:
+                pool.release(conn)
+        except Exception as exc:
+            out["derin_hata"] = f"{type(exc).__name__}: {exc}"
     return out
 
 
