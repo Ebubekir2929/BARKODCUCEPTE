@@ -26,6 +26,45 @@ class DBUnreachableError(RuntimeError):
     """MySQL sunucusuna ulaşılamadığında fırlatılır (503 handler yakalar)."""
 
 
+# ── 2026-06 — B Planı: direkt 3306 engelliyse otomatik TLS tüneli ──
+# Sağlayıcının SYN-proxy'si TCP'yi kabul edip MySQL greeting'i düşürüyor;
+# bu yüzden probe TCP connect ile yetinmez, greeting baytını da bekler.
+_endpoint_cache: dict = {}  # host -> (host, port, expires_monotonic)
+_ENDPOINT_TTL_SEC = 300
+
+
+async def _mysql_greeting_ok(host: str, port: int, timeout: float = 4.0) -> bool:
+    try:
+        r, w = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
+        try:
+            data = await asyncio.wait_for(r.read(5), timeout)
+            return len(data) > 0
+        finally:
+            w.close()
+    except Exception:
+        return False
+
+
+async def _resolve_mysql_endpoint(host: str) -> tuple:
+    """(host, port) döndürür: direkt 3306 sağlıklıysa onu, değilse TLS tünelini."""
+    cached = _endpoint_cache.get(host)
+    if cached and _time.monotonic() < cached[2]:
+        return cached[0], cached[1]
+    if await _mysql_greeting_ok(host, 3306):
+        ep = (host, 3306)
+    else:
+        tls_port = int(os.environ.get('MYSQL_TLS_PORT', '0') or 0)
+        if tls_port:
+            from .tls_tunnel import ensure_tunnel, LOCAL_TUNNEL_PORT
+            await ensure_tunnel(os.environ.get('MYSQL_TLS_HOST', host), tls_port)
+            logger.warning(f"MySQL direkt 3306 erişilemiyor — TLS tüneli kullanılıyor ({host})")
+            ep = ('127.0.0.1', LOCAL_TUNNEL_PORT)
+        else:
+            ep = (host, 3306)
+    _endpoint_cache[host] = (ep[0], ep[1], _time.monotonic() + _ENDPOINT_TTL_SEC)
+    return ep
+
+
 async def init_patron_pool():
     global patron_pool, _patron_last_fail
     async with _patron_lock:
@@ -36,9 +75,11 @@ async def init_patron_pool():
         # 2026-08 — wait_for: MySQL sunucusu TCP kabul edip el sıkışmayı
         # yanıtlamazsa istekler sonsuza dek asılı kalmasın (net hata dönsün).
         try:
+            _p_host, _p_port = await _resolve_mysql_endpoint(
+                os.environ.get('MYSQL_PATRON_HOST', '185.223.77.132'))
             patron_pool = await asyncio.wait_for(aiomysql.create_pool(
-                host=os.environ.get('MYSQL_PATRON_HOST', '185.223.77.132'),
-                port=3306,
+                host=_p_host,
+                port=_p_port,
                 user=os.environ.get('MYSQL_PATRON_USER', 'patron'),
                 password=os.environ.get('MYSQL_PATRON_PASS', ''),
                 db=os.environ.get('MYSQL_PATRON_DB', 'patron'),
@@ -64,9 +105,11 @@ async def init_data_pool():
         if (_time.monotonic() - _data_last_fail) < _FAIL_CACHE_SEC:
             raise DBUnreachableError("MySQL (kasacepteweb) sunucusuna ulaşılamıyor — kısa süre önce deneme başarısız oldu")
         try:
+            _d_host, _d_port = await _resolve_mysql_endpoint(
+                os.environ.get('MYSQL_DATA_HOST', '185.223.77.132'))
             data_pool = await asyncio.wait_for(aiomysql.create_pool(
-            host=os.environ.get('MYSQL_DATA_HOST', '185.223.77.132'),
-            port=3306,
+            host=_d_host,
+            port=_d_port,
             user=os.environ.get('MYSQL_DATA_USER', 'kceptetransfer'),
             password=os.environ.get('MYSQL_DATA_PASS', ''),
             db=os.environ.get('MYSQL_DATA_DB', 'kasacepteweb'),
