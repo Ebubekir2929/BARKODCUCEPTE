@@ -1,27 +1,20 @@
 # Test Credentials
 
 ## MySQL Users (patron database - LIVE)
+
+### Ana hesap (restoran)
+- **Email**: cakmak.ebubekir29@gmail.com
+- **Password**: 1234567
+- **Tenant ID**: d5587c87a7f9476fa82b83f40accd6c7 (Merkez)
+- **Business Type**: restoran
+
+### İkinci hesap (normal)
 - **Email**: cakmak_ebubekir@hotmail.com
 - **Username**: berk
 - **Password**: admin
-- **Tenant ID**: (none)
 - **Business Type**: normal
-- **License**: 2026-03-30 → 2027-03-30
 
-## MySQL Admin User (with tenant_id) — USE THIS FOR REPORT TESTING
-- **Email**: cakmak.ebubekir29@gmail.com
-- **Username**: admin
-- **Tenant ID**: d5587c87a7f9476fa82b83f40accd6c7
-- **Business Type**: restoran (has_tables=1)
-- **Password**: 1234567 (SHA1 verified 2026-07 — user changed it from 123456; DO NOT overwrite in prod DB)
-
-## 2026-05-21 — Apple App Store Reviewer Demo Account
-- **Email**: apple.review@barkodcucepte.com
-- **Username**: applereview
-- **Password**: appletest2026
-- **Tenant ID**: demo_apple_review
-- **Business Type**: restoran
-- **Purpose**: Exposed to Apple App Review for guideline 5.1.1(v) compliance verification.
-  Reviewer can test account deletion flow: Settings → "Hesabımı Sil" → password + "SİL"
-- **License**: 1 year auto (2026-05-21 → 2027-05-21)
-
+## DB Erişim Notu (2026-06)
+- Poyraz Hosting DDoS koruması (SYN-proxy) bazı IP'lerden 3306'yı bozuyor.
+- Backend otomatik: önce direkt 3306 dener (greeting probe), olmazsa TLS tüneli
+  (sunucuda stunnel :3308 → 127.0.0.1:3306) kullanır. Bkz: services/tls_tunnel.py

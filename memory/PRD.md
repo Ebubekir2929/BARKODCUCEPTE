@@ -123,3 +123,9 @@ yeniden başlatmalı). Bunu kötüleştiren 2 backend bug'ı düzeltildi:
 
 ## Test Kimlikleri
 Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 1234567 yapıldı).
+
+## 2026-06 (Fork) — DB Erişim Krizi Çözümü + client.py düzeltmesi
+- client.py: eksik `_push_islem_kaynaklar_if_due` metodu eklendi (lokasyon_list/banka_hesap_list/banka_pos_list'i 30 dk'da bir dataset_cache'e basar). İndirme: `/api/pos-dosya/client.py`
+- KÖK NEDEN BULUNDU: Poyraz Hosting DDoS koruması (SYN-proxy) workspace IP'sinden gelen sunucu-önce-konuşan protokolleri (MySQL 3306, SSH 22) bozuyordu; HTTP çalışıyordu. Fail2Ban/max_connections/iptables DEĞİLDİ.
+- B PLANI UYGULANDI: Sunucuda stunnel (:3308 TLS → 127.0.0.1:3306, systemd: stunnel-mysql, ciphers AES256-SHA TLS1.2). Backend'de `services/tls_tunnel.py` — otomatik: direkt 3306 greeting-probe başarısızsa yerel 127.0.0.1:13306 TLS tüneli. .env: MYSQL_TLS_HOST/MYSQL_TLS_PORT=3308.
+- Doğrulandı: login (her iki hesap), /api/islem/list gerçek veri, frontend yükleniyor. Kuyruk #21 "aktarildi" (FK sorunları da çözülmüş).
