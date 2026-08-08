@@ -1053,6 +1053,17 @@ export default function SettingsScreen() {
 
             <TouchableOpacity
               style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}
+              onPress={() => router.push('/sistem-saglik')}
+            >
+              <View style={styles.menuItemLeft}>
+                <Ionicons name="pulse-outline" size={22} color={colors.primary} />
+                <Text style={[styles.menuItemLabel, { color: colors.text }]}>Sistem Sağlığı</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}
               onPress={handleClearCache}
             >
               <View style={styles.menuItemLeft}>

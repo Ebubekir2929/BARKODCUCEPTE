@@ -63,7 +63,7 @@ export default function DashboardScreen() {
   });
 
   // Use live data hook with filter support (must be after filters state)
-  const { data: sourceData, isLoading: dataLoading, isRefreshing: dataRefreshing, error: dataError, lastSynced, refresh: refreshData, isLive, isFilterActive: isDataFiltered } = useLiveData(filters, { paused: showFilterModal });
+  const { data: sourceData, isLoading: dataLoading, isRefreshing: dataRefreshing, error: dataError, lastSynced, isOffline: dataOffline, cachedAt: dataCachedAt, refresh: refreshData, isLive, isFilterActive: isDataFiltered } = useLiveData(filters, { paused: showFilterModal });
 
   // User-configurable auto-refresh cadence (Settings → "Veri Yenileme Sıklığı")
   const refreshInterval = usePrefsStore((s) => s.refreshInterval);
@@ -814,13 +814,15 @@ export default function DashboardScreen() {
       {isLive && (
         <View style={[styles.liveIndicator, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
           <View style={styles.liveIndicatorLeft}>
-            <View style={[styles.liveDot, { backgroundColor: dataError ? '#EF4444' : '#10B981' }]} />
-            <Text style={[styles.liveText, { color: dataError ? '#EF4444' : '#10B981' }]}>
+            <View style={[styles.liveDot, { backgroundColor: dataError ? '#EF4444' : dataOffline ? '#F59E0B' : '#10B981' }]} />
+            <Text style={[styles.liveText, { color: dataError ? '#EF4444' : dataOffline ? '#F59E0B' : '#10B981' }]}>
               {dataLoading
                 ? t('updating')
                 : dataError
                   ? t('connection_error')
-                  : refreshInterval === 0
+                  : dataOffline
+                    ? `Çevrimdışı · Son veriler${dataCachedAt ? ` (${new Date(dataCachedAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })})` : ''}`
+                    : refreshInterval === 0
                     ? 'Manuel · Canlı'
                     : refreshInterval < 60
                       ? `Canlı Veri · ${refreshInterval} sn`

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '../store/authStore';
 import { useDataSourceStore } from '../store/dataSourceStore';
 import {
@@ -352,6 +353,9 @@ export function useLiveData(filter?: DashboardFilter, options?: { paused?: boole
   const lastFilterRef = useRef<string>('');
   const [error, setError] = useState<string | null>(null);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
+  // 2026-06 — Çevrimdışı mod: sunucuya ulaşılamazsa son başarılı veri gösterilir
+  const [isOffline, setIsOffline] = useState(false);
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hasLoadedOnce = useRef(false);
 
@@ -567,6 +571,8 @@ export function useLiveData(filter?: DashboardFilter, options?: { paused?: boole
       
       setData(transformed);
       hasLoadedOnce.current = true;
+      setIsOffline(false);
+      setCachedAt(null);
 
       const syncTimes = Object.values(apiData)
         .map((v: any) => v?.synced_at)
@@ -574,10 +580,37 @@ export function useLiveData(filter?: DashboardFilter, options?: { paused?: boole
         .sort()
         .reverse();
       if (syncTimes.length > 0) setLastSynced(syncTimes[0] as string);
+
+      // 2026-06 — Son başarılı veriyi cihaza kaydet (çevrimdışı yedek)
+      try {
+        await AsyncStorage.setItem(`dash_offline:${tenantId}`, JSON.stringify({
+          filterKey: currentFilterKey,
+          savedAt: new Date().toISOString(),
+          lastSynced: syncTimes[0] || null,
+          transformed,
+        }));
+      } catch {}
     } catch (err: any) {
       // AbortError is expected when tenant switches — silently ignore
       if (err?.name === 'AbortError' || ctrl.signal.aborted) return;
       console.error('Dashboard fetch error:', err);
+      // 2026-06 — Çevrimdışı yedek: sunucuya ulaşılamıyorsa son kaydedilen
+      // veriyi göster; kullanıcı boş ekran yerine son bilinen rakamları görür.
+      try {
+        const raw = await AsyncStorage.getItem(`dash_offline:${tenantId}`);
+        if (raw) {
+          const cached = JSON.parse(raw);
+          if (cached?.transformed && cached.filterKey === currentFilterKey) {
+            setData(cached.transformed);
+            hasLoadedOnce.current = true;
+            setIsOffline(true);
+            setCachedAt(cached.savedAt || null);
+            if (cached.lastSynced) setLastSynced(cached.lastSynced);
+            setError(null);
+            return;
+          }
+        }
+      } catch {}
       setError(err.message || 'Veri çekilemedi');
     } finally {
       if (!ctrl.signal.aborted) {
@@ -612,6 +645,8 @@ export function useLiveData(filter?: DashboardFilter, options?: { paused?: boole
     isRefreshing,
     error,
     lastSynced,
+    isOffline,
+    cachedAt,
     refresh: fetchDashboard,
     isLive: !!activeTenantId() && !isFilterActive,
     isFilterActive,
