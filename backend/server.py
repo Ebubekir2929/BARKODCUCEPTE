@@ -127,6 +127,25 @@ async def play_assets(filename: str):
 # 2026-06 — POS entegrasyon dosyaları (client.py / sync.php) indirme
 _POS_FILES = {"client.py": "text/x-python", "sync.php": "application/octet-stream"}
 
+
+# 2026-06 — Canlı teşhis: sürüm + havuz doluluk durumu (Railway hang debug)
+@app.get("/api/sistem-durum", include_in_schema=False)
+async def sistem_durum():
+    import services as _svc
+    out = {"surum": "2026-06-08-poolfix-v2", "patron": None, "data": None}
+    for ad in ("patron", "data"):
+        p = getattr(_svc, f"{ad}_pool", None)
+        if p is not None:
+            out[ad] = {"acik": p.size, "bos": p.freesize, "min": p.minsize, "max": p.maxsize}
+    try:
+        from services.tls_tunnel import _server as _tun
+        out["tunel_aktif"] = _tun is not None
+    except Exception:
+        out["tunel_aktif"] = False
+    return out
+
+
+
 @app.get("/api/pos-dosya/{filename}", include_in_schema=False)
 async def pos_dosya(filename: str):
     if filename not in _POS_FILES:
