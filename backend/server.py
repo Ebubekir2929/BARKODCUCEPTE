@@ -44,14 +44,14 @@ from fastapi import Request as _Request
 
 @app.exception_handler(RuntimeError)
 async def _runtime_error_handler(request: _Request, exc: RuntimeError):
-    msg = str(exc)
-    if "ulaşılamıyor" in msg:
+    from services import DBUnreachableError as _DBErr
+    if isinstance(exc, _DBErr):
         return _JSONResponse(status_code=503, content={
             "ok": False,
             "detail": "Veritabanı sunucusuna şu anda ulaşılamıyor. Lütfen birazdan tekrar deneyin.",
             "kod": "DB_UNREACHABLE",
         })
-    return _JSONResponse(status_code=500, content={"ok": False, "detail": msg[:200]})
+    return _JSONResponse(status_code=500, content={"ok": False, "detail": str(exc)[:200]})
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")

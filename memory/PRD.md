@@ -108,5 +108,18 @@ POS istemcisi çekip ERP12'ye INSERT eder. Uygulama ERP'ye ASLA doğrudan yazmaz
 DİKKAT: search_replace bazı düzenlemeleri sessizce kaybetti bu oturumda — kritik
 değişikliklerden sonra grep ile doğrulama yapıldı; gelecekte de doğrulayın.
 
+## Erişim Kesintisi RCA — 2026-08-08 (Iteration 13)
+KÖK NEDEN: Kullanıcının MySQL VPS'i (185.223.77.132:3306) TCP kabul edip MySQL
+greeting paketini GÖNDERMİYOR (sunucu tarafı arıza — kullanıcı VPS'te mysqld'yi
+yeniden başlatmalı). Bunu kötüleştiren 2 backend bug'ı düzeltildi:
+1) server.py startup: referanssız `asyncio.create_task(_init_pools_bg())` GC
+   tarafından yok ediliyordu ("Task was destroyed") → `app.state.init_pools_task`.
+2) services/__init__.py: pool init'e kilit + `asyncio.wait_for(8s)` +
+   `connect_timeout=5` + 20 sn devre kesici (`_FAIL_CACHE_SEC`) eklendi;
+   `DBUnreachableError` → server.py global handler HTTP 503 `kod: DB_UNREACHABLE`
+   ("Veritabanı sunucusuna şu anda ulaşılamıyor..."). MySQL dönünce otomatik
+   toparlar (restart gerekmez). Test: iteration_13.json ✓ (login 503 ~0.04-0.15s,
+   frontend hızlı hata modali, sonsuz spinner yok).
+
 ## Test Kimlikleri
 Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 1234567 yapıldı).

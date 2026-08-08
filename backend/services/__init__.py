@@ -22,13 +22,17 @@ _patron_last_fail = 0.0
 _data_last_fail = 0.0
 
 
+class DBUnreachableError(RuntimeError):
+    """MySQL sunucusuna ulaşılamadığında fırlatılır (503 handler yakalar)."""
+
+
 async def init_patron_pool():
     global patron_pool, _patron_last_fail
     async with _patron_lock:
         if patron_pool is not None:
             return patron_pool
         if (_time.monotonic() - _patron_last_fail) < _FAIL_CACHE_SEC:
-            raise RuntimeError("MySQL (patron) sunucusuna ulaşılamıyor — kısa süre önce deneme başarısız oldu")
+            raise DBUnreachableError("MySQL (patron) sunucusuna ulaşılamıyor — kısa süre önce deneme başarısız oldu")
         # 2026-08 — wait_for: MySQL sunucusu TCP kabul edip el sıkışmayı
         # yanıtlamazsa istekler sonsuza dek asılı kalmasın (net hata dönsün).
         try:
@@ -42,12 +46,12 @@ async def init_patron_pool():
                 autocommit=True,
                 minsize=1,
                 maxsize=5,
-                connect_timeout=10,
-            ), timeout=15)
+                connect_timeout=5,
+            ), timeout=8)
         except (asyncio.TimeoutError, OSError) as exc:
             _patron_last_fail = _time.monotonic()
             logger.error(f"patron MySQL pool init BAŞARISIZ: {exc!r}")
-            raise RuntimeError("MySQL (patron) sunucusuna ulaşılamıyor") from exc
+            raise DBUnreachableError("MySQL (patron) sunucusuna ulaşılamıyor") from exc
     logger.info("patron MySQL pool initialized")
     return patron_pool
 
@@ -58,7 +62,7 @@ async def init_data_pool():
         if data_pool is not None:
             return data_pool
         if (_time.monotonic() - _data_last_fail) < _FAIL_CACHE_SEC:
-            raise RuntimeError("MySQL (kasacepteweb) sunucusuna ulaşılamıyor — kısa süre önce deneme başarısız oldu")
+            raise DBUnreachableError("MySQL (kasacepteweb) sunucusuna ulaşılamıyor — kısa süre önce deneme başarısız oldu")
         try:
             data_pool = await asyncio.wait_for(aiomysql.create_pool(
             host=os.environ.get('MYSQL_DATA_HOST', '185.223.77.132'),
@@ -70,12 +74,12 @@ async def init_data_pool():
             autocommit=True,
             minsize=1,
             maxsize=5,
-            connect_timeout=10,
-        ), timeout=15)
+            connect_timeout=5,
+        ), timeout=8)
         except (asyncio.TimeoutError, OSError) as exc:
             _data_last_fail = _time.monotonic()
             logger.error(f"kasacepteweb MySQL pool init BAŞARISIZ: {exc!r}")
-            raise RuntimeError("MySQL (kasacepteweb) sunucusuna ulaşılamıyor") from exc
+            raise DBUnreachableError("MySQL (kasacepteweb) sunucusuna ulaşılamıyor") from exc
     logger.info("kasacepteweb MySQL pool initialized")
     return data_pool
 
