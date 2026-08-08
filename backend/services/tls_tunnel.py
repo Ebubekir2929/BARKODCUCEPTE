@@ -43,9 +43,13 @@ async def ensure_tunnel(remote_host: str, remote_port: int) -> int:
         if _server is not None:
             return LOCAL_TUNNEL_PORT
 
-        ctx = ssl.create_default_context()
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE  # sunucudaki self-signed stunnel sertifikası
+        # Sunucudaki stunnel 4.56 (OpenSSL 1.0.2) ile ortak şifre: TLS1.2 + RSA-AES
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.maximum_version = ssl.TLSVersion.TLSv1_2
+        ctx.set_ciphers("AES256-SHA:AES128-SHA:@SECLEVEL=1")
 
         async def handle(client_r, client_w):
             try:
