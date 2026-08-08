@@ -124,6 +124,19 @@ async def play_assets(filename: str):
     return FileResponse(str(fp), media_type=media, filename=fp.name)
 
 
+# 2026-06 — POS entegrasyon dosyaları (client.py / sync.php) indirme
+_POS_FILES = {"client.py": "text/x-python", "sync.php": "application/octet-stream"}
+
+@app.get("/api/pos-dosya/{filename}", include_in_schema=False)
+async def pos_dosya(filename: str):
+    if filename not in _POS_FILES:
+        return HTMLResponse("<h3>Bulunamadı</h3>", status_code=404)
+    fp = Path("/app/pos_entegrasyon") / filename
+    if not fp.exists():
+        return HTMLResponse("<h3>Dosya yok</h3>", status_code=404)
+    return FileResponse(str(fp), media_type=_POS_FILES[filename], filename=filename)
+
+
 @app.get("/api/play-assets", response_class=HTMLResponse, include_in_schema=False)
 async def play_assets_index():
     """Tiny HTML index page listing all play-assets files."""

@@ -5686,9 +5686,59 @@ SELECT TOP {limit}
 
 
     # ─────────────── Mobil İşlem Kuyruğu — ERP12 aktarım metotları ───────────────
+    def _push_islem_kaynaklar_if_due(self) -> None:
+        """2026-06 — Mobilin lokasyon/banka seçimleri için kaynak listelerini
+        (lokasyon_list, banka_hesap_list, banka_pos_list) 30 dakikada bir web'e basar.
+        Herhangi bir hata islem kuyruğu akışını bozmaz."""
+        now = time.time()
+        if now - getattr(self, "_islem_kaynaklar_last_push", 0) < 1800:
+            return
+        self._islem_kaynaklar_last_push = now
+        try:
+            conn = self.get_connection()
+        except Exception as exc:
+            self.println(f"islem kaynak: ERP bağlantısı kurulamadı -> {exc}")
+            return
+        try:
+            kaynaklar = {
+                "lokasyon_list": ["LOKASYON"],
+                "banka_hesap_list": ["BANKA_HESAP", "BANKA_HESAPLAR", "BANKA_HESAPLARI"],
+                "banka_pos_list": ["BANKA_POS", "BANKA_POSLAR", "BANKA_POS_TANIM"],
+            }
+            for dataset_key, tablolar in kaynaklar.items():
+                rows = None
+                for tbl in tablolar:
+                    try:
+                        rows = self.execute_query(conn, f"SELECT TOP 1000 * FROM {tbl}")
+                        break
+                    except Exception:
+                        continue
+                if rows is None:
+                    self.println(f"islem kaynak: {dataset_key} tablosu bulunamadı ({'/'.join(tablolar)})")
+                    continue
+                try:
+                    self._price_update_post({
+                        "action": "dataset_push",
+                        "dataset_key": dataset_key,
+                        "params": {},
+                        "data": rows,
+                        "data_hash": hash_obj(rows),
+                    }, timeout=120)
+                    self.println(f"islem kaynak: {dataset_key} güncellendi ({len(rows)} satır)")
+                except Exception as exc:
+                    self.println(f"islem kaynak: {dataset_key} gönderilemedi -> {exc}")
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     def process_pending_islemler(self):
         # 2026-06 — Kaynak listeleri (lokasyon/banka) periyodik olarak web'e basılır
-        self._push_islem_kaynaklar_if_due()
+        try:
+            self._push_islem_kaynaklar_if_due()
+        except Exception as exc:
+            self.println(f"islem kaynak push atlandı: {exc}")
         resp = self._price_update_post({"action": "islem_poll", "limit": 50}, timeout=60)
         items = resp.get("items", []) if isinstance(resp, dict) else []
         if not items:
