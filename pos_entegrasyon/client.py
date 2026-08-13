@@ -5178,7 +5178,23 @@ SELECT TOP {limit}
                 try:
                     if dataset_key == "fis_gunluk_bildirim_feed":
                         self.println(f"fis_gunluk_bildirim_feed request params={json.dumps(params, ensure_ascii=False)}")
-                    data = self.execute_dataset(defn, params)
+                    # 2026-06 — rap_filtre_lookup: Kaynak boşsa prosedür veri döndürmez;
+                    # tüm kaynakları tek tek okuyup BİRLEŞTİRİLMİŞ sonucu döndür.
+                    if dataset_key == "rap_filtre_lookup" and not str(params.get("Kaynak", "") or "").strip():
+                        data = []
+                        for _kaynak in RAP_FILTER_LOOKUP_SOURCES:
+                            try:
+                                _rows = self.execute_dataset(defn, {"Kaynak": _kaynak, "Q": ""})
+                                for _r in (_rows or []):
+                                    if isinstance(_r, dict):
+                                        _item = dict(_r)
+                                        _item["Kaynak"] = _kaynak
+                                        _item["KAYNAK"] = _kaynak
+                                        data.append(_item)
+                            except Exception as _exc:
+                                self.println(f"rap_filtre_lookup request kaynak hata: {_kaynak} -> {_exc}")
+                    else:
+                        data = self.execute_dataset(defn, params)
                     row_count = normalize_row_count(data)
                     if dataset_key == "fis_gunluk_bildirim_feed":
                         self.println(f"fis_gunluk_bildirim_feed SQL sonucu={row_count} kayıt")

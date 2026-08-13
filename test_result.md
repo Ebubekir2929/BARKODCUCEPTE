@@ -2566,3 +2566,15 @@ agent_communication:
     reports.tsx (rapor sonuç reportLoading). Spinner'lar kaldırıldı.
   - Self-test: cari ekstrede önbelleksiz aralık (2025-02) yenilendi → skeleton
     satırları ekran görüntüsüyle doğrulandı ✓; cache'li açılış anında geldi (SWR ✓).
+
+## 2026-06 (fork) — BUG FIX: Rapor filtreleri gelmiyor (tenant c918a648...)
+  - Kök neden: 9 tenant'ta eski client.py, RAP_FILTRE_LOOKUP'u Kaynak="" ile çağırıp
+    boş [] sonucu dataset_cache'e basıyordu → filtre dropdown'ları boş.
+  - Fix 1 (sync.php): save_dataset_cache'e KOŞULSUZ guard — rap_filtre_lookup +
+    row_count<=0 asla yazılmaz (skipped_empty_overwrite). MERKEZI dosya, kullanıcı
+    hosting'e yükleyince TÜM müşteriler korunur.
+  - Fix 2 (client.py): process_pending_requests'te rap_filtre_lookup + boş Kaynak
+    → 36 kaynak tek tek okunup birleştirilmiş sonuç döner (Kaynak/KAYNAK etiketli).
+  - Fix 3: c918a648 tenant'ının boş [] satırı silindi.
+  - testing_agent iter 14 (11/11) + iter 15 (16/16) PASS. VERIFIED ✅
+  - Kalıcı çözüm: müşteriye yeni client.py + hosting'e yeni sync.php.

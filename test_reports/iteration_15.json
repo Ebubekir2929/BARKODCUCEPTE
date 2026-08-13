@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 15 — All three iter-14→15 changes VERIFIED. (1) sync.php save_dataset_cache (lines 419-522) — brace/paren counts balanced 9/9 and 40/40; unconditional guard at lines 437-445 correctly returns skipped_empty_overwrite for rap_filtre_lookup with row_count<=0 BEFORE any UPDATE/INSERT — for both existing-row and brand-new-tenant cases; normal UPDATE branch (447-466) and INSERT branch (467-476) for other dataset keys remain intact; snapshot block (478-508) unchanged and reached via full return path. (2) POST /api/data/report-filter-options for tenant c918a648766449e28399ac909cc3236d source=LOKASYON returns 200 in <1s with data=[] (in-memory cache serves []; acceptable per review). Also PERSONEL/FIS_TURU/CARI all return 200 with empty list. Repeat call <10s (no hanging POS on-demand). (3) MySQL SELECT-only confirms tenant c918a648 has NO rap_filtre_lookup row in dataset_cache — deletion still in effect. Regression clean: healthy tenant d5587c... LOKASYON returns 740-row filtered list with Kaynak=LOKASYON tag; healthy row (id=2678, row_count=740, dj_len=53345) still present in DB; /api/sistem-durum 200 with surum field; auth login works. Empty-blob tenant 6de69d3b... (data_json='[]', row_count=0, id=117663) still graceful. Pytest 16/16 PASS in 11.99s.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_report_filter_options.py",
+    "/app/test_reports/pytest/iter15_results.xml"
+  ],
+  "action_items": [
+    "NO CODE CHANGES REQUIRED. Bug fully mitigated: (a) DB row for c918a648 deleted, (b) sync.php unconditional guard prevents any old client from re-installing an empty blob, (c) backend endpoint degrades gracefully (200 + data=[]) via _RAP_DENY on missing cache.",
+    "OPERATIONAL: Watch dataset_cache for tenant c918a648 — if a new row_count=0 rap_filtre_lookup row appears, the customer has NOT yet deployed the new sync.php on their POS server (their old client re-pushed but the guard on THEIR server did not fire because it's still old code). If new row_count>0 row appears → customer upgraded and re-synced healthy data.",
+    "COMMUNICATION: Ask customer c918a648 to (i) pull latest sync.php on their POS host, (ii) restart client.py so it re-executes RAP_FILTRE_LOOKUP for each of the 36 sources with new special-case merge logic. That will replace the (currently absent) row with a healthy blob."
+  ],
+  "critical_code_review_comments": [
+    "sync.php:419-522 save_dataset_cache — Static review CLEAN. Brace/paren counts balanced (9/9, 40/40). Function order: paramsHash calc → SELECT existing → NEW UNCONDITIONAL GUARD (lines 437-445) for rap_filtre_lookup+row_count<=0 (returns skipped_empty_overwrite BEFORE any writes; handles both branches: existing-row returns id, no-row returns 0/0) → normal UPDATE/INSERT branches → dataset_snapshots UPDATE/INSERT → update_existing_requests_from_cache → return array. Guard fires ONLY for rap_filtre_lookup so no regression for other datasets (fis_gunluk_bildirim_feed, extre_fis, etc.).",
+    "sync.php:440-445 guard — Correctly checks $rowCount which is derived by normalize_row_count($data) at line 426. Both count([]) and count of empty arrays are 0, so [] payload correctly triggers skip. Guard runs UNCONDITIONALLY (no `if ($existing)` gating) which closes the previous defense-in-depth gap for brand-new tenants. Returns short-circuit prevents snapshot write and sync_requests update — which is the desired behavior (no snapshot revision bump on ignored payload).",
+    "backend/routes/data.py:3073-3141 (unchanged since iter14) — _RAP_DENY set correctly prevents POS on-demand fallthrough for rap_filtre_lookup; missing-cache path returns empty data list gracefully. In-memory 30-min fresh cache may serve last-seen [] blob for c918a648 until TTL expiry — this is documented in the review request and acceptable.",
+    "client.py:5183 special-case (unchanged since iter14) — iterates all 36 RAP_FILTER_LOOKUP_SOURCES, tags Kaynak+KAYNAK on each row, merges. Confirmed no drift by inspecting file timestamp / test-run behavior."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_report_filter_options.py — extended iter14 suite with TestDeletedRowTenant (3 tests) and TestDatasetCacheRowAbsence (2 direct MySQL SELECT tests); no duplication of iter14 tests"
+  ],
+  "success_rate": {
+    "backend": "100% (16/16 pytest passed in 11.99s)",
+    "frontend": "skipped (per review request — backend only)"
+  },
+  "seed_data_creation": "None — SELECT-only reads via public API and via pymysql direct read. No writes to any live database.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Reusable suite: /app/backend/tests/test_report_filter_options.py (16 tests, ~12s). Three tenants under test: HEALTHY_TENANT=d5587c... (740-row healthy blob), EMPTY_TENANT=6de69d3b... (row_count=0, dj_len=2 '[]' — leftover), DELETED_ROW_TENANT=c918a648... (row deleted from dataset_cache). If any regression surfaces, first re-run this suite. If TestDatasetCacheRowAbsence.test_no_rap_filtre_lookup_row_for_deleted_tenant starts failing with a new empty row, it means customer's old POS client is still pushing (guard on their server not yet deployed) — that is NOT a backend code bug, it's a deployment/comms issue for the customer.",
+  "rca_of_issue": "Original bug (customer c918a648): user reported empty filter dropdowns on report screen because their dataset_cache.rap_filtre_lookup row held '[]' (row_count=0) — pushed by an old client.py that called the stored proc with Kaynak='' and immediately synced the empty result via sync.php save_dataset_cache. Fix layers verified this iteration: (1) sync.php guard now UNCONDITIONALLY returns skipped_empty_overwrite for rap_filtre_lookup + row_count<=0 (no existing-row precondition), preventing brand-new tenants from ever installing a bad blob; (2) offending row for c918a648 physically DELETED from dataset_cache — confirmed by SELECT; (3) backend endpoint returns 200 with data=[] via _RAP_DENY (no POS fallthrough) — verified live in <1s. Once customer deploys the new sync.php on their POS host and restarts client.py, the next scheduled sync will populate a healthy 36-source-merged rap_filtre_lookup blob."
+}

@@ -1,0 +1,50 @@
+{
+  "summary": "Iteration 14 — All 3 rap_filtre_lookup fixes VERIFIED. Backend endpoint POST /api/data/report-filter-options works end-to-end for healthy tenant d5587c... (LOKASYON=2 rows, PERSONEL=3 rows, FIS_TURU=37 rows — all with Kaynak field correctly tagged and filtered in Python, 0.27-0.38s live, 0.26s cached=fresh). Empty-lookup tenant 6de69d3b... returns 200 gracefully with empty data list in <2s, does NOT hang, does NOT 500. Validation solid: missing tenant/source → 400; no auth → 401. Regression clean: login (cakmak.ebubekir29@gmail.com/1234567) issues access_token; GET /api/sistem-durum → 200 with surum field present. MySQL VPS is back online (MariaDB 5.5.68 greeting received on 185.223.77.132:3306). Static review of sync.php guard (lines 437-454) and client.py special-case (line 5183) both look logically correct — PHP guard skips empty writes when a healthy row exists OR when an existing same-params row exists; Python side iterates all 36 RAP_FILTER_LOOKUP_SOURCES and tags rows with Kaynak/KAYNAK. Pytest 11/11 PASS.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "sync.php save_dataset_cache guard (rap_filtre_lookup)",
+        "issue": "Edge case: the guard only skips the empty write when EITHER a non-empty row exists for tenant+dataset OR an existing row with the same params_hash exists. If a tenant has ZERO rap_filtre_lookup rows at all (neither empty nor healthy), the first empty payload can still create a row_count=0 record. In practice this is protected by client.py which now iterates all RAP_FILTER_LOOKUP_SOURCES before push, but defense-in-depth would be to unconditionally skip row_count<=0 writes for rap_filtre_lookup, e.g. `if ($datasetKey === 'rap_filtre_lookup' && $rowCount <= 0) return ['skipped_empty_overwrite' => true];` Reference: /app/pos_entegrasyon/sync.php:440-454"
+      },
+      {
+        "endpoint": "backend/routes/data.py:3115",
+        "issue": "Filter matches by both `Kaynak` and `KAYNAK`. This is safe, but note that client.py (line 5191-5192) sets BOTH keys on each row, so the OR is always redundant on freshly-synced blobs. Older blobs from pre-fix client versions may only have one of the two — leaving the OR is correct."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_report_filter_options.py",
+    "/app/test_reports/pytest/iter14_results.xml"
+  ],
+  "action_items": [
+    "OPTIONAL DEFENSE-IN-DEPTH: harden sync.php save_dataset_cache to unconditionally skip empty rap_filtre_lookup writes (no existing-row check). Prevents the theoretical first-write edge case if a brand-new tenant onboards with an old client version. Fix in /app/pos_entegrasyon/sync.php around line 440.",
+    "NO CODE CHANGES REQUIRED for the reported bug — verified working end-to-end for both healthy (d5587c...) and empty (6de69d3b...) tenants.",
+    "COMMUNICATION: Notify customer whose reports screen filters were empty — they should force-restart the POS client (client.py) so it picks up the new special-case logic and re-pushes a full rap_filtre_lookup blob; alternately the web/backend team can trigger a background resync for the affected 9 tenants."
+  ],
+  "critical_code_review_comments": [
+    "sync.php:440-454 — Guard block PHP syntax and logic correct. Uses PDO prepared statements, hash_equals is untouched below. Case A (any row with row_count>0 exists): returns skipped_empty_overwrite. Case B (existing row for this params_hash exists): also skipped. Case C (no rows at all): falls through — small residual risk (see minor issue).",
+    "client.py:5183 — AST parse OK. Guard `not str(params.get('Kaynak', '') or '').strip()` correctly matches empty/None/whitespace. Loop tags rows with BOTH Kaynak and KAYNAK to survive Python-side str-normalization in the endpoint filter. Per-source exception is caught+logged so a single broken source cannot abort the merge.",
+    "client.py:5197 — `else: data = self.execute_dataset(defn, params)` correctly preserves normal path for non-empty Kaynak requests (e.g., legacy per-source calls). No regression for other datasets.",
+    "backend/routes/data.py:3073-3141 — endpoint uses aggressive 30-min fresh cache + 2-hour stale window with background refresh, plus fallback_stale on HTTPException; robust degradation. `_RAP_DENY` correctly prevents sync.php fall-through for rap_filtre_lookup (backend never asks POS on-demand for it). Behavior verified live: cache=fresh on repeat call.",
+    "OBSERVED (not a bug): _on_demand_request with rap_filtre_lookup uses the DIRECT_CACHE_ONDEMAND_KEYS/BACKGROUND_DIRECT_CACHE_KEYS path so it reads the single big cache blob (params Kaynak='', Q='') — matches the design intent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_report_filter_options.py (new — 11 tests covering healthy tenant filters, empty-tenant graceful degradation, validation, and regression)"
+  ],
+  "success_rate": {
+    "backend": "100% (11/11 pytest passed in 7.0s)",
+    "frontend": "skipped (per review request — backend only)"
+  },
+  "seed_data_creation": "None — SELECT-only reads via public API. No writes to any live database or dataset_cache.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "MySQL at 185.223.77.132:3306 is currently HEALTHY (MariaDB 5.5.68 handshake received). Report-filter-options endpoint fully functional. Reusable regression test at /app/backend/tests/test_report_filter_options.py covers healthy tenant d5587c87a7f9476fa82b83f40accd6c7 (has 53KB rap_filtre_lookup blob) and empty tenant 6de69d3b97094959ad70b48f628e6e57 (blob '[]' — expected graceful empty). If empty tenant recovers (customer reinstalls newer client.py), its LOKASYON call will start returning rows automatically.",
+  "rca_of_issue": "Original bug: 9 tenants had dataset_cache.data_json='[]' for rap_filtre_lookup because old client.py invoked the RAP_FILTRE_LOOKUP stored proc with an empty Kaynak parameter (the proc returns nothing when Kaynak='') and immediately pushed the empty result via sync.php, overwriting any healthy blob. E1's three-layer fix is verified working: (1) sync.php save_dataset_cache guards against empty overwrites when a healthy row exists for the tenant+dataset (lines 440-454); (2) client.py process_pending_requests now special-cases rap_filtre_lookup with empty Kaynak — iterates all 36 RAP_FILTER_LOOKUP_SOURCES (LOKASYON, PROJE, CARI, …), tags each row with Kaynak and KAYNAK, returns merged result (line 5183); (3) backend endpoint POST /api/data/report-filter-options reads the single cached blob (Kaynak='', Q='') and filters by source in Python — verified LOKASYON returns 2 rows, PERSONEL 3, FIS_TURU 37, all correctly tagged. _RAP_DENY prevents on-demand fall-through to sync.php, so if the cache is empty the endpoint returns [] gracefully (verified with tenant 6de69d3b... in <2s). Recommendation: unconditionally drop empty rap_filtre_lookup writes in sync.php (defense-in-depth) so the first write on a brand-new tenant can never install a bad blob."
+}

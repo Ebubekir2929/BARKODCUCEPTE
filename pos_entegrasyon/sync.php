@@ -434,6 +434,16 @@ function save_dataset_cache(PDO $pdo, string $tenantId, string $datasetKey, arra
     $stmt->execute([$tenantId, $datasetKey, $paramsHash]);
     $existing = $stmt->fetch(PDO::FETCH_ASSOC);
 
+    // 2026-06 — KORUMA: rap_filtre_lookup için boş veri ASLA yazılmaz.
+    // Eski client sürümleri Kaynak="" ile prosedürü çağırıp boş sonuç basıyor,
+    // bu da rapor filtrelerinin kaybolmasına yol açıyordu.
+    if ($datasetKey === 'rap_filtre_lookup' && $rowCount <= 0) {
+        if ($existing) {
+            return ['cache_id' => (int)$existing['id'], 'revision_no' => (int)$existing['revision_no'], 'row_count' => 0, 'skipped_empty_overwrite' => true];
+        }
+        return ['cache_id' => 0, 'revision_no' => 0, 'row_count' => 0, 'skipped_empty_overwrite' => true];
+    }
+
     if ($existing) {
         $cacheId = (int)$existing['id'];
         $revisionNo = (int)$existing['revision_no'];
