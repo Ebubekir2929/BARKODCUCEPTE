@@ -1940,6 +1940,61 @@ async def get_iptal_list(
 
 # === STOK ENDPOINTS ===
 
+@router.post("/barcode-price")
+async def barcode_price(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """2026-06 — Barkoddan Fiyat Gör: barkod ile ürünü bulur, TÜM fiyat
+    adlarındaki fiyatları + stok miktarı + ürün bilgilerini döndürür.
+    Body: { tenant_id, barkod }
+    """
+    tenant_id = body.get("tenant_id", "")
+    barkod = str(body.get("barkod", "") or "").strip()
+    if not tenant_id or not barkod:
+        raise HTTPException(status_code=400, detail="tenant_id ve barkod gerekli")
+    try:
+        items = await get_dataset_items(tenant_id, "stock_list")
+        matches = [it for it in items if str(it.get("BARKOD", "") or "").strip() == barkod]
+        if not matches:
+            # Barkod bulunamazsa stok koduyla da dene
+            matches = [it for it in items if str(it.get("KOD", "") or "").strip() == barkod]
+        if not matches:
+            return {"ok": True, "found": False, "barkod": barkod}
+
+        ilk = matches[0]
+        urun = {
+            "id": ilk.get("ID"),
+            "ad": ilk.get("AD"),
+            "kod": ilk.get("KOD"),
+            "barkod": ilk.get("BARKOD"),
+            "miktar": ilk.get("MIKTAR"),
+            "birim": ilk.get("BIRIM") or ilk.get("BIRIM_AD"),
+            "aktif": ilk.get("AKTIF"),
+            "kdv": ilk.get("KDV_PAREKENDE"),
+        }
+        fiyatlar = []
+        gorulen = set()
+        for it in matches:
+            fa_id = it.get("FIYAT_AD_ID") or it.get("FIYAT_AD") or 0
+            if fa_id in gorulen:
+                continue
+            gorulen.add(fa_id)
+            fiyatlar.append({
+                "fiyat_ad_id": fa_id,
+                "fiyat_adi": it.get("FIYAT_ADI") or it.get("FIYAT_LISTE_ADI") or "Fiyat",
+                "fiyat": it.get("FIYAT"),
+                "doviz": it.get("DOVIZ_AD") or "TRY",
+                "kdv_dahil": it.get("KDV_DAHILMI"),
+            })
+        return {"ok": True, "found": True, "barkod": barkod, "urun": _fix_large_ints(urun), "fiyatlar": _fix_large_ints(fiyatlar)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"barcode-price error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/stock-price-names")
 async def get_stock_price_names(
     body: dict,

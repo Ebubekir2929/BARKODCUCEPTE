@@ -745,6 +745,13 @@ export default function DashboardScreen() {
         </View>
         <TouchableOpacity
           style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border, marginRight: 8 }]}
+          onPress={() => router.push('/fiyat-gor')}
+          hitSlop={6}
+        >
+          <Ionicons name="pricetags-outline" size={20} color={colors.primary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border, marginRight: 8 }]}
           onPress={() => setShowPdfExport(true)}
           hitSlop={6}
         >

@@ -2578,3 +2578,12 @@ agent_communication:
   - Fix 3: c918a648 tenant'ının boş [] satırı silindi.
   - testing_agent iter 14 (11/11) + iter 15 (16/16) PASS. VERIFIED ✅
   - Kalıcı çözüm: müşteriye yeni client.py + hosting'e yeni sync.php.
+
+## 2026-06 (fork) — FEATURE: Barkoddan Fiyat Gör
+  - Backend: POST /api/data/barcode-price (BARKOD tam eşleşme, KOD fallback,
+    fiyat_ad_id dedupe). Frontend: /fiyat-gor ekranı (kamera + manuel giriş,
+    art arda okutma 2sn guard, izin akışı canAskAgain+openSettings'li).
+  - Girişler: dashboard header pricetags butonu + stock.tsx header butonu.
+  - Ayrıca: _mysql_greeting_ok probe düzeltmesi (0xFF hata paketi = sağlıksız,
+    ER_HOST_IS_BLOCKED durumunda otomatik tünele geçiş).
+  - testing_agent iter 16: backend 6/6 + frontend UI PASS. VERIFIED ✅

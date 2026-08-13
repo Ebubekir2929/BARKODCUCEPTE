@@ -1036,6 +1036,10 @@ export default function StockScreen() {
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>{t('stock_management')}</Text>
         <View style={{ flexDirection: 'row', gap: 8 }}>
+          {/* 2026-06 — Barkoddan Fiyat Gör */}
+          <TouchableOpacity style={[styles.iconBtn, { backgroundColor: colors.primary + '20' }]} onPress={() => router.push('/fiyat-gor')}>
+            <Ionicons name="pricetags-outline" size={20} color={colors.primary} />
+          </TouchableOpacity>
           {/* 2026-07 — Fatura/Fiş girişi ekranı */}
           <TouchableOpacity style={[styles.iconBtn, { backgroundColor: colors.warning + '20' }]} onPress={() => router.push('/fis-giris')}>
             <Ionicons name="receipt-outline" size={20} color={colors.warning} />

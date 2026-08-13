@@ -38,7 +38,9 @@ async def _mysql_greeting_ok(host: str, port: int, timeout: float = 4.0) -> bool
         r, w = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
         try:
             data = await asyncio.wait_for(r.read(5), timeout)
-            return len(data) > 0
+            # MySQL greeting: payload[0] = protokol sürümü (0x0a). Hata paketi
+            # (örn. ER_HOST_IS_BLOCKED) 0xFF ile başlar → sağlıklı DEĞİL.
+            return len(data) >= 5 and data[4] != 0xFF
         finally:
             w.close()
     except Exception:
