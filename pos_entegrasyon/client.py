@@ -52,6 +52,9 @@ LOG_PATH = os.path.join(CONFIG_DIR, "client.log")
 
 DEFAULT_SERVER_URL = "https://kasaceptetransfer.berkyazilim.com/sync.php"
 
+# 2026-06 — Çalışan sürümü loglarda görmek için (kullanıcı doğru build'i kurdu mu?)
+CLIENT_BUILD = "2026-06-13 v3 (istek önceliği + paralel request)"
+
 AUTORUN_START_DELAY_SEC = 8
 # Normal datasetler için direkt POST sınırı.
 # Büyük datasetlerde bu sınırı geçerse mevcut chunk upload kullanılır.
@@ -1822,6 +1825,7 @@ class Main(QMainWindow):
 
         self._ensure_client_secret()
         self.refresh_secret_ui()
+        self.println(f"🔧 Client sürümü: {CLIENT_BUILD}")
 
         if self.autorun:
             self.hide()
@@ -5208,8 +5212,9 @@ SELECT TOP {limit}
                 self.println("Tenant boş, request poll atlandı.")
                 return
 
+            server_url = self.ed_server_url.text().strip() or self.cfg.get("server_url", DEFAULT_SERVER_URL)
             resp = post_json(
-                self.ed_server_url.text().strip() or self.cfg.get("server_url", DEFAULT_SERVER_URL),
+                server_url,
                 tenant,
                 {"action": "request_poll", "limit": REQUEST_POLL_LIMIT},
                 client_secret=self.get_client_secret(),
@@ -5234,15 +5239,16 @@ SELECT TOP {limit}
                 self._request_begin()
                 threading.Thread(
                     target=self._process_single_request,
-                    args=(req, def_map),
+                    args=(req, def_map, tenant, server_url),
                     name=f"req_{request_uid[:8] or 'x'}",
                     daemon=True,
                 ).start()
         except Exception as exc:
             self.println(f"Request poll hata: {exc}")
 
-    def _process_single_request(self, req: Dict[str, Any], def_map: Dict[str, Any]):
-        """Tek bir mobil isteğini işler — kendi thread'inde çalışır (paralel)."""
+    def _process_single_request(self, req: Dict[str, Any], def_map: Dict[str, Any], tenant: str = "", server_url: str = ""):
+        """Tek bir mobil isteğini işler — kendi thread'inde çalışır (paralel).
+        Qt widget OKUMAZ: tenant/server_url poll thread'inden parametre olarak gelir."""
         t0 = time.time()
         request_uid = str(req.get("request_uid") or "")
         dataset_key = req.get("dataset_key")
@@ -5250,7 +5256,7 @@ SELECT TOP {limit}
         try:
             defn = def_map.get(dataset_key)
             if not defn:
-                self.send_request_result(request_uid, dataset_key, params, status="error", error_text="dataset_definition_not_found")
+                self.send_request_result(request_uid, dataset_key, params, status="error", error_text="dataset_definition_not_found", tenant=tenant, server_url=server_url)
                 return
 
             self.println(f"⇣ Request alındı: {dataset_key} ({request_uid})")
@@ -5278,11 +5284,11 @@ SELECT TOP {limit}
                 if dataset_key == "fis_gunluk_bildirim_feed":
                     self.println(f"fis_gunluk_bildirim_feed SQL sonucu={row_count} kayıt")
                 sql_sn = time.time() - t0
-                self.send_request_result(request_uid, dataset_key, params, status="done", data=data)
+                self.send_request_result(request_uid, dataset_key, params, status="done", data=data, tenant=tenant, server_url=server_url)
                 self.record_success(dataset_key, params, row_count, status="ondemand", note="request işlendi")
                 self.println(f"✓ Request işlendi: {dataset_key} ({row_count} kayıt, SQL {sql_sn:.1f} sn, toplam {time.time() - t0:.1f} sn)")
             except Exception as exc:
-                self.send_request_result(request_uid, dataset_key, params, status="error", error_text=str(exc))
+                self.send_request_result(request_uid, dataset_key, params, status="error", error_text=str(exc), tenant=tenant, server_url=server_url)
                 self.println(f"✗ Request hata: {dataset_key} -> {exc} ({time.time() - t0:.1f} sn)")
         except Exception as exc:
             self.println(f"Request işleme hata: {dataset_key} -> {exc}")
@@ -5292,10 +5298,11 @@ SELECT TOP {limit}
                 self._inflight_request_uids.discard(request_uid)
             self._request_end()
 
-    def send_request_result(self, request_uid: str, dataset_key: str, params: Dict[str, Any], status: str, data: Any = None, error_text: str = ""):
-        tenant = self.ed_tenant.text().strip() or self.cfg.get("tenant_id", "").strip()
+    def send_request_result(self, request_uid: str, dataset_key: str, params: Dict[str, Any], status: str, data: Any = None, error_text: str = "", tenant: str = "", server_url: str = ""):
+        # 2026-06 — Paralel thread'ler Qt widget OKUMAZ: tenant/server_url parametre ile gelir
+        tenant = tenant or self.cfg.get("tenant_id", "").strip()
         post_json(
-            self.ed_server_url.text().strip() or self.cfg.get("server_url", DEFAULT_SERVER_URL),
+            server_url or self.cfg.get("server_url", DEFAULT_SERVER_URL),
             tenant,
             {
                 "action": "request_result_push",

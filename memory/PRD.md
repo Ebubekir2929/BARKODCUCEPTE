@@ -157,3 +157,9 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - sync.php request_poll kayıtları 'running' işaretlediği için çift dispatch yok (120s stale reset hariç — set ile korunuyor).
 - Süre logu: "✓ Request işlendi: X (N kayıt, SQL Y sn, toplam Z sn)".
 - Test: AST tabanlı simülasyon — paralel çalışma, duplicate atlama, arka plan bekletme, süre logları ✅. py_compile OK.
+
+## 2026-06 (Fork) — client.py UÇTAN UCA TEST EDİLDİ + sürüm damgası
+- Kullanıcı "hiç veri gelmiyor / client kesmiyor" dedi → gerçek client.py Linux'ta PySide6 offscreen + sahte sync.php + sahte SQL ile UÇTAN UCA test edildi (/tmp/kc_e2e_test.py): T1 paralel (hızlı rapor ağır rapor sürerken 0.4sn), T2 arka plan bekletme + log, T3 istek yokken bekleme yok, T4 sonuç push, T5 bilinmeyen dataset error, T6 sürüm logu — HEPSİ GEÇTİ.
+- Thread güvenliği: paralel request thread'leri artık Qt widget OKUMUYOR (tenant/server_url poll thread'inden parametreyle geçiyor; send_request_result imzası genişletildi).
+- CLIENT_BUILD sabiti eklendi: başlangıçta "🔧 Client sürümü: 2026-06-13 v3" loglanır — kullanıcının hangi build'i çalıştırdığı artık doğrulanabilir.
+- Kod repo'da doğru çalışıyor; kullanıcı tarafında sorun büyük olasılıkla ESKİ BUILD çalışması (Windows'ta eski process/eski exe). Kullanıcıdan log başındaki sürüm satırını doğrulaması istendi.
