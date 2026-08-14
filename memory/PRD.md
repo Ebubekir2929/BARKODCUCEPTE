@@ -174,3 +174,7 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - stock.tsx: header sıkışıklığı çözüldü (başlık 17 + flexShrink, iconBtn 34, ikon 18, gap 6).
 - Premium kamera izin kartı: src/components/KameraIzinKarti.tsx (absolute overlay, MODAL DEĞİL) — fiyat-gor + stock scanner kullanıyor; canAskAgain=false → "Ayarları Aç" modu.
 - Fiyat Gör isimle arama: backend barcode-price'a Türkçe duyarsız AD araması eklendi; tek eşleşme → direkt sonuç, çoklu → candidates listesi (app'te seçim listesi). Test: "kola"→tek ürün, "me"→25 aday ✅.
+
+## 2026-08 (Fork) — Fiyat Gör "Son Bakılan Ürünler" + sürüm 1.0.44
+- fiyat-gor.tsx: AsyncStorage tabanlı geçmiş (fiyat_gor_gecmis_v1, max 10, ürün bazında dedupe). Başarılı sorguda otomatik eklenir; ad+kod+barkod+ilk fiyat gösterilir; dokununca yeniden sorgular; "Temizle" butonu var. Ekran testi ✅.
+- app.json: version 1.0.44, iOS buildNumber 48, Android versionCode 48 (kullanıcı store güncellemesi yapacak).

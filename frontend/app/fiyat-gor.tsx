@@ -1,6 +1,6 @@
 // 2026-06 — Barkoddan Fiyat Gör: barkod okut → tüm fiyat adlarındaki
 // fiyatlar + stok miktarı + ürün bilgileri. Art arda okutma destekli.
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, TextInput,
   ActivityIndicator, ScrollView, Alert, Linking, Platform,
@@ -12,6 +12,7 @@ import { useThemeStore } from '../src/store/themeStore';
 import { useAuthStore } from '../src/store/authStore';
 import { useDataSourceStore } from '../src/store/dataSourceStore';
 import KameraIzinKarti from '../src/components/KameraIzinKarti';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 let CameraView: any = null;
 let useCameraPermissions: any = () => [null, async () => ({ granted: false })];
@@ -22,6 +23,11 @@ try {
 } catch {}
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+
+// 2026-08 — Son bakılan ürünler geçmişi (cihazda saklanır)
+const GECMIS_KEY = 'fiyat_gor_gecmis_v1';
+const GECMIS_MAX = 10;
+interface GecmisUrun { id: any; ad: string; kod: string; barkod: string; fiyat?: any; doviz?: string; ts: number }
 
 interface FiyatSatir { fiyat_ad_id: number; fiyat_adi: string; fiyat: any; doviz: string; kdv_dahil?: boolean }
 interface Sonuc {
@@ -59,6 +65,38 @@ export default function FiyatGorScreen() {
   const [sonuc, setSonuc] = useState<Sonuc | null>(null);
   const [yukleniyor, setYukleniyor] = useState(false);
   const sonOkunan = useRef<{ kod: string; ts: number }>({ kod: '', ts: 0 });
+  const [gecmis, setGecmis] = useState<GecmisUrun[]>([]);
+
+  useEffect(() => {
+    AsyncStorage.getItem(GECMIS_KEY)
+      .then((v) => { if (v) setGecmis(JSON.parse(v)); })
+      .catch(() => {});
+  }, []);
+
+  const gecmiseEkle = useCallback((s: Sonuc) => {
+    if (!s.found || !s.urun) return;
+    const u = s.urun as any;
+    const ilkFiyat = (s.fiyatlar || [])[0];
+    const yeni: GecmisUrun = {
+      id: u.id ?? u.kod ?? u.barkod,
+      ad: u.ad || '',
+      kod: u.kod || '',
+      barkod: u.barkod || '',
+      fiyat: ilkFiyat?.fiyat,
+      doviz: ilkFiyat?.doviz || 'TRY',
+      ts: Date.now(),
+    };
+    setGecmis((prev) => {
+      const liste = [yeni, ...prev.filter((g) => String(g.id) !== String(yeni.id))].slice(0, GECMIS_MAX);
+      AsyncStorage.setItem(GECMIS_KEY, JSON.stringify(liste)).catch(() => {});
+      return liste;
+    });
+  }, []);
+
+  const gecmisiTemizle = useCallback(() => {
+    setGecmis([]);
+    AsyncStorage.removeItem(GECMIS_KEY).catch(() => {});
+  }, []);
 
   const fiyatSorgula = useCallback(async (barkod: string) => {
     const kod = barkod.trim();
@@ -73,12 +111,13 @@ export default function FiyatGorScreen() {
       const j = await resp.json();
       if (!resp.ok) throw new Error(j?.detail || 'Sorgu hatası');
       setSonuc(j);
+      gecmiseEkle(j);
     } catch (e: any) {
       Alert.alert('Hata', e?.message || 'Fiyat sorgulanamadı');
     } finally {
       setYukleniyor(false);
     }
-  }, [token, activeTenantId]);
+  }, [token, activeTenantId, gecmiseEkle]);
 
   const barkodOkundu = useCallback((data: string) => {
     const now = Date.now();
@@ -233,13 +272,48 @@ export default function FiyatGorScreen() {
           </>
         )}
 
-        {!yukleniyor && !sonuc && (
+        {!yukleniyor && !sonuc && gecmis.length === 0 && (
           <View style={{ alignItems: 'center', marginTop: 32 }}>
             <Ionicons name="pricetags-outline" size={48} color={colors.textSecondary} />
             <Text style={{ color: colors.textSecondary, marginTop: 12, textAlign: 'center' }}>
               Barkod okutun veya elle yazın —{'\n'}ürünün tüm fiyatları burada görünecek
             </Text>
           </View>
+        )}
+
+        {/* 2026-08 — Son bakılan ürünler */}
+        {!yukleniyor && gecmis.length > 0 && (
+          <>
+            <View style={styles.gecmisBaslikSatir}>
+              <Text style={[styles.bolumBaslik, { color: colors.textSecondary, marginTop: 0, marginBottom: 0 }]}>
+                SON BAKILAN ÜRÜNLER
+              </Text>
+              <TouchableOpacity onPress={gecmisiTemizle} hitSlop={8}>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: colors.primary }}>Temizle</Text>
+              </TouchableOpacity>
+            </View>
+            {gecmis.map((g) => (
+              <TouchableOpacity
+                key={String(g.id) + g.ts}
+                style={[styles.gecmisKart, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => fiyatSorgula(String(g.barkod || g.kod || g.ad || ''))}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.gecmisIkon, { backgroundColor: colors.primary + '14' }]}>
+                  <Ionicons name="time-outline" size={16} color={colors.primary} />
+                </View>
+                <View style={{ flex: 1, marginRight: 8 }}>
+                  <Text style={[{ fontSize: 13.5, fontWeight: '600', color: colors.text }]} numberOfLines={1}>{g.ad}</Text>
+                  <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 1 }} numberOfLines={1}>
+                    {[g.kod, g.barkod].filter(Boolean).join(' · ') || '—'}
+                  </Text>
+                </View>
+                {g.fiyat != null && (
+                  <Text style={{ fontSize: 14, fontWeight: '800', color: colors.primary }}>{fmtFiyat(g.fiyat, g.doviz)}</Text>
+                )}
+              </TouchableOpacity>
+            ))}
+          </>
         )}
       </ScrollView>
 
@@ -311,5 +385,11 @@ const styles = StyleSheet.create({
     borderRadius: 12, borderWidth: 1, paddingHorizontal: 16, paddingVertical: 14, marginBottom: 8,
   },
   fiyatAdi: { fontSize: 15, fontWeight: '600' },
+  gecmisBaslikSatir: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 18, marginBottom: 8 },
+  gecmisKart: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8,
+  },
+  gecmisIkon: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   fiyatDeger: { fontSize: 19, fontWeight: '800' },
 });
