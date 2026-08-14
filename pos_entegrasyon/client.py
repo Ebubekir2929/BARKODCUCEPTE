@@ -101,6 +101,9 @@ MASS_DELETE_MIN_PREV = 50
 
 LIVE_OPEN_TABLES_INTERVAL_SEC = 10
 REQUEST_POLL_INTERVAL_SEC = 1
+# 2026-06 — İstek bittikten sonra arka plan işlerinin beklemeye devam edeceği süre (sn).
+# Kullanıcı arka arkaya rapor açarken arka plan prewarm araya girmesin.
+REQUEST_PRIORITY_GRACE_SEC = 8
 REQUEST_POLL_LIMIT = 5
 ONDEMAND_TRACK_REFRESH_INTERVAL_SEC = 15
 
@@ -3445,6 +3448,26 @@ class Main(QMainWindow):
             self.println(f"Offline kuyruğa alındı: {dataset_key} -> {exc}")
             return {"ok": False, "queued_offline": True, "message": str(exc)}
 
+    def _bekle_istek_bitsin(self):
+        """2026-06 — Aktif kullanıcı isteği işlenirken arka plan işleri BEKLER.
+        İstek bittikten sonra da REQUEST_PRIORITY_GRACE_SEC kadar beklenir; böylece
+        kullanıcı arka arkaya rapor/ekstre açarken arka plan işleri araya girmez.
+        Mobil kullanıcı ekranda beklediği için tüm kaynak isteğe ayrılır (max 90 sn)."""
+        t0 = time.time()
+        yazildi = False
+        while time.time() - t0 < 90:
+            aktif = getattr(self, "_request_active", False)
+            son_ts = float(getattr(self, "_last_request_activity_ts", 0) or 0)
+            grace = son_ts > 0 and (time.time() - son_ts) < REQUEST_PRIORITY_GRACE_SEC
+            if not aktif and not grace:
+                break
+            if not yazildi:
+                self.println("⏸ Arka plan işleri bekletiliyor: aktif kullanıcı isteği önceliği")
+                yazildi = True
+            time.sleep(0.5)
+        if yazildi:
+            self.println("▶ Kullanıcı isteği tamamlandı, arka plan işleri devam ediyor")
+
     def sync_push_datasets(self, force: bool = False, force_dataset_keys: Optional[set] = None, only_dataset_keys: Optional[set] = None):
         defs = self.parse_dataset_defs()
         total = 0
@@ -3455,6 +3478,8 @@ class Main(QMainWindow):
         fiyat_adlari = None
 
         for defn in defs:
+            # 2026-06 — Her dataset arasında istek önceliği kontrolü
+            self._bekle_istek_bitsin()
             dataset_key = str((defn or {}).get("dataset_key", "")).strip()
             if dataset_key in PAGED_PUSH_DATASET_KEYS:
                 defn = normalize_paged_push_definition(defn)
@@ -4196,6 +4221,7 @@ HAVING ABS(SUM(ISNULL(X.BORC, 0) - ISNULL(X.ALACAK, 0))) > 0.0001
         pushed = 0
         checked = 0
         for item in selected:
+            self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
             checked += 1
             try:
                 data = self.execute_dataset(item["defn"], dict(item["params"]))
@@ -4272,6 +4298,7 @@ HAVING ABS(SUM(ISNULL(X.BORC, 0) - ISNULL(X.ALACAK, 0))) > 0.0001
             if key in seen:
                 continue
             seen.add(key)
+            self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
             checked += 1
             params = resolve_params(fis_def.get("params_template", {}))
             params["FisId"] = fid
@@ -4396,6 +4423,7 @@ SELECT TOP {limit}
         pushed = 0
         checked = 0
         for item in selected:
+            self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
             checked += 1
             params = dict(item["params"])
             try:
@@ -4534,6 +4562,7 @@ SELECT TOP {limit}
         fis_ids_for_detail: List[Any] = []
 
         for item in selected:
+            self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
             defn = item["defn"]
             dataset_key = str(item["dataset_key"])
             params = dict(item["params"])
@@ -4636,11 +4665,9 @@ SELECT TOP {limit}
             self.println("Tam ön yükleme çalışmıyor.")
 
     def _prefetch_wait_for_user_requests(self, max_wait_sec: float = 30.0):
-        """Mobil kullanıcının anlık istekleri (request_poll) işlenirken prefetch bekler."""
-        waited = 0.0
-        while self._request_poll_busy and waited < max_wait_sec:
-            time.sleep(0.5)
-            waited += 0.5
+        """Mobil kullanıcının anlık istekleri işlenirken prefetch bekler.
+        2026-06 — Doğru sinyal _request_active + grace süresidir; _bekle_istek_bitsin kullanılır."""
+        self._bekle_istek_bitsin()
 
     def load_all_cari_ids_for_prefetch(self, def_map: Dict[str, Any], limit: int = FULL_PREFETCH_CARI_LIMIT) -> List[Any]:
         """TÜM carilerin ID listesi. Önce cari_bakiye_liste prosedürü (tüm kartlar),
@@ -4842,7 +4869,7 @@ SELECT TOP {limit}
             for page in range(1, max_pages + 1):
                 if self._full_prefetch_cancel:
                     break
-                self._prefetch_wait_for_user_requests()
+                self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
                 params = dict(base_params)
                 if paged:
                     params["Page"] = page
@@ -4934,6 +4961,7 @@ SELECT TOP {limit}
             for item in batch:
                 if self._full_prefetch_cancel:
                     break
+                self._bekle_istek_bitsin()  # 2026-06 — istek önceliği: kayıt başına kontrol
                 processed += 1
                 try:
                     data = self.execute_dataset(item["defn"], dict(item["params"]))
@@ -4984,6 +5012,8 @@ SELECT TOP {limit}
         defs = self.parse_dataset_defs()
         pushed = 0
         handled = set()
+        # 2026-06 — İstek önceliği: aktif kullanıcı isteği varsa bekle
+        self._bekle_istek_bitsin()
         if "rap_acik_hesap_kisi_ozet_web" in only_dataset_keys:
             pushed += self.sync_direct_rap_acik_hesap_ozet(defs)
             handled.add("rap_acik_hesap_kisi_ozet_web")
@@ -5079,6 +5109,7 @@ SELECT TOP {limit}
         now_dt = datetime.now()
 
         for item in tracked:
+            self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
             dataset_key = str(item.get("dataset_key", "")).strip()
             params = item.get("params", {}) if isinstance(item.get("params", {}), dict) else {}
             defn = def_map.get(dataset_key)
@@ -5164,9 +5195,9 @@ SELECT TOP {limit}
                 self.println("Kuyrukta iş yok.")
                 return
 
-            # 2026-06 — Aktif istek var: arka plan işleri bir süre pas geçsin
-            # (mobil kullanıcı ekranda bekliyor, tüm kaynak isteğe ayrılır)
+            # 2026-06 — Aktif istek bayrağı: arka plan işleri bunu görüp BEKLER
             self._last_request_activity_ts = time.time()
+            self._request_active = True
 
             for req in requests_list:
                 request_uid = req.get("request_uid")
@@ -5211,6 +5242,11 @@ SELECT TOP {limit}
 
         except Exception as exc:
             self.println(f"Request poll hata: {exc}")
+        finally:
+            # 2026-06 — İstekler bitti: grace süresi işlemin BİTİŞİNDEN itibaren sayılsın
+            if getattr(self, "_request_active", False):
+                self._last_request_activity_ts = time.time()
+            self._request_active = False
 
     def send_request_result(self, request_uid: str, dataset_key: str, params: Dict[str, Any], status: str, data: Any = None, error_text: str = ""):
         tenant = self.ed_tenant.text().strip() or self.cfg.get("tenant_id", "").strip()

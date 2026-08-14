@@ -129,3 +129,12 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - KÖK NEDEN BULUNDU: Poyraz Hosting DDoS koruması (SYN-proxy) workspace IP'sinden gelen sunucu-önce-konuşan protokolleri (MySQL 3306, SSH 22) bozuyordu; HTTP çalışıyordu. Fail2Ban/max_connections/iptables DEĞİLDİ.
 - B PLANI UYGULANDI: Sunucuda stunnel (:3308 TLS → 127.0.0.1:3306, systemd: stunnel-mysql, ciphers AES256-SHA TLS1.2). Backend'de `services/tls_tunnel.py` — otomatik: direkt 3306 greeting-probe başarısızsa yerel 127.0.0.1:13306 TLS tüneli. .env: MYSQL_TLS_HOST/MYSQL_TLS_PORT=3308.
 - Doğrulandı: login (her iki hesap), /api/islem/list gerçek veri, frontend yükleniyor. Kuyruk #21 "aktarildi" (FK sorunları da çözülmüş).
+
+## 2026-06 (Fork) — client.py: Aktif Kullanıcı İsteği Önceliği TAMAMLANDI
+- `_bekle_istek_bitsin` güçlendirildi: aktif istek + istek bitiminden sonra REQUEST_PRIORITY_GRACE_SEC (8 sn) grace süresi boyunca arka plan işleri bekler ("⏸ Arka plan işleri bekletiliyor" / "▶ ... devam ediyor" logları).
+- `process_pending_requests` finally: grace süresi işlemin BİTİŞİNDEN itibaren sayılır (`_last_request_activity_ts` yenilenir).
+- Kesme kontrolü eklenen döngüler: `prewarm_fis_detail_cache`, `run_full_prefetch` (kayıt başına), `_prefetch_reports` (sayfa başına), `sync_tracked_ondemand_queries` (kayıt başına). Mevcuttu: prewarm_stok_bilgi_miktar, sync_current_month_extre/fis_detail, sync_push_datasets, sync_direct_cache.
+- `_prefetch_wait_for_user_requests` artık `_request_poll_busy` yerine `_bekle_istek_bitsin`e delege (yanlış sinyal düzeltildi).
+- Doğrulama: py_compile OK + AST tabanlı davranış testi (4 senaryo geçti) + `/api/pos-dosya/client.py` indirmesi güncel dosyayı veriyor.
+- NOT: Aynı dosyaya paralel search_replace yapma — dosya sonu bozuldu, truncate ile düzeltildi.
+- Bekleyen: Brevo IP beyaz listesi (kullanıcı aksiyonu, Railway IP 152.55.185.96). Gelecek: dashboard.tsx refactor (P3).
