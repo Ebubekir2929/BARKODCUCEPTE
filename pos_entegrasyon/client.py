@@ -1744,6 +1744,11 @@ class Main(QMainWindow):
         self._live_sync_busy = False
         self._reactive_sync_busy = False
         self._request_poll_busy = False
+        # 2026-06 — Paralel istek işleme: sayaç + kilitler
+        self._request_count_lock = threading.Lock()
+        self._active_request_count = 0
+        self._inflight_request_uids = set()
+        self._record_success_lock = threading.Lock()
         self._price_update_busy = False
         self._islem_busy = False
         self._backfill_busy = False
@@ -5176,7 +5181,25 @@ SELECT TOP {limit}
         if checked:
             self.println(f"Ondemand takip tamamlandı. Kontrol={checked}, güncelleme={pushed}")
 
+    def _request_begin(self):
+        """2026-06 — Paralel istek sayacı: en az 1 istek çalışıyorsa arka plan bekler."""
+        with self._request_count_lock:
+            self._active_request_count += 1
+        self._last_request_activity_ts = time.time()
+        self._request_active = True
+
+    def _request_end(self):
+        with self._request_count_lock:
+            self._active_request_count = max(0, self._active_request_count - 1)
+            kalan = self._active_request_count
+        self._last_request_activity_ts = time.time()
+        if kalan <= 0:
+            self._request_active = False
+
     def process_pending_requests(self):
+        """2026-06 — HIZ: İstekler ayrı thread'lerde PARALEL işlenir.
+        Poll turu SQL'in bitmesini beklemez; 1 sn sonra yeni istekleri hemen alır.
+        Böylece ağır bir rapor, arkadan gelen istekleri BLOKLAMAZ."""
         try:
             defs = self.parse_dataset_defs()
             def_map = {d["dataset_key"]: d for d in defs if isinstance(d, dict) and d.get("dataset_key")}
@@ -5201,58 +5224,73 @@ SELECT TOP {limit}
                 self.println("Kuyrukta iş yok.")
                 return
 
-            # 2026-06 — Aktif istek bayrağı: arka plan işleri bunu görüp BEKLER
-            self._last_request_activity_ts = time.time()
-            self._request_active = True
-
             for req in requests_list:
-                request_uid = req.get("request_uid")
-                dataset_key = req.get("dataset_key")
-                params = req.get("params", {}) or {}
-                defn = def_map.get(dataset_key)
-
-                if not defn:
-                    self.send_request_result(request_uid, dataset_key, params, status="error", error_text="dataset_definition_not_found")
-                    continue
-
-                self.println(f"⇣ Request alındı: {dataset_key} ({request_uid})")
-                try:
-                    if dataset_key == "fis_gunluk_bildirim_feed":
-                        self.println(f"fis_gunluk_bildirim_feed request params={json.dumps(params, ensure_ascii=False)}")
-                    # 2026-06 — rap_filtre_lookup: Kaynak boşsa prosedür veri döndürmez;
-                    # tüm kaynakları tek tek okuyup BİRLEŞTİRİLMİŞ sonucu döndür.
-                    if dataset_key == "rap_filtre_lookup" and not str(params.get("Kaynak", "") or "").strip():
-                        data = []
-                        for _kaynak in RAP_FILTER_LOOKUP_SOURCES:
-                            try:
-                                _rows = self.execute_dataset(defn, {"Kaynak": _kaynak, "Q": ""})
-                                for _r in (_rows or []):
-                                    if isinstance(_r, dict):
-                                        _item = dict(_r)
-                                        _item["Kaynak"] = _kaynak
-                                        _item["KAYNAK"] = _kaynak
-                                        data.append(_item)
-                            except Exception as _exc:
-                                self.println(f"rap_filtre_lookup request kaynak hata: {_kaynak} -> {_exc}")
-                    else:
-                        data = self.execute_dataset(defn, params)
-                    row_count = normalize_row_count(data)
-                    if dataset_key == "fis_gunluk_bildirim_feed":
-                        self.println(f"fis_gunluk_bildirim_feed SQL sonucu={row_count} kayıt")
-                    self.send_request_result(request_uid, dataset_key, params, status="done", data=data)
-                    self.record_success(dataset_key, params, row_count, status="ondemand", note="request işlendi")
-                    self.println(f"✓ Request işlendi: {dataset_key} ({row_count} kayıt)")
-                except Exception as exc:
-                    self.send_request_result(request_uid, dataset_key, params, status="error", error_text=str(exc))
-                    self.println(f"✗ Request hata: {dataset_key} -> {exc}")
-
+                request_uid = str(req.get("request_uid") or "")
+                with self._request_count_lock:
+                    if request_uid and request_uid in self._inflight_request_uids:
+                        continue  # aynı istek zaten çalışıyor (stale-reset çakışması)
+                    if request_uid:
+                        self._inflight_request_uids.add(request_uid)
+                self._request_begin()
+                threading.Thread(
+                    target=self._process_single_request,
+                    args=(req, def_map),
+                    name=f"req_{request_uid[:8] or 'x'}",
+                    daemon=True,
+                ).start()
         except Exception as exc:
             self.println(f"Request poll hata: {exc}")
+
+    def _process_single_request(self, req: Dict[str, Any], def_map: Dict[str, Any]):
+        """Tek bir mobil isteğini işler — kendi thread'inde çalışır (paralel)."""
+        t0 = time.time()
+        request_uid = str(req.get("request_uid") or "")
+        dataset_key = req.get("dataset_key")
+        params = req.get("params", {}) or {}
+        try:
+            defn = def_map.get(dataset_key)
+            if not defn:
+                self.send_request_result(request_uid, dataset_key, params, status="error", error_text="dataset_definition_not_found")
+                return
+
+            self.println(f"⇣ Request alındı: {dataset_key} ({request_uid})")
+            try:
+                if dataset_key == "fis_gunluk_bildirim_feed":
+                    self.println(f"fis_gunluk_bildirim_feed request params={json.dumps(params, ensure_ascii=False)}")
+                # 2026-06 — rap_filtre_lookup: Kaynak boşsa prosedür veri döndürmez;
+                # tüm kaynakları tek tek okuyup BİRLEŞTİRİLMİŞ sonucu döndür.
+                if dataset_key == "rap_filtre_lookup" and not str(params.get("Kaynak", "") or "").strip():
+                    data = []
+                    for _kaynak in RAP_FILTER_LOOKUP_SOURCES:
+                        try:
+                            _rows = self.execute_dataset(defn, {"Kaynak": _kaynak, "Q": ""})
+                            for _r in (_rows or []):
+                                if isinstance(_r, dict):
+                                    _item = dict(_r)
+                                    _item["Kaynak"] = _kaynak
+                                    _item["KAYNAK"] = _kaynak
+                                    data.append(_item)
+                        except Exception as _exc:
+                            self.println(f"rap_filtre_lookup request kaynak hata: {_kaynak} -> {_exc}")
+                else:
+                    data = self.execute_dataset(defn, params)
+                row_count = normalize_row_count(data)
+                if dataset_key == "fis_gunluk_bildirim_feed":
+                    self.println(f"fis_gunluk_bildirim_feed SQL sonucu={row_count} kayıt")
+                sql_sn = time.time() - t0
+                self.send_request_result(request_uid, dataset_key, params, status="done", data=data)
+                self.record_success(dataset_key, params, row_count, status="ondemand", note="request işlendi")
+                self.println(f"✓ Request işlendi: {dataset_key} ({row_count} kayıt, SQL {sql_sn:.1f} sn, toplam {time.time() - t0:.1f} sn)")
+            except Exception as exc:
+                self.send_request_result(request_uid, dataset_key, params, status="error", error_text=str(exc))
+                self.println(f"✗ Request hata: {dataset_key} -> {exc} ({time.time() - t0:.1f} sn)")
+        except Exception as exc:
+            self.println(f"Request işleme hata: {dataset_key} -> {exc}")
+            log(traceback.format_exc())
         finally:
-            # 2026-06 — İstekler bitti: grace süresi işlemin BİTİŞİNDEN itibaren sayılsın
-            if getattr(self, "_request_active", False):
-                self._last_request_activity_ts = time.time()
-            self._request_active = False
+            with self._request_count_lock:
+                self._inflight_request_uids.discard(request_uid)
+            self._request_end()
 
     def send_request_result(self, request_uid: str, dataset_key: str, params: Dict[str, Any], status: str, data: Any = None, error_text: str = ""):
         tenant = self.ed_tenant.text().strip() or self.cfg.get("tenant_id", "").strip()
@@ -5418,8 +5456,7 @@ SELECT TOP {limit}
 
     def on_request_tick(self):
         if self._request_poll_busy:
-            self.println("request_poll: zaten çalışıyor")
-            return
+            return  # 2026-06 — sessiz: poll artık sadece 1 kısa HTTP çağrısı sürer
         self._request_poll_busy = True
 
         def worker():
@@ -6285,16 +6322,17 @@ SELECT TOP {limit}
         self.txt_success.setPlainText("\n".join(lines))
 
     def record_success(self, dataset_key: str, params: Dict[str, Any], row_count: int, status: str = "ok", note: str = ""):
-        items = load_success_state()
-        items.insert(0, {
-            "time": now_str(),
-            "dataset_key": dataset_key,
-            "params": params,
-            "row_count": row_count,
-            "status": status,
-            "note": note,
-        })
-        save_success_state(items[:200])
+        with self._record_success_lock:
+            items = load_success_state()
+            items.insert(0, {
+                "time": now_str(),
+                "dataset_key": dataset_key,
+                "params": params,
+                "row_count": row_count,
+                "status": status,
+                "note": note,
+            })
+            save_success_state(items[:200])
         self.refresh_success_signal.emit()
 
     def queue_offline_payload(self, payload: Dict[str, Any]):

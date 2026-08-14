@@ -150,3 +150,10 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - _bekle_istek_bitsin guard'ı eklenen ek fonksiyonlar: _push_islem_kaynaklar_if_due (giriş+dataset başına), sync_direct_acik_masa_detay (liste+POS başına), sync_direct_rap_filtre_lookup (kaynak başına), sync_direct_rap_acik_hesap_ozet (sayfa başına), sync_direct_fis_gunluk_bildirim_feed, detect_changed_dependencies (watcher başına), _run_backfill_job (dataset/gün başına).
 - process_pending_requests / process_pending_islemler / process_pending_price_updates KASITLI olarak guard'sız (kullanıcı eylemleri + deadlock önleme).
 - Toplam 21 guard noktası; py_compile OK; /api/pos-dosya/client.py güncel (288KB).
+
+## 2026-06 (Fork) — Request HIZ: Paralel İstek İşleme (10 sn hedefi)
+- Sorun: request_poll worker istekleri SIRALI işliyordu; ağır bir rapor hem yeni poll'ları ("request_poll: zaten çalışıyor" spam) hem diğer istekleri blokluyordu.
+- Çözüm: process_pending_requests artık DISPATCHER — her istek `_process_single_request` ile AYRI thread'de paralel çalışır. `_request_begin/_request_end` sayaçlı bayrak yönetir (son istek bitince _request_active=False). `_inflight_request_uids` seti stale-reset duplicate'larını önler. record_success kilitlendi (thread-safe). on_request_tick "zaten çalışıyor" spam'i kaldırıldı.
+- sync.php request_poll kayıtları 'running' işaretlediği için çift dispatch yok (120s stale reset hariç — set ile korunuyor).
+- Süre logu: "✓ Request işlendi: X (N kayıt, SQL Y sn, toplam Z sn)".
+- Test: AST tabanlı simülasyon — paralel çalışma, duplicate atlama, arka plan bekletme, süre logları ✅. py_compile OK.
