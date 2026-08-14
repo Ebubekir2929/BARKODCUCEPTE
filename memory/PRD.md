@@ -138,3 +138,9 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - Doğrulama: py_compile OK + AST tabanlı davranış testi (4 senaryo geçti) + `/api/pos-dosya/client.py` indirmesi güncel dosyayı veriyor.
 - NOT: Aynı dosyaya paralel search_replace yapma — dosya sonu bozuldu, truncate ile düzeltildi.
 - Bekleyen: Brevo IP beyaz listesi (kullanıcı aksiyonu, Railway IP 152.55.185.96). Gelecek: dashboard.tsx refactor (P3).
+
+## 2026-06 (Fork) — Brevo E-posta ÇÖZÜLDÜ ✅
+- Kullanıcı Railway IP'sini (152.55.185.96) Brevo Authorized IPs beyaz listesine ekledi.
+- Kullanıcı production'da "Şifremi Unuttum" akışını test etti: "şuan çalıştı" — e-posta teslim ediliyor.
+- Not: BREVO_API_KEY yalnızca Railway (production) env'de tanımlı; dev workspace'te yok (dev SMTP Gmail fallback kullanır).
+- Kalan açık iş: dashboard.tsx refactor (P3).
