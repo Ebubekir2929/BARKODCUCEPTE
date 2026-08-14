@@ -163,3 +163,14 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - Thread güvenliği: paralel request thread'leri artık Qt widget OKUMUYOR (tenant/server_url poll thread'inden parametreyle geçiyor; send_request_result imzası genişletildi).
 - CLIENT_BUILD sabiti eklendi: başlangıçta "🔧 Client sürümü: 2026-06-13 v3" loglanır — kullanıcının hangi build'i çalıştırdığı artık doğrulanabilir.
 - Kod repo'da doğru çalışıyor; kullanıcı tarafında sorun büyük olasılıkla ESKİ BUILD çalışması (Windows'ta eski process/eski exe). Kullanıcıdan log başındaki sürüm satırını doğrulaması istendi.
+
+## 2026-08 (Fork) — "Bağlantı hatası" KÖK NEDENİ ÇÖZÜLDÜ + 4 UI düzeltmesi
+### sync.php performans krizi (rapor bağlantı hataları)
+- KÖK NEDEN: sync_logs (275K satır) created_at İNDEKSİ YOKTU; auto_cleanup_old_logs HER HTTP isteğinde tam tablo taraması yapan DELETE çalıştırıyordu + ensure_dataset_cache_rows her istekte ALTER/SHA2 backfill deniyordu → tüm PHP worker'ları doldu → sync.php 30sn+ timeout → rapor bağlantı hataları + 629 bayat istek birikti.
+- ACİL MÜDAHALE (canlı MySQL'e): idx_sync_logs_created indeksi eklendi (8sn), 629 bayat queued istek expire edildi → sync.php 30sn timeout'tan 0.7-1.8sn'ye düştü.
+- KALICI FİX (sync.php v-yeni): maintenance_due() (sync_maintenance marker tablosu + GET_LOCK, saatte 1 kez, kilidi alamayan atlar) → auto_cleanup_old_logs LIMIT'li partiler + ensure_dataset_cache_rows saatlik; request_poll'da 15dk+ queued otomatik expire (LIMIT 500). php -l OK. KULLANICI sync.php'yi hostinge YÜKLEMELİ (/api/pos-dosya/sync.php).
+### UI düzeltmeleri (test edildi, ekran görüntülü)
+- dashboard.tsx: userName büyütüldü (ios 17→20, minScale 0.9), header butonları kompakt.
+- stock.tsx: header sıkışıklığı çözüldü (başlık 17 + flexShrink, iconBtn 34, ikon 18, gap 6).
+- Premium kamera izin kartı: src/components/KameraIzinKarti.tsx (absolute overlay, MODAL DEĞİL) — fiyat-gor + stock scanner kullanıyor; canAskAgain=false → "Ayarları Aç" modu.
+- Fiyat Gör isimle arama: backend barcode-price'a Türkçe duyarsız AD araması eklendi; tek eşleşme → direkt sonuç, çoklu → candidates listesi (app'te seçim listesi). Test: "kola"→tek ürün, "me"→25 aday ✅.

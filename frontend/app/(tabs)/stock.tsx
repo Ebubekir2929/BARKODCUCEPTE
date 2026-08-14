@@ -10,6 +10,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../src/store/themeStore';
 import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import { useAuthStore } from '../../src/store/authStore';
+import KameraIzinKarti from '../../src/components/KameraIzinKarti';
 import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { readPendingTap, clearPendingTap, NOTIFICATION_TAP_EVENT } from '../../src/services/notificationTapHandler';
@@ -59,6 +60,7 @@ export default function StockScreen() {
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [permission, requestPermission] = useCameraPermissions();
+  const [izinKartiAcik, setIzinKartiAcik] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [toastVisible, setToastVisible] = useState(false);
 
@@ -746,11 +748,9 @@ export default function StockScreen() {
 
   // Barcode scan
   const openScanner = async () => {
-    if (!permission?.granted) {
-      const r = await requestPermission();
-      if (!r.granted) { showWarning(t('permission_required'), t('camera_permission')); return; }
-    }
-    setShowScanner(true);
+    if (permission?.granted) { setShowScanner(true); return; }
+    // 2026-08 — Premium izin kartı
+    setIzinKartiAcik(true);
   };
 
   const handleBarCodeScanned = ({ data }: { data: string }) => {
@@ -1034,25 +1034,25 @@ export default function StockScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <ActiveSourceIndicator />
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>{t('stock_management')}</Text>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
+        <Text style={[styles.headerTitle, { color: colors.text }]} numberOfLines={1}>{t('stock_management')}</Text>
+        <View style={{ flexDirection: 'row', gap: 6 }}>
           {/* 2026-06 — Barkoddan Fiyat Gör */}
           <TouchableOpacity style={[styles.iconBtn, { backgroundColor: colors.primary + '20' }]} onPress={() => router.push('/fiyat-gor')}>
-            <Ionicons name="pricetags-outline" size={20} color={colors.primary} />
+            <Ionicons name="pricetags-outline" size={18} color={colors.primary} />
           </TouchableOpacity>
           {/* 2026-07 — Fatura/Fiş girişi ekranı */}
           <TouchableOpacity style={[styles.iconBtn, { backgroundColor: colors.warning + '20' }]} onPress={() => router.push('/fis-giris')}>
-            <Ionicons name="receipt-outline" size={20} color={colors.warning} />
+            <Ionicons name="receipt-outline" size={18} color={colors.warning} />
           </TouchableOpacity>
           {/* 2026-07 — Sayım fişi ekranı (Faz 3) */}
           <TouchableOpacity style={[styles.iconBtn, { backgroundColor: '#8B5CF620' }]} onPress={() => router.push('/sayim-giris')}>
-            <Ionicons name="clipboard-outline" size={20} color="#8B5CF6" />
+            <Ionicons name="clipboard-outline" size={18} color="#8B5CF6" />
           </TouchableOpacity>
           <TouchableOpacity style={[styles.iconBtn, { backgroundColor: colors.success + '20' }]} onPress={openScanner}>
-            <Ionicons name="barcode-outline" size={20} color={colors.success} />
+            <Ionicons name="barcode-outline" size={18} color={colors.success} />
           </TouchableOpacity>
           <TouchableOpacity style={[styles.iconBtn, { backgroundColor: colors.primary + '20' }]} onPress={() => setShowFilterModal(true)}>
-            <Ionicons name="filter" size={20} color={colors.primary} />
+            <Ionicons name="filter" size={18} color={colors.primary} />
             {activeFilterCount > 0 && <View style={[styles.badge, { backgroundColor: colors.primary }]}><Text style={styles.badgeText}>{activeFilterCount}</Text></View>}
           </TouchableOpacity>
         </View>
@@ -1998,15 +1998,22 @@ export default function StockScreen() {
           setTimeout(() => openStockDetail(item as any), 250);
         }}
       />
+      <KameraIzinKarti
+        visible={izinKartiAcik}
+        onClose={() => setIzinKartiAcik(false)}
+        onGranted={() => { setIzinKartiAcik(false); setShowScanner(true); }}
+        requestPermission={requestPermission}
+        canAskAgain={permission?.canAskAgain !== false}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1 },
-  headerTitle: { fontSize: 20, fontWeight: '800' },
-  iconBtn: { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, gap: 8 },
+  headerTitle: { fontSize: 17, fontWeight: '800', flexShrink: 1 },
+  iconBtn: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   badge: { position: 'absolute', top: -4, right: -4, width: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   badgeText: { color: '#fff', fontSize: 10, fontWeight: '700' },
   priceSelector: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 10, borderWidth: 1 },

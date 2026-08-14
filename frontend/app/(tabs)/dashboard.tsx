@@ -737,7 +737,7 @@ export default function DashboardScreen() {
             style={[styles.userName, { color: colors.text }]}
             numberOfLines={1}
             adjustsFontSizeToFit
-            minimumFontScale={0.7}
+            minimumFontScale={0.9}
             maxFontSizeMultiplier={1.2}
           >
             {user?.full_name || 'Kullanıcı'}
@@ -2553,15 +2553,15 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web' ? { letterSpacing: 0.4, textTransform: 'uppercase' as const } : {}),
   },
   userName: {
-    fontSize: Platform.select({ web: 22, ios: 17, android: 22, default: 20 }),
+    fontSize: Platform.select({ web: 22, ios: 20, android: 22, default: 21 }),
     fontWeight: Platform.OS === 'web' ? '800' : '700',
     ...(Platform.OS === 'web' ? { letterSpacing: -0.5 } : {}),
   },
   filterButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: Platform.OS === 'ios' ? 10 : 14,
-    paddingVertical: Platform.OS === 'ios' ? 8 : 10,
+    paddingHorizontal: Platform.OS === 'ios' ? 9 : 11,
+    paddingVertical: Platform.OS === 'ios' ? 8 : 9,
     borderRadius: 20,
     borderWidth: 1,
     gap: 4,

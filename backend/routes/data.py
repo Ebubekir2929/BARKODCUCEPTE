@@ -1960,6 +1960,26 @@ async def barcode_price(
             # Barkod bulunamazsa stok koduyla da dene
             matches = [it for it in items if str(it.get("KOD", "") or "").strip() == barkod]
         if not matches:
+            # 2026-08 — Ürün ADINA göre kısmi arama (Türkçe büyük/küçük duyarsız)
+            def _tr_fold(s: str) -> str:
+                return s.replace("İ", "i").replace("I", "ı").lower()
+            q = _tr_fold(barkod)
+            if len(q) >= 2:
+                name_hits = [it for it in items if q in _tr_fold(str(it.get("AD", "") or ""))]
+                uniq: dict = {}
+                for it in name_hits:
+                    pid = it.get("ID")
+                    if pid not in uniq:
+                        uniq[pid] = it
+                if len(uniq) == 1:
+                    matches = name_hits
+                elif len(uniq) > 1:
+                    candidates = [
+                        {"id": v.get("ID"), "ad": v.get("AD"), "kod": v.get("KOD"), "barkod": v.get("BARKOD")}
+                        for v in list(uniq.values())[:25]
+                    ]
+                    return {"ok": True, "found": False, "barkod": barkod, "candidates": _fix_large_ints(candidates)}
+        if not matches:
             return {"ok": True, "found": False, "barkod": barkod}
 
         ilk = matches[0]

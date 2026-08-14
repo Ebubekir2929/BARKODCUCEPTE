@@ -11,6 +11,7 @@ import { router } from 'expo-router';
 import { useThemeStore } from '../src/store/themeStore';
 import { useAuthStore } from '../src/store/authStore';
 import { useDataSourceStore } from '../src/store/dataSourceStore';
+import KameraIzinKarti from '../src/components/KameraIzinKarti';
 
 let CameraView: any = null;
 let useCameraPermissions: any = () => [null, async () => ({ granted: false })];
@@ -28,6 +29,8 @@ interface Sonuc {
   barkod: string;
   urun?: { ad: string; kod: string; barkod: string; miktar: any; birim?: string; aktif?: boolean; kdv?: any };
   fiyatlar?: FiyatSatir[];
+  // 2026-08 — İsimle aramada birden çok ürün eşleşirse seçim listesi
+  candidates?: { id: any; ad: string; kod: string; barkod: string }[];
 }
 
 const fmtFiyat = (v: any, doviz = 'TRY') => {
@@ -51,6 +54,7 @@ export default function FiyatGorScreen() {
   }, [user?.tenants, activeSource]);
   const [permission, requestPermission] = useCameraPermissions();
   const [kameraAcik, setKameraAcik] = useState(false);
+  const [izinKartiAcik, setIzinKartiAcik] = useState(false);
   const [manuelBarkod, setManuelBarkod] = useState('');
   const [sonuc, setSonuc] = useState<Sonuc | null>(null);
   const [yukleniyor, setYukleniyor] = useState(false);
@@ -90,33 +94,8 @@ export default function FiyatGorScreen() {
       return;
     }
     if (permission?.granted) { setKameraAcik(true); return; }
-    if (permission && !permission.canAskAgain) {
-      Alert.alert(
-        'Kamera İzni Gerekli',
-        'Barkod taramak için kamera izni gerekiyor. Ayarlardan izin verebilirsiniz.',
-        [
-          { text: 'Vazgeç', style: 'cancel' },
-          { text: 'Ayarları Aç', onPress: () => Linking.openSettings() },
-        ]
-      );
-      return;
-    }
-    Alert.alert('Kamera İzni', 'Ürün barkodunu okutup fiyatını anında görmek için kamera izni gerekiyor.', [
-      { text: 'Vazgeç', style: 'cancel' },
-      {
-        text: 'İzin Ver',
-        onPress: async () => {
-          const res = await requestPermission();
-          if (res?.granted) setKameraAcik(true);
-          else if (res && !res.canAskAgain) {
-            Alert.alert('İzin Reddedildi', 'Ayarlardan kamera iznini açabilirsiniz.', [
-              { text: 'Tamam', style: 'cancel' },
-              { text: 'Ayarları Aç', onPress: () => Linking.openSettings() },
-            ]);
-          }
-        },
-      },
-    ]);
+    // 2026-08 — Premium izin kartı (Alert yerine)
+    setIzinKartiAcik(true);
   };
 
   return (
@@ -161,11 +140,12 @@ export default function FiyatGorScreen() {
         <Ionicons name="search" size={18} color={colors.textSecondary} />
         <TextInput
           style={[styles.manuelInput, { color: colors.text }]}
-          placeholder="Barkod veya stok kodu yazın"
+          placeholder="Barkod, kod veya ürün adı yazın"
           placeholderTextColor={colors.textSecondary}
           value={manuelBarkod}
           onChangeText={setManuelBarkod}
-          keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'default'}
+          keyboardType="default"
+          autoCorrect={false}
           returnKeyType="search"
           onSubmitEditing={() => fiyatSorgula(manuelBarkod)}
         />
@@ -178,12 +158,36 @@ export default function FiyatGorScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}>
         {yukleniyor && <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 24 }} />}
 
-        {!yukleniyor && sonuc && !sonuc.found && (
+        {!yukleniyor && sonuc && !sonuc.found && !(sonuc.candidates && sonuc.candidates.length > 0) && (
           <View style={[styles.bulunamadi, { backgroundColor: '#EF444415', borderColor: '#EF4444' }]}>
             <Ionicons name="alert-circle" size={36} color="#EF4444" />
             <Text style={[styles.bulunamadiText, { color: '#EF4444' }]}>Ürün bulunamadı</Text>
             <Text style={{ color: colors.textSecondary, fontSize: 13 }}>Barkod: {sonuc.barkod}</Text>
           </View>
+        )}
+
+        {!yukleniyor && sonuc && !sonuc.found && (sonuc.candidates?.length || 0) > 0 && (
+          <>
+            <Text style={[styles.bolumBaslik, { color: colors.textSecondary }]}>
+              {(sonuc.candidates || []).length} ÜRÜN BULUNDU — BİRİNİ SEÇİN
+            </Text>
+            {(sonuc.candidates || []).map((c) => (
+              <TouchableOpacity
+                key={String(c.id)}
+                style={[styles.fiyatKart, { backgroundColor: colors.card, borderColor: colors.border }]}
+                onPress={() => fiyatSorgula(String(c.kod || c.barkod || c.ad || ''))}
+                activeOpacity={0.7}
+              >
+                <View style={{ flex: 1, marginRight: 8 }}>
+                  <Text style={[styles.fiyatAdi, { color: colors.text }]} numberOfLines={1}>{c.ad}</Text>
+                  <Text style={{ fontSize: 11.5, color: colors.textSecondary, marginTop: 2 }} numberOfLines={1}>
+                    {[c.kod, c.barkod].filter(Boolean).join(' · ') || '—'}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
+            ))}
+          </>
         )}
 
         {!yukleniyor && sonuc?.found && sonuc.urun && (
@@ -238,6 +242,14 @@ export default function FiyatGorScreen() {
           </View>
         )}
       </ScrollView>
+
+      <KameraIzinKarti
+        visible={izinKartiAcik}
+        onClose={() => setIzinKartiAcik(false)}
+        onGranted={() => { setIzinKartiAcik(false); setKameraAcik(true); }}
+        requestPermission={requestPermission}
+        canAskAgain={permission?.canAskAgain !== false}
+      />
     </View>
   );
 }

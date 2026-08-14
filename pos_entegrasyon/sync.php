@@ -830,6 +830,18 @@ function ensure_dataset_cache_rows(PDO $pdo): void
     }
     $done = true;
 
+    /* 2026-06 — PERFORMANS: ALTER denemeleri + SHA2 backfill UPDATE'leri her istekte
+       tam tablo taraması yapıyordu. Tablo varsa bu ağır blok saatte 1 keze indirildi. */
+    try {
+        $existsStmt = $pdo->query("SHOW TABLES LIKE 'dataset_cache_rows'");
+        $tableExists = $existsStmt !== false && $existsStmt->fetchColumn() !== false;
+    } catch (Throwable $e) {
+        $tableExists = false;
+    }
+    if ($tableExists && !maintenance_due($pdo, 'rows_schema', 3600)) {
+        return;
+    }
+
     /*
      * Eski MySQL/Plesk kurulumlarında 1071 "Specified key was too long" hatası
      * tenant_id + dataset_key + params_hash + row_key indeksinden geliyordu.
@@ -1651,21 +1663,55 @@ function is_acik_masa_pos_currently_open(PDO $pdo, string $tenantId, array $para
     return false;
 }
 
+function maintenance_due(PDO $pdo, string $name, int $intervalSec): bool
+{
+    /* 2026-06 — PERFORMANS: Ağır bakım işleri (temizlik, DDL/backfill) HER istekte
+       çalışıp MySQL'i ve tüm PHP worker'larını kilitliyordu (sync.php timeout'larının
+       kök nedeni). Bu fonksiyon işi saatte 1 keze indirir ve GET_LOCK ile aynı anda
+       tek worker'ın çalışmasını garanti eder. Kilidi alamayan BEKLEMEZ, atlar. */
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS sync_maintenance (
+            name VARCHAR(64) NOT NULL PRIMARY KEY,
+            last_run_at DATETIME NOT NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        $stmt = $pdo->prepare("SELECT last_run_at FROM sync_maintenance WHERE name = ?");
+        $stmt->execute([$name]);
+        $last = $stmt->fetchColumn();
+        if ($last !== false && $last !== null && (time() - strtotime((string)$last)) < $intervalSec) {
+            return false;
+        }
+        $lockStmt = $pdo->prepare("SELECT GET_LOCK(?, 0)");
+        $lockStmt->execute(['kc_maint_' . $name]);
+        if (!(int)$lockStmt->fetchColumn()) {
+            return false;
+        }
+        $stmt = $pdo->prepare("INSERT INTO sync_maintenance (name, last_run_at) VALUES (?, NOW())
+                               ON DUPLICATE KEY UPDATE last_run_at = NOW()");
+        $stmt->execute([$name]);
+        return true;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
 function auto_cleanup_old_logs(PDO $pdo, int $days = 7): void
 {
-    static $done = false;
-    if ($done) {
+    /* 2026-06 — Saatte 1 kez, tek worker, LIMIT'li partiler. Uzun kilit yok. */
+    if (!maintenance_due($pdo, 'cleanup', 3600)) {
         return;
     }
-    $done = true;
     $days = max(1, min(3650, $days));
     try {
-        $stmt = $pdo->prepare("DELETE FROM sync_logs WHERE created_at < (NOW() - INTERVAL ? DAY)");
+        // Hızlı temizlik için created_at indeksi (varsa sessiz geçer)
+        try { $pdo->exec("ALTER TABLE sync_logs ADD KEY idx_sync_logs_created (created_at)"); } catch (Throwable $e) {}
+        for ($i = 0; $i < 5; $i++) {
+            $stmt = $pdo->prepare("DELETE FROM sync_logs WHERE created_at < (NOW() - INTERVAL ? DAY) LIMIT 10000");
+            $stmt->execute([$days]);
+            if ($stmt->rowCount() < 10000) { break; }
+        }
+        $stmt = $pdo->prepare("DELETE FROM sync_requests WHERE created_at < (NOW() - INTERVAL ? DAY) AND status IN ('done','error','expired') LIMIT 20000");
         $stmt->execute([$days]);
-        $stmt = $pdo->prepare("DELETE FROM sync_requests WHERE created_at < (NOW() - INTERVAL ? DAY) AND status IN ('done','error','expired')");
-        $stmt->execute([$days]);
-        $stmt = $pdo->prepare("DELETE FROM dataset_upload_chunks WHERE created_at < (NOW() - INTERVAL 2 DAY)");
-        $stmt->execute();
+        $pdo->exec("DELETE FROM dataset_upload_chunks WHERE created_at < (NOW() - INTERVAL 2 DAY) LIMIT 20000");
     } catch (Throwable $e) {
         // otomatik temizlik ana akışı bozmasın
     }
@@ -2686,6 +2732,14 @@ try {
 
             $limit = max(1, min(20, (int)($input['limit'] ?? 10)));
             reset_stale_running_requests($pdo, $tenantId, null, 120);
+            /* 2026-06 — 15 dk'dan eski queued istekler bayattır (mobil çoktan vazgeçti).
+               Expire edilmezse birikir ve client saatlerce eski istekleri işler. */
+            try {
+                $pdo->prepare("UPDATE sync_requests SET status = 'expired'
+                                WHERE tenant_id = ? AND status = 'queued'
+                                  AND created_at < (NOW() - INTERVAL 15 MINUTE) LIMIT 500")
+                    ->execute([$tenantId]);
+            } catch (Throwable $e) {}
             $pdo->beginTransaction();
 
             $stmt = $pdo->prepare(
