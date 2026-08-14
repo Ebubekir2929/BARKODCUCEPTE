@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 17 — forgot_password LOCKOUT FIX VERIFIED. Static code review of /app/backend/routes/auth.py forgot_password (lines 308-367) confirms the correct order: (1) lookup user, (2) generate temp password in memory only, (3) call send_email(...), (4) if send_email returns falsy -> raise HTTPException(500) with Turkish detail 'E-posta gönderilemedi, şifreniz değiştirilmedi...' and NO UPDATE runs, (5) only after send_email succeeds does the UPDATE users SET password=..., must_change_password=1 execute. There is no code path that mutates users.password when send_email fails. Live end-to-end proof against https://price-update-test.preview.emergentagent.com: POST /api/auth/forgot-password with cakmak_ebubekir@hotmail.com returned 500 with detail containing 'şifreniz değiştirilmedi'; POST /api/auth/login with the same account + 'admin' returned 200 with access_token immediately after — repeated the pair twice (idempotence proven). Unknown email 'yok@example.com' → 200 generic (no enumeration). Empty email → 400. Pytest: 7/8 PASS. The single FAIL is unrelated to this fix — regression login cakmak.ebubekir29@gmail.com / 1234567 returned 401 'şifre hatalı'; this credential in /app/memory/test_credentials.md appears stale (this account's password was likely rotated externally by the user; the current forgot_password change does NOT touch login logic at all and the hotmail account confirms passwords are NOT being mutated by the fix).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/auth/login",
+        "issue": "Regression credential cakmak.ebubekir29@gmail.com / 1234567 in /app/memory/test_credentials.md is stale — server returns 401 'Kullanıcı adı/e-posta veya şifre hatalı'. Password was likely rotated by the user directly on the production MySQL. This is NOT caused by the forgot_password change (that path does not modify login or the gmail account in this test run). Ask user to confirm/refresh this credential."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_forgot_password_iter17.py",
+    "/app/test_reports/pytest/iter17_results.xml"
+  ],
+  "action_items": [
+    "Ask user to renew the disabled Brevo API key (currently 401 'API Key is not enabled') so /api/auth/forgot-password can start returning 200 and actually rotate passwords. The lockout fix means the endpoint is safe to leave in production until then — users just get a 500 Turkish message and their password stays intact.",
+    "Confirm the correct password for cakmak.ebubekir29@gmail.com and update /app/memory/test_credentials.md; the value '1234567' currently fails login (401). This does not block the fix verification."
+  ],
+  "critical_code_review_comments": [
+    "auth.py:302-305 has a dead-code line — after `return TokenResponse(...)` at line 302, line 305 repeats the same return statement. Unreachable, but harmless. Consider removing.",
+    "forgot_password order (auth.py:308-367) matches the integration playbook exactly: temp password is only persisted to MySQL after send_email returns truthy. UPDATE happens in a separate `async with pool.acquire()` block, guaranteed to execute AFTER the send. Good.",
+    "Enumeration protection is correct: unknown/inactive user returns a generic 200 message; only KNOWN active users can trigger the 500 path.",
+    "send_email(...) call at line 354 is synchronous inside an async endpoint — if the SMTP call blocks it could stall the event loop for the request. Not urgent, but consider running_in_threadpool or an async SMTP client if latency becomes an issue with a real provider."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_forgot_password_iter17.py (new)",
+    "/app/test_reports/pytest/iter17_results.xml (new)"
+  ],
+  "success_rate": {"backend": "87.5% (7/8 — 1 fail is stale credential, not fix regression)", "frontend": "N/A (backend-only run)"},
+  "seed_data_creation": "None. All tests use existing live MySQL accounts; forgot_password is safe to call because email transport is broken by design and the fix guarantees no password mutation.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The lockout fix is complete and verified. When the user renews the Brevo API key, re-run test_forgot_password_iter17.py — tests 2/4 (expecting 500) will START FAILING because the endpoint will begin returning 200 with a real reset email, AND the hotmail account's password WILL be rotated on that call (must_change_password will flip to true). At that point either (a) remove the KNOWN account tests entirely, or (b) point them at a throwaway test account. Also refresh cakmak.ebubekir29@gmail.com password in /app/memory/test_credentials.md before running regression again.",
+  "rca_of_issue": "Original bug (already fixed by main agent): forgot_password UPDATE-then-send order — a failed email would leave the user with a randomly-generated password they never received, locking them out. Fix moves UPDATE strictly after a truthy send_email(...) return; on failure the endpoint raises 500 with a Turkish message and the users row is untouched. Verified live: cakmak_ebubekir@hotmail.com password 'admin' still logs in immediately after two consecutive failed forgot-password calls."
+}

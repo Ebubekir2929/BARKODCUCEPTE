@@ -330,11 +330,6 @@ async def forgot_password(data: ForgotPasswordRequest):
     new_password = ''.join(secrets.choice(alphabet) for _ in range(10))
     new_hash = sha1_hash(new_password)
 
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("UPDATE users SET password = %s, must_change_password = 1 WHERE user_id = %s", (new_hash, user_id))
-            await conn.commit()
-
     subject = "Barkodcu Cepte - Şifre Sıfırlama"
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
@@ -358,8 +353,15 @@ async def forgot_password(data: ForgotPasswordRequest):
 
     sent = send_email(email, subject, html, text)
     if not sent:
-        logger.warning(f"Password updated but email send failed for user {user_id}")
-        raise HTTPException(status_code=500, detail="Şifre sıfırlandı ancak e-posta gönderilemedi. Lütfen yöneticinizle iletişime geçin.")
+        # 2026-06 — E-posta gönderilemezse şifre DEĞİŞTİRİLMEZ (kilitlenme önlenir)
+        logger.warning(f"Password reset email failed for user {user_id} — password NOT changed")
+        raise HTTPException(status_code=500, detail="E-posta gönderilemedi, şifreniz değiştirilmedi. Lütfen daha sonra tekrar deneyin veya yöneticinizle iletişime geçin.")
+
+    # E-posta sağlayıcı kabul etti — şimdi şifreyi güncelle
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("UPDATE users SET password = %s, must_change_password = 1 WHERE user_id = %s", (new_hash, user_id))
+            await conn.commit()
 
     logger.info(f"Password reset email sent for user_id={user_id}, email={email}")
     return {"ok": True, "message": "Şifre sıfırlama e-postası gönderildi. Gelen kutunuzu kontrol edin."}
