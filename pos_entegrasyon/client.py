@@ -5164,6 +5164,10 @@ SELECT TOP {limit}
                 self.println("Kuyrukta iş yok.")
                 return
 
+            # 2026-06 — Aktif istek var: arka plan işleri bir süre pas geçsin
+            # (mobil kullanıcı ekranda bekliyor, tüm kaynak isteğe ayrılır)
+            self._last_request_activity_ts = time.time()
+
             for req in requests_list:
                 request_uid = req.get("request_uid")
                 dataset_key = req.get("dataset_key")
@@ -5262,6 +5266,12 @@ SELECT TOP {limit}
         self.process_pending_requests()
 
         # 3) Diğer büyük/master işler arka planda.
+        # 2026-06 — Son 15 sn içinde mobil kullanıcı isteği işlendiyse ağır arka plan
+        # işleri BU TURU PAS GEÇER: tüm kaynak (SQL Server + bant genişliği) isteğe kalır.
+        if time.time() - getattr(self, "_last_request_activity_ts", 0) < 15:
+            self.println("Arka plan işleri ertelendi: aktif kullanıcı isteği önceliği")
+            self._cleanup_logs_if_needed(7)
+            return
         background_force_keys = self.detect_changed_dependencies() - PRIORITY_REPORT_DATASET_KEYS
         self.sync_push_datasets(
             force=False,
