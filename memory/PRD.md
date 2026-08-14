@@ -144,3 +144,9 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - Kullanıcı production'da "Şifremi Unuttum" akışını test etti: "şuan çalıştı" — e-posta teslim ediliyor.
 - Not: BREVO_API_KEY yalnızca Railway (production) env'de tanımlı; dev workspace'te yok (dev SMTP Gmail fallback kullanır).
 - Kalan açık iş: dashboard.tsx refactor (P3).
+
+## 2026-06 (Fork) — İstek Önceliği TÜM arka plan işlerine genişletildi
+- Kullanıcı logu: request işlenirken "islem kaynak: banka_pos_list güncellendi" araya giriyordu → rapor gecikiyordu.
+- _bekle_istek_bitsin guard'ı eklenen ek fonksiyonlar: _push_islem_kaynaklar_if_due (giriş+dataset başına), sync_direct_acik_masa_detay (liste+POS başına), sync_direct_rap_filtre_lookup (kaynak başına), sync_direct_rap_acik_hesap_ozet (sayfa başına), sync_direct_fis_gunluk_bildirim_feed, detect_changed_dependencies (watcher başına), _run_backfill_job (dataset/gün başına).
+- process_pending_requests / process_pending_islemler / process_pending_price_updates KASITLI olarak guard'sız (kullanıcı eylemleri + deadlock önleme).
+- Toplam 21 guard noktası; py_compile OK; /api/pos-dosya/client.py güncel (288KB).

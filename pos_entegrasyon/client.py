@@ -2761,6 +2761,7 @@ class Main(QMainWindow):
             interval_sec = int(watcher.get("watch_interval_sec", 30))
             if not self.should_run_watcher(watch_key, interval_sec):
                 continue
+            self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
             try:
                 signature = self.execute_change_watcher(watcher)
             except Exception as exc:
@@ -3701,6 +3702,7 @@ class Main(QMainWindow):
             self.println("acik_masa_detay direkt cache atlandı: acik_masalar tanımı yok/kapalı.")
             return 0
 
+        self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
         try:
             open_rows = self.execute_dataset(open_def, resolve_params(open_def.get("params_template", {})))
         except Exception as exc:
@@ -3717,6 +3719,7 @@ class Main(QMainWindow):
         skipped_no_pos = 0
 
         for row in open_rows:
+            self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
             if not isinstance(row, dict):
                 continue
 
@@ -3781,6 +3784,7 @@ class Main(QMainWindow):
         ok_sources = 0
         empty_sources = 0
         for kaynak in RAP_FILTER_LOOKUP_SOURCES:
+            self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
             params = {"Kaynak": kaynak, "Q": ""}
             try:
                 rows = self.execute_dataset(defn, params)
@@ -3832,6 +3836,7 @@ class Main(QMainWindow):
         all_rows: List[Dict[str, Any]] = []
         max_pages = 200
         for page in range(1, max_pages + 1):
+            self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
             exec_params = dict(base_params)
             exec_params["Page"] = page
             exec_params["PageSize"] = page_size
@@ -3885,6 +3890,7 @@ class Main(QMainWindow):
         params["Personel"] = ""
         params["FisTuru"] = ""
 
+        self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
         try:
             data = self.execute_dataset(defn, params)
             if not isinstance(data, list):
@@ -5756,6 +5762,7 @@ SELECT TOP {limit}
         if now - getattr(self, "_islem_kaynaklar_last_push", 0) < 1800:
             return
         self._islem_kaynaklar_last_push = now
+        self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
         try:
             conn = self.get_connection()
         except Exception as exc:
@@ -5768,6 +5775,7 @@ SELECT TOP {limit}
                 "banka_pos_list": ["BANKA_POS", "BANKA_POSLAR", "BANKA_POS_TANIM"],
             }
             for dataset_key, tablolar in kaynaklar.items():
+                self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
                 rows = None
                 for tbl in tablolar:
                     try:
@@ -6160,6 +6168,7 @@ SELECT TOP {limit}
                 for defn in hedefler:
                     if self._backfill_cancel:
                         break
+                    self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
                     key = str(defn.get("dataset_key"))
                     try:
                         params = resolve_params_for_day(defn.get("params_template", {}), day_dt)
