@@ -211,3 +211,7 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - Katman 3 (yeni): server.py startup'ta _bellek_bekcisi task: 60sn'de bir VmRSS kontrol; > MEM_KORUMA_MB (env, varsayılan 400) ise TÜM cache'leri boşaltıp trim yapar, warning loglar. dataset_cache.tum_cache_bosalt() eklendi.
 - Testler: py_compile ✅, sistem-durum 76MB ✅, acil boşaltma birim testi ✅.
 - KULLANICI: Railway'e MUTLAKA redeploy + Railway plan bellek limitini bildirmesi istendi (512MB ise MEM_KORUMA_MB=400 uygun; farklıysa env'den ayarlanabilir).
+
+## 2026-08 — Production doğrulama
+- barkodcucepte-production.up.railway.app CANLI ve bugünkü İLK bellek fixi deployda (bellek_mb:87 görünüyor) → Railway bu workspace kodundan besleniyor (kullanıcı redeploy akışı çalışıyor).
+- Bellek Bekçisi (katman 3) için yeni redeploy gerekli. Doğrulama işareti: /api/sistem-durum "surum" = "2026-08-21-v5-bellek-bekcisi".
