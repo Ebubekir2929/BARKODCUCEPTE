@@ -215,3 +215,7 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 ## 2026-08 — Production doğrulama
 - barkodcucepte-production.up.railway.app CANLI ve bugünkü İLK bellek fixi deployda (bellek_mb:87 görünüyor) → Railway bu workspace kodundan besleniyor (kullanıcı redeploy akışı çalışıyor).
 - Bellek Bekçisi (katman 3) için yeni redeploy gerekli. Doğrulama işareti: /api/sistem-durum "surum" = "2026-08-21-v5-bellek-bekcisi".
+
+## 2026-08 — Production'da v5 CANLI ✅
+- Kullanıcı GitHub push + Railway redeploy yaptı. barkodcucepte-production.up.railway.app/api/sistem-durum → surum "2026-08-21-v5-bellek-bekcisi", bellek 84.9MB. 3 katmanlı bellek koruması (eviction + malloc_trim/ARENA_MAX + bellek bekçisi 400MB) production'da aktif.
+- Railway deploy akışı NOT: Emergent "Save to GitHub" → Railway redeploy (redeploy tek başına eski commit'i kurar).
