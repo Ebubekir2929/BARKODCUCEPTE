@@ -293,6 +293,49 @@ export default function DashboardScreen() {
     return user.tenants[0]?.tenant_id || '';
   }, [user?.tenants, activeSource]);
 
+  // 2026-08 — Market + Restoran ayrı tenant: aktif kaynak dışındaki
+  // kaynakların açık masaları da dashboard'da gösterilir (kaynak etiketiyle).
+  const [digerMasalar, setDigerMasalar] = useState<{ name: string; tables: OpenTable[] }[]>([]);
+  useEffect(() => {
+    let iptalEdildi = false;
+    const { token: tok } = useAuthStore.getState();
+    const yukle = async () => {
+      try {
+        const tenants = user?.tenants || [];
+        if (tenants.length < 2 || !tok) { if (!iptalEdildi) setDigerMasalar([]); return; }
+        const digerler = tenants.filter((tn) => tn.tenant_id !== activeTenantId);
+        if (digerler.length === 0) { if (!iptalEdildi) setDigerMasalar([]); return; }
+        const resp = await fetch(`${API_URL}/api/data/acik-masalar-coklu`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok}` },
+          body: JSON.stringify({ tenant_ids: digerler.map((tn) => tn.tenant_id) }),
+        });
+        const j = await resp.json();
+        if (iptalEdildi || !j?.ok) return;
+        const sonuc: { name: string; tables: OpenTable[] }[] = [];
+        for (const s of j.sources || []) {
+          const tn = digerler.find((x) => x.tenant_id === s.tenant_id);
+          const tables: OpenTable[] = (s.masalar || []).map((m: any, idx: number) => ({
+            id: `dt-${s.tenant_id}-${m.MASA_ID || idx}`,
+            tableNo: String(m.MASA || idx + 1),
+            customerName: '', customerId: '',
+            posId: String(m.POS_ID || ''),
+            amount: parseFloat(m.TUTAR || '0'),
+            paidAmount: parseFloat(m.ODENEN_TUTAR || '0'),
+            remainingAmount: parseFloat(m.KALAN_TUTAR || '0'),
+            location: m.LOKASYON || '', section: m.BOLUM || '',
+            openedAt: m.TARIH || '', itemCount: 0, dataSource: tn?.name || '',
+          }));
+          if (tables.length > 0) sonuc.push({ name: tn?.name || 'Diğer Kaynak', tables });
+        }
+        setDigerMasalar(sonuc);
+      } catch { /* sessiz — çevrimdışı olabilir */ }
+    };
+    yukle();
+    const zamanlayici = setInterval(yukle, 30000);
+    return () => { iptalEdildi = true; clearInterval(zamanlayici); };
+  }, [user?.tenants, activeTenantId]);
+
   // 2026-05-06 — Pending notification tap işleme — sade AsyncStorage flow.
   // activeTenantId'nin TANIMLANMASI bekleniyor (TDZ fix). Eğer auth hazır
   // değilse return — cold start race condition'ı önler.
@@ -737,12 +780,19 @@ export default function DashboardScreen() {
             style={[styles.userName, { color: colors.text }]}
             numberOfLines={1}
             adjustsFontSizeToFit
-            minimumFontScale={0.9}
+            minimumFontScale={0.72}
             maxFontSizeMultiplier={1.2}
           >
             {user?.full_name || 'Kullanıcı'}
           </Text>
         </View>
+        <TouchableOpacity
+          style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border, marginRight: 8 }]}
+          onPress={() => router.push('/giderler')}
+          hitSlop={6}
+        >
+          <Ionicons name="trending-down-outline" size={20} color={colors.error} />
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border, marginRight: 8 }]}
           onPress={() => router.push('/fiyat-gor')}
@@ -947,7 +997,7 @@ export default function DashboardScreen() {
         </View>
 
         {/* Open Tables Section — Restoran + has open tables */}
-        {user?.business_type === 'restoran' && (sourceData?.openTables || []).length > 0 && (
+        {(sourceData?.openTables || []).length > 0 && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.sectionHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -1049,6 +1099,61 @@ export default function DashboardScreen() {
           )}
         </View>
         )}
+
+        {/* 2026-08 — Diğer veri kaynaklarının açık masaları (Market + Restoran senaryosu) */}
+        {digerMasalar.map((kaynak) => (
+          <View key={`dk-${kaynak.name}`} style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={styles.sectionHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                <Ionicons name="restaurant-outline" size={18} color={colors.primary} />
+                <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0, flexShrink: 1 }]} numberOfLines={1}>
+                  {t('open_tables')} — {kaynak.name}
+                </Text>
+              </View>
+              <View style={[styles.openTableCount, { backgroundColor: colors.primary + '15' }]}>
+                <Text style={[styles.openTableCountText, { color: colors.primary }]}>{kaynak.tables.length}</Text>
+              </View>
+            </View>
+            <View style={[styles.openTablesSummary, { backgroundColor: colors.background, borderColor: colors.border }]}>
+              <View style={styles.openTablesSummaryItem}>
+                <Text style={[styles.openTablesSummaryLabel, { color: colors.textSecondary }]}>{t('total_open_amount')}</Text>
+                <Text style={[styles.openTablesSummaryValue, { color: colors.text }]}>
+                  ₺{kaynak.tables.reduce((s, x) => s + x.amount, 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                </Text>
+              </View>
+              <View style={[styles.openTablesSummaryDivider, { backgroundColor: colors.border }]} />
+              <View style={styles.openTablesSummaryItem}>
+                <Text style={[styles.openTablesSummaryLabel, { color: colors.textSecondary }]}>{t('total_remaining')}</Text>
+                <Text style={[styles.openTablesSummaryValue, { color: colors.error }]}>
+                  ₺{kaynak.tables.reduce((s, x) => s + x.remainingAmount, 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                </Text>
+              </View>
+            </View>
+            {kaynak.tables.map((table) => (
+              <View
+                key={table.id}
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, paddingHorizontal: 4, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border }}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                  <Ionicons name="restaurant-outline" size={15} color={colors.primary} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 13.5, fontWeight: '600', color: colors.text }} numberOfLines={1}>
+                      {t('table_short')} {table.tableNo}
+                    </Text>
+                    {!!(table.location || table.section) && (
+                      <Text style={{ fontSize: 11, color: colors.textSecondary }} numberOfLines={1}>
+                        {[table.location, table.section].filter(Boolean).join(' · ')}
+                      </Text>
+                    )}
+                  </View>
+                </View>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: colors.text }}>
+                  ₺{table.amount.toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ))}
 
         {/* Garson / Personel Satışları - Live Data (POS + ERP12) */}
         {(sourceData?.waiterSales || []).length > 0 && (

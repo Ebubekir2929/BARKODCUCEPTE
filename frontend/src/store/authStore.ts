@@ -36,6 +36,7 @@ interface AuthStore {
   forgotPassword: (email: string) => Promise<{ success: boolean; error?: string; message?: string }>;
   addTenant: (tenant_id: string, name: string) => Promise<{ success: boolean; error?: string }>;
   updateTenantName: (tenant_id: string, name: string) => Promise<{ success: boolean; error?: string }>;
+  changeTenantId: (tenant_id: string, new_tenant_id: string, password: string) => Promise<{ success: boolean; error?: string }>;
   removeTenant: (tenant_id: string) => Promise<{ success: boolean; error?: string }>;
   refreshUser: () => Promise<void>;
   deleteAccount: (password: string) => Promise<{ success: boolean; error?: string }>;
@@ -274,6 +275,26 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       set({ user: data });
       return { success: true };
     } catch (error) {
+      return { success: false, error: 'Bağlantı hatası' };
+    }
+  },
+
+  // 2026-08 — Tenant ID'yi şifre onayıyla değiştir
+  changeTenantId: async (tenant_id: string, new_tenant_id: string, password: string) => {
+    const { token } = get();
+    if (!token) return { success: false, error: 'Oturum açmanız gerekiyor' };
+    try {
+      const response = await fetch(`${API_URL}/api/auth/tenants/${encodeURIComponent(tenant_id)}/change-id`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ new_tenant_id, password }),
+      });
+      const data = await response.json();
+      if (!response.ok) return { success: false, error: data.detail || 'Tenant ID güncellenemedi' };
+      await AsyncStorage.setItem('user', JSON.stringify(data));
+      set({ user: data });
+      return { success: true };
+    } catch {
       return { success: false, error: 'Bağlantı hatası' };
     }
   },

@@ -190,3 +190,12 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - client.py py_compile ✅ (v3, indirme 290KB güncel), sync.php php -l ✅ (maintenance_due + expire mevcut, indirme 128KB güncel), canlı sync.php 0.48sn yanıt ✅.
 - Backend derleme ✅, login ✅, isimle arama ("kola"→Meral Kolasayın) ✅, çoklu aday (25) ✅, bellek izleme (120MB, sweep aktif) ✅.
 - app.json 1.0.44 / iOS 48 / Android 48 ✅. Fiyat Gör ekranı: sonuç + SON BAKILAN ÜRÜNLER ekran testi ✅.
+
+## 2026-08 (Fork) — 5 Yeni Özellik Paketi
+1. Sistem Sağlığı bellek göstergesi: sistem-saglik.tsx "Sunucu Belleği" satırı (bellek_mb + önbellek satır sayısı, 300/450MB renk eşikleri).
+2. Giderler ekranı (/app/frontend/app/giderler.tsx): rap_lm_gelir_tablosu'ndan GRUP='GİDERLER' kalemleri; Bugün/Son7/BuAy/GeçenAy aralıkları + lokasyon seçici (report-filter-options); toplam gider kartı + net satış/brüt kâr/kâr-zarar özeti + kalem başına % pay barı; SWR (önce cache_only sonra taze). Dashboard header'a kırmızı trending-down butonu eklendi. Ekran testi ✅ (canlı POS verisiyle).
+3. Offline açılış (2b): ZATEN VARDI — authStore.checkAuth ağ hatasında cihazdaki oturumla girer; dashboard dash_offline:{tenant} AsyncStorage yedeğiyle açılır (isOffline bandı).
+4. Tenant ID düzenleme: PUT /api/auth/tenants/{id}/change-id (şifre SHA1 doğrulama; ana kaynak→MySQL users.tenant_id + tenant_names taşıma, ek kaynak→Mongo user_tenants; duplicate koruması). authStore.changeTenantId + settings.tsx edit modalında ID alanı düzenlenebilir + ID değişince şifre alanı çıkar. Güvenlik testleri ✅ (401 yanlış şifre / 400 aynı id).
+5. Market+Restoran çoklu kaynak açık masalar: POST /api/data/acik-masalar-coklu (tenant_ids→masalar); dashboard business_type='restoran' kısıtı KALDIRILDI; digerMasalar state 30sn'de bir diğer tenant'ların masalarını çekip kaynak adıyla ayrı kart gösterir. API testi ✅ (2 kaynak, 3+4 masa).
+- NOT: dashboard userName minimumFontScale 0.72 (5 buton sıkışması); adjustsFontSizeToFit web'de çalışmaz, native'de küçülür.
+- Dashboard lint hataları (liveDot dupe, unescaped ') ÖNCEDEN VARDI, dokunulmadı.

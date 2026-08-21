@@ -29,7 +29,7 @@ import AccentColorPickerModal from '../../src/components/AccentColorPickerModal'
 export default function SettingsScreen() {
   const router = useRouter();
   const { colors, isDark, mode: themeMode, setMode: setThemeMode, accent } = useThemeStore();
-  const { user, logout, addTenant, updateTenantName, removeTenant } = useAuthStore();
+  const { user, logout, addTenant, updateTenantName, removeTenant, changeTenantId } = useAuthStore();
   const refreshInterval = usePrefsStore((s) => s.refreshInterval);
   const setRefreshInterval = usePrefsStore((s) => s.setRefreshInterval);
   const { language, setLanguage, t, loadLanguage } = useLanguageStore();
@@ -66,6 +66,7 @@ export default function SettingsScreen() {
   const [tenantIdInput, setTenantIdInput] = useState('');
   const [tenantNameInput, setTenantNameInput] = useState('');
   const [tenantLoading, setTenantLoading] = useState(false);
+  const [tenantPasswordInput, setTenantPasswordInput] = useState('');
 
   // Track keyboard height so we can lift the bottom-sheet modal on Android
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -397,6 +398,7 @@ export default function SettingsScreen() {
     setEditingTenantId(tenantId);
     setTenantIdInput(tenantId);
     setTenantNameInput(currentName);
+    setTenantPasswordInput('');
     setShowTenantModal(true);
   };
 
@@ -424,11 +426,26 @@ export default function SettingsScreen() {
         showWarning(t('warning_title'), t('enter_tenant_name'));
         return;
       }
+      // 2026-08 — Tenant ID değişikliği (şifre onaylı)
+      const yeniId = tenantIdInput.trim();
+      const idDegisti = !!yeniId && yeniId !== editingTenantId;
+      if (idDegisti && !tenantPasswordInput) {
+        showWarning(t('warning_title'), 'Tenant ID değişikliği için hesap şifrenizi girin');
+        return;
+      }
       setTenantLoading(true);
-      const result = await updateTenantName(editingTenantId, tenantNameInput.trim());
+      if (idDegisti) {
+        const idResult = await changeTenantId(editingTenantId, yeniId, tenantPasswordInput);
+        if (!idResult.success) {
+          setTenantLoading(false);
+          showError(t('error_title'), idResult.error || 'Tenant ID güncellenemedi');
+          return;
+        }
+      }
+      const result = await updateTenantName(idDegisti ? yeniId : editingTenantId, tenantNameInput.trim());
       setTenantLoading(false);
       if (result.success) {
-        showSuccess(t('success_title'), t('name_updated'));
+        showSuccess(t('success_title'), idDegisti ? 'Tenant ID ve isim güncellendi' : t('name_updated'));
         setShowTenantModal(false);
       } else {
         showError(t('error_title'), result.error || t('update_failed'));
@@ -1398,12 +1415,38 @@ export default function SettingsScreen() {
                   )}
 
                   {tenantModalMode === 'edit' && (
-                    <View style={[styles.editTenantIdDisplay, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                      <Ionicons name="key-outline" size={16} color={colors.textSecondary} />
-                      <Text style={[styles.editTenantIdText, { color: colors.textSecondary }]}>
-                        {editingTenantId}
-                      </Text>
-                    </View>
+                    <>
+                      <Text style={[styles.inputLabel, { color: colors.text }]}>Tenant ID</Text>
+                      <View style={[styles.modalInput, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                        <Ionicons name="key-outline" size={18} color={colors.textSecondary} />
+                        <TextInput
+                          style={[styles.modalInputField, { color: colors.text }]}
+                          placeholder="Tenant ID"
+                          placeholderTextColor={colors.textSecondary}
+                          value={tenantIdInput}
+                          onChangeText={setTenantIdInput}
+                          autoCapitalize="none"
+                          returnKeyType="next"
+                        />
+                      </View>
+                      {tenantIdInput.trim() !== editingTenantId && (
+                        <>
+                          <Text style={[styles.inputLabel, { color: colors.text }]}>Şifreniz (ID değişikliği onayı)</Text>
+                          <View style={[styles.modalInput, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                            <Ionicons name="lock-closed-outline" size={18} color={colors.textSecondary} />
+                            <TextInput
+                              style={[styles.modalInputField, { color: colors.text }]}
+                              placeholder="Hesap şifreniz"
+                              placeholderTextColor={colors.textSecondary}
+                              value={tenantPasswordInput}
+                              onChangeText={setTenantPasswordInput}
+                              secureTextEntry
+                              autoCapitalize="none"
+                            />
+                          </View>
+                        </>
+                      )}
+                    </>
                   )}
 
                   <Text style={[styles.inputLabel, { color: colors.text }]}>{t('tenant_name_field')}</Text>

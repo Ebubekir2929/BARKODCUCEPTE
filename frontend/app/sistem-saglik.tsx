@@ -17,6 +17,8 @@ interface Durum {
   patron?: PoolInfo | null;
   data?: PoolInfo | null;
   tunel_aktif?: boolean;
+  bellek_mb?: number;
+  ram_cache?: { dataset_girdi: number; dataset_satir: number; global_girdi: number };
   derin_acquire?: number;
   derin_select1?: number;
   derin_meta_sorgu?: { sure: number; satir: number };
@@ -163,6 +165,15 @@ export default function SistemSaglikScreen() {
             {/* Havuzlar */}
             <Text style={[styles.bolumBaslik, { color: colors.textSecondary }]}>VERİTABANI BAĞLANTI HAVUZU</Text>
             <View style={[styles.kart, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              {typeof durum.bellek_mb === 'number' && (
+                <View style={[styles.satir, { borderBottomColor: colors.border }]}>
+                  <Text style={[styles.satirBaslik, { color: colors.text }]}>Sunucu Belleği</Text>
+                  <Text style={{ fontWeight: '700', color: durum.bellek_mb > 450 ? '#EF4444' : durum.bellek_mb > 300 ? '#F59E0B' : '#10B981' }}>
+                    {durum.bellek_mb.toFixed(0)} MB
+                    {durum.ram_cache ? `  ·  ${durum.ram_cache.dataset_satir.toLocaleString('tr-TR')} önbellek satırı` : ''}
+                  </Text>
+                </View>
+              )}
               <PoolKart ad="Kullanıcı DB" p={durum.patron} />
               <PoolKart ad="Veri DB" p={durum.data} />
             </View>

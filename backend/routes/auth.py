@@ -474,6 +474,62 @@ async def update_tenant_name(tenant_id: str, data: TenantUpdate, current_user: d
     return await build_user_response(current_user)
 
 
+@router.put("/tenants/{tenant_id}/change-id", response_model=UserResponse)
+async def change_tenant_id(tenant_id: str, body: dict, current_user: dict = Depends(get_current_user)):
+    """2026-08 — Tenant ID'yi uygulamadan düzenleme (şifre onaylı)."""
+    new_id = str(body.get("new_tenant_id", "") or "").strip()
+    password = str(body.get("password", "") or "")
+    if not new_id or not password:
+        raise HTTPException(status_code=400, detail="Yeni Tenant ID ve şifre gerekli")
+    if new_id == tenant_id:
+        raise HTTPException(status_code=400, detail="Yeni ID mevcut ID ile aynı")
+
+    # Şifre doğrulama (MySQL users.password SHA1)
+    pool = await get_patron_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT password FROM users WHERE user_id = %s", (current_user["user_id"],))
+            row = await cur.fetchone()
+    if not row or sha1_hash(password) != str(row[0] or "").lower():
+        raise HTTPException(status_code=401, detail="Şifre hatalı")
+
+    # Yeni ID zaten kayıtlı mı?
+    existing_ids = {current_user.get("tenant_id")}
+    if mongo_db is not None:
+        async for et in mongo_db.user_tenants.find({"user_id": current_user["user_id"]}):
+            existing_ids.add(et.get("tenant_id"))
+    if new_id in existing_ids:
+        raise HTTPException(status_code=400, detail="Bu Tenant ID zaten kayıtlı")
+
+    if tenant_id == current_user.get("tenant_id"):
+        # Ana veri kaynağı — MySQL users.tenant_id güncelle
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute("UPDATE users SET tenant_id = %s WHERE user_id = %s", (new_id, current_user["user_id"]))
+                await conn.commit()
+        if mongo_db is not None:
+            try:
+                await mongo_db.tenant_names.update_many(
+                    {"user_id": current_user["user_id"], "tenant_id": tenant_id},
+                    {"$set": {"tenant_id": new_id}},
+                )
+            except Exception as e:
+                logger.warning(f"tenant_names id migrate failed: {e}")
+        current_user["tenant_id"] = new_id
+    else:
+        if mongo_db is None:
+            raise HTTPException(status_code=500, detail="Tenant yönetimi şu anda kullanılamıyor")
+        result = await mongo_db.user_tenants.update_one(
+            {"user_id": current_user["user_id"], "tenant_id": tenant_id},
+            {"$set": {"tenant_id": new_id}},
+        )
+        if result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Tenant bulunamadı")
+
+    logger.info(f"Tenant ID changed for {current_user['email']}: {tenant_id} -> {new_id}")
+    return await build_user_response(current_user)
+
+
 @router.delete("/tenants/{tenant_id}", response_model=UserResponse)
 async def remove_tenant(tenant_id: str, current_user: dict = Depends(get_current_user)):
     if mongo_db is None:

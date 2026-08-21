@@ -2033,6 +2033,24 @@ async def barcode_price(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/acik-masalar-coklu")
+async def acik_masalar_coklu(body: dict, current_user: dict = Depends(get_current_user)):
+    """2026-08 — Market + Restoran ayrı tenant'ları olan kullanıcılar için:
+    aktif kaynak dışındaki tenant'ların açık masalarını tek çağrıda döndürür."""
+    tenant_ids = body.get("tenant_ids") or []
+    if not isinstance(tenant_ids, list):
+        raise HTTPException(status_code=400, detail="tenant_ids listesi gerekli")
+    out = []
+    for tid in [str(t).strip() for t in tenant_ids[:10] if str(t).strip()]:
+        try:
+            items = await get_dataset_items(tid, "acik_masalar")
+        except Exception as e:
+            logger.warning(f"acik-masalar-coklu {tid}: {e}")
+            items = []
+        out.append({"tenant_id": tid, "masalar": _fix_large_ints(items or [])})
+    return {"ok": True, "sources": out}
+
+
 @router.post("/stock-price-names")
 async def get_stock_price_names(
     body: dict,
