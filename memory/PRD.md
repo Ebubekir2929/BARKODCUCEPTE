@@ -185,3 +185,8 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - İzleme: /api/sistem-durum artık bellek_mb (VmRSS) + ram_cache {dataset_girdi, dataset_satir, global_girdi} döndürür.
 - Testler: birim (sweep+boyut sınırı) ✅, e2e (barcode-price cache doldurma, 87MB) ✅.
 - KULLANICI AKSIYONU: Backend'i Railway'e yeniden deploy etmeli (fix ancak deploy sonrası production'da etkin olur).
+
+## 2026-08 — SON KONTROL (tümü geçti)
+- client.py py_compile ✅ (v3, indirme 290KB güncel), sync.php php -l ✅ (maintenance_due + expire mevcut, indirme 128KB güncel), canlı sync.php 0.48sn yanıt ✅.
+- Backend derleme ✅, login ✅, isimle arama ("kola"→Meral Kolasayın) ✅, çoklu aday (25) ✅, bellek izleme (120MB, sweep aktif) ✅.
+- app.json 1.0.44 / iOS 48 / Android 48 ✅. Fiyat Gör ekranı: sonuç + SON BAKILAN ÜRÜNLER ekran testi ✅.
