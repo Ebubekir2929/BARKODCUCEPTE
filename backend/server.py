@@ -132,7 +132,16 @@ _POS_FILES = {"client.py": "text/x-python", "sync.php": "application/octet-strea
 @app.get("/api/sistem-durum", include_in_schema=False)
 async def sistem_durum(derin: int = 0):
     import services as _svc
-    out = {"surum": "2026-08-21-v5-bellek-bekcisi", "patron": None, "data": None}
+    out = {"surum": "2026-08-21-v6-blob-fix", "patron": None, "data": None}
+    # 2026-08 — OOM teşhisi: çalışma süresi (restart tespiti için)
+    try:
+        with open("/proc/self/stat") as f:
+            ticks = int(f.read().split()[21])
+        with open("/proc/uptime") as f:
+            sys_up = float(f.read().split()[0])
+        out["calisma_dk"] = round((sys_up - ticks / 100.0) / 60, 1)
+    except Exception:
+        pass
     for ad in ("patron", "data"):
         p = getattr(_svc, f"{ad}_pool", None)
         if p is not None:

@@ -219,3 +219,14 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 ## 2026-08 — Production'da v5 CANLI ✅
 - Kullanıcı GitHub push + Railway redeploy yaptı. barkodcucepte-production.up.railway.app/api/sistem-durum → surum "2026-08-21-v5-bellek-bekcisi", bellek 84.9MB. 3 katmanlı bellek koruması (eviction + malloc_trim/ARENA_MAX + bellek bekçisi 400MB) production'da aktif.
 - Railway deploy akışı NOT: Emergent "Save to GitHub" → Railway redeploy (redeploy tek başına eski commit'i kurar).
+
+## 2026-08 — OOM 3. tur: blob tarama düzeltmesi (v5 zaten deploydaydı)
+- Kullanıcı tekrar OOM e-postası aldı; prod v5 çalışıyor ve bellek 85MB stabil → e-posta muhtemelen eski build'in son çöküşünden. Yine de gerçek bir spike kaynağı bulundu:
+- lookup_cached_report aday taramaları `SELECT data_json ... ORDER BY row_count DESC LIMIT 20` ile EN BÜYÜK 20 BLOB'u sırf params karşılaştırmak için RAM'e yüklüyordu → FIX: taramada sadece id+params_json çekilir, eşleşen TEK satırın blobu id ile alınır; LIMIT 100 + synced_at DESC; eşleşenler arasından en yüksek row_count seçilir (delta-değil-tam-veri garantisi korundu).
+- Regresyon testleri: exact + fuzzy (sıra değişik + boş alan) 3 datasette ✅.
+- Railway planı: HOBBY (8GB/replika) — plan yükseltme GEREKSİZ dendi.
+- Kullanıcıdan istenen: OOM e-postasının SAATİ (v5 deploy öncesi mi?) + Railway Observability bellek grafiği.
+
+## 2026-08 — OOM 18:12 analizi
+- Mail 18:12 TR; v5 o sıralar YENİ deploy edilmişti. En güçlü teori: OOM bildirimi, redeploy sırasında öldürülen ESKİ sızıntılı instance'a ait (cutover anı). Prod v5 85MB stabil seyrediyor.
+- sistem-durum'a calisma_dk (uptime) eklendi + sürüm v6-blob-fix (blob tarama düzeltmesini de içerir). Kullanıcı redeploy edecek; sonrasında calisma_dk ile restart takibi yapılabilir.

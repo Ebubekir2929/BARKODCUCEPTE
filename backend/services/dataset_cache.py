@@ -314,6 +314,7 @@ async def lookup_cached_report(
         return out
 
     target_norm = _norm_dict(params or {})
+    secilen_id = None
 
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
@@ -354,23 +355,28 @@ async def lookup_cached_report(
                     like_clauses.append("(params_json LIKE %s OR params_json LIKE %s)")
                     like_args.extend([f'%"{dk}":{iv},%', f'%"{dk}":{iv}}}%'])
                 if like_clauses:
+                    # 2026-08 — BELLEK: data_json BLOB'ları taramada YÜKLENMEZ;
+                    # önce sadece params karşılaştırılır, eşleşen TEK satırın
+                    # blobu id ile çekilir (eskiden en büyük 20 blob RAM'e geliyordu).
                     await cur.execute(
                         f"""
-                        SELECT data_json, row_count, synced_at, params_json
+                        SELECT id, row_count, synced_at, params_json
                         FROM dataset_cache
                         WHERE tenant_id=%s AND dataset_key=%s AND {' AND '.join(like_clauses)}
-                        ORDER BY row_count DESC, synced_at DESC LIMIT 20
+                        ORDER BY synced_at DESC LIMIT 100
                         """,
                         (tenant_id, dataset_key, *like_args),
                     )
+                    # Eşleşenler arasından EN ÇOK satırlıyı seç (delta değil tam veri)
+                    en_iyi_rc = -1
                     for cand in await cur.fetchall():
                         try:
                             cand_params = json.loads(cand[3] or "{}")
                         except Exception:
                             continue
-                        if _norm_dict(cand_params) == target_norm:
-                            row = cand
-                            break
+                        if _norm_dict(cand_params) == target_norm and int(cand[1] or 0) > en_iyi_rc:
+                            secilen_id = cand[0]
+                            en_iyi_rc = int(cand[1] or 0)
 
             # 3) Fallback B: fuzzy semantic match across recent entries.
             # Order by row_count DESC first because we may have multiple cache
@@ -378,25 +384,34 @@ async def lookup_cached_report(
             # its own hash, one written by our write_dataset_cache with our hash).
             # The row with the most data is almost always the "complete" one;
             # POS sometimes writes a single-row delta update right after.
-            if not row:
+            if not row and not secilen_id:
                 await cur.execute(
                     """
-                    SELECT data_json, row_count, synced_at, params_json
+                    SELECT id, row_count, synced_at, params_json
                     FROM dataset_cache
                     WHERE tenant_id=%s AND dataset_key=%s
-                    ORDER BY row_count DESC, synced_at DESC LIMIT 20
+                    ORDER BY synced_at DESC LIMIT 100
                     """,
                     (tenant_id, dataset_key),
                 )
                 candidates = await cur.fetchall()
+                en_iyi_rc = -1
                 for cand in candidates:
                     try:
                         cand_params = json.loads(cand[3] or "{}")
                     except Exception:
                         continue
-                    if _norm_dict(cand_params) == target_norm:
-                        row = cand
-                        break
+                    if _norm_dict(cand_params) == target_norm and int(cand[1] or 0) > en_iyi_rc:
+                        secilen_id = cand[0]
+                        en_iyi_rc = int(cand[1] or 0)
+
+            # Eşleşen adayın blobu TEK satır olarak çekilir
+            if not row and secilen_id:
+                await cur.execute(
+                    "SELECT data_json, row_count, synced_at FROM dataset_cache WHERE id=%s",
+                    (secilen_id,),
+                )
+                row = await cur.fetchone()
 
     if not row:
         return None
