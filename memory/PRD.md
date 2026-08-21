@@ -203,3 +203,11 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 ## 2026-08 — Karar + sürüm
 - Açık masalar gösterimi: VERİ ODAKLI davranış kesinleşti (masa verisi olan her kaynak görünür, aktif kaynak "diğer kaynaklar" sorgusundan hariç → çift gösterim yok). Kullanıcı kararı ajana bıraktı.
 - app.json: 1.0.45 / iOS 49 / Android 49.
+
+## 2026-08 (Fork) — Railway OOM 2. tur sertleştirme (3 katman)
+- Kullanıcı OOM'un TEKRAR olduğunu bildirdi (büyük olasılıkla eski build hâlâ deployda — doğrulama: prod /api/sistem-durum yanıtında bellek_mb VARSA yeni build).
+- Katman 1 (önceki): idle eviction (900sn) + _GLOBAL_CACHE TTL/200 girdi.
+- Katman 2 (yeni): Dockerfile ENV MALLOC_ARENA_MAX=2; bellek_iade_et() = gc.collect + libc malloc_trim(0) (eviction sonrası otomatik) — Python'un OS'a bellek iade etmemesi sorununu çözer.
+- Katman 3 (yeni): server.py startup'ta _bellek_bekcisi task: 60sn'de bir VmRSS kontrol; > MEM_KORUMA_MB (env, varsayılan 400) ise TÜM cache'leri boşaltıp trim yapar, warning loglar. dataset_cache.tum_cache_bosalt() eklendi.
+- Testler: py_compile ✅, sistem-durum 76MB ✅, acil boşaltma birim testi ✅.
+- KULLANICI: Railway'e MUTLAKA redeploy + Railway plan bellek limitini bildirmesi istendi (512MB ise MEM_KORUMA_MB=400 uygun; farklıysa env'den ayarlanabilir).

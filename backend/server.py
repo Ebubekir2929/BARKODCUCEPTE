@@ -307,6 +307,34 @@ async def startup():
     # → havuzlar kurulamıyor, tüm istekler sonsuza dek askıda kalıyordu
     # (kullanıcı: "kasacepteye erişemiyorum").
     app.state.init_pools_task = asyncio.create_task(_init_pools_bg())
+
+    # 2026-08 — Bellek bekçisi: RSS eşiği aşarsa TÜM RAM cache boşaltılır (OOM crash önleme)
+    async def _bellek_bekcisi():
+        esik_mb = float(os.environ.get("MEM_KORUMA_MB", "400"))
+        while True:
+            await asyncio.sleep(60)
+            try:
+                rss_mb = 0.0
+                with open("/proc/self/status") as f:
+                    for line in f:
+                        if line.startswith("VmRSS:"):
+                            rss_mb = int(line.split()[1]) / 1024
+                            break
+                if rss_mb > esik_mb:
+                    from services.dataset_cache import tum_cache_bosalt, bellek_iade_et
+                    from routes.data import _GLOBAL_CACHE
+                    n1 = tum_cache_bosalt()
+                    n2 = len(_GLOBAL_CACHE)
+                    _GLOBAL_CACHE.clear()
+                    bellek_iade_et()
+                    logging.warning(
+                        f"[bellek_bekcisi] RSS {rss_mb:.0f}MB > {esik_mb:.0f}MB — "
+                        f"cache boşaltıldı (dataset:{n1}, global:{n2})"
+                    )
+            except Exception as e:
+                logging.error(f"[bellek_bekcisi] hata: {e}")
+
+    app.state.bellek_bekcisi_task = asyncio.create_task(_bellek_bekcisi())
     logging.info("App startup complete; DB pools initializing in background.")
 
 

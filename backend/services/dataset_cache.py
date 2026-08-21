@@ -43,6 +43,31 @@ def _sweep_mem_cache(now: float) -> None:
         entry = _DATASET_MEM_CACHE.pop(k, None)
         if entry:
             logger.info(f"[data_mem_cache] evicted idle {k[1]} tenant={k[0]} ({entry.get('row_count', 0)} rows)")
+    if stale:
+        bellek_iade_et()
+
+
+def bellek_iade_et() -> None:
+    """2026-08 — Python boşalttığı belleği OS'a geri vermez (glibc arena tutar);
+    Railway RSS'i yüksek görüp OOM verir. gc + malloc_trim ile gerçekten iade eder."""
+    try:
+        import gc
+        gc.collect()
+    except Exception:
+        pass
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
+
+def tum_cache_bosalt() -> int:
+    """Acil durum: bellek baskısında TÜM dataset RAM cache'ini boşalt."""
+    n = len(_DATASET_MEM_CACHE)
+    _DATASET_MEM_CACHE.clear()
+    bellek_iade_et()
+    return n
 
 
 def _get_lock(tenant_id: str, dataset_key: str) -> asyncio.Lock:

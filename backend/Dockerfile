@@ -23,6 +23,8 @@ COPY . .
 
 # Railway sets $PORT env variable — we bind uvicorn to it
 ENV PORT=8001
+# 2026-08 — Railway OOM fix: glibc arena parçalanmasını azalt (RSS şişmesini önler)
+ENV MALLOC_ARENA_MAX=2
 EXPOSE 8001
 
 # Healthcheck (optional but nice)
