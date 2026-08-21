@@ -199,3 +199,7 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 5. Market+Restoran çoklu kaynak açık masalar: POST /api/data/acik-masalar-coklu (tenant_ids→masalar); dashboard business_type='restoran' kısıtı KALDIRILDI; digerMasalar state 30sn'de bir diğer tenant'ların masalarını çekip kaynak adıyla ayrı kart gösterir. API testi ✅ (2 kaynak, 3+4 masa).
 - NOT: dashboard userName minimumFontScale 0.72 (5 buton sıkışması); adjustsFontSizeToFit web'de çalışmaz, native'de küçülür.
 - Dashboard lint hataları (liveDot dupe, unescaped ') ÖNCEDEN VARDI, dokunulmadı.
+
+## 2026-08 — Karar + sürüm
+- Açık masalar gösterimi: VERİ ODAKLI davranış kesinleşti (masa verisi olan her kaynak görünür, aktif kaynak "diğer kaynaklar" sorgusundan hariç → çift gösterim yok). Kullanıcı kararı ajana bıraktı.
+- app.json: 1.0.45 / iOS 49 / Android 49.
