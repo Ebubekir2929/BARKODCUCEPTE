@@ -178,3 +178,10 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 ## 2026-08 (Fork) — Fiyat Gör "Son Bakılan Ürünler" + sürüm 1.0.44
 - fiyat-gor.tsx: AsyncStorage tabanlı geçmiş (fiyat_gor_gecmis_v1, max 10, ürün bazında dedupe). Başarılı sorguda otomatik eklenir; ad+kod+barkod+ilk fiyat gösterilir; dokununca yeniden sorgular; "Temizle" butonu var. Ekran testi ✅.
 - app.json: version 1.0.44, iOS buildNumber 48, Android versionCode 48 (kullanıcı store güncellemesi yapacak).
+
+## 2026-08 (Fork) — Railway OOM (Deploy Ran Out of Memory) FIX
+- KÖK NEDEN: 2 sınırsız RAM cache — (1) services/dataset_cache.py _DATASET_MEM_CACHE: stock_list gibi 60K parse edilmiş satır tenant başına RAM'de SONSUZA DEK kalıyordu (_CACHE_MAX_AGE tanımlıydı ama hiç uygulanmamıştı); (2) routes/data.py _GLOBAL_CACHE: tarih/filtre kombinasyonlu payload'lar günlerce birikiyordu.
+- FIX: _sweep_mem_cache() her get_dataset_items çağrısında 900sn+ boşta girdileri düşürür; _global_cache_set() TTL 30dk + max 200 girdi (en eskiler düşer) — 4 yazım noktası değiştirildi.
+- İzleme: /api/sistem-durum artık bellek_mb (VmRSS) + ram_cache {dataset_girdi, dataset_satir, global_girdi} döndürür.
+- Testler: birim (sweep+boyut sınırı) ✅, e2e (barcode-price cache doldurma, 87MB) ✅.
+- KULLANICI AKSIYONU: Backend'i Railway'e yeniden deploy etmeli (fix ancak deploy sonrası production'da etkin olur).

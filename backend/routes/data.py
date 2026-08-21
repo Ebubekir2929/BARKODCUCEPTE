@@ -28,6 +28,24 @@ router = APIRouter(prefix="/data", tags=["data"])
 # Value: { ts: float (epoch), payload: dict }
 _GLOBAL_CACHE: Dict[str, Dict[str, Any]] = {}
 
+# 2026-08 — Railway OOM fix: _GLOBAL_CACHE hiç boşaltılmıyordu; tarih/filtre
+# kombinasyonları günler içinde binlerce büyük payload biriktiriyordu.
+_GLOBAL_CACHE_MAX_AGE = 1800   # 30 dk'dan eski girdiler düşer
+_GLOBAL_CACHE_MAX_ENTRIES = 200
+
+
+def _global_cache_set(cache_key: str, payload: Any) -> None:
+    """TTL + boyut sınırlı cache yazımı (her yazımda ucuz süpürme)."""
+    now = time.time()
+    stale = [k for k, v in _GLOBAL_CACHE.items() if now - v.get("ts", 0) > _GLOBAL_CACHE_MAX_AGE]
+    for k in stale:
+        _GLOBAL_CACHE.pop(k, None)
+    fazla = len(_GLOBAL_CACHE) - _GLOBAL_CACHE_MAX_ENTRIES + 1
+    if fazla > 0:
+        for k in sorted(_GLOBAL_CACHE, key=lambda x: _GLOBAL_CACHE[x].get("ts", 0))[:fazla]:
+            _GLOBAL_CACHE.pop(k, None)
+    _GLOBAL_CACHE[cache_key] = {"ts": now, "payload": payload}
+
 # =========================================================================
 # REQUEST_CREATE WHITELIST  (user request 2026-05-01)
 # =========================================================================
@@ -1322,7 +1340,7 @@ async def get_hourly_stock_detail_full(
             "row_count": len(rows_inner),
             "hour_count": len(by_hour_inner),
         }
-        _GLOBAL_CACHE[cache_key] = {"ts": time.time(), "payload": payload}
+        _global_cache_set(cache_key, payload)
         return payload
 
     if cached and age is not None and age < TTL_STALE and not force_refresh:
@@ -3128,7 +3146,7 @@ async def run_report(
         async def _bg():
             try:
                 fresh = await _do_fetch()
-                _GLOBAL_CACHE[cache_key] = {"ts": time.time(), "payload": fresh}
+                _global_cache_set(cache_key, fresh)
             except Exception as e:
                 logger.warning(f"Report bg refresh failed: {e}")
         asyncio.create_task(_bg())
@@ -3137,7 +3155,7 @@ async def run_report(
     # Live fetch with fallback to any cache
     try:
         fresh = await _do_fetch()
-        _GLOBAL_CACHE[cache_key] = {"ts": time.time(), "payload": fresh}
+        _global_cache_set(cache_key, fresh)
         return {**fresh, "_cache": "live", "_age": 0}
     except HTTPException as e:
         if cached:
@@ -3190,7 +3208,7 @@ async def get_report_filter_options(
                 if str(r.get("Kaynak") or r.get("KAYNAK") or "").strip().upper() == wanted
             ]
             result = {**(result if isinstance(result, dict) else {}), "data": filtered}
-        _GLOBAL_CACHE[cache_key] = {"ts": time.time(), "payload": result}
+        _global_cache_set(cache_key, result)
         return result
 
     if cached and age is not None and age < TTL_STALE:

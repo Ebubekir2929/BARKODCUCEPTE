@@ -142,6 +142,25 @@ async def sistem_durum(derin: int = 0):
         out["tunel_aktif"] = _tun is not None
     except Exception:
         out["tunel_aktif"] = False
+    # 2026-08 — Railway OOM takibi: anlık RSS + RAM cache boyutları
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    out["bellek_mb"] = round(int(line.split()[1]) / 1024, 1)
+                    break
+    except Exception:
+        pass
+    try:
+        from services.dataset_cache import _DATASET_MEM_CACHE
+        from routes.data import _GLOBAL_CACHE
+        out["ram_cache"] = {
+            "dataset_girdi": len(_DATASET_MEM_CACHE),
+            "dataset_satir": sum(len(v.get("items") or []) for v in _DATASET_MEM_CACHE.values()),
+            "global_girdi": len(_GLOBAL_CACHE),
+        }
+    except Exception:
+        pass
     if derin:
         import asyncio as _aio
         import time as _t

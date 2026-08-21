@@ -30,7 +30,19 @@ _CACHE_FRESH_TTL = 30
 
 # Hard ceiling – after this, we drop the cache entry completely even if revision
 # hasn't changed, to free memory from tenants nobody is using.
-_CACHE_MAX_AGE = 3600
+# 2026-08 — Railway OOM fix: 3600 -> 900 sn; ayrıca artık her çağrıda süpürülüyor.
+_CACHE_MAX_AGE = 900
+
+
+def _sweep_mem_cache(now: float) -> None:
+    """2026-08 — Railway OOM fix: _CACHE_MAX_AGE tanımlıydı ama hiç uygulanmıyordu;
+    stock_list gibi 60K satırlık parse edilmiş listeler RAM'de sonsuza dek kalıyordu.
+    Kullanılmayan girdileri düşürerek belleği serbest bırakır."""
+    stale = [k for k, v in _DATASET_MEM_CACHE.items() if now - v.get("ts", 0) > _CACHE_MAX_AGE]
+    for k in stale:
+        entry = _DATASET_MEM_CACHE.pop(k, None)
+        if entry:
+            logger.info(f"[data_mem_cache] evicted idle {k[1]} tenant={k[0]} ({entry.get('row_count', 0)} rows)")
 
 
 def _get_lock(tenant_id: str, dataset_key: str) -> asyncio.Lock:
@@ -186,6 +198,7 @@ async def get_dataset_items(
     """Return the full list of parsed items for tenant+dataset, using mem cache."""
     key = (tenant_id, dataset_key)
     now = time.time()
+    _sweep_mem_cache(now)
     cached = _DATASET_MEM_CACHE.get(key)
 
     # Fast path: within TTL and not forced → serve cached
