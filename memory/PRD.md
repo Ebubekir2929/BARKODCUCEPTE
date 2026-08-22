@@ -313,3 +313,8 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 2. **Geçmiş gün doğrulama (iteration_19)**: HourDetailModal 2026-07-30 filtresiyle (bar tıklama → modal → ürün detayı → kapanma) ve LocationIptalModal 2026-06-09 filtresiyle (iptal satırı → modal → fiş listesi → kapanma) CANLI test edildi — PASS. Filtre temizleme/bugüne dönüş PASS.
 3. **Haftalık Trend Grafiği**: YENİ `GET /api/data/haftalik-trend?tenant_id=` (son 7 günün financial_data bloblarından gün bazında toplam/nakit/kart; gün başına en güncel blob, lokasyon filtreli bloblar atlanır). Frontend: `src/components/dashboard/WeeklyTrendChart.tsx` — 7 bar, en iyi gün vurgusu, Bugün etiketi, 5 dk modül cache; 7 günün toplamı 0 ise bölüm GİZLENİR. Dashboard'ta KDV bölümünün üstünde. Test: ea5231'de gerçek verilerle (323K-770K/gün) endpoint PASS; Merkez'de 0 → gizli davranışı PASS.
 - testing_agent iteration_19: backend 5/5 pytest + frontend tüm akışlar PASS. Test dosyası: /app/backend/tests/test_haftalik_trend_iter19.py
+
+## 2026-08-22 — Sürüm artırımı: 1.0.46 (iOS 50 / Android 50)
+- Dashboard refactor + Haftalık Trend Grafiği frontend değişikliği olduğundan mağaza build'i gerekiyor.
+- Backend değişiklikleri (v13-buffer-fix, temizlik, haftalik-trend endpoint) build GEREKTIRMEZ → Railway redeploy yeterli.
+- sync.php v39 → kullanıcı hosting'e yükleyecek.
