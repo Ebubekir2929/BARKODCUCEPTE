@@ -257,3 +257,7 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - requirements.txt'te KULLANILMAYAN ağır paketler bulundu ve silindi: pandas==3.0.0, numpy==2.4.2, pillow==12.1.0 (kodda hiç import yok; 126→123 satır). Build belleği ciddi hafifler.
 - v9-slim-build damgası. Prod v8'de 161MB→bekçi trim'iyle yönetiliyor.
 - Kalan izleme: v9 deploy sonrası OOM maili gelirse SAATİ deploy saatiyle karşılaştır; deploy dışıysa Railway loglarındaki [bellek] satırları incelenecek.
+
+## 2026-08-22 — v9 PRODUCTION'DA DOĞRULANDI ✅
+- surum: 2026-08-22-v9-slim-build, 84.9MB, 17:30 TR. Tüm bellek önlemleri canlı: eviction + malloc_trim/ARENA_MAX + periyodik trim (eşik*0.45) + bekçi (400MB) + dakikalık [bellek] logu + tracemalloc teşhisi + slim build (pandas/numpy/pillow silindi).
+- İzleme kuralı kullanıcıya verildi: deploy saatine denk gelen OOM maili = build aşaması, önemsiz; deploy dışı mail gelirse Railway Logs "[bellek]" satırları paylaşılacak.
