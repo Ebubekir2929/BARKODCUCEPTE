@@ -261,3 +261,8 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 ## 2026-08-22 — v9 PRODUCTION'DA DOĞRULANDI ✅
 - surum: 2026-08-22-v9-slim-build, 84.9MB, 17:30 TR. Tüm bellek önlemleri canlı: eviction + malloc_trim/ARENA_MAX + periyodik trim (eşik*0.45) + bekçi (400MB) + dakikalık [bellek] logu + tracemalloc teşhisi + slim build (pandas/numpy/pillow silindi).
 - İzleme kuralı kullanıcıya verildi: deploy saatine denk gelen OOM maili = build aşaması, önemsiz; deploy dışı mail gelirse Railway Logs "[bellek]" satırları paylaşılacak.
+
+## 2026-08-22 — v10: eşik 180MB (deploy'suz çökme KANITLANDI)
+- v9 17:29'da deploy edildi, 17:40'ta DEPLOY OLMADAN çöktü (uptime 4.6dk @17:45, bellek 201MB ve tırmanıyor). 8GB slider'a rağmen ~256MB'ta öldürülüyor → Railway tarafında görünmez tavan (destek ticket önerildi).
+- v10: MEM_KORUMA_MB varsayılanı 400→180 (kod içinde; env gerekmez). 180MB'da tüm cache boşaltma + trim + tracemalloc teşhis devreye girer — tavana ULAŞMADAN müdahale.
+- İSTENEN: kullanıcı v10 redeploy + Railway Logs'ta "bellek" araması ekran görüntüsü (çökme öncesi RSS eğrisi + [bellek_top] satırları teşhisi kesinleştirir).

@@ -132,7 +132,7 @@ _POS_FILES = {"client.py": "text/x-python", "sync.php": "application/octet-strea
 @app.get("/api/sistem-durum", include_in_schema=False)
 async def sistem_durum(derin: int = 0):
     import services as _svc
-    out = {"surum": "2026-08-22-v9-slim-build", "patron": None, "data": None}
+    out = {"surum": "2026-08-22-v10-esik180", "patron": None, "data": None}
     # 2026-08 — OOM teşhisi: çalışma süresi (restart tespiti için)
     try:
         with open("/proc/self/stat") as f:
@@ -321,7 +321,7 @@ async def startup():
     # v6.1: Her dakika RSS loglanır (Railway loglarından çökme öncesi eğri okunur);
     # eşik aşılırsa tracemalloc açılır, ikinci aşımda en çok bellek tutan kodlar loglanır.
     async def _bellek_bekcisi():
-        esik_mb = float(os.environ.get("MEM_KORUMA_MB", "400"))
+        esik_mb = float(os.environ.get("MEM_KORUMA_MB", "180"))  # 2026-08 — konteyner ~256MB tavanında ölüyor; eşik tavanın ALTINDA olmalı
         tracemalloc_acik = False
         while True:
             await asyncio.sleep(60)
