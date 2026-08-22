@@ -240,3 +240,14 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - Kullanıcının Railway Memory grafiği: BARKODCUCEPTE ~270MB'a değince ÇÖKÜP restart oluyor (16:05-16:07 testere dişi), MongoDB servisi sabit 192MB. 8GB planda 270MB'da ölüm = SERVİSTE DÜŞÜK ÖZEL BELLEK LİMİTİ tanımlı (muhtemelen 256MB).
 - ÇÖZÜM (kullanıcı aksiyonu): Railway → BARKODCUCEPTE → Settings → Deploy/Resources → Memory limitini 1GB+ yapmak veya özel limiti kaldırmak. MEM_KORUMA_MB=400 bekçisi 1GB limitle uyumlu; limit 256'da kalacaksa env MEM_KORUMA_MB=180 yapılmalı.
 - v7 production'da doğrulandı (95MB, dakikalık [bellek] logları aktif).
+
+## 2026-08-22 — OOM örüntüsü çözüldü: e-postalar DEPLOY anlarına denk geliyor
+- Zaman çizelgesi: dün 18:12 maili = redeploy sonrası; bugün 15:43 maili = v7 deploy anı (v7 15:42'de başladı). Çalışan uygulama hiç 270MB üstüne çıkmıyor (grafik) ve deploy dışı çökme yok.
+- Web araştırması: Railway'de build süreci için AYRI dahili bellek limiti var (exit 137); ayrıca Trial→Hobby geçişinde limitlerin işlemesi için temiz redeploy şart. Deploy cutover'da eski container'ın öldürülmesi OOM maili tetikleyebiliyor.
+- Dockerfile pip zaten --no-cache-dir. railway.json'da limit yok.
+- KULLANICIYA VERİLEN KURAL: Deploy saatine denk gelen OOM mailleri normal/yok sayılabilir; deploy YAPILMAMIŞKEN mail gelirse calisma_dk + [bellek] logları ile teşhis edilecek. Settings'te RAM slider'ı varsa 8GB'ta olduğu doğrulanacak.
+
+## 2026-08-22 — v8-trim + MEM_KORUMA_MB=180 önerisi
+- Prod gözlemi: RSS 247MB SABİT, ram_cache BOŞ → bellek geçici ağır tahsislerden kalan iade edilmemiş glibc alanı; ~256MB konteyner tavanına yaslanıyor, her spike öldürüyor (crash loop ~15-60dk).
+- v8: bekçi artık RSS > eşik*0.45 iken her dakika malloc_trim ile belleği OS'a iade eder (cache boş olsa bile). Eşik aşımında tam boşaltma + tracemalloc teşhisi aynen durur.
+- KULLANICI AKSİYONLARI: (1) Railway Variables → MEM_KORUMA_MB=180 ekle (redeploy'suz anında rahatlama), (2) Save to GitHub + redeploy (v8), (3) Settings'te RAM slider aranacak; yoksa Railway support'a "Hobby'de servis 256MB'ta OOM oluyor" ticket.

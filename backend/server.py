@@ -132,7 +132,7 @@ _POS_FILES = {"client.py": "text/x-python", "sync.php": "application/octet-strea
 @app.get("/api/sistem-durum", include_in_schema=False)
 async def sistem_durum(derin: int = 0):
     import services as _svc
-    out = {"surum": "2026-08-22-v7-bellek-log", "patron": None, "data": None}
+    out = {"surum": "2026-08-22-v8-trim", "patron": None, "data": None}
     # 2026-08 — OOM teşhisi: çalışma süresi (restart tespiti için)
     try:
         with open("/proc/self/stat") as f:
@@ -338,6 +338,11 @@ async def startup():
                     f"[bellek] RSS {rss_mb:.0f}MB | ds_cache:{len(_DATASET_MEM_CACHE)} "
                     f"global:{len(_GLOBAL_CACHE)} | görevler:{len(asyncio.all_tasks())}"
                 )
+                # v8 — Periyodik iade: RSS eşiğin %45'ini aşınca boş belleği OS'a geri ver
+                # (glibc geçici büyük tahsisleri tutuyor; cache boş olsa bile RSS şişik kalıyordu)
+                if rss_mb > esik_mb * 0.45:
+                    from services.dataset_cache import bellek_iade_et as _iade
+                    _iade()
                 if rss_mb > esik_mb:
                     if tracemalloc_acik:
                         import tracemalloc
