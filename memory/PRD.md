@@ -235,3 +235,8 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - Prod calisma_dk=6 → v6 ÇALIŞIRKEN ~15:43 TR'de OOM/restart oldu. Cache'ler değil, BAŞKA bir kaynak (veya hızlı spike). Pool'lar normal (patron 6/10, data 11/15), tünel kapalı.
 - v7: bellek bekçisi artık HER DAKİKA RSS + cache/görev sayısı loglar (Railway loglarından çökme öncesi eğri okunacak); eşik aşımında tracemalloc açılır, ikinci aşımda en çok bellek tutan 10 kod satırı loglanır.
 - SONRAKI ADIM: kullanıcı Railway Observability → Memory grafiği (son 24s) ekran görüntüsü + Deployments listesi paylaşacak; v7 redeploy sonrası bir sonraki OOM'da Railway loglarında [bellek] ve [bellek_top] satırlarına bakılacak.
+
+## 2026-08-22 — OOM KESİN TEŞHİS (Memory grafiği ile)
+- Kullanıcının Railway Memory grafiği: BARKODCUCEPTE ~270MB'a değince ÇÖKÜP restart oluyor (16:05-16:07 testere dişi), MongoDB servisi sabit 192MB. 8GB planda 270MB'da ölüm = SERVİSTE DÜŞÜK ÖZEL BELLEK LİMİTİ tanımlı (muhtemelen 256MB).
+- ÇÖZÜM (kullanıcı aksiyonu): Railway → BARKODCUCEPTE → Settings → Deploy/Resources → Memory limitini 1GB+ yapmak veya özel limiti kaldırmak. MEM_KORUMA_MB=400 bekçisi 1GB limitle uyumlu; limit 256'da kalacaksa env MEM_KORUMA_MB=180 yapılmalı.
+- v7 production'da doğrulandı (95MB, dakikalık [bellek] logları aktif).
