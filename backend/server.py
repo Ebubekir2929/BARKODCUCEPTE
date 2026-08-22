@@ -132,7 +132,7 @@ _POS_FILES = {"client.py": "text/x-python", "sync.php": "application/octet-strea
 @app.get("/api/sistem-durum", include_in_schema=False)
 async def sistem_durum(derin: int = 0):
     import services as _svc
-    out = {"surum": "2026-08-21-v6-blob-fix", "patron": None, "data": None}
+    out = {"surum": "2026-08-22-v7-bellek-log", "patron": None, "data": None}
     # 2026-08 — OOM teşhisi: çalışma süresi (restart tespiti için)
     try:
         with open("/proc/self/stat") as f:
@@ -318,8 +318,11 @@ async def startup():
     app.state.init_pools_task = asyncio.create_task(_init_pools_bg())
 
     # 2026-08 — Bellek bekçisi: RSS eşiği aşarsa TÜM RAM cache boşaltılır (OOM crash önleme)
+    # v6.1: Her dakika RSS loglanır (Railway loglarından çökme öncesi eğri okunur);
+    # eşik aşılırsa tracemalloc açılır, ikinci aşımda en çok bellek tutan kodlar loglanır.
     async def _bellek_bekcisi():
         esik_mb = float(os.environ.get("MEM_KORUMA_MB", "400"))
+        tracemalloc_acik = False
         while True:
             await asyncio.sleep(60)
             try:
@@ -329,9 +332,24 @@ async def startup():
                         if line.startswith("VmRSS:"):
                             rss_mb = int(line.split()[1]) / 1024
                             break
+                from services.dataset_cache import _DATASET_MEM_CACHE
+                from routes.data import _GLOBAL_CACHE
+                logging.info(
+                    f"[bellek] RSS {rss_mb:.0f}MB | ds_cache:{len(_DATASET_MEM_CACHE)} "
+                    f"global:{len(_GLOBAL_CACHE)} | görevler:{len(asyncio.all_tasks())}"
+                )
                 if rss_mb > esik_mb:
+                    if tracemalloc_acik:
+                        import tracemalloc
+                        top = tracemalloc.take_snapshot().statistics("lineno")[:10]
+                        for s in top:
+                            logging.warning(f"[bellek_top] {s}")
+                    else:
+                        import tracemalloc
+                        tracemalloc.start(10)
+                        tracemalloc_acik = True
+                        logging.warning("[bellek_bekcisi] tracemalloc açıldı — sonraki aşımda kaynak loglanacak")
                     from services.dataset_cache import tum_cache_bosalt, bellek_iade_et
-                    from routes.data import _GLOBAL_CACHE
                     n1 = tum_cache_bosalt()
                     n2 = len(_GLOBAL_CACHE)
                     _GLOBAL_CACHE.clear()

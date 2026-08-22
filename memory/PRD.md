@@ -230,3 +230,8 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 ## 2026-08 — OOM 18:12 analizi
 - Mail 18:12 TR; v5 o sıralar YENİ deploy edilmişti. En güçlü teori: OOM bildirimi, redeploy sırasında öldürülen ESKİ sızıntılı instance'a ait (cutover anı). Prod v5 85MB stabil seyrediyor.
 - sistem-durum'a calisma_dk (uptime) eklendi + sürüm v6-blob-fix (blob tarama düzeltmesini de içerir). Kullanıcı redeploy edecek; sonrasında calisma_dk ile restart takibi yapılabilir.
+
+## 2026-08-22 — OOM devam ediyor (v6 çalışırken restart tespit edildi)
+- Prod calisma_dk=6 → v6 ÇALIŞIRKEN ~15:43 TR'de OOM/restart oldu. Cache'ler değil, BAŞKA bir kaynak (veya hızlı spike). Pool'lar normal (patron 6/10, data 11/15), tünel kapalı.
+- v7: bellek bekçisi artık HER DAKİKA RSS + cache/görev sayısı loglar (Railway loglarından çökme öncesi eğri okunacak); eşik aşımında tracemalloc açılır, ikinci aşımda en çok bellek tutan 10 kod satırı loglanır.
+- SONRAKI ADIM: kullanıcı Railway Observability → Memory grafiği (son 24s) ekran görüntüsü + Deployments listesi paylaşacak; v7 redeploy sonrası bir sonraki OOM'da Railway loglarında [bellek] ve [bellek_top] satırlarına bakılacak.
