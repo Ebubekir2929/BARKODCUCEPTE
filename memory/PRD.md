@@ -274,3 +274,7 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - FIX v12: notification_watcher.py aynı düzeltme (1.5s retry).
 - E2E test: gelir tablosu canlı POS akışı 6 satır döndü ✅; watcher sağlıklı loglar ✅.
 - KULLANICI: v12'yi redeploy edecek (Save to GitHub → Railway). Bu, OOM krizinin NİHAİ çözümü.
+
+## 2026-08-22 — v12 PRODUCTION'DA KANITLANDI ✅ (OOM KRİZİ KAPANDI)
+- 9 dakikalık canlı izleme: 80MB → rapor anında 179MB spike → periyodik trim ile 140-143MB'a GERİ İNDİ ve sabitlendi. Restart YOK (uptime kesintisiz 0.9→8.7dk). Eskiden aynı senaryo GB'lara balonlaşıp OOM oluyordu.
+- OOM kök nedeni (include_data=True yoklamaları) v11+v12 ile kapatıldı; tüm koruma katmanları prod'da aktif.
