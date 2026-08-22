@@ -4,7 +4,7 @@
  * Tüm aylar 0 ise bölüm gizlenir. Devam eden ay (bu ay) kesikli vurgulanır.
  */
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleProp, ViewStyle } from 'react-native';
+import { View, Text, TouchableOpacity, StyleProp, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/authStore';
 
@@ -18,6 +18,8 @@ interface Props {
   tenantId: string | null;
   colors: any;
   style?: StyleProp<ViewStyle>;
+  /** Bir ay çubuğuna dokunulunca çağrılır (YYYY-MM) — gün gün döküm modalı açılır */
+  onMonthPress?: (ay: string) => void;
 }
 
 const AY_KISA = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
@@ -32,7 +34,7 @@ const fmtShort = (v: number) => {
 const _cache = new Map<string, { t: number; data: AyVerisi[] }>();
 const CACHE_MS = 5 * 60 * 1000;
 
-export function MonthlyTrendChart({ tenantId, colors, style }: Props) {
+export function MonthlyTrendChart({ tenantId, colors, style, onMonthPress }: Props) {
   const [data, setData] = useState<AyVerisi[] | null>(() => {
     const c = tenantId ? _cache.get(tenantId) : null;
     return c ? c.data : null;
@@ -98,7 +100,13 @@ export function MonthlyTrendChart({ tenantId, colors, style }: Props) {
           const vurgulu = i === enIyiIdx && d.toplam > 0;
           const barRenk = vurgulu ? colors.primary : d.toplam > 0 ? colors.primary + '55' : colors.border;
           return (
-            <View key={d.ay} style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end' }}>
+            <TouchableOpacity
+              key={d.ay}
+              style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end', minHeight: 44 }}
+              onPress={() => onMonthPress && onMonthPress(d.ay)}
+              disabled={!onMonthPress}
+              activeOpacity={0.6}
+            >
               <Text
                 style={{ fontSize: 9, fontWeight: '700', color: vurgulu ? colors.primary : colors.textSecondary, marginBottom: 3 }}
                 numberOfLines={1}
@@ -118,12 +126,12 @@ export function MonthlyTrendChart({ tenantId, colors, style }: Props) {
               }}>
                 {ayKisa(d.ay)}
               </Text>
-            </View>
+            </TouchableOpacity>
           );
         })}
       </View>
       <Text style={{ fontSize: 9, color: colors.textSecondary, marginTop: 8, opacity: 0.7 }}>
-        Kesikli çubuk devam eden ayı gösterir
+        Kesikli çubuk devam eden ayı gösterir{onMonthPress ? ' · Bir aya dokunarak gün gün dökümü açın' : ''}
       </Text>
     </View>
   );

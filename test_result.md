@@ -2612,3 +2612,8 @@ agent_communication:
     (Son Çalışma 23/08 01:52, karantina 1.152) UI screenshot ile doğrulandı ✅
   - /api/data/aylik-trend + MonthlyTrendChart: iki tenant curl + UI screenshot PASS ✅
   - haftalik-trend ve aylik-karsilastirma regresyonları (ortak yardımcıya geçiş) PASS ✅
+
+## 2026-08-22 — Ay Detayı modalı
+  - /api/data/ay-detay + MonthDetailModal + MonthlyTrendChart onMonthPress.
+  - E2E canlı doğrulama: ay çubuğu → gün listesi → güne dokun → dashboard o günün
+    filtreli özetine geçti (13/05 Merkez ₺178.383). VERIFIED ✅

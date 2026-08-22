@@ -37,6 +37,7 @@ import { KdvMatrahSection } from '../../src/components/dashboard/KdvMatrahSectio
 import { WeeklyTrendChart } from '../../src/components/dashboard/WeeklyTrendChart';
 import { MonthlyCompareCard } from '../../src/components/dashboard/MonthlyCompareCard';
 import { MonthlyTrendChart } from '../../src/components/dashboard/MonthlyTrendChart';
+import { MonthDetailModal } from '../../src/components/dashboard/MonthDetailModal';
 import { CardTypeLocationModal } from '../../src/components/dashboard/CardTypeLocationModal';
 import { HourDetailModal } from '../../src/components/dashboard/HourDetailModal';
 import { LocationIptalModal } from '../../src/components/dashboard/LocationIptalModal';
@@ -60,6 +61,7 @@ export default function DashboardScreen() {
 
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [showCompareModal, setShowCompareModal] = useState(false);
+  const [selectedTrendMonth, setSelectedTrendMonth] = useState<string | null>(null); // 2026-08 — 6 ay grafiği gün gün döküm
   const [showPdfExport, setShowPdfExport] = useState(false); // 2026-07 — PDF dışa aktarma
   const [filters, setFilters] = useState({
     branchId: null as string | null,
@@ -1380,11 +1382,12 @@ export default function DashboardScreen() {
           style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}
         />
 
-        {/* Son 6 Ay Satış Trendi — 2026-08 yeni çubuk grafiği */}
+        {/* Son 6 Ay Satış Trendi — 2026-08 yeni çubuk grafiği (aya dokun → gün gün döküm) */}
         <MonthlyTrendChart
           tenantId={activeTenantId}
           colors={colors}
           style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}
+          onMonthPress={(ay) => setSelectedTrendMonth(ay)}
         />
 
         {/* KDV / Matrah Detayı — 2026-08 refactor: ayrı komponent */}
@@ -1664,6 +1667,20 @@ export default function DashboardScreen() {
         isDesktop={isDesktop}
         t={t}
         onOpenDetail={(id) => openIptalDetail(id)}
+      />
+
+      {/* Ay Detayı Modalı — 2026-08: 6 ay grafiğinde aya dokununca gün gün döküm */}
+      <MonthDetailModal
+        ay={selectedTrendMonth}
+        onClose={() => setSelectedTrendMonth(null)}
+        tenantId={activeTenantId}
+        colors={colors}
+        isDesktop={isDesktop}
+        onDayPress={(tarih) => {
+          setSelectedTrendMonth(null);
+          const gun = new Date(tarih + 'T12:00:00');
+          setFilters((f) => ({ ...f, startDate: gun, endDate: gun }));
+        }}
       />
 
       {/* 2026-05-06 — Eski inline iptal Modal (Modal+ScrollView+iptalDetailItems)

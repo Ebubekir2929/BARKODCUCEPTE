@@ -330,3 +330,10 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 2. **Aylık Trend**: YENİ `GET /api/data/aylik-trend` (son 6 ayın ay bazında toplamı) + `MonthlyTrendChart.tsx` (6 çubuk, en iyi ay vurgusu, devam eden ay KESİKLİ çubuk, tümü 0 ise gizli). Dashboard'ta Aylık Karşılaştırma'nın altında.
 3. **DRY refactor**: financial_data gün-toplamı mantığı `_finans_gun_toplamlari()` ortak yardımcısına alındı; haftalik-trend + aylik-karsilastirma + aylik-trend üçü de bunu kullanır (regresyon curl ile doğrulandı).
 - Doğrulama: aylik-trend ea5231 (Tem 6.7M, Ağu 10.5M) ve d5587 (May 179K, Haz 52K, Tem 15K) ✓; UI screenshot: 6 ay grafiği Merkez'de render (Mayıs vurgulu, Ağustos kesikli) ✓; temizlik kartı "henüz çalışmadı" hali ✓ (dolu hal ilk tur sonrası otomatik).
+
+## 2026-08-22 — Ay Detayı (gün gün döküm) ✅
+- YENİ `GET /api/data/ay-detay?tenant_id=&ay=YYYY-MM` — seçilen ayın gün gün toplam/nakit/kart dökümü (_finans_gun_toplamlari ortak yardımcısı; gelecekteki günler kesilir; format doğrulama 422).
+- YENİ `MonthDetailModal.tsx` — gün satırları (gün no + gün adı, tutar, nakit/kart alt satırı, oran barı, en iyi güne kupa ikonu); güne dokununca modal kapanır ve dashboard filtresi o güne geçer.
+- MonthlyTrendChart çubukları dokunulabilir (`onMonthPress`); dashboard'ta `selectedTrendMonth` state + MonthDetailModal bağlandı.
+- CANLI DOĞRULAMA: Mayıs çubuğu → modal (₺179.621,69 ay toplamı, 31 gün listesi) → ₺178.383,41 (13 Mayıs) satırı → dashboard "13/05 - 13/05" filtreli özete geçti ✓. Backend curl: 2026-05 (2 dolu gün), geçersiz ay 422, bu ay 22 günde kesildi ✓. tsc+lint temiz.
+- Not: Bu değişiklik de 1.0.46 build'ine dahil.

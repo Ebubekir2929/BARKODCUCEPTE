@@ -570,6 +570,34 @@ async def _finans_gun_toplamlari(tenant_id: str, like_patterns: list, limit: int
     return gun_toplam
 
 
+@router.get("/ay-detay")
+async def ay_detay(
+    tenant_id: str = Query(...),
+    ay: str = Query(..., description="YYYY-MM"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Seçilen ayın gün gün satış dökümü (6 ay grafiğinden ay dokunması)."""
+    import re as _re
+    from calendar import monthrange
+    from datetime import date
+
+    if not _re.match(r"^\d{4}-\d{2}$", ay or ""):
+        raise HTTPException(status_code=422, detail="ay YYYY-MM biçiminde olmalı")
+    yil, ay_no = int(ay[:4]), int(ay[5:7])
+    gun_sayisi = monthrange(yil, ay_no)[1]
+    bugun = date.today()
+
+    gunler = await _finans_gun_toplamlari(tenant_id, [f'%"sdate":"{ay}-%'], limit=300)
+    out = []
+    for g in range(1, gun_sayisi + 1):
+        tarih = f"{ay}-{g:02d}"
+        if date(yil, ay_no, g) > bugun:
+            break  # gelecekteki günleri listeleme
+        v = gunler.get(tarih, {"toplam": 0.0, "nakit": 0.0, "kart": 0.0})
+        out.append({"tarih": tarih, **v})
+    return {"ok": True, "ay": ay, "data": out}
+
+
 @router.get("/aylik-trend")
 async def aylik_trend(
     tenant_id: str = Query(...),
