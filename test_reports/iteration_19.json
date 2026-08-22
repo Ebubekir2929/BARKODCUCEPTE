@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 19 — 3 iş doğrulandı: (1) Yeni /api/data/haftalik-trend endpoint'i BACKEND'de 5/5 test PASS: Merkez tenant 7 elemanlı seri döndürüyor (toplam=nakit=kart=0 son 7 gün, NORMAL); canlı ea5231 tenant'ında 7 gün toplam ₺3.484.231,55 (323K-770K aralığında, POS geneli sağlıklı), auth zorunlu (401), missing tenant_id 422. Endpoint field'ları {tarih,toplam,nakit,kart}, tarihler ASC sıralı, nakit+kart<=toplam invariant tutuyor. (2) FRONTEND Weekly Trend: Merkez'de son 7 gün 0 satış → 'Son 7 Gün Satış Trendi' bölümü GÖRÜNMÜYOR (WeeklyTrendChart.tsx:72 `if (toplam7 <= 0) return null` doğru çalışıyor), konsol temiz, hiçbir TypeError yok. (3) GEÇMİŞ GÜN modalları — bu tur DOĞRULANDI: FilterModal (tarih GG/AA/YYYY input) ile 30/07/2026 seçildi → Saatlik Satışlar grafiği render oldu (₺3,00 toplam, 12:00-13:00 tek bar) → bar tıklama → HourDetailModal '12:00 - 13:00 Satış Detayı' açıldı: 'Tüm Lokasyonlar ₺3,00', Toplam KDV ₺0,03, KDV oranı bazında kırılım (%1 → matrah ₺2,97 KDV ₺0,03 toplam ₺3,00), Ürün Detayı (Abdulkadir Aslan 2 adet ₺2,00, Abdulhamit Kırtepe 1 adet ₺1,00), dip Toplam ₺3,00 — hepsi tutarlı; Escape ile temiz kapandı. Filtre 09/06/2026 → İptaller bölümü göründü (Merkez · 1 İptal · ₺20,00) → satıra tıklama → LocationIptalModal 'Merkez - İptal Fişleri' açıldı: özet '1 İptal (1 fiş, 0 satır) Toplam: ₺20,00' + fiş satırı 'GENEL KULLANICI · FİŞ İPTAL · 09.06.2026 15:38 · ₺20,00' + Detay CTA; Escape ile temiz kapandı. Filtre X ile temizlendi → dashboard bugüne döndü (Canlı Veri · 1 dk, tümü ₺0,00, Açık Masalar 5). Filtre değişimlerinde HİÇ TypeError/undefined hatası yok. (4) sync.php v39 KOD İNCELEMESİ: line 2391 `$rowUidHash = sha256_hex($tenantId . '|' . $datasetKey . '|' . $rowKey);` — params_hash artık formülde YOK ✅, açıklayıcı yorum (v39 KALICI KOPYA ÖNLEME, 140K ölü satır problemi) doğru; delete path (line 2367) aynı row_uid_hash kolonunu kullanıyor ✅. UYARI: Line 888'deki backfill hâlâ ESKİ formülü kullanıyor (`SHA2(CONCAT(tenant_id, '|', dataset_key, '|', params_hash, '|', row_key), 256)`) — mevcut DB'deki eski satırlar params_hash içeren hash'lere sahip, yeni push'lar bunlarla ON DUPLICATE KEY üzerinden eşleşmeyecek → old rows orphan kalır (birikme durur ama tarihsel kirlilik silinmez). Bir defalık migration (UPDATE ... SET row_uid_hash = SHA2(CONCAT(tenant_id,'|',dataset_key,'|',row_key),256)) önerilir.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_haftalik_trend_iter19.py",
+    "/app/test_reports/pytest/iter19_results.xml"
+  ],
+  "action_items": [
+    "sync.php line 888 (safe_alter backfill) NEW formülü ile güncellensin: `UPDATE dataset_cache_rows SET row_uid_hash = SHA2(CONCAT(tenant_id, '|', dataset_key, '|', row_key), 256)` — mevcut tarihsel kayıtlar da v39 anahtarına migrate olsun; aksi halde eski params_hash içeren hash'ler orphan kalır (yeni push ile eşleşmez).",
+    "İsteğe bağlı: FilterModal'daki tarih input'larına (start-date-input, end-date-input) ve 'Uygula' butonuna testID eklenmesi automation'ı sağlamlaştırır — şu an placeholder='GG/AA/YYYY' seçicisi ile geçici olarak test edildi.",
+    "İsteğe bağlı: WeeklyTrendChart komponentinde 5dk modül-içi cache (`_cache` Map) doğru çalışıyor ancak logout/tenant değişimi sonrası cache invalidation yok — kritik değil ama not düşülür."
+  ],
+  "critical_code_review_comments": [
+    "WeeklyTrendChart.tsx:69-72 defansif kontroller doğru: data null/boş → return null; toplam7 <= 0 → return null. Merkez tenant senaryosunda tam işledi.",
+    "haftalik-trend endpoint (routes/data.py:511-587) dataset_cache'te LIKE '%\"sdate\":\"YYYY-MM-DD%' araması yapıyor; params_json içindeki lokasyonID null olan blob'ları alıyor (firma geneli), tenant başına en güncel blob kazanıyor (ORDER BY updated_at DESC). Yatay ölçek testi: 7 params_hash'in LIMIT 100 ile alınması OK. Ama LIKE arka arkaya 7 kez OR'lanıyor, büyük dataset_cache tablolarında index kullanılamaz (LIKE '%...%') — tenant_id + dataset_key indeksi filtresi yeterince keskin olduğu için sorun görülmedi (1-3ms).",
+    "sync.php v39 (line 2386-2391) yorum ve implementasyon doğru; ama backfill migration (line 888) aynı düzeltmeyi yansıtmıyor (kritik değil ama tutarsız).",
+    "HourDetailModal / LocationIptalModal — refactor sonrası visible/onClose/data prop kontratı doğru çalışıyor, iOS nested-modal sorunu için Platform.OS branch (dashboard.tsx:700) korunmuş."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (5/5 pytest)",
+    "frontend": "100% (Weekly Trend gizleme + HourDetailModal geçmiş gün + LocationIptalModal geçmiş gün + filtre temizleme, hepsi PASS)"
+  },
+  "seed_data_creation": "None. Canlı MySQL, salt-okunur test. Frontend flow'ları için 30/07/2026 (₺3 satış) ve 09/06/2026 (₺20 iptal) DB'de zaten mevcut olan tarihler kullanıldı.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Yeni haftalik-trend endpoint ve WeeklyTrendChart komponenti (dashboard.tsx:1364) production-ready. HourDetailModal ve LocationIptalModal refactor (iter18'de veri yokluğundan SKIP'lenmişti) GEÇMİŞ TARİH filtresiyle bu turda tam doğrulandı. FilterModal'da input placeholder='GG/AA/YYYY' selector'ları hâlâ kullanılabilir. sync.php v39 sadece kod incelendi (canlı POS erişimi yok) — line 888 backfill query eski formülle kalmış, main agent bir sonraki tur sync.php'ye dokunursa lütfen bu backfill'i güncellesin."
+}

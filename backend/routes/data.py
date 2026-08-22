@@ -508,6 +508,85 @@ async def get_dataset(
     return result
 
 
+@router.get("/haftalik-trend")
+async def haftalik_trend(
+    tenant_id: str = Query(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Son 7 günün günlük ciro trendi (dashboard mini grafiği).
+
+    Her gün için dataset_cache'teki en güncel `financial_data` blob'undan
+    GENELTOPLAM/NAKIT/KREDI_KARTI toplanır. Bloblar küçüktür (tek satır);
+    7 günün LIKE eşleşmeleri tek sorguda çekilir.
+    """
+    from datetime import date, timedelta
+
+    gunler = [(date.today() - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+    likes = " OR ".join(["params_json LIKE %s"] * len(gunler))
+    args = [f'%"sdate":"{g}%' for g in gunler]
+
+    pool = await get_data_pool()
+    # Gün başına EN GÜNCEL blob kazanır (updated_at DESC → ilk görülen)
+    gun_blob: dict = {}
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"""
+                SELECT params_json, data_json FROM dataset_cache
+                WHERE tenant_id=%s AND dataset_key='financial_data' AND ({likes})
+                ORDER BY updated_at DESC LIMIT 100
+                """,
+                (tenant_id, *args),
+            )
+            rows = await cur.fetchall()
+
+    def _f(v):
+        try:
+            return float(v) if v is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    for pjson, blob in rows or []:
+        try:
+            p = json.loads(pjson or "{}")
+            gun = str(p.get("sdate") or "")[:10]
+        except Exception:
+            continue
+        if not gun or gun in gun_blob:
+            continue
+        # Lokasyon filtreli blobları atla — firma geneli (lokasyonID null) istenir
+        lok = p.get("lokasyonID")
+        if lok not in (None, "", 0):
+            continue
+        try:
+            data = json.loads(blob or "[]")
+        except Exception:
+            continue
+        toplam = nakit = kart = 0.0
+        for r in data if isinstance(data, list) else []:
+            if not isinstance(r, dict):
+                continue
+            g = _f(r.get("GENELTOPLAM"))
+            if g <= 0:
+                g = _f(r.get("PERAKENDE_GENELTOPLAM")) + _f(r.get("ERP12_GENELTOPLAM"))
+            toplam += g
+            n = _f(r.get("NAKIT"))
+            if n <= 0:
+                n = _f(r.get("PERAKENDE_NAKIT")) + _f(r.get("ERP12_NAKIT"))
+            nakit += n
+            k = _f(r.get("KREDI_KARTI"))
+            if k <= 0:
+                k = _f(r.get("PERAKENDE_KREDI_KARTI")) + _f(r.get("ERP12_KREDI_KARTI"))
+            kart += k
+        gun_blob[gun] = {"toplam": round(toplam, 2), "nakit": round(nakit, 2), "kart": round(kart, 2)}
+
+    out = [
+        {"tarih": g, **gun_blob.get(g, {"toplam": 0.0, "nakit": 0.0, "kart": 0.0})}
+        for g in gunler
+    ]
+    return {"ok": True, "data": out}
+
+
 @router.get("/dashboard")
 async def get_dashboard_data(
     tenant_id: str = Query(...),

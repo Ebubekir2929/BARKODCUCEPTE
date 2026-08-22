@@ -884,6 +884,11 @@ function ensure_dataset_cache_rows(PDO $pdo): void
     safe_alter($pdo, "ALTER TABLE dataset_cache_rows DROP INDEX uniq_dataset_cache_row_hash");
 
     // Var olan eski kayıtlara hash üret.
+    // NOT (v39): Bu backfill BİLEREK eski (params_hash'li) formülü kullanır —
+    // eski tabloda aynı stabil anahtarın birden çok kopyası olduğundan yeni
+    // (params_hash'siz) formülle doldurmak UNIQUE index çakışması yaratır.
+    // Eski kopyalar sunucudaki günlük temizlik görevi tarafından ayıklanır;
+    // yeni push'lar 'dataset_delta_push' içindeki stabil formülü kullanır.
     safe_alter($pdo, "UPDATE dataset_cache_rows SET row_key_hash = SHA2(row_key, 256) WHERE row_key_hash IS NULL OR row_key_hash = ''");
     safe_alter($pdo, "UPDATE dataset_cache_rows SET row_uid_hash = SHA2(CONCAT(tenant_id, '|', dataset_key, '|', params_hash, '|', row_key), 256) WHERE row_uid_hash IS NULL OR row_uid_hash = ''");
 
@@ -2353,6 +2358,7 @@ try {
                     (tenant_id, dataset_key, params_hash, row_key, row_key_hash, row_uid_hash, row_hash, row_json, deleted_at, created_at, updated_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NOW(), NOW())
                  ON DUPLICATE KEY UPDATE
+                    params_hash = VALUES(params_hash),
                     row_key = VALUES(row_key),
                     row_key_hash = VALUES(row_key_hash),
                     row_hash = VALUES(row_hash),
@@ -2382,7 +2388,12 @@ try {
                     $rowHash = sha256_hex($rowJson);
                 }
                 $rowKeyHash = sha256_hex($rowKey);
-                $rowUidHash = sha256_hex($tenantId . '|' . $datasetKey . '|' . $paramsHash . '|' . $rowKey);
+                // v39 — KALICI KOPYA ÖNLEME: uid artık params_hash İÇERMEZ.
+                // Eski formül (tenant|dataset|paramsHash|rowKey) her push'ta farklı
+                // paramsHash (örn. saat bazlı sdate) ürettiğinden upsert hiç
+                // eşleşmiyor, aynı satır her push'ta YENİDEN ekleniyordu
+                // (bir tenant'ta 140K ölü kopya / 2.7GB birikti). Stabil anahtar:
+                $rowUidHash = sha256_hex($tenantId . '|' . $datasetKey . '|' . $rowKey);
                 $upsertStmt->execute([$tenantId, $datasetKey, $paramsHash, $rowKey, $rowKeyHash, $rowUidHash, $rowHash, $rowJson]);
                 $upserted++;
             }
@@ -2396,7 +2407,8 @@ try {
                 if ($rowKey === '') {
                     continue;
                 }
-                $rowUidHash = sha256_hex($tenantId . '|' . $datasetKey . '|' . $paramsHash . '|' . $rowKey);
+                // v39 — silme uid'i de paramsHash'siz stabil formülle hesaplanır
+                $rowUidHash = sha256_hex($tenantId . '|' . $datasetKey . '|' . $rowKey);
                 $deleteStmt->execute([$rowUidHash]);
                 $deleted += $deleteStmt->rowCount();
             }

@@ -34,6 +34,7 @@ import { useResponsive } from '../../src/hooks/useResponsive';
 import { webStyles } from '../../src/styles/webModalStyles';
 import { WaiterSalesSection, HourlyLocationSection } from '../../src/components/DashboardSections';
 import { KdvMatrahSection } from '../../src/components/dashboard/KdvMatrahSection';
+import { WeeklyTrendChart } from '../../src/components/dashboard/WeeklyTrendChart';
 import { CardTypeLocationModal } from '../../src/components/dashboard/CardTypeLocationModal';
 import { HourDetailModal } from '../../src/components/dashboard/HourDetailModal';
 import { LocationIptalModal } from '../../src/components/dashboard/LocationIptalModal';
@@ -1358,6 +1359,13 @@ export default function DashboardScreen() {
             </View>
           );
         })()}
+
+        {/* Son 7 Gün Satış Trendi — 2026-08 yeni mini grafik */}
+        <WeeklyTrendChart
+          tenantId={activeTenantId}
+          colors={colors}
+          style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}
+        />
 
         {/* KDV / Matrah Detayı — 2026-08 refactor: ayrı komponent */}
         <KdvMatrahSection

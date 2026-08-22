@@ -2596,3 +2596,9 @@ agent_communication:
   - Frontend: dashboard.tsx 3663→2690; KdvMatrahSection, CardTypeLocationModal,
     HourDetailModal, LocationIptalModal ayrı komponentlere taşındı (görsel birebir).
   - testing_agent iteration_18: PASS (frontend regression + backend smoke). VERIFIED ✅
+
+## 2026-08-22 — sync.php v39 + Haftalık Trend + Geçmiş Gün Modal Doğrulama
+  - sync.php v39: row_uid_hash stabil formül (params_hash'siz) → hourly kopyaları kökten önlenir.
+  - GET /api/data/haftalik-trend + WeeklyTrendChart (dashboard, toplam 0 ise gizli).
+  - iteration_19: backend 5/5 pytest PASS; HourDetailModal (30.07.2026) ve
+    LocationIptalModal (09.06.2026) geçmiş tarih filtreleriyle CANLI doğrulandı. VERIFIED ✅
