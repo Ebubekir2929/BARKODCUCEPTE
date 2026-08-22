@@ -145,6 +145,29 @@ async def get_data_pool():
     return data_pool
 
 
+async def stream_rows(pool, sql: str, params=None, chunk: int = 1000):
+    """2026-08 v13-buffer-fix — Satırları SSCursor (sunucu taraflı, TAMPONSUZ)
+    ile akış halinde döndürür.
+
+    Normal aiomysql Cursor'ı TÜM sonuç kümesini execute() anında RAM'e okur
+    (connection.py okuma tamponu) — fetchmany kullanılsa bile. Büyük rapor
+    bloblarında bu yüzlerce MB tampon demek → Railway OOM. SSCursor satırları
+    sunucudan parça parça çeker; bellek düz kalır.
+
+    NOT: Döngüden erken çıkılacaksa (break/return) çağıran taraf
+    `contextlib.aclosing` ile sarmalıdır — cursor kalan satırları drenajlar.
+    """
+    async with pool.acquire() as conn:
+        async with conn.cursor(aiomysql.SSCursor) as cur:
+            await cur.execute(sql, params or ())
+            while True:
+                batch = await cur.fetchmany(chunk)
+                if not batch:
+                    break
+                for row in batch:
+                    yield row
+
+
 async def close_pools():
     global patron_pool, data_pool
     if patron_pool:

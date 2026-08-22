@@ -278,3 +278,18 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 ## 2026-08-22 — v12 PRODUCTION'DA KANITLANDI ✅ (OOM KRİZİ KAPANDI)
 - 9 dakikalık canlı izleme: 80MB → rapor anında 179MB spike → periyodik trim ile 140-143MB'a GERİ İNDİ ve sabitlendi. Restart YOK (uptime kesintisiz 0.9→8.7dk). Eskiden aynı senaryo GB'lara balonlaşıp OOM oluyordu.
 - OOM kök nedeni (include_data=True yoklamaları) v11+v12 ile kapatıldı; tüm koruma katmanları prod'da aktif.
+
+## 2026-08-22 — v13-buffer-fix: aiomysql fetchall tamponları AKIŞA çevrildi ✅
+- 19:45 çökmesinin tracemalloc teşhisi: aiomysql connection.py:1307 okuma tamponları — normal Cursor TÜM sonucu execute() anında RAM'e okur (fetchmany bile kurtarmaz).
+- KANIT: ea5231… tenant'ında hourly_stock_detail 139.440 satır = 2.7GB; def6f845… 3.168 satır = 164MB. Eski fetchall bunları tek tamponda çekiyordu → OOM.
+- FIX: services/__init__.py'ye `stream_rows(pool, sql, params, chunk)` eklendi — SSCursor (sunucu taraflı, tamponsuz) ile satırlar parça parça akar. Erken break/return yapan çağrılar `contextlib.aclosing` ile drenajlanır.
+- Dönüştürülen noktalar (13 adet):
+  - data.py: dashboard tarih aralığı blob akışı (_blob_akisi), /stock blobları, hourly-detail row_json, delta-rows, cari-extre date-agnostic (aclosing), _feed_fis_lookup (aclosing), high-sale-detail feed.
+  - dataset_cache.py: _load_all_rows (pages+rows), _load_filtered_rows_sql, lookup_pages_dataset, hourly single-hour/RAW yolu, full-day agg yolu.
+- EK OPTİMİZASYONLAR:
+  - Full-day agg: `latest` sözlüğünde TAM dict biriktirme kaldırıldı → tek geçişte dedupe+agregasyon (seen_keys string set). Dedupe sırası aynı (updated_at DESC, ilk kazanır).
+  - hourly RAW/single-hour: TARIH LIKE push-down (sdate→edate günleri, ≤45 gün) — çağıran zaten tarih filtreliyor, sonuç değişmez, ağ/bellek ~%95 düşer.
+  - Büyük blob satırlı sorgularda chunk=1 (bloblar) / 100 (hourly) / 500 (rows).
+  - /stock: delta placeholder dict blob'unda `'str' object has no attribute get` 500 hatası düzeltildi (sadece list blob'lar alınır).
+- TEST (164MB'lık def6f845 tenant): peak VmHWM 55.8MB (eski: 164MB+ tampon), malloc_trim sonrası 31.6MB'a iner; agg 96 satır doğru toplam; süre 23s→13s. 10+ endpoint API testi ✅ (dashboard tek/aralık, stock, customers, hourly-detail-full, hourly-detail, barcode-price, stock-list, cari-list, cari-extre, fis-detail, acik-masalar-coklu).
+- KULLANICI: Save to GitHub → Railway redeploy (v13). /api/sistem-durum "surum":"2026-08-22-v13-buffer-fix" doğrular.

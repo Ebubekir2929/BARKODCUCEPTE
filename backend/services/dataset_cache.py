@@ -15,7 +15,7 @@ import logging
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from services import get_data_pool
+from services import get_data_pool, stream_rows
 
 logger = logging.getLogger(__name__)
 
@@ -133,53 +133,50 @@ async def _load_all_rows(tenant_id: str, dataset_key: str) -> List[dict]:
                     (tenant_id, dataset_key),
                 )
                 latest = await cur.fetchone()
-                if latest:
-                    await cur.execute(
-                        """
-                        SELECT data_json
-                        FROM dataset_cache_pages
-                        WHERE tenant_id=%s AND dataset_key=%s AND params_hash=%s
-                        ORDER BY page_no ASC
-                        """,
-                        (tenant_id, dataset_key, latest[0]),
-                    )
-                    pages = await cur.fetchall()
-                    for (raw,) in pages or []:
-                        if not raw:
-                            continue
-                        try:
-                            arr = json.loads(raw)
-                        except Exception:
-                            continue
-                        if isinstance(arr, list):
-                            items.extend(p for p in arr if isinstance(p, dict))
-                        elif isinstance(arr, dict) and isinstance(arr.get("data"), list):
-                            items.extend(p for p in arr["data"] if isinstance(p, dict))
-            if items:
-                return items
-
-    # 1) Try per-row table first
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
+        if latest:
+            # v13-buffer-fix: sayfa blobları SSCursor ile TEK TEK akıtılır;
+            # eski fetchall tüm sayfaları aynı anda RAM tamponuna alıyordu.
+            async for (raw,) in stream_rows(
+                pool,
                 """
-                SELECT row_json FROM dataset_cache_rows
-                WHERE tenant_id=%s AND dataset_key=%s AND deleted_at IS NULL
-                ORDER BY id ASC
+                SELECT data_json
+                FROM dataset_cache_pages
+                WHERE tenant_id=%s AND dataset_key=%s AND params_hash=%s
+                ORDER BY page_no ASC
                 """,
-                (tenant_id, dataset_key),
-            )
-            while True:
-                batch = await cur.fetchmany(5000)
-                if not batch:
-                    break
-                for (raw,) in batch:
-                    if not raw:
-                        continue
-                    try:
-                        items.append(json.loads(raw))
-                    except Exception:
-                        continue
+                (tenant_id, dataset_key, latest[0]),
+                chunk=1,
+            ):
+                if not raw:
+                    continue
+                try:
+                    arr = json.loads(raw)
+                except Exception:
+                    continue
+                if isinstance(arr, list):
+                    items.extend(p for p in arr if isinstance(p, dict))
+                elif isinstance(arr, dict) and isinstance(arr.get("data"), list):
+                    items.extend(p for p in arr["data"] if isinstance(p, dict))
+        if items:
+            return items
+
+    # 1) Try per-row table first — v13-buffer-fix: SSCursor akışı (tamponsuz)
+    async for (raw,) in stream_rows(
+        pool,
+        """
+        SELECT row_json FROM dataset_cache_rows
+        WHERE tenant_id=%s AND dataset_key=%s AND deleted_at IS NULL
+        ORDER BY id ASC
+        """,
+        (tenant_id, dataset_key),
+        chunk=500,
+    ):
+        if not raw:
+            continue
+        try:
+            items.append(json.loads(raw))
+        except Exception:
+            continue
 
     if items:
         return items
@@ -682,28 +679,24 @@ async def _load_filtered_rows_sql(
     """
     pool = await get_data_pool()
     items: List[dict] = []
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                f"""
-                SELECT row_json FROM dataset_cache_rows
-                WHERE tenant_id=%s AND dataset_key=%s AND deleted_at IS NULL
-                  AND ({sql_filter})
-                ORDER BY id ASC
-                """,
-                (tenant_id, dataset_key, *sql_params),
-            )
-            while True:
-                batch = await cur.fetchmany(2000)
-                if not batch:
-                    break
-                for (raw,) in batch:
-                    if not raw:
-                        continue
-                    try:
-                        items.append(json.loads(raw))
-                    except Exception:
-                        continue
+    # v13-buffer-fix: SSCursor akışı (tamponsuz)
+    async for (raw,) in stream_rows(
+        pool,
+        f"""
+        SELECT row_json FROM dataset_cache_rows
+        WHERE tenant_id=%s AND dataset_key=%s AND deleted_at IS NULL
+          AND ({sql_filter})
+        ORDER BY id ASC
+        """,
+        (tenant_id, dataset_key, *sql_params),
+        chunk=500,
+    ):
+        if not raw:
+            continue
+        try:
+            items.append(json.loads(raw))
+        except Exception:
+            continue
     return items
 
 
@@ -743,22 +736,23 @@ async def lookup_pages_dataset(
                     (tenant_id, dataset_key),
                 )
                 row = await cur.fetchone()
-                if not row:
-                    return None
-                latest_hash = row[0]
-                await cur.execute(
-                    """
-                    SELECT data_json
-                    FROM dataset_cache_pages
-                    WHERE tenant_id=%s AND dataset_key=%s AND params_hash=%s
-                    ORDER BY page_no ASC
-                    """,
-                    (tenant_id, dataset_key, latest_hash),
-                )
-                pages = await cur.fetchall()
-        # Concatenate page arrays in order
+        if not row:
+            return None
+        latest_hash = row[0]
+        # Concatenate page arrays in order — v13-buffer-fix: sayfa blobları
+        # SSCursor ile TEK TEK akıtılır (eski fetchall hepsini tamponluyordu).
         merged: List[dict] = []
-        for (data_json_raw,) in pages or []:
+        async for (data_json_raw,) in stream_rows(
+            pool,
+            """
+            SELECT data_json
+            FROM dataset_cache_pages
+            WHERE tenant_id=%s AND dataset_key=%s AND params_hash=%s
+            ORDER BY page_no ASC
+            """,
+            (tenant_id, dataset_key, latest_hash),
+            chunk=1,
+        ):
             try:
                 arr = json.loads(data_json_raw) if data_json_raw else []
             except Exception:
@@ -854,42 +848,56 @@ async def lookup_rows_dataset(
             try:
                 from services import get_data_pool
                 pool = await get_data_pool()
-                async with pool.acquire() as conn:
-                    async with conn.cursor() as cur:
-                        if skip_agg and not is_single_hour:
-                            # Full-day RAW — no hour pre-filter, return ALL rows
-                            await cur.execute(
-                                """
-                                SELECT row_json, updated_at
-                                FROM dataset_cache_rows
-                                WHERE tenant_id=%s AND dataset_key='hourly_stock_detail'
-                                  AND deleted_at IS NULL
-                                ORDER BY updated_at DESC
-                                """,
-                                (tenant_id,),
-                            )
-                            target_hour_int = None
-                        else:
-                            target_hour = sdate_str[11:13]
-                            like_pattern = f"%\"SAAT_ADI\":\"{target_hour}:00 - %"
-                            await cur.execute(
-                                """
-                                SELECT row_json, updated_at
-                                FROM dataset_cache_rows
-                                WHERE tenant_id=%s AND dataset_key='hourly_stock_detail'
-                                  AND deleted_at IS NULL
-                                  AND row_json LIKE %s
-                                ORDER BY updated_at DESC
-                                """,
-                                (tenant_id, like_pattern),
-                            )
-                            target_hour_int = int(target_hour)
-                        rows = await cur.fetchall()
+                # v13-buffer-fix: SSCursor akışı — eski fetchall on binlerce
+                # satırı tek RAM tamponuna alıyordu (Railway OOM).
+                # Ek: TARIH push-down — sdate/edate aralığındaki günler SQL
+                # seviyesinde LIKE ile süzülür; çağıran zaten tarih filtresi
+                # uyguladığı için sonuç değişmez, bellek/ağ yükü ~%95 düşer.
+                _date_likes: list = []
+                _date_args: list = []
+                try:
+                    from datetime import date as _d, timedelta as _td
+                    _sd = _d.fromisoformat(sdate_str[:10])
+                    _ed = _d.fromisoformat((edate_str or sdate_str)[:10])
+                    if _sd <= _ed and (_ed - _sd).days <= 45:
+                        _gun = _sd
+                        while _gun <= _ed:
+                            _date_likes.append("row_json LIKE %s")
+                            _date_args.append(f'%"TARIH":"{_gun.isoformat()}%')
+                            _gun += _td(days=1)
+                except (ValueError, TypeError):
+                    _date_likes = []
+                    _date_args = []
+                _date_sql = f" AND ({' OR '.join(_date_likes)})" if _date_likes else ""
+                if skip_agg and not is_single_hour:
+                    # Full-day RAW — no hour pre-filter, return ALL rows
+                    _sql = f"""
+                        SELECT row_json, updated_at
+                        FROM dataset_cache_rows
+                        WHERE tenant_id=%s AND dataset_key='hourly_stock_detail'
+                          AND deleted_at IS NULL{_date_sql}
+                        ORDER BY updated_at DESC
+                        """
+                    _sql_args = (tenant_id, *_date_args)
+                    target_hour_int = None
+                else:
+                    target_hour = sdate_str[11:13]
+                    like_pattern = f"%\"SAAT_ADI\":\"{target_hour}:00 - %"
+                    _sql = f"""
+                        SELECT row_json, updated_at
+                        FROM dataset_cache_rows
+                        WHERE tenant_id=%s AND dataset_key='hourly_stock_detail'
+                          AND deleted_at IS NULL
+                          AND row_json LIKE %s{_date_sql}
+                        ORDER BY updated_at DESC
+                        """
+                    _sql_args = (tenant_id, like_pattern, *_date_args)
+                    target_hour_int = int(target_hour)
                 p = params or {}
                 wanted_lok = p.get("lokasyonID") or p.get("LOKASYON_ID") or p.get("lokasyon_id")
                 seen: set = set()
                 out: list = []
-                for row_json_raw, _upd in rows or []:
+                async for row_json_raw, _upd in stream_rows(pool, _sql, _sql_args, chunk=100):
                     try:
                         d = json.loads(row_json_raw) if isinstance(row_json_raw, (str, bytes)) else (row_json_raw or {})
                     except Exception:
@@ -953,41 +961,13 @@ async def lookup_rows_dataset(
             try:
                 from services import get_data_pool
                 pool = await get_data_pool()
-                async with pool.acquire() as conn:
-                    async with conn.cursor() as cur:
-                        # Fetch raw rows + updated_at; dedupe in Python by
-                        # (SAAT_ADI, STOK_ID, LOKASYON_ID) — keep the most
-                        # recent push. Same-content rows can exist multiple
-                        # times when POS sync writes the same product under
-                        # different params_hash (e.g., full-day vs. single-hour
-                        # snapshot). Aggregating without dedupe double-counts.
-                        await cur.execute(
-                            """
-                            SELECT row_json, updated_at
-                            FROM dataset_cache_rows
-                            WHERE tenant_id=%s AND dataset_key='hourly_stock_detail' AND deleted_at IS NULL
-                            ORDER BY updated_at DESC
-                            """,
-                            (tenant_id,),
-                        )
-                        rows = await cur.fetchall()
-                # ─── Python-side dedupe + aggregation ───
-                # Track the latest row per (saat_adi, stok_id, lokasyon_id).
-                latest: dict = {}
-                for row_json_raw, upd in rows or []:
-                    try:
-                        d = json.loads(row_json_raw) if isinstance(row_json_raw, (str, bytes)) else (row_json_raw or {})
-                    except Exception:
-                        continue
-                    saat = (d.get("SAAT_ADI") or "").strip()
-                    if not saat:
-                        continue
-                    stok_id = d.get("STOK_ID") or 0
-                    lok_id = int(d.get("LOKASYON_ID") or 0)
-                    key = (saat, str(stok_id), lok_id)
-                    if key not in latest:  # first row wins because we ORDER BY updated_at DESC
-                        latest[key] = d
-                # Aggregate the deduped rows by (hour, location)
+                # v13-buffer-fix: SSCursor akışı + TEK GEÇİŞTE dedupe+agregasyon.
+                # Eski hali fetchall ile TÜM satırları (139K satır / 2.7GB'lık
+                # tenant var!) RAM'e alıp full dict'leri `latest` sözlüğünde
+                # biriktiriyordu → Railway OOM. Artık satır satır akıtılır;
+                # ilk görülen (saat,stok,lok) doğrudan toplama işlenir, ham
+                # dict saklanmaz. Dedupe sırası aynı: ORDER BY updated_at DESC
+                # → en güncel push kazanır.
                 p = params or {}
                 wanted_lok = p.get("lokasyonID") or p.get("LOKASYON_ID") or p.get("lokasyon_id")
 
@@ -997,11 +977,33 @@ async def lookup_rows_dataset(
                     except (TypeError, ValueError):
                         return 0.0
 
+                seen_keys: set = set()
                 agg: dict = {}
-                for d in latest.values():
+                async for row_json_raw, upd in stream_rows(
+                    pool,
+                    """
+                    SELECT row_json, updated_at
+                    FROM dataset_cache_rows
+                    WHERE tenant_id=%s AND dataset_key='hourly_stock_detail' AND deleted_at IS NULL
+                    ORDER BY updated_at DESC
+                    """,
+                    (tenant_id,),
+                    chunk=100,
+                ):
+                    try:
+                        d = json.loads(row_json_raw) if isinstance(row_json_raw, (str, bytes)) else (row_json_raw or {})
+                    except Exception:
+                        continue
                     saat = (d.get("SAAT_ADI") or "").strip()
-                    lok = (d.get("LOKASYON") or "").strip()
+                    if not saat:
+                        continue
+                    stok_id = d.get("STOK_ID") or 0
                     lok_id = int(d.get("LOKASYON_ID") or 0)
+                    dkey = f"{saat}|{stok_id}|{lok_id}"
+                    if dkey in seen_keys:  # first row wins because we ORDER BY updated_at DESC
+                        continue
+                    seen_keys.add(dkey)
+                    lok = (d.get("LOKASYON") or "").strip()
                     if wanted_lok not in (None, "", 0):
                         try:
                             if int(wanted_lok) != lok_id:

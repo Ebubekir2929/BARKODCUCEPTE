@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
-from services import get_data_pool
+from contextlib import aclosing
+from services import get_data_pool, stream_rows
 from services.dataset_cache import (
     get_dataset_items,
     filter_stock_items,
@@ -395,19 +396,18 @@ async def fetch_dataset(pool, tenant_id: str, dataset_key: str, filter_date: Opt
                                    or "active_rows" in (data.get("meta") or {})
                                    or (not data.get("data") and data.get("row_count"))):
         try:
-            async with pool.acquire() as conn2:
-                async with conn2.cursor() as cur2:
-                    await cur2.execute(
-                        """
-                        SELECT row_json FROM dataset_cache_rows
-                        WHERE tenant_id=%s AND dataset_key=%s AND deleted_at IS NULL
-                        ORDER BY id ASC LIMIT 5000
-                        """,
-                        (tenant_id, dataset_key),
-                    )
-                    rs = await cur2.fetchall()
+            # v13-buffer-fix: SSCursor akışı (eski fetchall 5000 satırı tek tamponda alıyordu)
             parsed = []
-            for (raw,) in rs:
+            async for (raw,) in stream_rows(
+                pool,
+                """
+                SELECT row_json FROM dataset_cache_rows
+                WHERE tenant_id=%s AND dataset_key=%s AND deleted_at IS NULL
+                ORDER BY id ASC LIMIT 5000
+                """,
+                (tenant_id, dataset_key),
+                chunk=1000,
+            ):
                 if not raw:
                     continue
                 try:
@@ -576,24 +576,25 @@ async def get_dashboard_data(
                 if sdate <= sdate_val[:10] <= edate:
                     match_ids.append(rid)
 
-            all_rows = []
-            if match_ids:
+            # v13-buffer-fix: bloblar SSCursor ile TEK TEK akıtılır; eski
+            # fetchall tüm aralığın bloblarını aynı anda RAM'e alıyordu → OOM.
+            async def _blob_akisi():
+                if not match_ids:
+                    return
                 id_ph = ",".join(["%s"] * len(match_ids))
-                async with pool.acquire() as conn:
-                    async with conn.cursor() as cur:
-                        await cur.execute(f"""
-                            SELECT dataset_key, data_json, row_count, synced_at, updated_at, params_json
-                            FROM dataset_cache WHERE id IN ({id_ph})
-                            ORDER BY updated_at DESC
-                        """, tuple(match_ids))
-                        all_rows = await cur.fetchall()
+                async for r in stream_rows(pool, f"""
+                        SELECT dataset_key, data_json, row_count, synced_at, updated_at, params_json
+                        FROM dataset_cache WHERE id IN ({id_ph})
+                        ORDER BY updated_at DESC
+                    """, tuple(match_ids), chunk=1):
+                    yield r
             
             # Group rows by dataset_key, filtered by date range
             from collections import defaultdict
             keyed_data = defaultdict(list)
             keyed_meta = {}
             
-            for row in all_rows:
+            async for row in _blob_akisi():
                 dk, data_json, row_count, synced_at, updated_at, params_json = row
                 if dk not in dashboard_keys:
                     continue
@@ -750,21 +751,19 @@ async def get_stock_data(
     current_user: dict = Depends(get_current_user),
 ):
     pool = await get_data_pool()
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("""
-                SELECT data_json, params_json, row_count, synced_at, updated_at
-                FROM dataset_cache 
-                WHERE tenant_id = %s AND dataset_key = 'stock_list'
-                ORDER BY updated_at DESC
-            """, (tenant_id,))
-            rows = await cur.fetchall()
-    
+    # v13-buffer-fix: stock_list blobları SSCursor ile tek tek akıtılır
     all_stocks = []
-    for row in rows:
+    async for row in stream_rows(pool, """
+            SELECT data_json, params_json, row_count, synced_at, updated_at
+            FROM dataset_cache
+            WHERE tenant_id = %s AND dataset_key = 'stock_list'
+            ORDER BY updated_at DESC
+        """, (tenant_id,), chunk=1):
         try:
             data = json.loads(row[0]) if row[0] else []
-            all_stocks.extend(data)
+            # Delta placeholder blob'lar dict olabilir — sadece listeleri al
+            if isinstance(data, list):
+                all_stocks.extend(d for d in data if isinstance(d, dict))
         except json.JSONDecodeError:
             pass
     
@@ -1445,24 +1444,22 @@ async def get_hourly_stock_detail(
             where_extra = " AND row_json LIKE %s"
             params_sql.append(f'%"LOKASYON_ID":{int(lokasyon_id)}%')
 
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    f"""
-                    SELECT row_json FROM dataset_cache_rows
-                    WHERE tenant_id=%s
-                      AND dataset_key='hourly_stock_detail'
-                      AND deleted_at IS NULL
-                      AND row_json LIKE %s
-                      AND row_json LIKE %s
-                      {where_extra}
-                    """,
-                    tuple(params_sql),
-                )
-                raw_rows = await cur.fetchall()
-
+        # v13-buffer-fix: SSCursor akışı — büyük saat detayları tamponsuz okunur
         parents: list = []
-        for (rj,) in raw_rows:
+        async for (rj,) in stream_rows(
+            pool,
+            f"""
+            SELECT row_json FROM dataset_cache_rows
+            WHERE tenant_id=%s
+              AND dataset_key='hourly_stock_detail'
+              AND deleted_at IS NULL
+              AND row_json LIKE %s
+              AND row_json LIKE %s
+              {where_extra}
+            """,
+            tuple(params_sql),
+            chunk=100,
+        ):
             try:
                 d = json.loads(rj) if isinstance(rj, (str, bytes)) else rj
             except Exception:
@@ -2383,53 +2380,53 @@ async def get_cari_extre(
             try:
                 from services.dataset_cache import get_data_pool as _gdp
                 pool = await _gdp()
-                async with pool.acquire() as conn:
-                    async with conn.cursor() as cur:
-                        # 2026-06 — Prefetch: 500 cari cache'lendiğinde "son 40 blob"
-                        # taraması hedef cariyi kaçırıyordu. params_json LIKE ile
-                        # doğrudan bu carinin bloblarını buluruz.
-                        await cur.execute(
-                            """SELECT data_json, params_json, synced_at FROM dataset_cache
-                               WHERE tenant_id=%s AND dataset_key='kart_extre_cari'
-                                 AND (params_json LIKE %s OR params_json LIKE %s)
-                               ORDER BY synced_at DESC LIMIT 10""",
-                            (tenant_id, f'%"ID":{int(cari_id)},%', f'%"ID":{int(cari_id)}}}%'),
-                        )
-                        for blob, pjson, synced in await cur.fetchall():
-                            try:
-                                p = json.loads(pjson or "{}")
-                                if int(p.get("ID") or 0) != int(cari_id):
-                                    continue
-                                rows = json.loads(blob or "[]")
-                            except (TypeError, ValueError, json.JSONDecodeError):
+                # 2026-06 — Prefetch: params_json LIKE ile doğrudan bu carinin
+                # blobları bulunur. v13-buffer-fix: bloblar SSCursor ile TEK TEK
+                # akıtılır; break ile erken çıkışta aclosing kalanı drenajlar.
+                async with aclosing(stream_rows(
+                    pool,
+                    """SELECT data_json, params_json, synced_at FROM dataset_cache
+                       WHERE tenant_id=%s AND dataset_key='kart_extre_cari'
+                         AND (params_json LIKE %s OR params_json LIKE %s)
+                       ORDER BY synced_at DESC LIMIT 10""",
+                    (tenant_id, f'%"ID":{int(cari_id)},%', f'%"ID":{int(cari_id)}}}%'),
+                    chunk=1,
+                )) as _cari_akis:
+                    async for blob, pjson, synced in _cari_akis:
+                        try:
+                            p = json.loads(pjson or "{}")
+                            if int(p.get("ID") or 0) != int(cari_id):
                                 continue
-                            if not isinstance(rows, list):
-                                continue
-                            # Cache yaşı (rozet için)
+                            rows = json.loads(blob or "[]")
+                        except (TypeError, ValueError, json.JSONDecodeError):
+                            continue
+                        if not isinstance(rows, list):
+                            continue
+                        # Cache yaşı (rozet için)
+                        age_sec = None
+                        try:
+                            if synced:
+                                age_sec = int((datetime.now() - synced).total_seconds())
+                        except Exception:
                             age_sec = None
-                            try:
-                                if synced:
-                                    age_sec = int((datetime.now() - synced).total_seconds())
-                            except Exception:
-                                age_sec = None
-                            filtered = [
-                                r for r in rows
-                                if isinstance(r, dict)
-                                and ((not _row_dt(r)) or (tarih_baslangic <= _row_dt(r) <= tarih_bitis))
-                            ]
-                            logger.info(
-                                f"[cari-extre] date-agnostic cache HIT ID={cari_id} "
-                                f"blob_range={p.get('TARIH_BASLANGIC')}→{p.get('TARIH_BITIS')} "
-                                f"rows={len(rows)} filtered={len(filtered)}"
-                            )
-                            result = {
-                                "ok": True,
-                                "data": _fix_large_ints(filtered),
-                                "_cache_hit": True,
-                                "_source": "mysql_date_agnostic",
-                                "_age_sec": age_sec,
-                            }
-                            break
+                        filtered = [
+                            r for r in rows
+                            if isinstance(r, dict)
+                            and ((not _row_dt(r)) or (tarih_baslangic <= _row_dt(r) <= tarih_bitis))
+                        ]
+                        logger.info(
+                            f"[cari-extre] date-agnostic cache HIT ID={cari_id} "
+                            f"blob_range={p.get('TARIH_BASLANGIC')}→{p.get('TARIH_BITIS')} "
+                            f"rows={len(rows)} filtered={len(filtered)}"
+                        )
+                        result = {
+                            "ok": True,
+                            "data": _fix_large_ints(filtered),
+                            "_cache_hit": True,
+                            "_source": "mysql_date_agnostic",
+                            "_age_sec": age_sec,
+                        }
+                        break
             except Exception as e:
                 logger.debug(f"[cari-extre] date-agnostic fallback failed: {e}")
 
@@ -2531,43 +2528,45 @@ async def _feed_fis_lookup(tenant_id: str, fis_id) -> tuple:
     try:
         from services.dataset_cache import get_data_pool as _gdp
         pool = await _gdp()
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    """SELECT data_json FROM dataset_cache
-                       WHERE tenant_id=%s AND dataset_key=%s
-                       ORDER BY synced_at DESC LIMIT 8""",
-                    (tenant_id, "fis_gunluk_bildirim_feed"),
-                )
-                for (blob,) in await cur.fetchall():
+        # v13-buffer-fix: bloblar SSCursor ile TEK TEK akıtılır; return ile
+        # erken çıkışta aclosing kalan satırları drenajlar.
+        async with aclosing(stream_rows(
+            pool,
+            """SELECT data_json FROM dataset_cache
+               WHERE tenant_id=%s AND dataset_key=%s
+               ORDER BY synced_at DESC LIMIT 8""",
+            (tenant_id, "fis_gunluk_bildirim_feed"),
+            chunk=1,
+        )) as _fis_akis:
+            async for (blob,) in _fis_akis:
+                try:
+                    data = json.loads(blob or "[]")
+                except Exception:
+                    continue
+                if not isinstance(data, list):
+                    continue
+                for r in data:
+                    if not isinstance(r, dict):
+                        continue
+                    fid = r.get("FIS_ID")
                     try:
-                        data = json.loads(blob or "[]")
-                    except Exception:
+                        match = fis_int is not None and int(fid) == fis_int
+                    except (TypeError, ValueError):
+                        match = False
+                    if not match and str(fid) != str(fis_id):
                         continue
-                    if not isinstance(data, list):
-                        continue
-                    for r in data:
-                        if not isinstance(r, dict):
-                            continue
-                        fid = r.get("FIS_ID")
+                    raw = None
+                    for k in ("DETAYLAR", "URUNLER", "ITEMS", "LINES"):
+                        if k in r:
+                            raw = r[k]
+                            break
+                    if isinstance(raw, str):
                         try:
-                            match = fis_int is not None and int(fid) == fis_int
-                        except (TypeError, ValueError):
-                            match = False
-                        if not match and str(fid) != str(fis_id):
-                            continue
-                        raw = None
-                        for k in ("DETAYLAR", "URUNLER", "ITEMS", "LINES"):
-                            if k in r:
-                                raw = r[k]
-                                break
-                        if isinstance(raw, str):
-                            try:
-                                raw = json.loads(raw)
-                            except Exception:
-                                raw = None
-                        details = [el for el in raw if isinstance(el, dict)] if isinstance(raw, list) else []
-                        return details, r
+                            raw = json.loads(raw)
+                        except Exception:
+                            raw = None
+                    details = [el for el in raw if isinstance(el, dict)] if isinstance(raw, list) else []
+                    return details, r
     except Exception as e:
         logger.debug(f"[feed_fis_lookup] failed fis_id={fis_id}: {e}")
     return [], {}
@@ -2830,42 +2829,42 @@ async def get_high_sale_detail(
             from services.dataset_cache import get_data_pool
             import json as _json2
             pool = await get_data_pool()
-            async with pool.acquire() as conn:
-                async with conn.cursor() as cur:
-                    # Try newest entries first; if the FIS_ID isn't in them,
-                    # iterate through more candidates. We collect rows from
-                    # ALL recent caches and let `_match_row` pick the right
-                    # one — receipts may straddle day boundaries.
-                    await cur.execute(
-                        """
-                        SELECT data_json, row_count, synced_at FROM dataset_cache
-                        WHERE tenant_id=%s AND dataset_key=%s
-                        ORDER BY synced_at DESC LIMIT 8
-                        """,
-                        (tenant_id, "fis_gunluk_bildirim_feed"),
-                    )
-                    merged: list = []
-                    seen_fids: set = set()
-                    for cand in await cur.fetchall():
-                        try:
-                            data = _json2.loads(cand[0] or "[]")
-                        except Exception:
-                            continue
-                        if not isinstance(data, list):
-                            continue
-                        for r in data:
-                            if not isinstance(r, dict):
-                                continue
-                            fid = r.get("FIS_ID")
-                            try:
-                                fid_key = int(fid) if fid is not None else None
-                            except (TypeError, ValueError):
-                                fid_key = str(fid)
-                            if fid_key in seen_fids:
-                                continue
-                            seen_fids.add(fid_key)
-                            merged.append(r)
-                    rows = merged
+            # Try newest entries first; if the FIS_ID isn't in them,
+            # iterate through more candidates. We collect rows from
+            # ALL recent caches and let `_match_row` pick the right
+            # one — receipts may straddle day boundaries.
+            # v13-buffer-fix: bloblar SSCursor ile TEK TEK akıtılır.
+            merged: list = []
+            seen_fids: set = set()
+            async for cand in stream_rows(
+                pool,
+                """
+                SELECT data_json, row_count, synced_at FROM dataset_cache
+                WHERE tenant_id=%s AND dataset_key=%s
+                ORDER BY synced_at DESC LIMIT 8
+                """,
+                (tenant_id, "fis_gunluk_bildirim_feed"),
+                chunk=1,
+            ):
+                try:
+                    data = _json2.loads(cand[0] or "[]")
+                except Exception:
+                    continue
+                if not isinstance(data, list):
+                    continue
+                for r in data:
+                    if not isinstance(r, dict):
+                        continue
+                    fid = r.get("FIS_ID")
+                    try:
+                        fid_key = int(fid) if fid is not None else None
+                    except (TypeError, ValueError):
+                        fid_key = str(fid)
+                    if fid_key in seen_fids:
+                        continue
+                    seen_fids.add(fid_key)
+                    merged.append(r)
+            rows = merged
         except Exception as e_db:
             logger.warning(f"[high-sale-detail] direct cache lookup failed: {e_db}")
 

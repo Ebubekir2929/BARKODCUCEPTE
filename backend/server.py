@@ -132,7 +132,7 @@ _POS_FILES = {"client.py": "text/x-python", "sync.php": "application/octet-strea
 @app.get("/api/sistem-durum", include_in_schema=False)
 async def sistem_durum(derin: int = 0):
     import services as _svc
-    out = {"surum": "2026-08-22-v12-watcher-fix", "patron": None, "data": None}
+    out = {"surum": "2026-08-22-v13-buffer-fix", "patron": None, "data": None}
     # 2026-08 — OOM teşhisi: çalışma süresi (restart tespiti için)
     try:
         with open("/proc/self/stat") as f:
