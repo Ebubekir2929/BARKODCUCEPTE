@@ -2606,3 +2606,9 @@ agent_communication:
 ## 2026-08-22 — Trend Detayı (gün dokunma) + Aylık Karşılaştırma kartı
   - WeeklyTrendChart onDayPress → setFilters(o gün); MonthlyCompareCard + /api/data/aylik-karsilastirma.
   - Endpoint iki tenant'la curl doğrulandı; kart UI screenshot ile doğrulandı (Merkez, -100% rozet). VERIFIED ✅
+
+## 2026-08-22 — Temizlik kartı + Aylık trend
+  - sistem-saglik "GÜNLÜK VERİ TEMİZLİĞİ" kartı: hem "henüz çalışmadı" hem DOLU hal
+    (Son Çalışma 23/08 01:52, karantina 1.152) UI screenshot ile doğrulandı ✅
+  - /api/data/aylik-trend + MonthlyTrendChart: iki tenant curl + UI screenshot PASS ✅
+  - haftalik-trend ve aylik-karsilastirma regresyonları (ortak yardımcıya geçiş) PASS ✅
