@@ -2602,3 +2602,7 @@ agent_communication:
   - GET /api/data/haftalik-trend + WeeklyTrendChart (dashboard, toplam 0 ise gizli).
   - iteration_19: backend 5/5 pytest PASS; HourDetailModal (30.07.2026) ve
     LocationIptalModal (09.06.2026) geçmiş tarih filtreleriyle CANLI doğrulandı. VERIFIED ✅
+
+## 2026-08-22 — Trend Detayı (gün dokunma) + Aylık Karşılaştırma kartı
+  - WeeklyTrendChart onDayPress → setFilters(o gün); MonthlyCompareCard + /api/data/aylik-karsilastirma.
+  - Endpoint iki tenant'la curl doğrulandı; kart UI screenshot ile doğrulandı (Merkez, -100% rozet). VERIFIED ✅

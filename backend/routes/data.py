@@ -508,6 +508,95 @@ async def get_dataset(
     return result
 
 
+@router.get("/aylik-karsilastirma")
+async def aylik_karsilastirma(
+    tenant_id: str = Query(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Bu ay vs geçen ay satış karşılaştırması (dashboard kartı).
+
+    Adil kıyas için 'geçen ay aynı dönem' (1'inden bugünün gün numarasına kadar)
+    hesaplanır; ayrıca geçen ayın tam toplamı da döner. Kaynak: her günün en
+    güncel `financial_data` blobu (lokasyon filtresizler).
+    """
+    from datetime import date
+
+    bugun = date.today()
+    bu_ay_prefix = bugun.strftime("%Y-%m")
+    if bugun.month == 1:
+        gecen_yil, gecen_ay = bugun.year - 1, 12
+    else:
+        gecen_yil, gecen_ay = bugun.year, bugun.month - 1
+    gecen_ay_prefix = f"{gecen_yil:04d}-{gecen_ay:02d}"
+
+    pool = await get_data_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT params_json, data_json FROM dataset_cache
+                WHERE tenant_id=%s AND dataset_key='financial_data'
+                  AND (params_json LIKE %s OR params_json LIKE %s)
+                ORDER BY updated_at DESC LIMIT 400
+                """,
+                (tenant_id, f'%"sdate":"{bu_ay_prefix}-%', f'%"sdate":"{gecen_ay_prefix}-%'),
+            )
+            rows = await cur.fetchall()
+
+    def _f(v):
+        try:
+            return float(v) if v is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    # Gün başına EN GÜNCEL blob (updated_at DESC → ilk görülen kazanır)
+    gun_toplam: dict = {}
+    for pjson, blob in rows or []:
+        try:
+            p = json.loads(pjson or "{}")
+            gun = str(p.get("sdate") or "")[:10]
+        except Exception:
+            continue
+        if not gun or gun in gun_toplam:
+            continue
+        if p.get("lokasyonID") not in (None, "", 0):
+            continue
+        try:
+            data = json.loads(blob or "[]")
+        except Exception:
+            continue
+        toplam = 0.0
+        for r in data if isinstance(data, list) else []:
+            if not isinstance(r, dict):
+                continue
+            g = _f(r.get("GENELTOPLAM"))
+            if g <= 0:
+                g = _f(r.get("PERAKENDE_GENELTOPLAM")) + _f(r.get("ERP12_GENELTOPLAM"))
+            toplam += g
+        gun_toplam[gun] = toplam
+
+    bu_ay_toplam = sum(v for g, v in gun_toplam.items() if g.startswith(bu_ay_prefix))
+    gecen_ay_toplam = sum(v for g, v in gun_toplam.items() if g.startswith(gecen_ay_prefix))
+    # Aynı dönem: geçen ayın 1..bugünün gün numarası
+    gecen_ay_ayni = sum(
+        v for g, v in gun_toplam.items()
+        if g.startswith(gecen_ay_prefix) and int(g[8:10]) <= bugun.day
+    )
+    fark = bu_ay_toplam - gecen_ay_ayni
+    fark_yuzde = round((fark / gecen_ay_ayni) * 100, 1) if gecen_ay_ayni > 0 else None
+
+    return {
+        "ok": True,
+        "data": {
+            "bu_ay": {"ay": bu_ay_prefix, "toplam": round(bu_ay_toplam, 2), "gun": bugun.day},
+            "gecen_ay_ayni_donem": {"ay": gecen_ay_prefix, "toplam": round(gecen_ay_ayni, 2)},
+            "gecen_ay_toplam": round(gecen_ay_toplam, 2),
+            "fark": round(fark, 2),
+            "fark_yuzde": fark_yuzde,
+        },
+    }
+
+
 @router.get("/haftalik-trend")
 async def haftalik_trend(
     tenant_id: str = Query(...),

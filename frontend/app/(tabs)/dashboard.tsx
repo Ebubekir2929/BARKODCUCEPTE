@@ -35,6 +35,7 @@ import { webStyles } from '../../src/styles/webModalStyles';
 import { WaiterSalesSection, HourlyLocationSection } from '../../src/components/DashboardSections';
 import { KdvMatrahSection } from '../../src/components/dashboard/KdvMatrahSection';
 import { WeeklyTrendChart } from '../../src/components/dashboard/WeeklyTrendChart';
+import { MonthlyCompareCard } from '../../src/components/dashboard/MonthlyCompareCard';
 import { CardTypeLocationModal } from '../../src/components/dashboard/CardTypeLocationModal';
 import { HourDetailModal } from '../../src/components/dashboard/HourDetailModal';
 import { LocationIptalModal } from '../../src/components/dashboard/LocationIptalModal';
@@ -1360,8 +1361,19 @@ export default function DashboardScreen() {
           );
         })()}
 
-        {/* Son 7 Gün Satış Trendi — 2026-08 yeni mini grafik */}
+        {/* Son 7 Gün Satış Trendi — 2026-08 yeni mini grafik (güne dokun → o günün özeti) */}
         <WeeklyTrendChart
+          tenantId={activeTenantId}
+          colors={colors}
+          style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}
+          onDayPress={(tarih) => {
+            const gun = new Date(tarih + 'T12:00:00');
+            setFilters((f) => ({ ...f, startDate: gun, endDate: gun }));
+          }}
+        />
+
+        {/* Aylık Karşılaştırma — 2026-08 yeni kart */}
+        <MonthlyCompareCard
           tenantId={activeTenantId}
           colors={colors}
           style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}

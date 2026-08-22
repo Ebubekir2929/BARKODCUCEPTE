@@ -4,7 +4,7 @@
  * (grafik kütüphanesi gerekmez). Tenant başına 5 dk modül-içi cache (SWR hissi).
  */
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleProp, ViewStyle } from 'react-native';
+import { View, Text, TouchableOpacity, StyleProp, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/authStore';
 
@@ -19,6 +19,8 @@ interface Props {
   tenantId: string | null;
   colors: any;
   style?: StyleProp<ViewStyle>;
+  /** Bir gün barına dokunulunca çağrılır (YYYY-MM-DD) — dashboard o günün özetine geçer */
+  onDayPress?: (tarih: string) => void;
 }
 
 const GUN_KISA = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
@@ -33,7 +35,7 @@ const fmtShort = (v: number) => {
   return v.toFixed(0);
 };
 
-export function WeeklyTrendChart({ tenantId, colors, style }: Props) {
+export function WeeklyTrendChart({ tenantId, colors, style, onDayPress }: Props) {
   const [data, setData] = useState<GunVerisi[] | null>(() => {
     const c = tenantId ? _cache.get(tenantId) : null;
     return c ? c.data : null;
@@ -90,6 +92,11 @@ export function WeeklyTrendChart({ tenantId, colors, style }: Props) {
           <Text style={{ fontSize: 11, color: colors.textSecondary, marginTop: 2 }}>
             Toplam ₺{toplam7.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} · Ort ₺{(toplam7 / 7).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}/gün
           </Text>
+          {!!onDayPress && (
+            <Text style={{ fontSize: 10, color: colors.textSecondary, marginTop: 2, opacity: 0.7 }}>
+              Bir güne dokunarak o günün özetini görüntüleyin
+            </Text>
+          )}
         </View>
       </View>
 
@@ -101,7 +108,13 @@ export function WeeklyTrendChart({ tenantId, colors, style }: Props) {
           const vurgulu = i === enIyiIdx && d.toplam > 0;
           const barRenk = vurgulu ? colors.primary : d.toplam > 0 ? colors.primary + '55' : colors.border;
           return (
-            <View key={d.tarih} style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end' }}>
+            <TouchableOpacity
+              key={d.tarih}
+              style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end', minHeight: 44 }}
+              onPress={() => onDayPress && onDayPress(d.tarih)}
+              disabled={!onDayPress}
+              activeOpacity={0.6}
+            >
               <Text
                 style={{ fontSize: 9, fontWeight: '700', color: vurgulu ? colors.primary : colors.textSecondary, marginBottom: 3 }}
                 numberOfLines={1}
@@ -118,7 +131,7 @@ export function WeeklyTrendChart({ tenantId, colors, style }: Props) {
               }}>
                 {i === bugunIdx ? 'Bugün' : GUN_KISA[gun.getDay()]}
               </Text>
-            </View>
+            </TouchableOpacity>
           );
         })}
       </View>

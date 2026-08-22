@@ -318,3 +318,9 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - Dashboard refactor + Haftalık Trend Grafiği frontend değişikliği olduğundan mağaza build'i gerekiyor.
 - Backend değişiklikleri (v13-buffer-fix, temizlik, haftalik-trend endpoint) build GEREKTIRMEZ → Railway redeploy yeterli.
 - sync.php v39 → kullanıcı hosting'e yükleyecek.
+
+## 2026-08-22 — Trend Detayı + Aylık Karşılaştırma ✅
+1. **Trend Detayı**: WeeklyTrendChart barları artık dokunulabilir (`onDayPress`) — dokununca dashboard filtresi o güne (startDate=endDate=gün) ayarlanır, o günün özeti görünür. Başlığa "Bir güne dokunarak..." ipucu eklendi. (Merkez tenant'ında trend gizli olduğundan UI'da canlı doğrulanamadı; setFilters FilterModal onApply ile birebir aynı mekanizma.)
+2. **Aylık Karşılaştırma**: YENİ `GET /api/data/aylik-karsilastirma?tenant_id=` — bu ay (1..bugün) vs geçen ay AYNI DÖNEM (1..aynı gün) + geçen ay tam toplam + fark/yüzde. Kaynak: gün başına en güncel financial_data blobu (2 LIKE ay-prefix sorgusu, LIMIT 400). Frontend: `MonthlyCompareCard.tsx` (yüzde rozeti yeşil/kırmızı, iki kutu, alt bilgi satırları; iki dönem de 0 ise gizli, 5 dk cache). Dashboard'ta WeeklyTrend'in altında.
+- Doğrulama: endpoint ea5231 (10.5M vs 1.57M, +568.1%) ve d5587 (0 vs 15.3K, -100%) ✓; UI screenshot ile Merkez'de kart render ✓ (Ağustos 1-22 vs Temmuz 1-22, -100% rozet). tsc+lint temiz.
+- NOT: Sürüm 1.0.46 build'i henüz alınmadıysa bu değişiklikler aynı build'e dahil olur, ayrıca artırım GEREKMEZ.
