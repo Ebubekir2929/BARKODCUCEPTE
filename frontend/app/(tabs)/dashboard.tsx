@@ -36,6 +36,7 @@ import { WaiterSalesSection, HourlyLocationSection } from '../../src/components/
 import { KdvMatrahSection } from '../../src/components/dashboard/KdvMatrahSection';
 import { WeeklyTrendChart } from '../../src/components/dashboard/WeeklyTrendChart';
 import { MonthlyCompareCard } from '../../src/components/dashboard/MonthlyCompareCard';
+import { MonthlyTrendChart } from '../../src/components/dashboard/MonthlyTrendChart';
 import { CardTypeLocationModal } from '../../src/components/dashboard/CardTypeLocationModal';
 import { HourDetailModal } from '../../src/components/dashboard/HourDetailModal';
 import { LocationIptalModal } from '../../src/components/dashboard/LocationIptalModal';
@@ -1374,6 +1375,13 @@ export default function DashboardScreen() {
 
         {/* Aylık Karşılaştırma — 2026-08 yeni kart */}
         <MonthlyCompareCard
+          tenantId={activeTenantId}
+          colors={colors}
+          style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}
+        />
+
+        {/* Son 6 Ay Satış Trendi — 2026-08 yeni çubuk grafiği */}
+        <MonthlyTrendChart
           tenantId={activeTenantId}
           colors={colors}
           style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}

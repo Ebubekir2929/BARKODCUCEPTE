@@ -508,6 +508,103 @@ async def get_dataset(
     return result
 
 
+async def _finans_gun_toplamlari(tenant_id: str, like_patterns: list, limit: int = 400) -> dict:
+    """Gün başına EN GÜNCEL `financial_data` blobundan toplam/nakit/kart çıkarır.
+
+    haftalik-trend, aylik-karsilastirma ve aylik-trend ortak yardımcısı.
+    Lokasyon filtreli bloblar atlanır (firma geneli istenir).
+    Dönen: { 'YYYY-MM-DD': {toplam, nakit, kart} }
+    """
+    likes = " OR ".join(["params_json LIKE %s"] * len(like_patterns))
+    pool = await get_data_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"""
+                SELECT params_json, data_json FROM dataset_cache
+                WHERE tenant_id=%s AND dataset_key='financial_data' AND ({likes})
+                ORDER BY updated_at DESC LIMIT {int(limit)}
+                """,
+                (tenant_id, *like_patterns),
+            )
+            rows = await cur.fetchall()
+
+    def _f(v):
+        try:
+            return float(v) if v is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    gun_toplam: dict = {}
+    for pjson, blob in rows or []:
+        try:
+            p = json.loads(pjson or "{}")
+            gun = str(p.get("sdate") or "")[:10]
+        except Exception:
+            continue
+        if not gun or gun in gun_toplam:
+            continue
+        if p.get("lokasyonID") not in (None, "", 0):
+            continue
+        try:
+            data = json.loads(blob or "[]")
+        except Exception:
+            continue
+        toplam = nakit = kart = 0.0
+        for r in data if isinstance(data, list) else []:
+            if not isinstance(r, dict):
+                continue
+            g = _f(r.get("GENELTOPLAM"))
+            if g <= 0:
+                g = _f(r.get("PERAKENDE_GENELTOPLAM")) + _f(r.get("ERP12_GENELTOPLAM"))
+            toplam += g
+            n = _f(r.get("NAKIT"))
+            if n <= 0:
+                n = _f(r.get("PERAKENDE_NAKIT")) + _f(r.get("ERP12_NAKIT"))
+            nakit += n
+            k = _f(r.get("KREDI_KARTI"))
+            if k <= 0:
+                k = _f(r.get("PERAKENDE_KREDI_KARTI")) + _f(r.get("ERP12_KREDI_KARTI"))
+            kart += k
+        gun_toplam[gun] = {"toplam": round(toplam, 2), "nakit": round(nakit, 2), "kart": round(kart, 2)}
+    return gun_toplam
+
+
+@router.get("/aylik-trend")
+async def aylik_trend(
+    tenant_id: str = Query(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """Son 6 ayın ay bazında toplam satışı (dashboard çubuk grafiği)."""
+    from datetime import date
+
+    bugun = date.today()
+    aylar = []
+    y, m = bugun.year, bugun.month
+    for _ in range(6):
+        aylar.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+    aylar.reverse()  # eski → yeni
+
+    gunler = await _finans_gun_toplamlari(
+        tenant_id, [f'%"sdate":"{ay}-%' for ay in aylar], limit=1500
+    )
+    ay_toplam = {ay: 0.0 for ay in aylar}
+    for gun, v in gunler.items():
+        ay = gun[:7]
+        if ay in ay_toplam:
+            ay_toplam[ay] += v["toplam"]
+    return {
+        "ok": True,
+        "data": [
+            {"ay": ay, "toplam": round(ay_toplam[ay], 2), "devam_ediyor": ay == aylar[-1]}
+            for ay in aylar
+        ],
+    }
+
+
 @router.get("/aylik-karsilastirma")
 async def aylik_karsilastirma(
     tenant_id: str = Query(...),
@@ -529,51 +626,12 @@ async def aylik_karsilastirma(
         gecen_yil, gecen_ay = bugun.year, bugun.month - 1
     gecen_ay_prefix = f"{gecen_yil:04d}-{gecen_ay:02d}"
 
-    pool = await get_data_pool()
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                """
-                SELECT params_json, data_json FROM dataset_cache
-                WHERE tenant_id=%s AND dataset_key='financial_data'
-                  AND (params_json LIKE %s OR params_json LIKE %s)
-                ORDER BY updated_at DESC LIMIT 400
-                """,
-                (tenant_id, f'%"sdate":"{bu_ay_prefix}-%', f'%"sdate":"{gecen_ay_prefix}-%'),
-            )
-            rows = await cur.fetchall()
-
-    def _f(v):
-        try:
-            return float(v) if v is not None else 0.0
-        except (TypeError, ValueError):
-            return 0.0
-
-    # Gün başına EN GÜNCEL blob (updated_at DESC → ilk görülen kazanır)
-    gun_toplam: dict = {}
-    for pjson, blob in rows or []:
-        try:
-            p = json.loads(pjson or "{}")
-            gun = str(p.get("sdate") or "")[:10]
-        except Exception:
-            continue
-        if not gun or gun in gun_toplam:
-            continue
-        if p.get("lokasyonID") not in (None, "", 0):
-            continue
-        try:
-            data = json.loads(blob or "[]")
-        except Exception:
-            continue
-        toplam = 0.0
-        for r in data if isinstance(data, list) else []:
-            if not isinstance(r, dict):
-                continue
-            g = _f(r.get("GENELTOPLAM"))
-            if g <= 0:
-                g = _f(r.get("PERAKENDE_GENELTOPLAM")) + _f(r.get("ERP12_GENELTOPLAM"))
-            toplam += g
-        gun_toplam[gun] = toplam
+    gun_toplam_map = await _finans_gun_toplamlari(
+        tenant_id,
+        [f'%"sdate":"{bu_ay_prefix}-%', f'%"sdate":"{gecen_ay_prefix}-%'],
+        limit=400,
+    )
+    gun_toplam = {g: v["toplam"] for g, v in gun_toplam_map.items()}
 
     bu_ay_toplam = sum(v for g, v in gun_toplam.items() if g.startswith(bu_ay_prefix))
     gecen_ay_toplam = sum(v for g, v in gun_toplam.items() if g.startswith(gecen_ay_prefix))
@@ -611,63 +669,9 @@ async def haftalik_trend(
     from datetime import date, timedelta
 
     gunler = [(date.today() - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
-    likes = " OR ".join(["params_json LIKE %s"] * len(gunler))
-    args = [f'%"sdate":"{g}%' for g in gunler]
-
-    pool = await get_data_pool()
-    # Gün başına EN GÜNCEL blob kazanır (updated_at DESC → ilk görülen)
-    gun_blob: dict = {}
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                f"""
-                SELECT params_json, data_json FROM dataset_cache
-                WHERE tenant_id=%s AND dataset_key='financial_data' AND ({likes})
-                ORDER BY updated_at DESC LIMIT 100
-                """,
-                (tenant_id, *args),
-            )
-            rows = await cur.fetchall()
-
-    def _f(v):
-        try:
-            return float(v) if v is not None else 0.0
-        except (TypeError, ValueError):
-            return 0.0
-
-    for pjson, blob in rows or []:
-        try:
-            p = json.loads(pjson or "{}")
-            gun = str(p.get("sdate") or "")[:10]
-        except Exception:
-            continue
-        if not gun or gun in gun_blob:
-            continue
-        # Lokasyon filtreli blobları atla — firma geneli (lokasyonID null) istenir
-        lok = p.get("lokasyonID")
-        if lok not in (None, "", 0):
-            continue
-        try:
-            data = json.loads(blob or "[]")
-        except Exception:
-            continue
-        toplam = nakit = kart = 0.0
-        for r in data if isinstance(data, list) else []:
-            if not isinstance(r, dict):
-                continue
-            g = _f(r.get("GENELTOPLAM"))
-            if g <= 0:
-                g = _f(r.get("PERAKENDE_GENELTOPLAM")) + _f(r.get("ERP12_GENELTOPLAM"))
-            toplam += g
-            n = _f(r.get("NAKIT"))
-            if n <= 0:
-                n = _f(r.get("PERAKENDE_NAKIT")) + _f(r.get("ERP12_NAKIT"))
-            nakit += n
-            k = _f(r.get("KREDI_KARTI"))
-            if k <= 0:
-                k = _f(r.get("PERAKENDE_KREDI_KARTI")) + _f(r.get("ERP12_KREDI_KARTI"))
-            kart += k
-        gun_blob[gun] = {"toplam": round(toplam, 2), "nakit": round(nakit, 2), "kart": round(kart, 2)}
+    gun_blob = await _finans_gun_toplamlari(
+        tenant_id, [f'%"sdate":"{g}%' for g in gunler], limit=100
+    )
 
     out = [
         {"tarih": g, **gun_blob.get(g, {"toplam": 0.0, "nakit": 0.0, "kart": 0.0})}

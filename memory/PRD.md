@@ -324,3 +324,9 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 2. **Aylık Karşılaştırma**: YENİ `GET /api/data/aylik-karsilastirma?tenant_id=` — bu ay (1..bugün) vs geçen ay AYNI DÖNEM (1..aynı gün) + geçen ay tam toplam + fark/yüzde. Kaynak: gün başına en güncel financial_data blobu (2 LIKE ay-prefix sorgusu, LIMIT 400). Frontend: `MonthlyCompareCard.tsx` (yüzde rozeti yeşil/kırmızı, iki kutu, alt bilgi satırları; iki dönem de 0 ise gizli, 5 dk cache). Dashboard'ta WeeklyTrend'in altında.
 - Doğrulama: endpoint ea5231 (10.5M vs 1.57M, +568.1%) ve d5587 (0 vs 15.3K, -100%) ✓; UI screenshot ile Merkez'de kart render ✓ (Ağustos 1-22 vs Temmuz 1-22, -100% rozet). tsc+lint temiz.
 - NOT: Sürüm 1.0.46 build'i henüz alınmadıysa bu değişiklikler aynı build'e dahil olur, ayrıca artırım GEREKMEZ.
+
+## 2026-08-22 — Temizlik Bildirimi + Aylık Trend Grafiği ✅
+1. **Temizlik Bildirimi**: sistem-saglik.tsx'e "GÜNLÜK VERİ TEMİZLİĞİ" kartı — son çalışma (TR saati), karantinaya alınan tekrarlanan kayıt, kalıcı silinen, eski saatlik (>60g), eski sayfa önbelleği; hata varsa kırmızı satır. Veri yoksa "henüz çalışmadı".
+2. **Aylık Trend**: YENİ `GET /api/data/aylik-trend` (son 6 ayın ay bazında toplamı) + `MonthlyTrendChart.tsx` (6 çubuk, en iyi ay vurgusu, devam eden ay KESİKLİ çubuk, tümü 0 ise gizli). Dashboard'ta Aylık Karşılaştırma'nın altında.
+3. **DRY refactor**: financial_data gün-toplamı mantığı `_finans_gun_toplamlari()` ortak yardımcısına alındı; haftalik-trend + aylik-karsilastirma + aylik-trend üçü de bunu kullanır (regresyon curl ile doğrulandı).
+- Doğrulama: aylik-trend ea5231 (Tem 6.7M, Ağu 10.5M) ve d5587 (May 179K, Haz 52K, Tem 15K) ✓; UI screenshot: 6 ay grafiği Merkez'de render (Mayıs vurgulu, Ağustos kesikli) ✓; temizlik kartı "henüz çalışmadı" hali ✓ (dolu hal ilk tur sonrası otomatik).

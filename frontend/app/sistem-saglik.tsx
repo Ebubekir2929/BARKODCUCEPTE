@@ -23,6 +23,19 @@ interface Durum {
   derin_select1?: number;
   derin_meta_sorgu?: { sure: number; satir: number };
   derin_hata?: string;
+  temizlik?: {
+    durum?: string;
+    baslangic?: string;
+    bitis?: string;
+    soft_deleted_silinen?: number;
+    hourly_silinen?: number;
+    eski_sayfa_silinen?: number;
+    superseded_soft_del?: number;
+    soft_deleted_hata?: string;
+    hourly_hata?: string;
+    sayfa_hata?: string;
+    superseded_hata?: string;
+  };
 }
 
 export default function SistemSaglikScreen() {
@@ -192,6 +205,59 @@ export default function SistemSaglikScreen() {
                   <Text style={[styles.kotu, { flex: 1, textAlign: 'right' }]} numberOfLines={2}>{durum.derin_hata}</Text>
                 </View>
               ) : null}
+            </View>
+            {/* Günlük Veri Temizliği — 2026-08 */}
+            <Text style={[styles.bolumBaslik, { color: colors.textSecondary }]}>GÜNLÜK VERİ TEMİZLİĞİ</Text>
+            <View style={[styles.kart, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              {(() => {
+                const tz = durum.temizlik;
+                if (!tz || tz.durum) {
+                  return (
+                    <View style={[styles.satir, { borderBottomWidth: 0 }]}>
+                      <Text style={[styles.satirBaslik, { color: colors.text }]}>Durum</Text>
+                      <Text style={[styles.satirDeger, { color: colors.textSecondary }]}>
+                        {tz?.durum || 'Henüz çalışmadı'}
+                      </Text>
+                    </View>
+                  );
+                }
+                // UTC → TR saati (UTC+3)
+                const trSaat = (iso?: string) => {
+                  if (!iso) return '—';
+                  try {
+                    const d = new Date(iso);
+                    return d.toLocaleString('tr-TR', {
+                      day: '2-digit', month: '2-digit',
+                      hour: '2-digit', minute: '2-digit',
+                      timeZone: 'Europe/Istanbul',
+                    });
+                  } catch { return iso; }
+                };
+                const hata = tz.soft_deleted_hata || tz.hourly_hata || tz.sayfa_hata || tz.superseded_hata;
+                const satirlar: [string, string][] = [
+                  ['Son Çalışma', trSaat(tz.bitis || tz.baslangic)],
+                  ['Tekrarlanan Kayıt (karantina)', (tz.superseded_soft_del ?? 0).toLocaleString('tr-TR')],
+                  ['Kalıcı Silinen', (tz.soft_deleted_silinen ?? 0).toLocaleString('tr-TR')],
+                  ['Eski Saatlik Kayıt (>60 gün)', (tz.hourly_silinen ?? 0).toLocaleString('tr-TR')],
+                  ['Eski Sayfa Önbelleği', (tz.eski_sayfa_silinen ?? 0).toLocaleString('tr-TR')],
+                ];
+                return (
+                  <>
+                    {satirlar.map(([ad, deger], i) => (
+                      <View key={ad} style={[styles.satir, { borderBottomColor: colors.border, borderBottomWidth: (i === satirlar.length - 1 && !hata) ? 0 : 1 }]}>
+                        <Text style={[styles.satirBaslik, { color: colors.text }]}>{ad}</Text>
+                        <Text style={[styles.satirDeger, { color: i === 0 ? '#10B981' : colors.textSecondary, fontWeight: i === 0 ? '700' : '400' }]}>{deger}</Text>
+                      </View>
+                    ))}
+                    {hata ? (
+                      <View style={[styles.satir, { borderBottomWidth: 0 }]}>
+                        <Text style={[styles.satirBaslik, { color: '#EF4444' }]}>Hata</Text>
+                        <Text style={[styles.kotu, { flex: 1, textAlign: 'right' }]} numberOfLines={2}>{hata}</Text>
+                      </View>
+                    ) : null}
+                  </>
+                );
+              })()}
             </View>
           </>
         )}
