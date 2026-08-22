@@ -122,7 +122,9 @@ async def _pos_request_data(
             logger.warning(f"[pos] request_create {dataset_key} returned no request_uid: {j}")
             return []
 
-        # 2) Poll request_status with include_data=true
+        # 2) Durum yoklaması — 2026-08 OOM FIX: include_data=False!
+        # Eskiden 0.25sn'de bir TAM VERİ blobu indiriliyordu (7/24, tüm tenantlar)
+        # → dakikada GB'larca tahsis, Railway 6.7GB OOM patlamasının ana kaynağı.
         started = datetime.utcnow()
         last_status = "queued"
         while (datetime.utcnow() - started).total_seconds() < timeout_s:
@@ -132,7 +134,7 @@ async def _pos_request_data(
                     "tenant_id": tenant_id,
                     "action": "request_status",
                     "request_uid": request_uid,
-                    "include_data": True,
+                    "include_data": False,
                 }, headers={"Content-Type": "application/json; charset=utf-8"})
                 sj = st.json()
             except Exception as e:
@@ -154,9 +156,31 @@ async def _pos_request_data(
 
             last_status = str(sj.get("status") or "unknown").lower()
             if last_status == "done":
-                cache = sj.get("cache") or {}
-                data = cache.get("data")
-                return data if isinstance(data, list) else []
+                # Veri SADECE şimdi, TEK SEFER çekilir (chunk bitmediyse kısa retry)
+                for _deneme in range(20):
+                    try:
+                        fin = await client.post(POS_API_URL, json={
+                            "tenant_id": tenant_id,
+                            "action": "request_status",
+                            "request_uid": request_uid,
+                            "include_data": True,
+                        }, headers={"Content-Type": "application/json; charset=utf-8"})
+                        fj = fin.json()
+                    except Exception as e:
+                        logger.warning(f"[pos] final data fetch failed: {e}")
+                        return []
+                    if not fj.get("ok", True):
+                        _ec = str(fj.get("error", "")).lower()
+                        if "upload_incomplete" in _ec or "result_upload" in _ec:
+                            if (datetime.utcnow() - started).total_seconds() >= timeout_s:
+                                return []
+                            await asyncio.sleep(1.5)
+                            continue
+                        return []
+                    cache = fj.get("cache") or {}
+                    data = cache.get("data")
+                    return data if isinstance(data, list) else []
+                return []
             if last_status == "error":
                 logger.warning(f"[pos] request_status {dataset_key} error: {sj.get('error_text')}")
                 return []

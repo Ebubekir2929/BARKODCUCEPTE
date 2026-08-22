@@ -1106,10 +1106,13 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
     deadline = poll_start + timeout_sec
     while time.time() < deadline:
         poll_count += 1
+        # 2026-08 — OOM PATLAMASI FIX: Beklerken include_data=False!
+        # Eskiden her 150ms'de TAM VERİ blobu tekrar tekrar indiriliyordu;
+        # büyük raporlarda dakikada GB'larca tahsis → Railway 6.7GB OOM crash.
         status_resp = await sync_post({
             "action": "request_status",
             "request_uid": request_uid,
-            "include_data": True,
+            "include_data": False,
         }, tenant_id)
 
         # Detect chunked upload still in progress (sync.php streaming results in N parts)
@@ -1126,7 +1129,23 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
         status = status_resp.get("status", "unknown")
         
         if status == "done":
-            cache = status_resp.get("cache", {})
+            # Veri SADECE şimdi, TEK SEFER çekilir (chunk birleşmesi bitmediyse kısa retry)
+            cache = {}
+            for _deneme in range(20):
+                final_resp = await sync_post({
+                    "action": "request_status",
+                    "request_uid": request_uid,
+                    "include_data": True,
+                }, tenant_id)
+                if not final_resp.get("ok", True):
+                    _ec = str(final_resp.get("error", "")).lower()
+                    if "upload_incomplete" in _ec or "result_upload" in _ec:
+                        if time.time() >= deadline:
+                            break
+                        await asyncio.sleep(0.6)
+                        continue
+                cache = final_resp.get("cache", {}) or {}
+                break
             data_for_cache = cache.get("data", []) if isinstance(cache.get("data"), list) else []
             # Write-through to kasacepteweb.dataset_cache so the next call hits Step 0
             try:

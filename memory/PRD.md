@@ -266,3 +266,11 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - v9 17:29'da deploy edildi, 17:40'ta DEPLOY OLMADAN çöktü (uptime 4.6dk @17:45, bellek 201MB ve tırmanıyor). 8GB slider'a rağmen ~256MB'ta öldürülüyor → Railway tarafında görünmez tavan (destek ticket önerildi).
 - v10: MEM_KORUMA_MB varsayılanı 400→180 (kod içinde; env gerekmez). 180MB'da tüm cache boşaltma + trim + tracemalloc teşhis devreye girer — tavana ULAŞMADAN müdahale.
 - İSTENEN: kullanıcı v10 redeploy + Railway Logs'ta "bellek" araması ekran görüntüsü (çökme öncesi RSS eğrisi + [bellek_top] satırları teşhisi kesinleştirir).
+
+## 2026-08-22 — 🎯 OOM PATLAMASININ GERÇEK KÖK NEDENİ BULUNDU VE ÇÖZÜLDÜ (v11+v12)
+- Kullanıcının proje Memory grafiği: BARKODCUCEPTE 17:39-40'ta 1-2 dk içinde 6.68GB'a fırlayıp 8GB limitte OOM! (256MB tavan teorisi YANLIŞTI — servis grafiği örnekleme yanıltmış.)
+- KÖK NEDEN: request_status yoklamaları include_data=True ile yapılıyordu → sync.php her yoklamada TAM data_json blobunu tekrar gönderiyordu. İki yer: (1) routes/data.py on_demand poll (150ms aralık), (2) notification_watcher.py poll (250ms, 7/24, TÜM tenantlar) → dakikada GB'larca tahsis → balon → OOM.
+- FIX v11: data.py poll include_data=False; status done olunca TEK SEFER include_data=True ile veri çekimi (upload_incomplete için 20 denemeli 0.6s retry, deadline sınırlı).
+- FIX v12: notification_watcher.py aynı düzeltme (1.5s retry).
+- E2E test: gelir tablosu canlı POS akışı 6 satır döndü ✅; watcher sağlıklı loglar ✅.
+- KULLANICI: v12'yi redeploy edecek (Save to GitHub → Railway). Bu, OOM krizinin NİHAİ çözümü.
