@@ -251,3 +251,9 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - Prod gözlemi: RSS 247MB SABİT, ram_cache BOŞ → bellek geçici ağır tahsislerden kalan iade edilmemiş glibc alanı; ~256MB konteyner tavanına yaslanıyor, her spike öldürüyor (crash loop ~15-60dk).
 - v8: bekçi artık RSS > eşik*0.45 iken her dakika malloc_trim ile belleği OS'a iade eder (cache boş olsa bile). Eşik aşımında tam boşaltma + tracemalloc teşhisi aynen durur.
 - KULLANICI AKSİYONLARI: (1) Railway Variables → MEM_KORUMA_MB=180 ekle (redeploy'suz anında rahatlama), (2) Save to GitHub + redeploy (v8), (3) Settings'te RAM slider aranacak; yoksa Railway support'a "Hobby'de servis 256MB'ta OOM oluyor" ticket.
+
+## 2026-08-22 — SON TEŞHİS: Build OOM + slim requirements (v9)
+- Kullanıcı Scale ekranını paylaştı: CPU 8 vCPU / Memory 8GB MAKSIMUMDA → runtime tavanı YOK. OOM mailleri deploy anlarıyla örtüşüyor → Railway'in AYRI dahili BUILD bellek limiti (exit 137) en olası kaynak.
+- requirements.txt'te KULLANILMAYAN ağır paketler bulundu ve silindi: pandas==3.0.0, numpy==2.4.2, pillow==12.1.0 (kodda hiç import yok; 126→123 satır). Build belleği ciddi hafifler.
+- v9-slim-build damgası. Prod v8'de 161MB→bekçi trim'iyle yönetiliyor.
+- Kalan izleme: v9 deploy sonrası OOM maili gelirse SAATİ deploy saatiyle karşılaştır; deploy dışıysa Railway loglarındaki [bellek] satırları incelenecek.
