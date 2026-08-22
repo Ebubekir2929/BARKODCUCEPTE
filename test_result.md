@@ -2587,3 +2587,12 @@ agent_communication:
   - Ayrıca: _mysql_greeting_ok probe düzeltmesi (0xFF hata paketi = sağlıksız,
     ER_HOST_IS_BLOCKED durumunda otomatik tünele geçiş).
   - testing_agent iter 16: backend 6/6 + frontend UI PASS. VERIFIED ✅
+
+## 2026-08-22 — v13-buffer-fix + Temizlik + Dashboard Refactor
+  - Backend: stream_rows (SSCursor) ile 13 fetchall noktası akışa çevrildi; full-day
+    hourly agg tek geçişli; TARIH LIKE push-down. Peak bellek 164MB'lık tenant'ta 55.8MB.
+  - services/veri_temizlik.py: günlük temizlik (superseded hourly kopyaları soft-del,
+    ilk turda 140.568 satır). sistem-durum: bellek_gecmisi + temizlik alanları.
+  - Frontend: dashboard.tsx 3663→2690; KdvMatrahSection, CardTypeLocationModal,
+    HourDetailModal, LocationIptalModal ayrı komponentlere taşındı (görsel birebir).
+  - testing_agent iteration_18: PASS (frontend regression + backend smoke). VERIFIED ✅

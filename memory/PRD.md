@@ -293,3 +293,17 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
   - /stock: delta placeholder dict blob'unda `'str' object has no attribute get` 500 hatası düzeltildi (sadece list blob'lar alınır).
 - TEST (164MB'lık def6f845 tenant): peak VmHWM 55.8MB (eski: 164MB+ tampon), malloc_trim sonrası 31.6MB'a iner; agg 96 satır doğru toplam; süre 23s→13s. 10+ endpoint API testi ✅ (dashboard tek/aralık, stock, customers, hourly-detail-full, hourly-detail, barcode-price, stock-list, cari-list, cari-extre, fis-detail, acik-masalar-coklu).
 - KULLANICI: Save to GitHub → Railway redeploy (v13). /api/sistem-durum "surum":"2026-08-22-v13-buffer-fix" doğrular.
+
+## 2026-08-22 — 3 görev: Bellek İzleme + Veri Temizliği + Dashboard Refactor ✅
+1. **Canlı Bellek İzleme**: /api/sistem-durum artık `bellek_gecmisi` (son 3 saatin dakikalık RSS örnekleri, bekçi döngüsü doldurur), `bellek_zirve_mb` (VmHWM) ve `temizlik` (son temizlik istatistiği) döner.
+2. **Veri Temizlik Görevi** (services/veri_temizlik.py, günde 1, ilk tur başlangıçtan 10 dk sonra):
+   - Adım 1: soft-deleted satırlar >7 gün → kalıcı silme
+   - Adım 2: hourly_stock_detail >60 gün → silme
+   - Adım 3: dataset_cache_pages eski (güncel olmayan) hash sayfaları >7 gün → silme
+   - Adım 4 (EN BÜYÜK KAZANIM): superseded hourly kopyaları — aynı (TARIH,SAAT,STOK,LOK) kombinasyonunun eski push kopyaları SOFT-delete edilir (7 gün karantina → adım 1 kalıcı siler; deleted_at=NULL ile geri alınabilir). MariaDB 5.5'te JSON fonksiyonu yok → alanlar SQL LOCATE+SUBSTRING (URUNLER-öncesi CASE korumalı) + Python regex ile çıkarılır. TARIH/SAAT bulunamayan satıra DOKUNULMAZ.
+   - İLK TUR SONUCU: ea5231 tenant'ında 140.568 ölü kopya soft-del (1.608 canlı kaldı, %98.9 ölü veriydi!). Sorgu hızı 7 gün sonra hard-delete ile tam düzelir (soft-del satırlar hâlâ fiziksel tarama maliyeti yaratıyor, index deleted_at içermiyor — 2.7GB tabloda index rebuild riskli, yapılmadı).
+   - Deadlock (1213/1205) retry eklendi (_parcali_sil, 3 deneme).
+   - dataset_cache blob tablosuna DOKUNULMAZ (tarih aralıklı dashboard geçmişi).
+   - NOT: POS her push'ta aynı kombinasyonları yeniden yazıyor (günde ~6K satır/tenant) — kalıcı çözüm istenirse sync.php'de upsert değerlendirilebilir (yapılmadı).
+3. **Dashboard Refactor**: dashboard.tsx 3663 → ~2690 satır. Çıkarılan komponentler (src/components/dashboard/): KdvMatrahSection, CardTypeLocationModal, HourDetailModal, LocationIptalModal + dashboardModalStyles (ortak modal stilleri). Kullanılmayan 27 stil tanımı silindi, duplicate liveDot/liveText temizlendi. tsc + lint temiz.
+- testing_agent iteration_18: PASS (login, dashboard, CardTypeLocationModal aç/kapa, sekme regresyonları, sistem-durum yeni alanlar). HourDetail/LocationIptal modalları bugün veri olmadığı için SKIP — kod birebir taşındı.

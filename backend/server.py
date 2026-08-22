@@ -157,7 +157,20 @@ async def sistem_durum(derin: int = 0):
             for line in f:
                 if line.startswith("VmRSS:"):
                     out["bellek_mb"] = round(int(line.split()[1]) / 1024, 1)
-                    break
+                if line.startswith("VmHWM:"):
+                    out["bellek_zirve_mb"] = round(int(line.split()[1]) / 1024, 1)
+    except Exception:
+        pass
+    # 2026-08 v13 — Canlı bellek izleme: son 3 saatin dakikalık RSS örnekleri
+    # (bekçi döngüsü doldurur). Deploy sonrası eğri buradan okunur.
+    try:
+        out["bellek_gecmisi"] = list(app.state.bellek_gecmisi)
+    except Exception:
+        pass
+    # 2026-08 v13 — Veri temizlik görevi son çalışma istatistiği
+    try:
+        from services.veri_temizlik import son_calisma as _temizlik
+        out["temizlik"] = dict(_temizlik) if _temizlik else {"durum": "henüz çalışmadı"}
     except Exception:
         pass
     try:
@@ -311,6 +324,13 @@ async def startup():
         except Exception as e:
             logging.error(f"Failed to start notification watcher: {e}")
 
+        # 2026-08 v13 — Günlük eski veri temizlik görevi
+        try:
+            from services.veri_temizlik import start_temizlik
+            start_temizlik()
+        except Exception as e:
+            logging.error(f"Failed to start veri temizlik: {e}")
+
     # 2026-08 — KRİTİK: task referansı saklanmalı! Referanssız create_task GC
     # tarafından yarıda YOK EDİLİYORDU ("Task was destroyed but it is pending!")
     # → havuzlar kurulamıyor, tüm istekler sonsuza dek askıda kalıyordu
@@ -323,6 +343,9 @@ async def startup():
     async def _bellek_bekcisi():
         esik_mb = float(os.environ.get("MEM_KORUMA_MB", "180"))  # 2026-08 — konteyner ~256MB tavanında ölüyor; eşik tavanın ALTINDA olmalı
         tracemalloc_acik = False
+        # v13 — Canlı izleme: son 3 saatin dakikalık RSS örnekleri (sistem-durum'da döner)
+        from collections import deque
+        app.state.bellek_gecmisi = deque(maxlen=180)
         while True:
             await asyncio.sleep(60)
             try:
@@ -332,6 +355,10 @@ async def startup():
                         if line.startswith("VmRSS:"):
                             rss_mb = int(line.split()[1]) / 1024
                             break
+                from datetime import datetime as _dt
+                app.state.bellek_gecmisi.append(
+                    {"t": _dt.utcnow().strftime("%H:%M"), "mb": round(rss_mb, 1)}
+                )
                 from services.dataset_cache import _DATASET_MEM_CACHE
                 from routes.data import _GLOBAL_CACHE
                 logging.info(

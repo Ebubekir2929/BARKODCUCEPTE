@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 18 — Frontend regression after dashboard.tsx refactor (3663→2690 satır, 4 blok ayrı komponentlere: KdvMatrahSection, CardTypeLocationModal, HourDetailModal, LocationIptalModal). Login cakmak.ebubekir29@gmail.com/1234567 ÇALIŞIYOR (önceki iter17'de stale denilen credential şu an geçerli). Dashboard mobil (390x844) sağlıklı yükleniyor: 4 özet kartı (Nakit/Kredi Kartı/Açık Hesap/Toplam ₺0,00 — bugün satış yok, NORMAL), Açık Masalar bölümü 5 masa ile render oluyor (Toplam Açık Tutar ₺189,00, Diğer/Merkez/VERESİYE lokasyon dağılımı). CardTypeLocationModal: Nakit ve Toplam kartlarına tıklayınca 'Nakit - Lokasyon Dağılımı' modalı açılıyor, X kapatma ikonu + Toplam ₺0,00 satırı görünür (screenshot 04 doğruluyor); Escape ile kapanıyor. HourDetailModal: bugün satış olmadığı için Saatlik Satış Grafiği hiç render edilmiyor → SKIP (kabul). LocationIptalModal: iptal verisi yok → SKIP (kabul). KdvMatrahSection: veri yok, hata YOK, sayfa render normal. Sekme regresyon: Stok (9 ürün listesi), Cariler (6 cari), Raporlar (7 rapor kartı) hepsi açılıyor. Konsol: 6 mesaj, hiçbiri 'undefined is not a function' / TypeError değil (0 kritik pageerror). Backend smoke: GET /api/sistem-durum → surum='2026-08-22-v13-buffer-fix', bellek_gecmisi 17 kayıt, bellek_zirve_mb=87.7, temizlik alanı dolu (superseded_soft_del=480 iş yaptığını gösteriyor; sayfa_hata olarak MySQL 1213 deadlock uyarısı var — kritik değil ama not düşüldü). GET /api/data/dashboard?tenant_id=...&sdate=today → 200 (13 dashboard anahtarı: financial_data, hourly_data, iptal_ozet, top10_stock_movements, ...). NOT: request'te POST demiş ama endpoint aslında GET (dokümanda küçük tutarsızlık — düzeltme gerekmez, GET çalışıyor).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/sistem-durum",
+        "issue": "temizlik.sayfa_hata alanı '(1213, Deadlock found when trying to get lock; try restarting transaction)' içeriyor — günlük veri temizlik görevi sayfa döngüsünde MySQL deadlock yakalayıp durmuş. Silinen sayı yine de 0 hourly / 480 superseded_soft_del, yani kısmen çalışmış. İzleme önerilir; retry mekanizması eklenebilir."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "İsteğe bağlı: services/veri_temizlik.py içindeki sayfa döngüsü için MySQL 1213 deadlock retry (2-3 kez tekrar deneme) eklenebilir; şu an günlük görev deadlock'ta iptal oluyor.",
+    "İsteğe bağlı: review_request'te '/api/data/dashboard' için POST yazıyor ama endpoint GET — belge/istek şablonunu güncellemekte fayda var (kod tarafı doğru: routes/data.py:511 @router.get('/dashboard'))."
+  ],
+  "critical_code_review_comments": [
+    "Refactor temiz: 4 modal/section komponenti prop-drilling ile net şekilde ayrılmış, davranış korunmuş. CardTypeLocationModal (280 satır), HourDetailModal (390 satır), LocationIptalModal, KdvMatrahSection tek sorumluluk ilkesine uygun.",
+    "CardTypeLocationModal ScrollView + Pressable(absoluteFill) overlay yapısı web'de doğru çalışıyor; tıklanınca modal açıldı, Escape ile kapandı, tıklama-dışı-alan kapama da modal-overlay Pressable ile sağlanmış.",
+    "HourDetailModal ve LocationIptalModal test edilemedi çünkü test tenant'ında ilgili veri yok (Saatlik grafiği ve İptaller bölümü koşullu render). Kod incelendi — visible prop + onClose + selectedHour null-guard doğru, runtime hatası riski yok.",
+    "dashboard.tsx (2690 satır) hâlâ 700 satır sınırının çok üzerinde; refactor iyi bir başlangıç, ileride Açık Masalar, Karşılaştırma bloğu, Personel Satış Özet gibi başka kısımların da çıkarılması önerilir."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (2/2 smoke)", "frontend": "100% (test edilebilir tüm akışlar başarılı, 2 modal veri yokluğundan SKIP)"},
+  "seed_data_creation": "None. Canlı MySQL, salt-okunur test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Refactor sonrası regresyon temiz. Bugün (2026-08-22) tenant'ta satış = 0 olduğu için HourDetailModal ve LocationIptalModal fiilen render edilmedi; ileride bu iki modalı test etmek için sdate parametresini satış olan bir geçmiş tarihe (ör. 2026-08-15 hafta içi) çekip Filtre modalıyla değiştirmek gerekir. cakmak.ebubekir29@gmail.com/1234567 credential'ı ŞU AN GEÇERLİ — iter17'deki 'stale' notu artık geçersiz.",
+  "rca_of_issue": "Yeni hata bulunmadı. Backend v13-buffer-fix + dashboard refactor + veri_temizlik entegrasyonu görsel/işlevsel davranışı koruyor. Tek küçük not: /api/sistem-durum.temizlik.sayfa_hata'da MySQL 1213 deadlock yakalanmış — soft-delete/hourly cleanup akışında sayfa döngüsünün ortasında sonlanmış; kritik değil çünkü zaten günlük tekrar çalışıyor ve superseded_soft_del=480 kayıt başarıyla silinmiş."
+}
