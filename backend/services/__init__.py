@@ -177,3 +177,58 @@ async def close_pools():
         data_pool.close()
         await data_pool.wait_closed()
     logger.info("MySQL pools closed")
+
+
+async def _havuz_bekcisi():
+    """2026-08 — BAĞLANTI BEKÇİSİ (canlıdaki login askıda kalma sorunu).
+
+    Endpoint kararı (direkt 3306 vs TLS tüneli) yalnızca AÇILIŞTA veriliyordu.
+    Hosting'in DDoS koruması çalışma SIRASINDA direkt 3306'yı bloklarsa mevcut
+    havuz bağlantıları sonsuza dek askıda kalıyor, login/tüm sorgular zaman
+    aşımına uğruyordu (Railway'de yaşandı: tunel_aktif=False, login 45s+ askı).
+
+    Her 60 sn'de havuzlara SELECT 1 atılır (8 sn sınır). Üst üste 2 başarısızlıkta
+    havuz kapatılır ve endpoint önbelleği temizlenir → bir sonraki istek probe'u
+    yeniden çalıştırır; 3306 bloksa TLS tüneline otomatik düşer.
+    """
+    global patron_pool, data_pool
+    hata = {"patron": 0, "data": 0}
+    while True:
+        await asyncio.sleep(60)
+        for ad in ("patron", "data"):
+            pool = patron_pool if ad == "patron" else data_pool
+            if pool is None:
+                continue
+            try:
+                async def _ping(p=pool):
+                    async with p.acquire() as conn:
+                        async with conn.cursor() as cur:
+                            await cur.execute("SELECT 1")
+                            await cur.fetchone()
+                await asyncio.wait_for(_ping(), timeout=8)
+                hata[ad] = 0
+            except Exception as exc:
+                hata[ad] += 1
+                logger.error(f"[havuz_bekcisi] {ad} ping hatası #{hata[ad]}: {exc!r}")
+                if hata[ad] >= 2:
+                    logger.error(f"[havuz_bekcisi] {ad} havuzu SIFIRLANIYOR — endpoint yeniden çözülecek (gerekirse TLS tüneli)")
+                    _endpoint_cache.clear()
+                    try:
+                        pool.close()
+                    except Exception:
+                        pass
+                    if ad == "patron":
+                        patron_pool = None
+                    else:
+                        data_pool = None
+                    hata[ad] = 0
+
+
+_bekci_task = None
+
+
+def start_havuz_bekcisi():
+    global _bekci_task
+    if _bekci_task is None or _bekci_task.done():
+        _bekci_task = asyncio.get_event_loop().create_task(_havuz_bekcisi())
+        logger.info("🔌 Havuz bekçisi başladı (60 sn'de bir MySQL ping, 2 hatada endpoint yeniden çözümü)")

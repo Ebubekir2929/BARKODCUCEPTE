@@ -349,3 +349,9 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - DailyReceiptsSection'a hızlı arama kutusu: belge no, personel, lokasyon, fiş türü, FIS_ID ve ÜRÜN ADI (DETAYLAR içinde) — Türkçe harf duyarsız (toLocaleLowerCase('tr-TR')), istemci tarafı anlık filtre, "N fiş bulundu" sayacı, temizle (X) butonu, eşleşme yoksa boş durum. "Daha fazla göster" filtrelenmiş listeye göre çalışır; tarih değişince arama sıfırlanır.
 - CANLI DOĞRULAMA: 'abdul' (ürün adı) → 1 fiş; 'MOB-77' (belge no) → bulundu; 'xyz yok' → boş durum ✓. tsc+lint temiz.
 - SÜRÜM: 1.0.47 (iOS build 51 / Android versionCode 51) — kullanıcı isteğiyle artırıldı.
+
+## 2026-08-27 — v14-havuz-bekcisi: Canlıda login askıda kalma sorunu (KÖK NEDEN + FIX)
+- BULGU: Railway canlı backend ayakta ama login 45s+ askıda (HTTP yanıtsız). `tunel_aktif: False`, havuz acik:1/bos:0. Teşhis: endpoint kararı (direkt 3306 vs TLS tüneli) YALNIZCA açılışta veriliyordu; hosting DDoS koruması çalışma sırasında Railway'in direkt 3306 bağlantısını bloklayınca havuz sonsuza dek askıda kalıyor, tünele geçilmiyordu.
+- FIX: `services/__init__.py` → `_havuz_bekcisi()`: 60 sn'de bir patron+data havuzlarına SELECT 1 (8 sn sınır); üst üste 2 başarısızlıkta havuz kapatılır + `_endpoint_cache` temizlenir → sonraki istek probe'u yeniden çalıştırır, 3306 bloksa MYSQL_TLS_PORT tüneline OTOMATİK düşer. server.py startup'ta başlatılır. Sürüm: 2026-08-27-v14-havuz-bekcisi.
+- KULLANICI AKSİYONU: Save to GitHub → Railway Redeploy (redeploy anında probe yeniden çalışıp tünele düşeceği için login hemen düzelir; v14 sonrası bu durum otomatik toparlanır).
+- Dev doğrulama: bekçi başladı, login 200, 90 sn boyunca ping hatası yok.

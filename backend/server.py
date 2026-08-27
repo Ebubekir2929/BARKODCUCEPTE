@@ -132,7 +132,7 @@ _POS_FILES = {"client.py": "text/x-python", "sync.php": "application/octet-strea
 @app.get("/api/sistem-durum", include_in_schema=False)
 async def sistem_durum(derin: int = 0):
     import services as _svc
-    out = {"surum": "2026-08-22-v13-buffer-fix", "patron": None, "data": None}
+    out = {"surum": "2026-08-27-v14-havuz-bekcisi", "patron": None, "data": None}
     # 2026-08 — OOM teşhisi: çalışma süresi (restart tespiti için)
     try:
         with open("/proc/self/stat") as f:
@@ -330,6 +330,13 @@ async def startup():
             start_temizlik()
         except Exception as e:
             logging.error(f"Failed to start veri temizlik: {e}")
+
+        # 2026-08 — Bağlantı bekçisi: MySQL endpoint'i ölürse otomatik failover
+        try:
+            from services import start_havuz_bekcisi
+            start_havuz_bekcisi()
+        except Exception as e:
+            logging.error(f"Failed to start havuz bekcisi: {e}")
 
     # 2026-08 — KRİTİK: task referansı saklanmalı! Referanssız create_task GC
     # tarafından yarıda YOK EDİLİYORDU ("Task was destroyed but it is pending!")
