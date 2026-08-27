@@ -570,6 +570,83 @@ async def _finans_gun_toplamlari(tenant_id: str, like_patterns: list, limit: int
     return gun_toplam
 
 
+@router.get("/gunluk-fisler")
+async def gunluk_fisler(
+    tenant_id: str = Query(...),
+    tarih: str = Query(..., description="YYYY-MM-DD"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Seçilen günün satılan fişleri + ürün içerikleri (dashboard bölümü).
+
+    Kaynak: `fis_gunluk_bildirim_feed` günlük blobları. Aynı günün birden çok
+    blobu olabilir (delta push) → FIS_ID bazında dedupe, en güncel blob kazanır.
+    Bloblar SSCursor ile TEK TEK akıtılır (v13 bellek kuralı).
+    """
+    import re as _re
+    if not _re.match(r"^\d{4}-\d{2}-\d{2}$", tarih or ""):
+        raise HTTPException(status_code=422, detail="tarih YYYY-MM-DD biçiminde olmalı")
+
+    pool = await get_data_pool()
+    fisler: dict = {}
+    async for (blob,) in stream_rows(
+        pool,
+        """
+        SELECT data_json FROM dataset_cache
+        WHERE tenant_id=%s AND dataset_key='fis_gunluk_bildirim_feed'
+          AND params_json LIKE %s
+        ORDER BY synced_at DESC LIMIT 20
+        """,
+        (tenant_id, f'%"TARIH":"{tarih}"%'),
+        chunk=1,
+    ):
+        try:
+            data = json.loads(blob or "[]")
+        except Exception:
+            continue
+        for r in data if isinstance(data, list) else []:
+            if not isinstance(r, dict):
+                continue
+            fid = r.get("FIS_ID")
+            if fid is None or fid in fisler:
+                continue
+            # Gün doğrulaması (blob params günü ile satır günü uyuşmalı)
+            gun = str(r.get("GUN") or r.get("FIS_TARIHI") or "")[:10]
+            if gun and gun != tarih:
+                continue
+            detaylar = r.get("DETAYLAR")
+            if isinstance(detaylar, str):
+                try:
+                    detaylar = json.loads(detaylar)
+                except Exception:
+                    detaylar = []
+            fisler[fid] = {
+                "FIS_ID": fid,
+                "BELGENO": r.get("BELGENO"),
+                "FIS_TARIHI": r.get("FIS_TARIHI"),
+                "FIS_TURU_AD": r.get("FIS_TURU_AD"),
+                "KESEN_PERSONEL": r.get("KESEN_PERSONEL"),
+                "LOKASYON": r.get("LOKASYON"),
+                "TUTAR": r.get("TUTAR"),
+                "DETAY_SATIR_SAYISI": r.get("DETAY_SATIR_SAYISI"),
+                "DETAYLAR": [d for d in detaylar if isinstance(d, dict)] if isinstance(detaylar, list) else [],
+            }
+
+    def _f(v):
+        try:
+            return float(v) if v is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    liste = sorted(fisler.values(), key=lambda x: str(x.get("FIS_TARIHI") or ""), reverse=True)[:300]
+    return {
+        "ok": True,
+        "tarih": tarih,
+        "fis_sayisi": len(liste),
+        "toplam_tutar": round(sum(_f(x.get("TUTAR")) for x in liste), 2),
+        "data": _fix_large_ints(liste),
+    }
+
+
 @router.get("/ay-detay")
 async def ay_detay(
     tenant_id: str = Query(...),

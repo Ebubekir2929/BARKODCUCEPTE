@@ -38,6 +38,7 @@ import { WeeklyTrendChart } from '../../src/components/dashboard/WeeklyTrendChar
 import { MonthlyCompareCard } from '../../src/components/dashboard/MonthlyCompareCard';
 import { MonthlyTrendChart } from '../../src/components/dashboard/MonthlyTrendChart';
 import { MonthDetailModal } from '../../src/components/dashboard/MonthDetailModal';
+import { DailyReceiptsSection } from '../../src/components/dashboard/DailyReceiptsSection';
 import { CardTypeLocationModal } from '../../src/components/dashboard/CardTypeLocationModal';
 import { HourDetailModal } from '../../src/components/dashboard/HourDetailModal';
 import { LocationIptalModal } from '../../src/components/dashboard/LocationIptalModal';
@@ -1388,6 +1389,14 @@ export default function DashboardScreen() {
           colors={colors}
           style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}
           onMonthPress={(ay) => setSelectedTrendMonth(ay)}
+        />
+
+        {/* Günlük Satılan Fişler — 2026-08 yeni bölüm (tarih filtresine bağlı) */}
+        <DailyReceiptsSection
+          tenantId={activeTenantId}
+          tarih={`${filters.startDate.getFullYear()}-${String(filters.startDate.getMonth() + 1).padStart(2, '0')}-${String(filters.startDate.getDate()).padStart(2, '0')}`}
+          colors={colors}
+          style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}
         />
 
         {/* KDV / Matrah Detayı — 2026-08 refactor: ayrı komponent */}

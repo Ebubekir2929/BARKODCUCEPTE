@@ -337,3 +337,10 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - MonthlyTrendChart çubukları dokunulabilir (`onMonthPress`); dashboard'ta `selectedTrendMonth` state + MonthDetailModal bağlandı.
 - CANLI DOĞRULAMA: Mayıs çubuğu → modal (₺179.621,69 ay toplamı, 31 gün listesi) → ₺178.383,41 (13 Mayıs) satırı → dashboard "13/05 - 13/05" filtreli özete geçti ✓. Backend curl: 2026-05 (2 dolu gün), geçersiz ay 422, bu ay 22 günde kesildi ✓. tsc+lint temiz.
 - Not: Bu değişiklik de 1.0.46 build'ine dahil.
+
+## 2026-08-27 — Günlük Satılan Fişler bölümü ✅
+- YENİ `GET /api/data/gunluk-fisler?tenant_id=&tarih=YYYY-MM-DD` — fis_gunluk_bildirim_feed bloblarından o günün fişleri (FIS_ID dedupe, en güncel blob kazanır, SSCursor akışı, GUN doğrulaması, max 300 fiş, format 422). Yanıt: fis_sayisi + toplam_tutar + fiş listesi (DETAYLAR parse edilmiş ürün içerikleri).
+- YENİ `DailyReceiptsSection.tsx` — dashboard bölümü: saat/personel/lokasyon/fiş türü/belge no/tutar kartları; karta dokun → AKORDEON ürün içeriği (stok adı, miktar+birim, KDV, tutar); 10'arlı "Daha fazla göster"; boş durumda "Bu tarihte fiş yok".
+- GERİYE DÖNÜK: bölüm dashboard'ın MEVCUT tarih filtresine bağlı (filters.startDate) — filtre değişince o günün fişleri gelir. Feed kapsamı POS'un feed gönderdiği günlerle sınırlı (eski aylarda feed yoksa boş görünür — beklenen).
+- E2E CANLI DOĞRULAMA: Ağustos ay dökümünden 26'ya dokun → dashboard 26/08 filtre → bölümde 1 fiş ₺2,00 → akordeonda ürün (Abdul Rızaoğlu 1 Adet KDV ₺0,02) ✓. Boş gün (27.08) "fiş yok" ✓. Geçersiz tarih 422 ✓. tsc+lint temiz.
+- Not: 1.0.46 build'ine dahil.

@@ -2617,3 +2617,7 @@ agent_communication:
   - /api/data/ay-detay + MonthDetailModal + MonthlyTrendChart onMonthPress.
   - E2E canlı doğrulama: ay çubuğu → gün listesi → güne dokun → dashboard o günün
     filtreli özetine geçti (13/05 Merkez ₺178.383). VERIFIED ✅
+
+## 2026-08-27 — Günlük Satılan Fişler
+  - /api/data/gunluk-fisler + DailyReceiptsSection (dashboard, tarih filtresine bağlı).
+  - E2E: 26/08 filtre → 1 fiş → akordeon ürün içeriği açıldı. Boş gün + 422 doğrulandı. VERIFIED ✅
