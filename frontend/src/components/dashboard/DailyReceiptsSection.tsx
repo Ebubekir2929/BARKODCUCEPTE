@@ -4,8 +4,8 @@
  * gelir (geriye dönük bakma = mevcut filtre). Fişe dokununca ürün içeriği
  * akordeon olarak açılır. "Daha fazla göster" ile 10'arlı yüklenir.
  */
-import React, { useEffect, useState } from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator, StyleProp, ViewStyle } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleProp, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/authStore';
 
@@ -45,6 +45,19 @@ export function DailyReceiptsSection({ tenantId, tarih, colors, style }: Props) 
   const [loading, setLoading] = useState(false);
   const [acikFis, setAcikFis] = useState<number | null>(null);
   const [gosterilen, setGosterilen] = useState(10);
+  const [arama, setArama] = useState('');
+
+  // Türkçe duyarsız arama: belge no, personel, lokasyon, fiş türü ve ÜRÜN ADI
+  const filtreli = useMemo(() => {
+    if (!fisler) return null;
+    const q = arama.trim().toLocaleLowerCase('tr-TR');
+    if (!q) return fisler;
+    return fisler.filter((f) => {
+      const alanlar = [f.BELGENO, f.KESEN_PERSONEL, f.LOKASYON, f.FIS_TURU_AD, String(f.FIS_ID)];
+      if (alanlar.some((a) => (a || '').toLocaleLowerCase('tr-TR').includes(q))) return true;
+      return f.DETAYLAR.some((u) => (u.STOK_ADI || '').toLocaleLowerCase('tr-TR').includes(q));
+    });
+  }, [fisler, arama]);
 
   useEffect(() => {
     if (!tenantId || !tarih) return;
@@ -52,6 +65,7 @@ export function DailyReceiptsSection({ tenantId, tarih, colors, style }: Props) 
     setLoading(true);
     setAcikFis(null);
     setGosterilen(10);
+    setArama('');
     (async () => {
       try {
         const { token } = useAuthStore.getState();
@@ -113,7 +127,41 @@ export function DailyReceiptsSection({ tenantId, tarih, colors, style }: Props) 
         </View>
       ) : (
         <>
-          {fisler.slice(0, gosterilen).map((f) => {
+          {/* Hızlı arama: belge no / personel / ürün adı */}
+          <View style={{
+            flexDirection: 'row', alignItems: 'center', gap: 8,
+            borderWidth: 1, borderColor: colors.border, borderRadius: 12,
+            paddingHorizontal: 12, marginBottom: 10, minHeight: 44,
+            backgroundColor: colors.background,
+          }}>
+            <Ionicons name="search" size={16} color={colors.textSecondary} />
+            <TextInput
+              style={{ flex: 1, fontSize: 13, color: colors.text, paddingVertical: 10 }}
+              placeholder="Belge no, personel veya ürün adı ara..."
+              placeholderTextColor={colors.textSecondary}
+              value={arama}
+              onChangeText={(v) => { setArama(v); setGosterilen(10); setAcikFis(null); }}
+              autoCorrect={false}
+              autoCapitalize="none"
+              returnKeyType="search"
+            />
+            {arama.length > 0 && (
+              <TouchableOpacity onPress={() => setArama('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                <Ionicons name="close-circle" size={18} color={colors.textSecondary} />
+              </TouchableOpacity>
+            )}
+          </View>
+          {arama.trim().length > 0 && (
+            <Text style={{ fontSize: 11, color: colors.textSecondary, marginBottom: 8 }}>
+              {(filtreli || []).length} fiş bulundu
+            </Text>
+          )}
+          {(filtreli || []).length === 0 ? (
+            <View style={{ alignItems: 'center', paddingVertical: 14 }}>
+              <Ionicons name="search-outline" size={24} color={colors.textSecondary} />
+              <Text style={{ color: colors.textSecondary, marginTop: 6, fontSize: 13 }}>Aramayla eşleşen fiş yok</Text>
+            </View>
+          ) : (filtreli || []).slice(0, gosterilen).map((f) => {
             const acik = acikFis === f.FIS_ID;
             return (
               <View
@@ -175,7 +223,7 @@ export function DailyReceiptsSection({ tenantId, tarih, colors, style }: Props) 
               </View>
             );
           })}
-          {fisler.length > gosterilen && (
+          {(filtreli || []).length > gosterilen && (
             <TouchableOpacity
               style={{
                 alignItems: 'center', paddingVertical: 12, borderRadius: 12,
@@ -185,7 +233,7 @@ export function DailyReceiptsSection({ tenantId, tarih, colors, style }: Props) 
               activeOpacity={0.6}
             >
               <Text style={{ fontSize: 13, fontWeight: '700', color: colors.primary }}>
-                Daha fazla göster ({fisler.length - gosterilen} fiş daha)
+                Daha fazla göster ({(filtreli || []).length - gosterilen} fiş daha)
               </Text>
             </TouchableOpacity>
           )}

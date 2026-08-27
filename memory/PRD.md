@@ -344,3 +344,8 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - GERİYE DÖNÜK: bölüm dashboard'ın MEVCUT tarih filtresine bağlı (filters.startDate) — filtre değişince o günün fişleri gelir. Feed kapsamı POS'un feed gönderdiği günlerle sınırlı (eski aylarda feed yoksa boş görünür — beklenen).
 - E2E CANLI DOĞRULAMA: Ağustos ay dökümünden 26'ya dokun → dashboard 26/08 filtre → bölümde 1 fiş ₺2,00 → akordeonda ürün (Abdul Rızaoğlu 1 Adet KDV ₺0,02) ✓. Boş gün (27.08) "fiş yok" ✓. Geçersiz tarih 422 ✓. tsc+lint temiz.
 - Not: 1.0.46 build'ine dahil.
+
+## 2026-08-27 — Fiş Arama + sürüm 1.0.47 ✅
+- DailyReceiptsSection'a hızlı arama kutusu: belge no, personel, lokasyon, fiş türü, FIS_ID ve ÜRÜN ADI (DETAYLAR içinde) — Türkçe harf duyarsız (toLocaleLowerCase('tr-TR')), istemci tarafı anlık filtre, "N fiş bulundu" sayacı, temizle (X) butonu, eşleşme yoksa boş durum. "Daha fazla göster" filtrelenmiş listeye göre çalışır; tarih değişince arama sıfırlanır.
+- CANLI DOĞRULAMA: 'abdul' (ürün adı) → 1 fiş; 'MOB-77' (belge no) → bulundu; 'xyz yok' → boş durum ✓. tsc+lint temiz.
+- SÜRÜM: 1.0.47 (iOS build 51 / Android versionCode 51) — kullanıcı isteğiyle artırıldı.
