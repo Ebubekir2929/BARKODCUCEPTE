@@ -805,8 +805,7 @@ async def get_dashboard_data(
     result = {}
     
     # Also fetch last week data for comparison + all locations
-    last_week_data = {}
-    all_locations = []
+    lw_items_pre = None  # tarih aralığı dalında akıştan toplanır
     
     if sdate:
         if not edate:
@@ -830,18 +829,29 @@ async def get_dashboard_data(
         else:
             # Date range — 2026-06: önce hafif kolonlar (blob YOK), tarih aralığına
             # uyan kayıtlar belirlenir, sonra sadece onların blob'ları çekilir.
+            # 2026-09 — "Bu Ay" zaman aşımı düzeltmesi: geçen hafta (aralık −7 gün)
+            # kıyas blobları da AYNI meta taramasından seçilir ve AYNI akışta
+            # çekilir (eskiden gün gün 15 ayrı fetch_dataset → 30 ek sorgu →
+            # tünel gecikmesiyle 20 sn'lik istemci zaman aşımı aşılıyordu).
+            from datetime import datetime as _dt, timedelta as _td
+            _lw_start = (_dt.strptime(sdate, "%Y-%m-%d") - _td(days=7)).strftime("%Y-%m-%d")
+            _lw_end = (_dt.strptime(edate, "%Y-%m-%d") - _td(days=7)).strftime("%Y-%m-%d")
+
             key_ph = ",".join(["%s"] * len(dashboard_keys))
             async with pool.acquire() as conn:
                 async with conn.cursor() as cur:
+                    # updated_at ön süzgeci: bir günün blobu o günden önce güncellenemez
                     await cur.execute(f"""
                         SELECT id, dataset_key, params_json
                         FROM dataset_cache 
                         WHERE tenant_id = %s AND dataset_key IN ({key_ph})
+                          AND updated_at >= %s
                         ORDER BY updated_at DESC
-                    """, (tenant_id, *dashboard_keys))
+                    """, (tenant_id, *dashboard_keys, _lw_start))
                     meta_rows = await cur.fetchall()
 
             match_ids = []
+            lw_ids = set()
             for rid, dk, pjson in meta_rows:
                 try:
                     params = json.loads(pjson) if pjson else {}
@@ -850,20 +860,25 @@ async def get_dashboard_data(
                 sdate_val = params.get('sdate', '') if isinstance(params, dict) else ''
                 if not sdate_val:
                     continue
-                if sdate <= sdate_val[:10] <= edate:
+                gun = sdate_val[:10]
+                if sdate <= gun <= edate:
                     match_ids.append(rid)
+                if dk == "financial_data_location" and _lw_start <= gun <= _lw_end:
+                    lw_ids.add(rid)
+            lw_items_pre = []
 
-            # v13-buffer-fix: bloblar SSCursor ile TEK TEK akıtılır; eski
-            # fetchall tüm aralığın bloblarını aynı anda RAM'e alıyordu → OOM.
+            # v13-buffer-fix: bloblar SSCursor ile akıtılır (küçük dashboard
+            # blobları — 10'luk parçalar RAM'i düz tutar, tur sayısını azaltır).
             async def _blob_akisi():
-                if not match_ids:
+                tum_idler = list(dict.fromkeys([*match_ids, *lw_ids]))
+                if not tum_idler:
                     return
-                id_ph = ",".join(["%s"] * len(match_ids))
+                id_ph = ",".join(["%s"] * len(tum_idler))
                 async for r in stream_rows(pool, f"""
-                        SELECT dataset_key, data_json, row_count, synced_at, updated_at, params_json
+                        SELECT id, dataset_key, data_json, row_count, synced_at, updated_at, params_json
                         FROM dataset_cache WHERE id IN ({id_ph})
                         ORDER BY updated_at DESC
-                    """, tuple(match_ids), chunk=1):
+                    """, tuple(tum_idler), chunk=10):
                     yield r
             
             # Group rows by dataset_key, filtered by date range
@@ -872,7 +887,7 @@ async def get_dashboard_data(
             keyed_meta = {}
             
             async for row in _blob_akisi():
-                dk, data_json, row_count, synced_at, updated_at, params_json = row
+                rid, dk, data_json, row_count, synced_at, updated_at, params_json = row
                 if dk not in dashboard_keys:
                     continue
                 try:
@@ -886,6 +901,13 @@ async def get_dashboard_data(
                 
                 # Check if this record's date falls within the range
                 record_date = sdate_val[:10]  # "2026-04-13"
+                if rid in lw_ids:
+                    try:
+                        _lw_data = json.loads(data_json) if data_json else []
+                    except json.JSONDecodeError:
+                        _lw_data = []
+                    if isinstance(_lw_data, list):
+                        lw_items_pre.extend(r for r in _lw_data if isinstance(r, dict))
                 if sdate <= record_date <= edate:
                     try:
                         data = json.loads(data_json) if data_json else []
@@ -936,27 +958,9 @@ async def get_dashboard_data(
         from datetime import datetime, timedelta
         today = datetime.now()
         
-        if sdate and edate:
-            # Date range filter: last week = same range shifted 7 days back
-            start_dt = datetime.strptime(sdate, "%Y-%m-%d")
-            end_dt = datetime.strptime(edate, "%Y-%m-%d")
-            lw_start = (start_dt - timedelta(days=7)).strftime("%Y-%m-%d")
-            lw_end = (end_dt - timedelta(days=7)).strftime("%Y-%m-%d")
-            
-            # Fetch each day in the last week range
-            lw_items = []
-            cur_dt = start_dt - timedelta(days=7)
-            end_lw_dt = end_dt - timedelta(days=7)
-            while cur_dt <= end_lw_dt:
-                day_str = cur_dt.strftime("%Y-%m-%d")
-                try:
-                    day_data = await fetch_dataset(pool, tenant_id, "financial_data_location", day_str)
-                    day_items = day_data.get("data", [])
-                    if isinstance(day_items, list):
-                        lw_items.extend(day_items)
-                except:
-                    pass
-                cur_dt += timedelta(days=1)
+        if sdate and edate and lw_items_pre is not None:
+            # Date range filter: geçen hafta blobları ana akışta zaten toplandı
+            lw_items = lw_items_pre
         elif sdate:
             lw_date = (datetime.strptime(sdate, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
             lw_data = await fetch_dataset(pool, tenant_id, "financial_data_location", lw_date)

@@ -42,11 +42,11 @@ export interface TenantSnapshot {
   tenant: Tenant;
   loading: boolean;
   error?: string | null;
-  totals: { cash: number; card: number; openAccount: number; total: number };
+  totals: { cash: number; card: number; openAccount: number; total: number; erp12?: number };
   branches: {
     branchId: string;
     branchName: string;
-    sales: { cash: number; card: number; openAccount: number; total: number };
+    sales: { cash: number; card: number; openAccount: number; total: number; erp12?: number };
   }[];
   cancels: { count: number; amount: number };
   /** hour label -> amount */
@@ -220,8 +220,8 @@ export const CompareModal: React.FC<{
     try {
       const url = `${API_URL}/api/data/dashboard?tenant_id=${encodeURIComponent(tn.tenant_id)}&sdate=${sdate}&edate=${edate}`;
       const ctrl = new AbortController();
-      // Fail fast (20s) so tenants without backend / aborted ones don't block UI
-      const timer = setTimeout(() => ctrl.abort(), 20000);
+      // Tek gün 20s; tarih aralığı (Bu Ay vb.) sunucuda daha uzun sürer → 45s
+      const timer = setTimeout(() => ctrl.abort(), sdate === edate ? 20000 : 45000);
       const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: ctrl.signal });
       clearTimeout(timer);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -236,6 +236,8 @@ export const CompareModal: React.FC<{
           card: parseFloat(b?.KREDI_KARTI || '0'),
           openAccount: parseFloat(b?.VERESIYE || b?.ACIK_HESAP || '0'),
           total: parseFloat(b?.TOPLAM || b?.GENELTOPLAM || '0'),
+          // ERP12 (ofis) tarafı: iade fişleri burada NEGATİF gelir ve GENELTOPLAM'dan düşer
+          erp12: parseFloat(b?.ERP12_GENELTOPLAM || '0'),
         },
       }));
       const totals = branches.reduce(
@@ -244,8 +246,9 @@ export const CompareModal: React.FC<{
           card: acc.card + b.sales.card,
           openAccount: acc.openAccount + b.sales.openAccount,
           total: acc.total + b.sales.total,
+          erp12: acc.erp12 + b.sales.erp12,
         }),
-        { cash: 0, card: 0, openAccount: 0, total: 0 }
+        { cash: 0, card: 0, openAccount: 0, total: 0, erp12: 0 }
       );
 
       const iptalRaw: any[] = apiData?.iptal_ozet?.data || [];
@@ -301,7 +304,8 @@ export const CompareModal: React.FC<{
 
       return { tenant: tn, loading: false, error: null, totals, branches, cancels, hourly, hourlyFis, hourlyLoc, topProducts };
     } catch (e: any) {
-      return { ...emptySnapshot(tn, false), error: e?.message || 'Hata' };
+      const msg = e?.name === 'AbortError' ? 'Zaman aşımı' : (e?.message || 'Hata');
+      return { ...emptySnapshot(tn, false), error: msg };
     }
   }, [token]);
 
@@ -784,7 +788,9 @@ export const CompareModal: React.FC<{
                         flexDirection: 'row', alignItems: 'center', gap: 3,
                       }}>
                         <Ionicons name="warning" size={11} color="#FFF" />
-                        <Text style={{ color: '#FFF', fontSize: 10, fontWeight: '800' }}>Veri Yok</Text>
+                        <Text style={{ color: '#FFF', fontSize: 10, fontWeight: '800' }}>
+                          {snap.error === 'Zaman aşımı' ? 'Zaman Aşımı' : 'Veri Yok'}
+                        </Text>
                       </View>
                     )}
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
@@ -956,6 +962,36 @@ export const CompareModal: React.FC<{
                       </View>
                     );
                   })}
+
+                  {/* 2026-09 — ERP12 / İade satırı: iade fişleri ERP12 tarafında NEGATİF
+                      gelir ve Toplam'dan düşer (Nakit+Kart ≠ Toplam görünmesinin nedeni).
+                      Yalnızca en az bir kaynakta sıfırdan farklıysa gösterilir. */}
+                  {snapshots.some((s) => Math.abs(s.totals.erp12 || 0) > 0.005) && (
+                    <View style={[styles.tableRow, { borderBottomColor: colors.border }]}>
+                      <View style={[styles.colMetric, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}>
+                        <Ionicons name="return-down-back-outline" size={14} color={colors.warning || '#F59E0B'} />
+                        <View>
+                          <Text style={{ color: colors.text, fontWeight: '600', fontSize: 13 }}>ERP12 / İade</Text>
+                          <Text style={{ color: colors.textSecondary, fontSize: 9 }}>Toplama dahil (iade −)</Text>
+                        </View>
+                      </View>
+                      {snapshots.map((s) => {
+                        const v = s.totals.erp12 || 0;
+                        return (
+                          <Text
+                            key={s.tenant.tenant_id}
+                            style={[styles.colValue, { color: v < 0 ? colors.error : colors.text, fontWeight: '700', fontSize: 13 }]}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.7}
+                          >
+                            {v < 0 ? '−' : ''}₺{fmtTL(Math.abs(v))}
+                          </Text>
+                        );
+                      })}
+                      <Text style={[styles.colShare, { color: colors.textSecondary, fontSize: 11 }]}>—</Text>
+                    </View>
+                  )}
 
                   <View style={[styles.tableRow, { borderBottomColor: colors.border, borderBottomWidth: 0 }]}>
                     <View style={[styles.colMetric, { flexDirection: 'row', alignItems: 'center', gap: 6 }]}>

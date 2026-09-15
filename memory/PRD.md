@@ -355,3 +355,11 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - FIX: `services/__init__.py` → `_havuz_bekcisi()`: 60 sn'de bir patron+data havuzlarına SELECT 1 (8 sn sınır); üst üste 2 başarısızlıkta havuz kapatılır + `_endpoint_cache` temizlenir → sonraki istek probe'u yeniden çalıştırır, 3306 bloksa MYSQL_TLS_PORT tüneline OTOMATİK düşer. server.py startup'ta başlatılır. Sürüm: 2026-08-27-v14-havuz-bekcisi.
 - KULLANICI AKSİYONU: Save to GitHub → Railway Redeploy (redeploy anında probe yeniden çalışıp tünele düşeceği için login hemen düzelir; v14 sonrası bu durum otomatik toparlanır).
 - Dev doğrulama: bekçi başladı, login 200, 90 sn boyunca ping hatası yok.
+
+## 2026-09-15 — v15: Veri Karşılaştırması "Bu Ay → Veri Yok" + Toplam ≠ Nakit+Kart açıklaması ✅
+- **Kök neden (Veri Yok):** `/api/data/dashboard` tarih aralığı dalı geçen hafta kıyası için gün gün 15 ayrı `fetch_dataset` (30 sorgu) + blobları `chunk=1` akıtıyordu → Railway→MySQL tünel gecikmesiyle 20 sn istemci zaman aşımı aşılıyor, kart "Veri Yok" gösteriyordu.
+- **Fix (backend `routes/data.py`):** meta taraması `updated_at >= aralık−7g` ön süzgeciyle; geçen hafta `financial_data_location` blobları aynı meta taramasından seçilip AYNI SSCursor akışında (`chunk=10`) çekiliyor. 15 günlük aralık lokalde 7.4s → 3.4s (sonuçlar birebir aynı).
+- **Fix (frontend `CompareModal.tsx`):** aralık sorgularında istemci zaman aşımı 20s → 45s; zaman aşımında rozet "Zaman Aşımı" (Veri Yok yerine).
+- **Toplam ≠ Nakit+Kart:** hata değil — "Satıştan iade fişi" ERP12 tarafında NEGATİF gelir ve `GENELTOPLAM`'dan düşer (TERME 14 Eyl: 44.607,92 − 17.558 iade = 27.049,92). Metrik tablosuna **"ERP12 / İade"** satırı eklendi (yalnızca sıfırdan farklıysa görünür).
+- Sürüm: 1.0.48 (iOS 52 / Android 52); `/api/sistem-durum` → `2026-09-15-v15-aralik-hizlandirma`.
+- Not: test hesabının (Merkez) POS'u 8 Eylül'den beri senkron göndermiyor → dev'de bugünkü veri 0 görünmesi normal.
