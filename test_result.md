@@ -2621,3 +2621,15 @@ agent_communication:
 ## 2026-08-27 — Günlük Satılan Fişler
   - /api/data/gunluk-fisler + DailyReceiptsSection (dashboard, tarih filtresine bağlı).
   - E2E: 26/08 filtre → 1 fiş → akordeon ürün içeriği açıldı. Boş gün + 422 doğrulandı. VERIFIED ✅
+
+## 2026-09-15 — v15 aralık hızlandırma + v16 rapor "hazırlanıyor" modeli
+  - /api/data/dashboard aralık dalı: geçen hafta blobları aynı akışta (7.4s → 3.4s); CompareModal 45s timeout + "ERP12 / İade" satırı.
+  - report-run pending modeli (wait_sec, _INFLIGHT_REPORTS tekilleştirme), sync.php keep-alive istemci, reportFetch.ts helper + pending UI.
+  - sync.php v40: rap_* stale-reset 600 sn.
+  - testing_agent iteration_20: backend 8/8 + frontend 2/2 PASS. VERIFIED ✅
+
+## 2026-09-18 — v17 Rapor Ön Yükleme (kullanım tabanlı gece prefetch) + tazelik düzeltmesi
+  - services/rapor_kullanim.py (report_usage şablon sayacı, belirteç çözümü), GET /api/data/rapor-onyukleme-listesi,
+    sync.php v41 report_prefetch_list, client.py _prefetch_reports kullanım tabanlı liste.
+  - rap_* MySQL cache yaş sınırı (bugünü kapsar 600 sn / geçmiş 12 sa), TIMESTAMPDIFF ile DB saati.
+  - testing_agent iteration_21: 6 birim + 7 API testi PASS. VERIFIED ✅

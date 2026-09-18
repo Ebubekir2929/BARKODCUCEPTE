@@ -272,6 +272,48 @@ function upsert_firm_if_missing(PDO $pdo, string $tenantId, ?string $dbName = nu
     return $firm;
 }
 
+/**
+ * v41 — Rapor Ön Yükleme: backend'in report_usage tablosuna yazdığı göreli
+ * tarih belirteçlerini ({TODAY}, {MONTH_START}, {DAYS_AGO:7} ...) bugünün
+ * tarihine çözer. Backend'deki services/rapor_kullanim.py::coz ile birebir.
+ */
+function report_template_resolve(array $template, ?DateTimeImmutable $today = null): array
+{
+    $today = $today ?? new DateTimeImmutable('today', new DateTimeZone('Europe/Istanbul'));
+    $monthStart = $today->modify('first day of this month');
+    $prevMonthEnd = $monthStart->modify('-1 day');
+    $map = [
+        'TODAY' => $today,
+        'YESTERDAY' => $today->modify('-1 day'),
+        'MONTH_START' => $monthStart,
+        'MONTH_END' => $today->modify('last day of this month'),
+        'PREV_MONTH_START' => $prevMonthEnd->modify('first day of this month'),
+        'PREV_MONTH_END' => $prevMonthEnd,
+        'YEAR_START' => new DateTimeImmutable($today->format('Y') . '-01-01', new DateTimeZone('Europe/Istanbul')),
+        'WEEK_START' => $today->modify('monday this week'),
+    ];
+    $out = [];
+    foreach ($template as $k => $v) {
+        if (is_string($v) && preg_match('/^\{([A-Z_]+)(?::(\d+))?\}( \d{2}:\d{2}:\d{2})?$/', $v, $m)) {
+            $name = $m[1];
+            $n = isset($m[2]) && $m[2] !== '' ? (int)$m[2] : null;
+            $time = $m[3] ?? '';
+            if ($name === 'DAYS_AGO' && $n !== null) {
+                $d = $today->modify('-' . $n . ' day');
+            } elseif (isset($map[$name])) {
+                $d = $map[$name];
+            } else {
+                $out[$k] = $v;
+                continue;
+            }
+            $out[$k] = $d->format('Y-m-d') . $time;
+            continue;
+        }
+        $out[$k] = $v;
+    }
+    return $out;
+}
+
 function require_firm(PDO $pdo, string $tenantId): array
 {
     $stmt = $pdo->prepare("SELECT * FROM firms WHERE tenant_id = ? AND is_active = 1 LIMIT 1");
@@ -1316,9 +1358,12 @@ function reset_stale_running_requests(PDO $pdo, string $tenantId, ?string $datas
                   WHERE tenant_id = ?
                     AND status = 'running'
                     AND picked_at IS NOT NULL
-                    AND picked_at < DATE_SUB(NOW(), INTERVAL ? SECOND)"
+                    /* v40 — ağır rap_* raporları 120 sn'de 'takıldı' sayılıp yeniden
+                       kuyruğa alınıyordu → POS aynı raporu tekrar tekrar çalıştırıyordu.
+                       rap_* için eşik 600 sn. */
+                    AND picked_at < DATE_SUB(NOW(), INTERVAL (CASE WHEN dataset_key LIKE 'rap\\_%' THEN GREATEST(?, 600) ELSE ? END) SECOND)"
             );
-            $stmt->execute([$tenantId, $timeoutSeconds]);
+            $stmt->execute([$tenantId, $timeoutSeconds, $timeoutSeconds]);
         }
     } catch (Throwable $e) {
         // Ana request akışını bozmasın.
@@ -1832,6 +1877,46 @@ try {
             }
 
             respond(['ok' => true, 'items' => $items]);
+        }
+
+        case 'report_prefetch_list': {
+            // v41 — Rapor Ön Yükleme: tenant'ın en çok kullanılan rapor şablonları
+            // (backend report_usage). POS istemcisi gece bunları çalıştırıp cache'e basar.
+            // Kural backend services/rapor_kullanim.py::liste ile aynı.
+            $firm = require_firm($pdo, $tenantId);
+            verify_client_secret($firm);
+            $limit = max(1, min(30, (int)($input['limit'] ?? 10)));
+            $minHits = max(1, (int)($input['min_hits'] ?? 2));
+            $items = [];
+            try {
+                $stmt = $pdo->prepare(
+                    "SELECT dataset_key, params_template_json, hit_count, last_used_at
+                       FROM report_usage
+                      WHERE tenant_id = ?
+                        AND last_used_at >= DATE_SUB(NOW(), INTERVAL 45 DAY)
+                        AND (hit_count >= ? OR last_used_at >= DATE_SUB(NOW(), INTERVAL 7 DAY))
+                      ORDER BY hit_count DESC, last_used_at DESC
+                      LIMIT " . $limit
+                );
+                $stmt->execute([$tenantId, $minHits]);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                    $tpl = json_decode((string)$r['params_template_json'], true);
+                    if (!is_array($tpl)) {
+                        continue;
+                    }
+                    $items[] = [
+                        'dataset_key' => (string)$r['dataset_key'],
+                        'template' => $tpl,
+                        'params' => report_template_resolve($tpl),
+                        'hit_count' => (int)$r['hit_count'],
+                        'last_used_at' => (string)$r['last_used_at'],
+                    ];
+                }
+            } catch (Throwable $e) {
+                // Tablo henüz yoksa (backend ilk kullanımda oluşturur) boş liste dön.
+                respond(['ok' => true, 'items' => [], 'note' => 'report_usage_unavailable']);
+            }
+            respond(['ok' => true, 'count' => count($items), 'items' => $items]);
         }
 
         case 'dataset_cache_exists': {
@@ -2639,7 +2724,7 @@ try {
             }
 
             $normalizedParamsJson = clean_json(cache_lookup_array($datasetKey, $params));
-            reset_stale_running_requests($pdo, $tenantId, $datasetKey, $datasetKey === 'fis_gunluk_bildirim_feed' ? 45 : 120);
+            reset_stale_running_requests($pdo, $tenantId, $datasetKey, $datasetKey === 'fis_gunluk_bildirim_feed' ? 45 : (strpos((string)$datasetKey, 'rap_') === 0 ? 600 : 120));
 
             // Cache-first request akışı:
             // Aynı sorgu daha önce web cache'e yazıldıysa yeni POS request açma.

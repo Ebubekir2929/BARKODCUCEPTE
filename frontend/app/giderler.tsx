@@ -11,6 +11,7 @@ import { router } from 'expo-router';
 import { useThemeStore } from '../src/store/themeStore';
 import { useAuthStore } from '../src/store/authStore';
 import { useDataSourceStore } from '../src/store/dataSourceStore';
+import { fetchReportWithPending, pendingLabel, PendingInfo } from '../src/utils/reportFetch';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -67,6 +68,7 @@ export default function GiderlerScreen() {
   const [lokasyonAcik, setLokasyonAcik] = useState(false);
   const [yukleniyor, setYukleniyor] = useState(false);
   const [hata, setHata] = useState<string | null>(null);
+  const [bekleme, setBekleme] = useState<PendingInfo | null>(null); // POS hazırlıyor durumu
   const [kalemler, setKalemler] = useState<GiderKalem[]>([]);
   const [ozet, setOzet] = useState<Ozet | null>(null);
   const [eskiVeri, setEskiVeri] = useState(false);
@@ -145,13 +147,9 @@ export default function GiderlerScreen() {
           setYukleniyor(false);
         }
       } catch { /* cache miss */ }
-      // 2) Taze veri
-      const resp = await fetch(`${API_URL}/api/data/report-run`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(body),
-      });
-      const j = await resp.json();
+      // 2) Taze veri — POS uzun sürerse 'pending' döngüsüyle beklenir (v16)
+      const j = await fetchReportWithPending(body, token, { onPending: setBekleme });
+      setBekleme(null);
       if (!j?.ok) throw new Error(j?.detail || 'Rapor alınamadı');
       veriIsle(j.data || []);
       setEskiVeri(false);
@@ -227,7 +225,12 @@ export default function GiderlerScreen() {
         contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 24 }}
         refreshControl={<RefreshControl refreshing={false} onRefresh={getir} tintColor={colors.primary} />}
       >
-        {yukleniyor && kalemler.length === 0 && <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 24 }} />}
+        {yukleniyor && kalemler.length === 0 && (
+          <View style={{ alignItems: 'center', marginTop: 24, gap: 10 }}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            {bekleme && <Text style={{ color: colors.textSecondary, fontSize: 12 }}>{pendingLabel(bekleme)}</Text>}
+          </View>
+        )}
 
         {hata && kalemler.length === 0 && !yukleniyor && (
           <View style={{ alignItems: 'center', marginTop: 32, gap: 8 }}>

@@ -322,7 +322,8 @@ async def lookup_cached_report(
             # complete result. Tiebreak by recency.
             await cur.execute(
                 """
-                SELECT data_json, row_count, synced_at, params_json
+                SELECT data_json, row_count, synced_at, params_json,
+                       TIMESTAMPDIFF(SECOND, synced_at, NOW()) AS yas_sn
                 FROM dataset_cache
                 WHERE tenant_id=%s AND dataset_key=%s AND params_json=%s
                 ORDER BY row_count DESC, synced_at DESC LIMIT 1
@@ -405,7 +406,7 @@ async def lookup_cached_report(
             # Eşleşen adayın blobu TEK satır olarak çekilir
             if not row and secilen_id:
                 await cur.execute(
-                    "SELECT data_json, row_count, synced_at FROM dataset_cache WHERE id=%s",
+                    "SELECT data_json, row_count, synced_at, NULL, TIMESTAMPDIFF(SECOND, synced_at, NOW()) FROM dataset_cache WHERE id=%s",
                     (secilen_id,),
                 )
                 row = await cur.fetchone()
@@ -414,8 +415,12 @@ async def lookup_cached_report(
         return None
 
     raw, row_count, synced_at = row[0], row[1], row[2]
+    # 2026-09 v17 — yaş DB saatine göre (TIMESTAMPDIFF): sunucu UTC, MySQL
+    # Europe/Istanbul olduğundan datetime.now() farkı 3 saat sapıyordu.
     age_sec = None
-    if synced_at:
+    if len(row) > 4 and row[4] is not None:
+        age_sec = float(row[4])
+    elif synced_at:
         try:
             age_sec = (datetime.now() - synced_at).total_seconds()
         except Exception:

@@ -1,0 +1,39 @@
+{
+  "summary": "Iter 20 — v16 'rapor-hazirlaniyor' pending model doğrulandı: BACKEND 8/8 PASS. (1) Login: cakmak.ebubekir29 → access_token + user.tenants içinde Merkez d5587c87... mevcut. (2) POST /api/data/report-run (rap_personel_satis_ozet_web, 2026-09-01..15, wait_sec=4) 200 döndü ~5-8s içinde, ok:true, pending:true, status='queued', elapsed_sec>=3, data:[], pages:0, _cache:'pending'. (3) 3.5s sonra force_refresh:false ile 2. çağrı yine pending, elapsed_sec1 -> elapsed_sec2 BÜYÜDÜ (arka plan görevi paylaşılıyor / yeniden başlatılmıyor). (4) cache_only:true çağrısı <5s içinde ok:true + pending flag YOK. (5) Geçersiz dataset_key → 400. (6) tenant_id yok → 422. (7) GET /api/sistem-durum surum='2026-09-15-v16-rapor-hazirlaniyor' ✅. (8) GET /api/data/dashboard tarih aralığı (sdate=2026-09-01 & edate=2026-09-15) 200<15s, financial_data_location + last_week{total} + all_locations[] var; tek gün varyantı da 200. FRONTEND (390x844) 2/2 PASS: Login → Raporlar → 'Personel Satış Özet' → 'Raporu Çalıştır' → ~24s sonra loading ekranında AYNEN 'POS kuyruğunda sırada · 25 sn' + helper 'Rapor POS bilgisayarında hazırlanıyor; bitince otomatik gelecek. Uzun tarih aralıkları daha uzun sürer.' + testID='report-pending-cancel' 'Beklemeyi İptal Et' butonu göründü. Butona tap → spinner durdu, hata alert'i YOK, 'Sonuç bulunamadı' ekranı temiz açıldı. CompareModal (git-compare header ikonu x=296,y=38) → 'Veri Kaynağı Karşılaştırması' açıldı → 'Bu Ay' preset → 01 Eyl-18 Eyl 2026, Merkez ve Gümüşhane kartları ₺0,00 (0 lok · 0 iptal) — 'Zaman Aşımı' rozeti YOK, Metrik tablosu 5 satır tam: Nakit/Kart/Açık/Toplam/İptaller (İptaller '0 · ₺0,00' — ERP12/İade satırı). Console'da error yok, sadece expo-notifications ve shadow-props deprecation uyarıları (v16 dışı, kritik değil).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_report_run_pending_iter20.py",
+    "/app/test_reports/pytest/iter20_results.xml"
+  ],
+  "action_items": [
+    "İsteğe bağlı: report-run pending state için testID eklenmesi ('report-pending-status-text', 'report-loading-container') selektör bulmayı hızlandırır — şu an 'POS kuyruğunda sırada' text-selector ile stabil çalışıyor.",
+    "İsteğe bağlı: CompareModal header ikonuna testID='dashboard-compare-button' + modal başlığına testID='compare-modal-title' — koordinat tabanlı (296,38) tap yerine testID ile daha sağlam olur.",
+    "Not: giderler.tsx dosyası bu iterasyonda UI ile ayrıca test edilmedi; kod incelemesinde fetchReportWithPending kullandığı doğrulandı (reports.tsx ile aynı helper), aynı pending pattern çalışacak."
+  ],
+  "critical_code_review_comments": [
+    "reports.tsx:1215-1218 fetchReportWithPending doğru bağlanmış: onPending closure'da runTokenRef karşılaştırması ile eski token'lar sızmaz; setPendingInfo(null) hem cancel'da hem finally'de temizlenir → memory leak yok.",
+    "reports.tsx:2287-2294 cancel butonu testID='report-pending-cancel' + minHeight:44 (touch target ✅) + abortRef.current.abort() sonrası setPendingInfo(null) + setReportLoading(false) → temiz sonlanma.",
+    "reportFetch.ts:73 'gonder = { ...body, force_refresh: false, cache_only: false }' — 2. turdan itibaren force_refresh KALDIRILIYOR → POS'a 2. istek AÇILMIYOR ✅ (backend'in dedup mantığıyla uyumlu).",
+    "reportFetch.ts:69-72 10 dk üst sınır + AbortError proper handling → mobile ekranda süresiz spinner riski yok.",
+    "Backend elapsed_sec 3.5s bekleme sonrası ~4-5s arttı (test: 4.11 → 8.27 gibi) → arka plan poll'ü canlı ve request'ler arasında paylaşılıyor, sync.php'ye yalnızca 1 istek açılıyor (elapsed sıfırlanmıyor).",
+    "sistem-durum surum string'i '2026-09-15-v16-rapor-hazirlaniyor' cache-header'ından değil koddan geliyor; v16 markerının doğruluğu confirmed."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "100% (8/8 pytest — sistem-durum, report-run pending/shared-bgtask/cache_only/invalid/missing, dashboard range+single-day)",
+    "frontend": "100% (Raporlar pending flow + Beklemeyi İptal Et + CompareModal 'Bu Ay' + metrik tablo hepsi PASS)"
+  },
+  "seed_data_creation": "None. Canlı MySQL, salt-okunur. Merkez POS'u offline olduğundan report-run çağrıları sonsuza kadar pending kalıyor — bu tam olarak test edilmek istenen davranış.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "v16 pending model production-ready. reports.tsx ve giderler.tsx aynı fetchReportWithPending helper'ını kullanıyor; kod incelemesinde tutarlılık doğrulandı ama giderler.tsx UI ayrıca test edilmedi (Merkez'de gider verisi olmayacağı için pending akışı aynı davranacak). Sonraki turlarda offline olmayan bir tenant (ea5231...) ile canlı pending → data transition testi (queued → running → sayfa N → ok:true, pending yok) yapılabilir."
+}

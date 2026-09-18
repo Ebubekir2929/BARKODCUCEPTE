@@ -160,6 +160,7 @@ FULL_PREFETCH_BATCH_SIZE = 25                # Her partide işlenecek kayıt
 FULL_PREFETCH_BATCH_SLEEP_SEC = 1.5          # Partiler arası nefes (POS SQL'i yormasın)
 FULL_PREFETCH_REPORTS_ENABLED = True         # Rapor varsayılanları da ısıtılsın
 FULL_PREFETCH_REPORT_MAX_PAGES = 6           # Sayfalı raporlarda en fazla kaç sayfa
+FULL_PREFETCH_USAGE_REPORT_LIMIT = 10        # v17 — Kullanım tabanlı (report_usage) en fazla kaç rapor şablonu
 
 # Request beklemeden dataset_cache'e yazılacak özel dataset.
 # Açık masa detay ürün satırı satırı rows'a düşmez; POS_ID bazlı normal cache kaydı olarak tutulur.
@@ -4783,10 +4784,13 @@ SELECT TOP {limit}
         parametre setleri. Böylece kullanıcı raporu açtığında backend MySQL cache'ten
         (exact/fuzzy params match) anında yanıt verir; POS'a request_create gitmez.
         NOT: Mobil taraftaki reports.tsx defaultParams değişirse burası da güncellenmeli."""
+        # 2026-09 v17 — Mobil (reports.tsx) tarih filtrelerini "YYYY-MM-DD 00:00:00" /
+        # "YYYY-MM-DD 23:59:59" biçiminde gönderir ve varsayılan aralık AY BAŞI→BUGÜN'dür.
+        # Eski biçim (saatsiz / yıl başı) backend cache eşleşmesini KAÇIRIYORDU.
         now = datetime.now()
-        today_s = now.strftime("%Y-%m-%d")
-        month_start = now.strftime("%Y-%m-01")
-        year_start = now.strftime("%Y-01-01")
+        today_s = now.strftime("%Y-%m-%d") + " 23:59:59"
+        month_start = now.strftime("%Y-%m-01") + " 00:00:00"
+        year_start = now.strftime("%Y-01-01") + " 00:00:00"
         stok_defaults = {
             "Stoklar": "", "StokGrup": "", "StokCinsi": "", "StokMarka": "", "StokVergi": "",
             "StokOzelKod1": "", "StokOzelKod2": "", "StokOzelKod3": "", "StokOzelKod4": "",
@@ -4797,7 +4801,7 @@ SELECT TOP {limit}
                 "dataset_key": "rap_satis_adet_kar_web",
                 "paged": True,
                 "params": {
-                    "BASTARIH": year_start, "BITTARIH": today_s,
+                    "BASTARIH": month_start, "BITTARIH": today_s,
                     "KdvDahil": 1, "FisTipi": 0, "Pc_Ad": "", "Lokasyon": "",
                     "MaliyetYoksaSatisGelsin": 0, "SarfFireGelmesin": 0,
                     "Page": 1, "PageSize": 500, **stok_defaults,
@@ -4807,7 +4811,7 @@ SELECT TOP {limit}
                 "dataset_key": "rap_stok_envanter_web",
                 "paged": True,
                 "params": {
-                    "SONTARIH": today_s,
+                    "SONTARIH": today_s.split(" ")[0] + " 00:00:00",  # mobil: SONTARIH "bit/end" kalıbına uymaz → 00:00:00 eklenir
                     "Lokasyon": "", "Durum": 0, "FiyatId": 0, "Aktif": "",
                     "Tedarikci": "", "KdvDahil": 1, "LokasyonDagilim": 0,
                     "Page": 1, "PageSize": 500, **stok_defaults,
@@ -4851,7 +4855,7 @@ SELECT TOP {limit}
                 "dataset_key": "rap_cari_hesap_ekstresi_web",
                 "paged": True,
                 "params": {
-                    "BASTARIH": year_start, "BITTARIH": f"{today_s} 23:59:59",
+                    "BASTARIH": year_start, "BITTARIH": today_s,
                     "BakiyeTip": 0, "Proje": "", "Lokasyon": "", "AktifDurum": "",
                     "Cariler": "", "CariKodu": "", "CariAdi": "",
                     "CariTur": "", "CariGrup": "", "Temsilci": "", "Sehir": "", "CariRut": "",
@@ -4863,41 +4867,89 @@ SELECT TOP {limit}
             },
         ]
 
+    def _fetch_report_prefetch_list(self) -> List[Dict[str, Any]]:
+        """2026-09 v17 — Rapor Ön Yükleme: sync.php `report_prefetch_list` → bu
+        tenant'ta mobilden EN ÇOK çalıştırılan rapor şablonları (tarihler bugüne
+        çözülmüş). Backend her rapor çalıştırmasını report_usage'a sayar."""
+        tenant = self.ed_tenant.text().strip() or self.cfg.get("tenant_id", "").strip()
+        if not tenant:
+            return []
+        try:
+            resp = post_json(
+                self.ed_server_url.text().strip() or self.cfg.get("server_url", DEFAULT_SERVER_URL),
+                tenant,
+                {"action": "report_prefetch_list", "limit": FULL_PREFETCH_USAGE_REPORT_LIMIT},
+                client_secret=self.get_client_secret(),
+                timeout=30,
+            )
+            items = resp.get("items") if isinstance(resp, dict) else None
+            return [i for i in (items or []) if isinstance(i, dict) and i.get("dataset_key") and isinstance(i.get("params"), dict)]
+        except Exception as exc:
+            self.println(f"Rapor ön yükleme listesi alınamadı: {exc}")
+            return []
+
+    def _prefetch_one_report(self, def_map: Dict[str, Any], dataset_key: str, base_params: Dict[str, Any], paged: bool, note: str) -> int:
+        """Tek raporu (sayfalıysa PageSize dolduğu sürece, üst sınırla) çalıştırıp cache'e basar."""
+        defn = def_map.get(dataset_key)
+        if not defn or not defn.get("enabled", True):
+            self.println(f"Tam ön yükleme: {dataset_key} tanımı yok/kapalı, atlandı.")
+            return 0
+        pushed = 0
+        page_size = int(base_params.get("PageSize", 500) or 500)
+        max_pages = FULL_PREFETCH_REPORT_MAX_PAGES if paged else 1
+        for page in range(1, max_pages + 1):
+            if self._full_prefetch_cancel:
+                break
+            self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
+            params = dict(base_params)
+            if paged:
+                params["Page"] = page
+            try:
+                data = self.execute_dataset(defn, params)
+                if self._push_direct_cache_dataset_if_changed(defn, params, data, note=note):
+                    pushed += 1
+                row_count = normalize_row_count(data)
+                if not paged or row_count < page_size:
+                    break
+            except Exception as exc:
+                self.println(f"Tam ön yükleme rapor hata: {dataset_key} Page={page} -> {exc}")
+                break
+        return pushed
+
     def _prefetch_reports(self, def_map: Dict[str, Any], note: str) -> int:
-        """Rapor varsayılanlarını çalıştırıp cache'e basar. Sayfalı raporlarda
-        PageSize dolduğu sürece sonraki sayfalar da (üst sınırla) ısıtılır."""
+        """Rapor varsayılanları + (v17) kullanım tabanlı 'en çok kullanılan' rapor
+        şablonlarını çalıştırıp cache'e basar. Aynı parametre seti iki kez çalışmaz."""
         if not FULL_PREFETCH_REPORTS_ENABLED:
             return 0
         pushed = 0
+        islenen: set = set()
+
+        # 1) Kullanım tabanlı liste ÖNCE (kullanıcının gerçekten açtığı raporlar)
+        usage_items = self._fetch_report_prefetch_list()
+        if usage_items:
+            self.println(f"Rapor ön yükleme: {len(usage_items)} kullanım tabanlı şablon alındı.")
+        for it in usage_items:
+            if self._full_prefetch_cancel:
+                break
+            dataset_key = str(it["dataset_key"])
+            params = dict(it["params"])
+            key = dataset_run_key(dataset_key, {k: v for k, v in params.items() if k != "Page"})
+            if key in islenen:
+                continue
+            islenen.add(key)
+            pushed += self._prefetch_one_report(def_map, dataset_key, params, "PageSize" in params, note + "_usage")
+
+        # 2) Sabit varsayılanlar (mobil rapor ekranının açılış parametreleri)
         for rd in self._report_prefetch_definitions():
             if self._full_prefetch_cancel:
                 break
             dataset_key = rd["dataset_key"]
-            defn = def_map.get(dataset_key)
-            if not defn or not defn.get("enabled", True):
-                self.println(f"Tam ön yükleme: {dataset_key} tanımı yok/kapalı, atlandı.")
-                continue
             base_params = dict(rd["params"])
-            paged = bool(rd.get("paged", False))
-            page_size = int(base_params.get("PageSize", 500) or 500)
-            max_pages = FULL_PREFETCH_REPORT_MAX_PAGES if paged else 1
-            for page in range(1, max_pages + 1):
-                if self._full_prefetch_cancel:
-                    break
-                self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
-                params = dict(base_params)
-                if paged:
-                    params["Page"] = page
-                try:
-                    data = self.execute_dataset(defn, params)
-                    if self._push_direct_cache_dataset_if_changed(defn, params, data, note=note):
-                        pushed += 1
-                    row_count = normalize_row_count(data)
-                    if not paged or row_count < page_size:
-                        break
-                except Exception as exc:
-                    self.println(f"Tam ön yükleme rapor hata: {dataset_key} Page={page} -> {exc}")
-                    break
+            key = dataset_run_key(dataset_key, {k: v for k, v in base_params.items() if k != "Page"})
+            if key in islenen:
+                continue
+            islenen.add(key)
+            pushed += self._prefetch_one_report(def_map, dataset_key, base_params, bool(rd.get("paged", False)), note)
         return pushed
 
     def run_full_prefetch(self, reason: str = "manual"):

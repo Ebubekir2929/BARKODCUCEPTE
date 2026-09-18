@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends, Query
 from contextlib import aclosing
 from services import get_data_pool, stream_rows
+from services import rapor_kullanim
 from services.dataset_cache import (
     get_dataset_items,
     filter_stock_items,
@@ -1125,16 +1126,40 @@ import asyncio
 
 SYNC_URL = "https://kasaceptetransfer.berkyazilim.com/api/sync.php"
 
+# 2026-09 v16 — sync.php için PAYLAŞILAN keep-alive istemci.
+# Eskiden her çağrı yeni TCP+TLS el sıkışması yapıyordu (~0.5 sn/çağrı; bir rapor
+# için ~30 poll = ~15 sn boşa). Keep-alive ile çağrı ~0.18 sn. Ayrıca hosting'in
+# nadir 60 sn askıları için kısa okuma zaman aşımı + 1 yeniden deneme.
+_SYNC_CLIENT: Optional[httpx.AsyncClient] = None
+_SYNC_TIMEOUT = httpx.Timeout(connect=8.0, read=20.0, write=20.0, pool=8.0)
 
-async def sync_post(payload: dict, tenant_id: str) -> dict:
-    """Post to sync.php API"""
-    payload["tenant_id"] = tenant_id
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(
-            SYNC_URL,
-            json=payload,
+
+def _get_sync_client() -> httpx.AsyncClient:
+    global _SYNC_CLIENT
+    if _SYNC_CLIENT is None or _SYNC_CLIENT.is_closed:
+        _SYNC_CLIENT = httpx.AsyncClient(
+            timeout=_SYNC_TIMEOUT,
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10, keepalive_expiry=30.0),
             headers={"Content-Type": "application/json; charset=utf-8"},
         )
+    return _SYNC_CLIENT
+
+
+async def sync_post(payload: dict, tenant_id: str, timeout: Optional[float] = None) -> dict:
+    """Post to sync.php API (keep-alive havuzu; askıda kalan çağrı 1 kez yenilenir)."""
+    payload["tenant_id"] = tenant_id
+    client = _get_sync_client()
+    kw = {"timeout": httpx.Timeout(connect=8.0, read=timeout, write=timeout, pool=8.0)} if timeout else {}
+    resp = None
+    for deneme in range(2):
+        try:
+            resp = await client.post(SYNC_URL, json=payload, **kw)
+            break
+        except (httpx.TimeoutException, httpx.RemoteProtocolError, httpx.ConnectError) as e:
+            if deneme == 1:
+                raise HTTPException(status_code=504, detail=f"sync.php yanıt vermedi ({type(e).__name__})")
+            logger.warning(f"[sync_post] {payload.get('action')} askıda kaldı ({type(e).__name__}) — yeni bağlantıyla tekrar")
+            await asyncio.sleep(0.3)
     data = resp.json()
     if resp.status_code >= 400:
         msg = data.get("error", data.get("message", f"HTTP {resp.status_code}"))
@@ -1233,7 +1258,7 @@ async def sync_request(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, timeout_sec: int = 35, raw_cache: bool = False, skip_mysql_cache: bool = False, mysql_cache_max_age_sec: Optional[int] = None, cache_only: bool = False):
+async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, timeout_sec: int = 35, raw_cache: bool = False, skip_mysql_cache: bool = False, mysql_cache_max_age_sec: Optional[int] = None, cache_only: bool = False, status_cb=None):
     """Generic on-demand: MySQL cache → sync.php cache → request_create+poll.
 
     Three-tier cache strategy:
@@ -1341,8 +1366,11 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
         }
 
     # ---------- Step 1: try sync.php cache (instant if hot) ----------
+    # v17 — yaş sınırı istenmişse dataset_get atlanır (sync.php bu yolda yaş
+    # kontrolü yapmaz; aynı tablo Step 0b'de DB saatiyle zaten kontrol edildi).
+    # Yaş sınırı request_create'e `cache_ttl_sec` olarak iletilir.
     try:
-        cache_resp = await sync_post({
+        cache_resp = {} if mysql_cache_max_age_sec is not None else await sync_post({
             "action": "dataset_get",
             "dataset_key": dataset_key,
             "params": params,
@@ -1372,6 +1400,7 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
         "params": params,
         "priority_no": 1,
         "requested_by": "mobile",
+        **({"cache_ttl_sec": int(mysql_cache_max_age_sec)} if mysql_cache_max_age_sec is not None else {}),
     }, tenant_id)
 
     request_uid = create_resp.get("request_uid", "")
@@ -1407,8 +1436,18 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
                 continue
 
         status = status_resp.get("status", "unknown")
+        if status_cb:
+            try:
+                status_cb(status)
+            except Exception:
+                pass
         
         if status == "done":
+            if status_cb:
+                try:
+                    status_cb("indiriliyor")
+                except Exception:
+                    pass
             # Veri SADECE şimdi, TEK SEFER çekilir (chunk birleşmesi bitmediyse kısa retry)
             cache = {}
             for _deneme in range(20):
@@ -1416,7 +1455,7 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
                     "action": "request_status",
                     "request_uid": request_uid,
                     "include_data": True,
-                }, tenant_id)
+                }, tenant_id, timeout=120)
                 if not final_resp.get("ok", True):
                     _ec = str(final_resp.get("error", "")).lower()
                     if "upload_incomplete" in _ec or "result_upload" in _ec:
@@ -1456,8 +1495,10 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
             await asyncio.sleep(0.15)   # fast start: 150ms × 10 = 1.5s total
         elif poll_count <= 25:
             await asyncio.sleep(0.35)   # medium: 350ms × 15 = 5.25s
-        else:
+        elif poll_count <= 100:
             await asyncio.sleep(0.8)    # slow: 800ms for long-running queries
+        else:
+            await asyncio.sleep(2.0)    # v16: ~1 dk sonra 2 sn — 10 dk'lık arka plan beklemesi sync.php'yi yormasın
 
     raise HTTPException(status_code=504, detail="Detay zamanında gelmedi. Lütfen tekrar deneyin.")
 
@@ -3336,6 +3377,19 @@ async def get_high_sale_detail(
 
 # === RAPOR ENDPOINTS ===
 
+@router.get("/rapor-onyukleme-listesi")
+async def rapor_onyukleme_listesi(tenant_id: str, current_user: dict = Depends(get_current_user)):
+    """v17 — Tenant'ın gece ön yüklenecek 'en çok kullanılan' rapor şablonları
+    (POS istemcisinin sync.php `report_prefetch_list` ile aldığı listenin aynısı)."""
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id gerekli")
+    try:
+        items = await rapor_kullanim.liste(tenant_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Liste alınamadı: {e}")
+    return {"ok": True, "count": len(items), "items": items}
+
+
 @router.post("/report-run")
 async def run_report(
     body: dict,
@@ -3381,6 +3435,12 @@ async def run_report(
     cached = _GLOBAL_CACHE.get(cache_key)
     age = now - cached["ts"] if cached else None
 
+    # 2026-09 v17 — Rapor Ön Yükleme: gerçek kullanım şablon olarak sayılır;
+    # POS istemcisi gece en çok kullanılanları önceden çalıştırıp cache'e basar.
+    # (cache_only ön isteği ve pending döngüsü yinelemeleri `_pending_poll` sayılmaz)
+    if dataset_key.startswith("rap_") and dataset_key != "rap_filtre_lookup" and not cache_only and not body.get("_pending_poll"):
+        rapor_kullanim.kaydet_arka_planda(tenant_id, dataset_key, params)
+
     if cached and age is not None and age < TTL_FRESH and not force_refresh:
         return {**cached["payload"], "_cache": "fresh", "_age": int(age)}
 
@@ -3403,13 +3463,32 @@ async def run_report(
             logger.debug(f"[report-run] cache_only mysql lookup failed: {e}")
         return {"ok": True, "data": [], "pages": 0, "_cache": "miss", "_source": "cache_only"}
 
-    async def _do_fetch() -> dict:
+    # 2026-09 v16 — "hazırlanıyor" modeli: POS zaman aşımı artık HATA değil.
+    # İstemci en fazla `wait_sec` bekler; rapor bitmediyse `pending:true` + POS
+    # durumu (queued/running/indiriliyor) + geçen süre döner ve arka plandaki
+    # görev raporu 10 dk'ya kadar beklemeye devam eder. Aynı rapor için ikinci
+    # bir POS isteği açılmaz (_INFLIGHT_REPORTS ile tekilleştirme).
+    try:
+        wait_sec = min(max(float(body.get("wait_sec", 25)), 3.0), 90.0)
+    except (TypeError, ValueError):
+        wait_sec = 25.0
+
+    # v17 — Tazelik: MySQL blob cache artık SINIRSIZ yaşla "canlı" sayılmaz.
+    # Bugünü kapsayan rapor → en fazla 10 dk; yalnızca geçmiş → 12 saat.
+    # (Gece ön yüklenen "bu ay" raporu sabah cache_only ile ANINDA gösterilir,
+    #  ardından arkada POS'tan tazelenir.)
+    _MYSQL_AZAMI_YAS = 600 if rapor_kullanim.bugunu_kapsar(params) else 12 * 3600
+
+    async def _do_fetch(ent: dict) -> dict:
+        def _st(s: str):
+            ent["status"] = s
         try:
             logger.info(f"Running report: {dataset_key} with params: {params}")
+            POS_TIMEOUT = 600  # arka plan görevi POS'u en fazla 10 dk bekler
 
             if fetch_all and isinstance(params, dict) and "PageSize" in params:
                 page_size = int(params.get("PageSize") or 500)
-                first_result = await _on_demand_request(tenant_id, dataset_key, {**params, "Page": 1, "PageSize": page_size}, timeout_sec=90)
+                first_result = await _on_demand_request(tenant_id, dataset_key, {**params, "Page": 1, "PageSize": page_size}, timeout_sec=POS_TIMEOUT, status_cb=_st, mysql_cache_max_age_sec=_MYSQL_AZAMI_YAS)
                 first_data = first_result.get("data", []) if isinstance(first_result, dict) else []
                 if not isinstance(first_data, list):
                     first_data = []
@@ -3425,8 +3504,9 @@ async def run_report(
                 batch_size = 8  # was 5 — more parallelism for snappier reports
                 done = False
                 while not done and page <= max_pages:
+                    _st(f"sayfa {page}")
                     tasks = [
-                        _on_demand_request(tenant_id, dataset_key, {**params, "Page": p, "PageSize": page_size}, timeout_sec=90)
+                        _on_demand_request(tenant_id, dataset_key, {**params, "Page": p, "PageSize": page_size}, timeout_sec=POS_TIMEOUT, mysql_cache_max_age_sec=_MYSQL_AZAMI_YAS)
                         for p in range(page, min(page + batch_size, max_pages + 1))
                     ]
                     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -3448,7 +3528,7 @@ async def run_report(
                 logger.info(f"Report result (paged): {dataset_key} -> {len(all_rows)} rows across {page-1} page(s)")
                 return {"ok": True, "request_uid": req_uid, "data": all_rows, "pages": page - 1}
 
-            result = await _on_demand_request(tenant_id, dataset_key, params, timeout_sec=60)
+            result = await _on_demand_request(tenant_id, dataset_key, params, timeout_sec=POS_TIMEOUT, status_cb=_st, mysql_cache_max_age_sec=_MYSQL_AZAMI_YAS)
             data_count = len(result.get("data", [])) if isinstance(result.get("data"), list) else 0
             logger.info(f"Report result: {dataset_key} -> {data_count} rows")
             return result
@@ -3458,26 +3538,67 @@ async def run_report(
             logger.error(f"Report run error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
+    def _baslat() -> dict:
+        """Aynı rapor için çalışan görev varsa ona bağlan; yoksa yeni başlat.
+        60 sn içinde bitmiş görev de yeniden kullanılır (pending döngüsündeki
+        istemci force_refresh ile gelse bile POS'a ikinci istek açılmaz)."""
+        ent = _INFLIGHT_REPORTS.get(cache_key)
+        if ent:
+            t = ent["task"]
+            if not t.done():
+                return ent
+            if t.exception() is None and time.time() - ent.get("finished", 0) < 60:
+                return ent
+            _INFLIGHT_REPORTS.pop(cache_key, None)
+        ent = {"started": time.time(), "status": "baslatiliyor", "task": None, "finished": 0.0}
+
+        async def _runner():
+            try:
+                fresh = await _do_fetch(ent)
+                _global_cache_set(cache_key, fresh)
+                return fresh
+            except HTTPException as e:
+                logger.warning(f"[report-run] {dataset_key} başarısız: {e.detail}")
+                raise
+            finally:
+                ent["finished"] = time.time()
+                asyncio.get_running_loop().call_later(
+                    60, lambda: _INFLIGHT_REPORTS.pop(cache_key, None) if _INFLIGHT_REPORTS.get(cache_key) is ent else None
+                )
+
+        ent["task"] = asyncio.create_task(_runner())
+        _INFLIGHT_REPORTS[cache_key] = ent
+        return ent
+
     # Stale cache → kick off bg refresh, return stale immediately
     if cached and age is not None and age < TTL_STALE and not force_refresh:
-        async def _bg():
-            try:
-                fresh = await _do_fetch()
-                _global_cache_set(cache_key, fresh)
-            except Exception as e:
-                logger.warning(f"Report bg refresh failed: {e}")
-        asyncio.create_task(_bg())
+        _baslat()
         return {**cached["payload"], "_cache": "stale", "_age": int(age)}
 
-    # Live fetch with fallback to any cache
+    # Live fetch (en fazla wait_sec bekle) with fallback to any cache
+    ent = _baslat()
+    done, _ = await asyncio.wait({ent["task"]}, timeout=wait_sec)
+    if not done:
+        return {
+            "ok": True,
+            "pending": True,
+            "status": ent.get("status") or "running",
+            "elapsed_sec": int(time.time() - ent["started"]),
+            "data": [],
+            "pages": 0,
+            "_cache": "pending",
+        }
     try:
-        fresh = await _do_fetch()
-        _global_cache_set(cache_key, fresh)
+        fresh = ent["task"].result()
         return {**fresh, "_cache": "live", "_age": 0}
     except HTTPException as e:
         if cached:
             return {**cached["payload"], "_cache": "fallback_stale", "_age": int(age) if age is not None else 0, "_stale_reason": str(e.detail)}
         raise
+
+
+# cache_key -> {"task": asyncio.Task, "started": float, "status": str}
+_INFLIGHT_REPORTS: Dict[str, dict] = {}
 
 
 @router.post("/report-filter-options")

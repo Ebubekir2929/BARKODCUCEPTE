@@ -1,0 +1,24 @@
+{
+  "summary": "v17 Rapor Ön Yükleme backend testing complete. All 6 unit tests (tests/test_rapor_kullanim_v17.py) pass. Wrote and ran 7 API integration tests (tests/test_rapor_onyukleme_api_v17.py) against the live backend covering: login, sürüm regression (2026-09-18-v17-rapor-on-yukleme), GET /api/data/rapor-onyukleme-listesi auth/422/shape, full usage-counting flow (2x normal → hit_count>=2, then _pending_poll & cache_only do NOT increment, then normal +1), cache_only<5s without pending, and dashboard regression with financial_data_location. All 13 tests pass. No issues found.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": [], "react_native_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_rapor_kullanim_v17.py",
+    "/app/backend/tests/test_rapor_onyukleme_api_v17.py",
+    "/app/test_reports/pytest/iter21_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "services/rapor_kullanim.py is clean, small (~230 lines), well-documented, uses async/await properly and swallows only expected DB errors on kaydet() to avoid breaking hot path — appropriate for background usage counting.",
+    "routes/data.py::rapor_onyukleme_listesi correctly enforces auth via Depends(get_current_user); tenant_id is a required query param so FastAPI returns 422 when missing — matches spec.",
+    "report-run properly gates rapor_kullanim.kaydet_arka_planda by (not cache_only) and (not _pending_poll) and dataset_key.startswith('rap_') and != 'rap_filtre_lookup' — verified end-to-end.",
+    "MongoDB _id not in scope (project uses MySQL); no serialization issues observed."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "N/A (skipped per request)"},
+  "seed_data_creation": "No manual seed created; test_usage_counting_flow exercises the report_usage table via live report-run calls (Merkez tenant POS is offline → responses are pending:true as expected; usage counting still fires because it runs before pending path).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Container date is 2026-09-18. Use EXPO_PUBLIC_BACKEND_URL. Tenant Merkez POS is OFFLINE — /api/data/report-run returns pending:true, which is expected. Usage counting fires synchronously via kaydet_arka_planda before the pending branch, so hit_count increments even when the POS never responds. Tests: /app/backend/tests/test_rapor_kullanim_v17.py (6 unit) + /app/backend/tests/test_rapor_onyukleme_api_v17.py (7 API).",
+  "rca_of_issue": "N/A — no bugs found; feature verified working."
+}

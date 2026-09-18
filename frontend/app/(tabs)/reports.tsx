@@ -21,6 +21,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as XLSX from 'xlsx';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { SkeletonRows } from '../../src/components/Skeleton';
+import { fetchReportWithPending, pendingLabel, PendingInfo } from '../../src/utils/reportFetch';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -881,6 +882,8 @@ export default function ReportsScreen() {
   const [moreLoading, setMoreLoading] = useState(false);
   const [loadedPages, setLoadedPages] = useState(0);
   const [reportAgeSec, setReportAgeSec] = useState<number | null>(null); // tazelik rozeti
+  // 2026-09 v16 — POS 'hazırlanıyor' durumu (zaman aşımı yerine canlı bekleme)
+  const [pendingInfo, setPendingInfo] = useState<PendingInfo | null>(null);
   const [sortKey, setSortKey] = useState('');
   const [sortAsc, setSortAsc] = useState(true);
   const [searchFilter, setSearchFilter] = useState('');
@@ -1206,13 +1209,14 @@ export default function ReportsScreen() {
         }
       } catch { /* cache miss OK */ }
 
-      // 2) Full fetch (POS or backend fresh cache) — arkada
-      const firstResp = await fetch(`${API_URL}/api/data/report-run`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(bodyBase),
+      // 2) Full fetch (POS or backend fresh cache) — arkada.
+      // 2026-09 v16 — POS 25 sn'de bitirmezse backend `pending` döner; yardımcı
+      // 3 sn arayla bekler ve durumu (sırada / çalışıyor · süre) bildirir.
+      const first = await fetchReportWithPending(bodyBase, token, {
         signal: controller.signal,
+        onPending: (p) => { if (runTokenRef.current === token_id) setPendingInfo(p); },
       });
-      const first = await firstResp.json();
+      setPendingInfo(null);
       if (runTokenRef.current !== token_id || controller.signal.aborted) return; // aborted
       if (!first.ok) { showError('Hata', first.detail || 'Rapor çalıştırılamadı'); setReportLoading(false); return; }
       const firstRows = (first.data || []).map(indexRow);
@@ -1241,13 +1245,11 @@ export default function ReportsScreen() {
               Detayli: 1, Page: 1, PageSize: 500,
               ...STOK_FILTER_DEFAULTS,
             };
-            const fisResp = await fetch(`${API_URL}/api/data/report-run`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-              body: JSON.stringify({ tenant_id: activeTenantId, dataset_key: 'rap_fis_kalem_listesi_web', params: fisParams, fetch_all: true }),
-              signal: controller.signal,
-            });
-            const fis = await fisResp.json();
+            const fis = await fetchReportWithPending(
+              { tenant_id: activeTenantId, dataset_key: 'rap_fis_kalem_listesi_web', params: fisParams, fetch_all: true },
+              token,
+              { signal: controller.signal },
+            );
             if (runTokenRef.current !== token_id || controller.signal.aborted) return collectedRows;
             const fisRows: any[] = Array.isArray(fis?.data) ? fis.data : [];
             if (fisRows.length > 0) {
@@ -1360,7 +1362,7 @@ export default function ReportsScreen() {
         if (runTokenRef.current === token_id) showError('Hata', 'Bağlantı hatası');
       }
     } finally {
-      if (runTokenRef.current === token_id) { setReportLoading(false); setMoreLoading(false); }
+      if (runTokenRef.current === token_id) { setReportLoading(false); setMoreLoading(false); setPendingInfo(null); }
     }
   }, [activeTenantId, selectedReport, filterValues]);
 
@@ -2272,7 +2274,26 @@ export default function ReportsScreen() {
               )}
             </View>
             {reportLoading ? (
-              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 }}><ActivityIndicator size="large" color={colors.primary} /><Text style={[{ color: colors.textSecondary }]}>POS'tan veri alınıyor...</Text></View>
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12, paddingHorizontal: 24 }}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={[{ color: colors.textSecondary }]}>
+                  {pendingInfo ? pendingLabel(pendingInfo) : "POS'tan veri alınıyor..."}
+                </Text>
+                {pendingInfo && (
+                  <>
+                    <Text style={{ color: colors.textSecondary, fontSize: 11, textAlign: 'center' }}>
+                      Rapor POS bilgisayarında hazırlanıyor; bitince otomatik gelecek. Uzun tarih aralıkları daha uzun sürer.
+                    </Text>
+                    <TouchableOpacity
+                      testID="report-pending-cancel"
+                      onPress={() => { if (abortRef.current) { try { abortRef.current.abort(); } catch(_){} } setPendingInfo(null); setReportLoading(false); }}
+                      style={{ marginTop: 6, paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: colors.border, minHeight: 44, justifyContent: 'center' }}
+                    >
+                      <Text style={{ color: colors.error, fontWeight: '700' }}>Beklemeyi İptal Et</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
             ) : processedData.length > 0 ? (
               <FlatList
                 data={processedData}

@@ -363,3 +363,21 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - **Toplam ≠ Nakit+Kart:** hata değil — "Satıştan iade fişi" ERP12 tarafında NEGATİF gelir ve `GENELTOPLAM`'dan düşer (TERME 14 Eyl: 44.607,92 − 17.558 iade = 27.049,92). Metrik tablosuna **"ERP12 / İade"** satırı eklendi (yalnızca sıfırdan farklıysa görünür).
 - Sürüm: 1.0.48 (iOS 52 / Android 52); `/api/sistem-durum` → `2026-09-15-v15-aralik-hizlandirma`.
 - Not: test hesabının (Merkez) POS'u 8 Eylül'den beri senkron göndermiyor → dev'de bugünkü veri 0 görünmesi normal.
+
+## 2026-09-15 — v16: Raporlarda "zaman aşımı" yerine "hazırlanıyor" modeli + sync.php keep-alive ✅
+- **Ölçüm (TERME, Satış Adet/Kâr 1,5 ay):** toplam 29 sn = POS SQL ~22 sn (asıl maliyet) + sync.php çağrıları 0,5 sn/çağrı (her seferinde yeni TLS). sync.php hosting bazen 60 sn askıda kalıyor. `sync_requests`: bazı müşterilerde POS isteği dakikalar sonra alıyor; kullanıcılar aynı raporu 8-10 kez tekrar tetiklemiş.
+- **Backend `routes/data.py`:**
+  - `sync_post`: paylaşılan keep-alive `httpx.AsyncClient` (0,5 → 0,18 sn/çağrı), `connect=8s/read=20s` + 1 yeniden deneme (60 sn askı yok). `include_data=True` indirme 120 sn.
+  - `report-run`: `wait_sec` (varsayılan 25, 3-90) kadar bekler; bitmezse **`pending:true, status (queued/running/indiriliyor/sayfa N), elapsed_sec`** döner. Arka plan görevi (`_INFLIGHT_REPORTS`, cache_key ile tekilleştirme) POS'u 10 dk'ya kadar bekler, bitince `_GLOBAL_CACHE`'e yazar. 60 sn içinde bitmiş görev yeniden kullanılır → aynı rapor için ikinci POS isteği açılmaz. `_on_demand_request(status_cb=)` eklendi; poll 100. turdan sonra 2 sn'ye yavaşlar.
+- **Frontend:** `src/utils/reportFetch.ts` → `fetchReportWithPending()` (3 sn arayla yineler, 2. turdan itibaren `force_refresh:false`), `pendingLabel()`. `reports.tsx` ve `giderler.tsx` bunu kullanır; yükleme ekranında **"POS kuyruğunda sırada / POS'ta çalışıyor · 47 sn"** + "Beklemeyi İptal Et" (testID `report-pending-cancel`).
+- **sync.php v40:** `reset_stale_running_requests` → rap_* için eşik 120 → 600 sn (uzun raporlar 2 dk'da 'takıldı' sayılıp tekrar tekrar çalıştırılmıyor). Hostinge yeniden yüklenmeli.
+- Sürüm 1.0.49 (iOS 53 / Android 53); `/api/sistem-durum` → `2026-09-15-v16-rapor-hazirlaniyor`.
+
+## 2026-09-18 — v17: Rapor Ön Yükleme (kullanım tabanlı gece prefetch) + rapor tazelik düzeltmesi ✅
+- **Amaç:** Bu ay en çok kullanılan raporlar gece POS'ta önceden çalıştırılıp cache'e basılır → sabah anında açılır.
+- **Backend `services/rapor_kullanim.py`:** her mobil rapor çalıştırması (cache_only ve `_pending_poll` hariç) `kasacepteweb.report_usage` tablosuna ŞABLON olarak sayılır (tarihler göreli belirteç: `{TODAY}`, `{YESTERDAY}`, `{MONTH_START}`, `{MONTH_END}`, `{PREV_MONTH_START/END}`, `{YEAR_START}`, `{WEEK_START}`, `{DAYS_AGO:N}` ≤90; saat eki korunur; 90 günden eski sabit tarih → sayılmaz). Tablo ilk kayıtta otomatik oluşur. `liste()` → son 45 gün, hit≥2 veya son 7 gün, hit sırasına göre 10 adet, belirteçler çözülmüş. `GET /api/data/rapor-onyukleme-listesi?tenant_id=` aynı listeyi verir.
+- **sync.php v41:** `report_prefetch_list` aksiyonu (client secret ile) + `report_template_resolve()` (Europe/Istanbul). Tablo yoksa boş liste.
+- **client.py:** `_prefetch_reports` önce `report_prefetch_list` şablonlarını (en fazla `FULL_PREFETCH_USAGE_REPORT_LIMIT=10`), sonra sabit varsayılanları çalıştırır (`_prefetch_one_report`, tekilleştirme). Sabit varsayılan tarihler mobil biçimine çekildi (`… 00:00:00` / `… 23:59:59`, ay başı) — eski biçim cache eşleşmesini kaçırıyordu.
+- **TAZELİK DÜZELTMESİ (önemli):** rap_* canlı yolunda MySQL blob cache yaşı sınırsızdı (aynı parametreyle rapor bir kez çalışınca gün boyu POS'a gidilmiyordu). Artık bugünü kapsayan rapor → en fazla 600 sn, yalnızca geçmiş → 12 saat (`_MYSQL_AZAMI_YAS`); yaş DB saatiyle `TIMESTAMPDIFF` (sunucu UTC / MySQL Istanbul 3 saat sapması giderildi); Step 1 `dataset_get` atlanır, `request_create`'e `cache_ttl_sec` iletilir. Akış: cache_only → gece prefetch ANINDA gösterilir → arkada POS'tan tazelenir.
+- Testler: `tests/test_rapor_kullanim_v17.py` (6 birim). Sürüm 1.0.50 (iOS 54 / Android 54); `/api/sistem-durum` → `2026-09-18-v17-rapor-on-yukleme`.
+- Dağıtım: sync.php hostinge, client.py müşteri POS'larına güncellenmeli; backend Railway redeploy.
