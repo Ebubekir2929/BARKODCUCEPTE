@@ -3,6 +3,7 @@ from contextlib import aclosing
 from services import get_data_pool, stream_rows
 from services import rapor_kullanim
 from services.dataset_cache import (
+    BUYUK_VERI_ESIGI, dataset_satir_sayisi, stream_dataset_items,
     get_dataset_items,
     filter_stock_items,
     filter_cari_items,
@@ -579,6 +580,145 @@ async def _finans_gun_toplamlari(tenant_id: str, like_patterns: list, limit: int
     return gun_toplam
 
 
+@router.get("/gunluk-urun-detay")
+async def gunluk_urun_detay(
+    tenant_id: str = Query(...),
+    tarih: str = Query(..., description="YYYY-MM-DD"),
+    stok_id: Optional[str] = Query(None),
+    stok_adi: str = Query(""),
+    current_user: dict = Depends(get_current_user),
+):
+    """v19 — Ürün Detayı: seçilen günde bir ürünün SAAT dağılımı (miktar/tutar)
+    ve o ürünü içeren FİŞLER (fis_gunluk_bildirim_feed; eşleşme STOK_ID varsa
+    onunla, yoksa STOK_ADI ile)."""
+    import re as _re
+    if not _re.match(r"^\d{4}-\d{2}-\d{2}$", tarih or ""):
+        raise HTTPException(status_code=422, detail="tarih YYYY-MM-DD biçiminde olmalı")
+    if not stok_id and not stok_adi:
+        raise HTTPException(status_code=400, detail="stok_id veya stok_adi gerekli")
+    hedef_ad = (stok_adi or "").strip().casefold()
+    params = {"sdate": f"{tarih} 00:00:00", "edate": f"{tarih} 23:59:59", "lokasyonID": None, "_skip_aggregate": True}
+    rows = _flatten_hourly_urunler((await lookup_rows_dataset(tenant_id, "hourly_stock_detail", params)) or [])
+
+    def _f(v):
+        try:
+            return float(v) if v is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _urun_mu(sid, ad) -> bool:
+        if stok_id and sid not in (None, ""):
+            return str(sid) == str(stok_id)
+        return bool(hedef_ad) and str(ad or "").strip().casefold() == hedef_ad
+
+    saatler: Dict[str, dict] = {}
+    ad_bulunan = stok_adi
+    for r in rows:
+        if not isinstance(r, dict) or not _urun_mu(r.get("STOK_ID"), r.get("STOK_ADI")):
+            continue
+        if str(r.get("TARIH") or "")[:10] not in ("", tarih):
+            continue
+        ad_bulunan = r.get("STOK_ADI") or ad_bulunan
+        saat = str(r.get("SAAT_ADI") or "").strip()[:5] or "??"
+        a = saatler.setdefault(saat, {"SAAT": saat, "MIKTAR": 0.0, "TUTAR": 0.0, "LOKASYONLAR": set()})
+        a["MIKTAR"] += _f(r.get("TOPLAM_MIKTAR") if r.get("TOPLAM_MIKTAR") is not None else r.get("MIKTAR"))
+        a["TUTAR"] += max(_f(r.get("KDV_DAHIL_TOPLAM_TUTAR")), _f(r.get("PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR")), _f(r.get("ERP12_KDV_DAHIL_TOPLAM_TUTAR")))
+        if r.get("LOKASYON"):
+            a["LOKASYONLAR"].add(str(r.get("LOKASYON")).strip())
+    saat_listesi = [
+        {"SAAT": v["SAAT"], "MIKTAR": round(v["MIKTAR"], 3), "TUTAR": round(v["TUTAR"], 2), "LOKASYONLAR": sorted(v["LOKASYONLAR"])}
+        for v in sorted(saatler.values(), key=lambda x: x["SAAT"])
+    ]
+
+    pool = await get_data_pool()
+    fisler = await _gunluk_fisleri_yukle(pool, tenant_id, tarih)
+    esleşen_fisler = []
+    for f in fisler.values():
+        kalemler = [d for d in f.get("DETAYLAR", []) if _urun_mu(d.get("STOK_ID"), d.get("STOK_ADI"))]
+        if not kalemler:
+            continue
+        esleşen_fisler.append({
+            **{k: f.get(k) for k in ("FIS_ID", "BELGENO", "FIS_TARIHI", "FIS_TURU_AD", "KESEN_PERSONEL", "LOKASYON", "TUTAR")},
+            "URUN_MIKTAR": round(sum(_f(d.get("MIKTAR")) for d in kalemler), 3),
+            "URUN_TUTAR": round(sum(_f(d.get("DAHIL_TUTAR")) for d in kalemler), 2),
+            "KALEM_SAYISI": len(f.get("DETAYLAR", [])),
+        })
+    esleşen_fisler.sort(key=lambda x: str(x.get("FIS_TARIHI") or ""))
+    return {
+        "ok": True, "tarih": tarih, "STOK_ID": stok_id, "STOK_ADI": ad_bulunan,
+        "toplam_miktar": round(sum(x["MIKTAR"] for x in saat_listesi), 3),
+        "toplam_tutar": round(sum(x["TUTAR"] for x in saat_listesi), 2),
+        "saatler": saat_listesi,
+        "fisler": _fix_large_ints(esleşen_fisler),
+    }
+
+
+@router.get("/haftalik-urun-trend")
+async def haftalik_urun_trend(
+    tenant_id: str = Query(...),
+    bitis: str = Query(..., description="YYYY-MM-DD — son gün (dahil)"),
+    limit: int = Query(20, ge=1, le=200),
+    lokasyon_id: Optional[int] = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    """v19 — Haftalık Ürün Trendi: son 7 günde (bitis dahil) her ürünün GÜNLÜK
+    adetleri. hourly_stock_detail 7 günün params_hash'leriyle tek akışta okunur;
+    STOK_ID bazında toplanır; toplam adede göre ilk `limit` ürün döner."""
+    import re as _re
+    from datetime import date as _d, timedelta as _td
+    if not _re.match(r"^\d{4}-\d{2}-\d{2}$", bitis or ""):
+        raise HTTPException(status_code=422, detail="bitis YYYY-MM-DD biçiminde olmalı")
+    son = _d.fromisoformat(bitis)
+    gunler = [(son - _td(days=i)).isoformat() for i in range(6, -1, -1)]
+    params = {"sdate": f"{gunler[0]} 00:00:00", "edate": f"{gunler[-1]} 23:59:59",
+              "lokasyonID": int(lokasyon_id) if lokasyon_id else None, "_skip_aggregate": True}
+    rows = _flatten_hourly_urunler((await lookup_rows_dataset(tenant_id, "hourly_stock_detail", params)) or [])
+
+    def _f(v):
+        try:
+            return float(v) if v is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    urunler: Dict[str, dict] = {}
+    gun_toplam = {g: 0.0 for g in gunler}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        ad = str(r.get("STOK_ADI") or "").strip()
+        gun = str(r.get("TARIH") or "")[:10]
+        if not ad or gun not in gun_toplam:
+            continue
+        sid = str(r.get("STOK_ID") or ad)
+        u = urunler.get(sid)
+        if u is None:
+            u = urunler[sid] = {"STOK_ID": r.get("STOK_ID"), "STOK_ADI": ad, "BIRIM_ADI": r.get("BIRIM_ADI") or "",
+                                "GUNLER": {g: 0.0 for g in gunler}, "TUTAR": 0.0}
+        m = _f(r.get("TOPLAM_MIKTAR") if r.get("TOPLAM_MIKTAR") is not None else r.get("MIKTAR"))
+        u["GUNLER"][gun] += m
+        gun_toplam[gun] += m
+        u["TUTAR"] += max(_f(r.get("KDV_DAHIL_TOPLAM_TUTAR")), _f(r.get("PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR")), _f(r.get("ERP12_KDV_DAHIL_TOPLAM_TUTAR")))
+
+    out = []
+    for u in urunler.values():
+        seri = [round(u["GUNLER"][g], 3) for g in gunler]
+        toplam = sum(seri)
+        ilk3, son3 = sum(seri[:3]), sum(seri[-3:])
+        out.append({
+            "STOK_ID": u["STOK_ID"], "STOK_ADI": u["STOK_ADI"], "BIRIM_ADI": u["BIRIM_ADI"],
+            "GUNLUK": seri, "TOPLAM": round(toplam, 3), "TUTAR": round(u["TUTAR"], 2),
+            "GUN_ORT": round(toplam / 7, 2),
+            # ivme: son 3 gün vs ilk 3 gün (yüzde); ilk 3 gün 0 ise None
+            "IVME_YUZDE": round((son3 - ilk3) / ilk3 * 100, 1) if ilk3 > 0 else None,
+        })
+    out.sort(key=lambda x: (-x["TOPLAM"], -x["TUTAR"], x["STOK_ADI"]))
+    return {
+        "ok": True, "gunler": gunler, "urun_sayisi": len(out),
+        "gun_toplamlari": [round(gun_toplam[g], 3) for g in gunler],
+        "data": _fix_large_ints(out[:limit]),
+    }
+
+
 @router.get("/gunluk-urun-satis")
 async def gunluk_urun_satis(
     tenant_id: str = Query(...),
@@ -660,23 +800,8 @@ async def gunluk_urun_satis(
     }
 
 
-@router.get("/gunluk-fisler")
-async def gunluk_fisler(
-    tenant_id: str = Query(...),
-    tarih: str = Query(..., description="YYYY-MM-DD"),
-    current_user: dict = Depends(get_current_user),
-):
-    """Seçilen günün satılan fişleri + ürün içerikleri (dashboard bölümü).
-
-    Kaynak: `fis_gunluk_bildirim_feed` günlük blobları. Aynı günün birden çok
-    blobu olabilir (delta push) → FIS_ID bazında dedupe, en güncel blob kazanır.
-    Bloblar SSCursor ile TEK TEK akıtılır (v13 bellek kuralı).
-    """
-    import re as _re
-    if not _re.match(r"^\d{4}-\d{2}-\d{2}$", tarih or ""):
-        raise HTTPException(status_code=422, detail="tarih YYYY-MM-DD biçiminde olmalı")
-
-    pool = await get_data_pool()
+async def _gunluk_fisleri_yukle(pool, tenant_id: str, tarih: str) -> dict:
+    """Günün fişleri (FIS_ID → fiş) — fis_gunluk_bildirim_feed bloblarından, dedupe."""
     fisler: dict = {}
     async for (blob,) in stream_rows(
         pool,
@@ -720,6 +845,27 @@ async def gunluk_fisler(
                 "DETAY_SATIR_SAYISI": r.get("DETAY_SATIR_SAYISI"),
                 "DETAYLAR": [d for d in detaylar if isinstance(d, dict)] if isinstance(detaylar, list) else [],
             }
+    return fisler
+
+
+@router.get("/gunluk-fisler")
+async def gunluk_fisler(
+    tenant_id: str = Query(...),
+    tarih: str = Query(..., description="YYYY-MM-DD"),
+    current_user: dict = Depends(get_current_user),
+):
+    """Seçilen günün satılan fişleri + ürün içerikleri (dashboard bölümü).
+
+    Kaynak: `fis_gunluk_bildirim_feed` günlük blobları. Aynı günün birden çok
+    blobu olabilir (delta push) → FIS_ID bazında dedupe, en güncel blob kazanır.
+    Bloblar SSCursor ile TEK TEK akıtılır (v13 bellek kuralı).
+    """
+    import re as _re
+    if not _re.match(r"^\d{4}-\d{2}-\d{2}$", tarih or ""):
+        raise HTTPException(status_code=422, detail="tarih YYYY-MM-DD biçiminde olmalı")
+
+    pool = await get_data_pool()
+    fisler = await _gunluk_fisleri_yukle(pool, tenant_id, tarih)
 
     def _f(v):
         try:
@@ -2452,7 +2598,15 @@ async def barcode_price(
     if not tenant_id or not barkod:
         raise HTTPException(status_code=400, detail="tenant_id ve barkod gerekli")
     try:
-        items = await get_dataset_items(tenant_id, "stock_list")
+        if await dataset_satir_sayisi(tenant_id, "stock_list") > BUYUK_VERI_ESIGI:
+            # v19 — büyük tenant: barkodu içeren sayfalar LIKE ile bulunur, tüm liste RAM'e alınmaz
+            import contextlib
+            items = []
+            async with contextlib.aclosing(stream_dataset_items(tenant_id, "stock_list", barkod)) as akis:
+                async for sayfa in akis:
+                    items.extend(it for it in sayfa if barkod in (str(it.get("BARKOD") or "").strip(), str(it.get("KOD") or "").strip()))
+        else:
+            items = await get_dataset_items(tenant_id, "stock_list")
         matches = [it for it in items if str(it.get("BARKOD", "") or "").strip() == barkod]
         if not matches:
             # Barkod bulunamazsa stok koduyla da dene
@@ -2611,6 +2765,67 @@ async def get_stock_list_sync(
 
         # Slow path: full in-memory load + filtering (used when any filter active)
         t0 = time.time()
+
+        # v19 — BÜYÜK TENANT (200K ürün): tüm liste RAM'e alınmaz, sayfalar akıtılır.
+        # Süzgeç + sayfalama akış sırasında uygulanır; arama varsa MySQL LIKE ile
+        # yalnızca eşleşen sayfalar okunur. Süzgeç yoksa istenen sayfa dolunca durur.
+        toplam_satir = await dataset_satir_sayisi(tenant_id, "stock_list")
+        if toplam_satir > BUYUK_VERI_ESIGI:
+            import contextlib
+            arama = str(body.get("search") or "").strip()
+            filtre_args = dict(
+                search=arama,
+                groups=body.get("groups") or [],
+                kdv_values=body.get("kdv_values") or [],
+                markas=body.get("markas") or [],
+                aktif=body.get("aktif") if body.get("aktif") is not None else None,
+                hareketli=body.get("hareketli") if body.get("hareketli") is not None else None,
+                qty=body.get("qty"),
+                profit=body.get("profit"),
+                price_min=float(body["price_min"]) if body.get("price_min") not in (None, "") else None,
+                price_max=float(body["price_max"]) if body.get("price_max") not in (None, "") else None,
+            )
+            sayfa_no = max(1, int(page or 1))
+            bas = (sayfa_no - 1) * page_size
+            secilen: list = []
+            sayac = 0
+            # Arama LIKE ön süzgeci yalnızca ASCII güvenli 3+ karakterli terimlerde
+            # (Türkçe büyük/küçük eşleşmesi collation'a bırakılamaz); Python süzgeci
+            # her durumda tam çalışır.
+            sql_like = arama if (len(arama) >= 3 and arama.isascii() and arama.replace(" ", "").isalnum()) else None
+
+            def _fa_s(it):
+                try:
+                    return int(it.get("FIYAT_AD") or it.get("FIYAT_AD_ID") or 0)
+                except (TypeError, ValueError):
+                    return 0
+
+            async with contextlib.aclosing(stream_dataset_items(tenant_id, "stock_list", sql_like)) as akis:
+                async for sayfa in akis:
+                    if fa_id is not None:
+                        sayfa = [it for it in sayfa if _fa_s(it) == fa_id]
+                    if has_filter:
+                        sayfa = filter_stock_items(sayfa, **filtre_args)
+                    for it in sayfa:
+                        if bas <= sayac < bas + page_size:
+                            secilen.append(it)
+                        sayac += 1
+                    # Süzgeç yoksa toplam biliniyor → sayfa dolunca akışı kes
+                    if not has_filter and fa_id is None and sayac >= bas + page_size:
+                        sayac = toplam_satir
+                        break
+            toplam = sayac
+            return {
+                "ok": True,
+                "data": _fix_large_ints(secilen),
+                "page": sayfa_no,
+                "page_size": page_size,
+                "total_pages": max(1, (toplam + page_size - 1) // page_size) if toplam else 0,
+                "total_count": toplam,
+                "_source": "mysql_stream",
+                "_load_ms": int((time.time() - t0) * 1000),
+            }
+
         items = await get_dataset_items(tenant_id, "stock_list", force_refresh=force_refresh)
         load_ms = int((time.time() - t0) * 1000)
 

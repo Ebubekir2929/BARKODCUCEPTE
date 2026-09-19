@@ -2638,3 +2638,8 @@ agent_communication:
   - hourly_stock_detail okumaları params_hash indeksiyle (18 sn → 1 sn), dashboard tek gün 2 sorgu (fetch_day_datasets),
     GET /api/data/gunluk-urun-satis + DailyProductSalesSection. close_pools/shutdown askı düzeltmesi.
   - pytest tests/test_v18_gunluk_urun_satis.py 10/10; testing_agent iteration_22 frontend 5/5 PASS. VERIFIED ✅
+
+## 2026-09-19 — v19 büyük stok listesi akış modu + Ürün Detayı + Haftalık Ürün Trendi
+  - client.py streaming stock_list push; backend stream_dataset_items (/stock-list, /barcode-price); gunluk-urun-detay, haftalik-urun-trend;
+    DailyProductSalesSection akordeon + WeeklyProductTrendSection.
+  - testing_agent iteration_23: backend 10/10 + frontend 7/7 PASS. VERIFIED ✅

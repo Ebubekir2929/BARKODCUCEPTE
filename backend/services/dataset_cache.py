@@ -212,6 +212,56 @@ async def _load_all_rows(tenant_id: str, dataset_key: str) -> List[dict]:
             return []
 
 
+BUYUK_VERI_ESIGI = 25_000  # v19 — bu satır sayısının üstündeki sayfalı veri setleri RAM'e alınmaz
+
+
+async def dataset_satir_sayisi(tenant_id: str, dataset_key: str) -> int:
+    """dataset_cache üst kaydındaki row_count (hafif sorgu)."""
+    meta = await _fetch_meta(tenant_id, dataset_key)
+    return int(meta["row_count"]) if meta else 0
+
+
+async def stream_dataset_items(tenant_id: str, dataset_key: str, sql_like: Optional[str] = None):
+    """v19 — Sayfalı veri setini (stock_list, cari_bakiye_liste) SAYFA SAYFA akıtır;
+    hiçbir zaman tüm liste RAM'de tutulmaz (200K ürünlü müşteride get_dataset_items
+    ~250 MB → Railway OOM → "ürünler çekilemedi"). `sql_like` verilirse yalnızca
+    data_json'unda o metni içeren sayfalar okunur (arama ön süzgeci).
+    Erken çıkılacaksa `contextlib.aclosing` ile sarın."""
+    pool = await get_data_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """SELECT params_hash FROM dataset_cache_pages
+                   WHERE tenant_id=%s AND dataset_key=%s ORDER BY updated_at DESC LIMIT 1""",
+                (tenant_id, dataset_key),
+            )
+            latest = await cur.fetchone()
+    if not latest:
+        return
+    ek_sql, ek_args = "", []
+    if sql_like:
+        ek_sql = " AND data_json LIKE %s"
+        ek_args = [f"%{sql_like}%"]
+    async for (raw,) in stream_rows(
+        pool,
+        f"""SELECT data_json FROM dataset_cache_pages
+            WHERE tenant_id=%s AND dataset_key=%s AND params_hash=%s{ek_sql}
+            ORDER BY page_no ASC""",
+        (tenant_id, dataset_key, latest[0], *ek_args),
+        chunk=1,
+    ):
+        if not raw:
+            continue
+        try:
+            arr = json.loads(raw)
+        except Exception:
+            continue
+        if isinstance(arr, dict):
+            arr = arr.get("data")
+        if isinstance(arr, list):
+            yield [p for p in arr if isinstance(p, dict)]
+
+
 async def get_dataset_items(
     tenant_id: str,
     dataset_key: str,

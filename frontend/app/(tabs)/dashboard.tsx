@@ -40,6 +40,7 @@ import { MonthlyTrendChart } from '../../src/components/dashboard/MonthlyTrendCh
 import { MonthDetailModal } from '../../src/components/dashboard/MonthDetailModal';
 import { DailyReceiptsSection } from '../../src/components/dashboard/DailyReceiptsSection';
 import { DailyProductSalesSection } from '../../src/components/dashboard/DailyProductSalesSection';
+import { WeeklyProductTrendSection } from '../../src/components/dashboard/WeeklyProductTrendSection';
 import { CardTypeLocationModal } from '../../src/components/dashboard/CardTypeLocationModal';
 import { HourDetailModal } from '../../src/components/dashboard/HourDetailModal';
 import { LocationIptalModal } from '../../src/components/dashboard/LocationIptalModal';
@@ -774,14 +775,15 @@ export default function DashboardScreen() {
       {/* Status bar separator */}
       <View style={[styles.statusBarLine, { backgroundColor: colors.border }]} />
       {/* Header */}
-      <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <View style={{ flex: 1, marginRight: 8 }}>
+      {/* 2026-09 (v20) — Dar ekranda 5 buton "Hoş geldiniz + isim" alanını ~110px'e
+          sıkıştırıyor, adjustsFontSizeToFit de yazıyı minicik yapıyordu.
+          Çözüm: compact ekranda butonlar ikinci satıra iner, isim tam genişlik alır. */}
+      <View style={[styles.header, compactHeader && styles.headerCompact, { borderBottomColor: colors.border }]}>
+        <View style={compactHeader ? styles.headerGreetingCompact : styles.headerGreeting}>
           <Text
             style={[styles.greeting, { color: colors.textSecondary }]}
             numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.7}
-            maxFontSizeMultiplier={1.2}
+            maxFontSizeMultiplier={1.3}
           >
             {t('welcome_greeting')}
           </Text>
@@ -789,12 +791,13 @@ export default function DashboardScreen() {
             style={[styles.userName, { color: colors.text }]}
             numberOfLines={1}
             adjustsFontSizeToFit
-            minimumFontScale={0.72}
-            maxFontSizeMultiplier={1.2}
+            minimumFontScale={0.85}
+            maxFontSizeMultiplier={1.3}
           >
             {user?.full_name || 'Kullanıcı'}
           </Text>
         </View>
+        <View style={compactHeader ? styles.headerActionsCompact : styles.headerActions}>
         <TouchableOpacity
           style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border, marginRight: 8 }]}
           onPress={() => router.push('/giderler')}
@@ -844,6 +847,7 @@ export default function DashboardScreen() {
             <Text style={[styles.filterText, { color: colors.primary }]} maxFontSizeMultiplier={1.2}>{t('filter_short')}</Text>
           )}
         </TouchableOpacity>
+        </View>
       </View>
 
       {/* Global Data Source Selector */}
@@ -1401,6 +1405,15 @@ export default function DashboardScreen() {
           style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}
         />
 
+        {/* Haftalık Ürün Trendi — 2026-09 v19: son 7 günün günlük adetleri, yükselenler */}
+        <WeeklyProductTrendSection
+          tenantId={activeTenantId}
+          bitis={`${filters.startDate.getFullYear()}-${String(filters.startDate.getMonth() + 1).padStart(2, '0')}-${String(filters.startDate.getDate()).padStart(2, '0')}`}
+          lokasyonId={filters.branchId && /^\d+$/.test(String(filters.branchId)) ? String(filters.branchId) : null}
+          colors={colors}
+          style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}
+        />
+
         {/* Günlük Satılan Fişler — 2026-08 yeni bölüm (tarih filtresine bağlı) */}
         <DailyReceiptsSection
           tenantId={activeTenantId}
@@ -1882,16 +1895,38 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderBottomWidth: 1,
   },
+  headerCompact: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    paddingVertical: 12,
+    gap: 10,
+  },
+  headerGreeting: {
+    flex: 1,
+    marginRight: 8,
+  },
+  headerGreetingCompact: {
+    width: '100%',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerActionsCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+  },
   greeting: {
-    fontSize: Platform.select({ web: 12, ios: 12, android: 14, default: 13 }),
+    fontSize: Platform.select({ web: 13, ios: 15, android: 16, default: 15 }),
     marginBottom: 2,
-    fontWeight: Platform.OS === 'web' ? '600' : '400',
+    fontWeight: Platform.OS === 'web' ? '600' : '500',
     ...(Platform.OS === 'web' ? { letterSpacing: 0.4, textTransform: 'uppercase' as const } : {}),
   },
   userName: {
-    fontSize: Platform.select({ web: 22, ios: 20, android: 22, default: 21 }),
-    fontWeight: Platform.OS === 'web' ? '800' : '700',
-    ...(Platform.OS === 'web' ? { letterSpacing: -0.5 } : {}),
+    fontSize: Platform.select({ web: 24, ios: 26, android: 27, default: 26 }),
+    fontWeight: '800',
+    ...(Platform.OS === 'web' ? { letterSpacing: -0.5 } : { letterSpacing: -0.3 }),
   },
   filterButton: {
     flexDirection: 'row',

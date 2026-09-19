@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 23 (v19) — full backend + frontend acceptance passing. Backend: 10/10 pytest cases pass (test_v19_stok_akis_urun_trend.py) covering /api/data/gunluk-urun-detay (GALETA 2026-09-14: STOK_ADI 'GALETA', toplam_miktar 18, 7 saatler entries with HH:MM/MIKTAR/TUTAR, 14 fisler with FIS_ID/FIS_TARIHI/URUN_MIKTAR/URUN_TUTAR; missing stok_id+stok_adi→400; bad tarih→422); /api/data/haftalik-urun-trend (limit=5: ok:true, gunler=7 dates ending 2026-09-14, gun_toplamlari 7 numbers, data sorted TOPLAM desc, first item GALETA TOPLAM 77, each item has GUNLUK(7)/TOPLAM/TUTAR/GUN_ORT/IVME_YUZDE; limit=0→422); /api/data/stock-list (large tenant ea52…f0d3 page=2 size=50: _source 'mysql_stream', 50 rows, total_count>25K, total_pages == ceil(total/50), <15s; search='3' page=1: _source mysql_stream, non-empty, every row contains '3'; small tenant regression: 200 with data list); /api/sistem-durum surum == '2026-09-19-v19-stok-akis-urun-trend'; /api/data/gunluk-urun-satis regression urun_sayisi == 130. Frontend (Expo web, 390x844): login OK; on today · Merkez, weekly-product-trend renders empty-state 'Son 7 günde ürün satışı yok' (toggles hidden as expected because no rows); opened header funnel filter, set date to 26/08/2026, banner shows 'Tüm Şubeler · 26/08 - 26/08'; daily-product-sales updates to '1 adet · 1 ürün · ₺2,00' with row 'Abdul Rızaoğlu · 1 farklı saatte · Merkez'; tapping daily-product-row-0 expands daily-product-detail with 'SAATLERE GÖRE' chip '15:00 · 1 · ₺2,00' and 'FİŞLER (1)' block; tapping again collapses (element removed from DOM); weekly-product-trend for 26/08 shows Abdul Rızaoğlu with 7 mini day bars (Per/Cum/Cmt/Paz/Pzt/Sal/Çar) and both weekly-trend-mode-toplam/weekly-trend-mode-ivme (En Çok/Yükselen) toggles are present; Günlük Satılan Fişler still renders. Console clean apart from ignored shadow*/expo-notifications deprecations. No red screens, no pageerrors.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_v19_stok_akis_urun_trend.py",
+    "/app/test_reports/pytest/iter23_results.xml",
+    "/tmp/iter23_after_login.png",
+    "/tmp/iter23_weekly_today.png",
+    "/tmp/iter23_filter_modal_open.png",
+    "/tmp/iter23_accordion_expanded.png",
+    "/tmp/iter23_weekly_26aug.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes/data.py gunluk-urun-detay: validation order is correct (tarih regex first, then stok_id/stok_adi presence). Response uses _fix_large_ints for BigInt safety.",
+    "routes/data.py haftalik-urun-trend: uses hourly_stock_detail with 7-day window in a single lookup, aggregates by STOK_ID, and computes IVME_YUZDE with ilk3=0 guard returning None — no ZeroDivisionError.",
+    "stock-list mysql_stream path: streaming under 15s for >25K rows (~40K observed) and search filter propagates into COUNT() so total_count and total_pages remain consistent.",
+    "WeeklyProductTrendSection.tsx correctly hides toggle chips when there are no rows (weekly-trend-mode-* not rendered), which matches the review's conditional expectation.",
+    "DailyProductSalesSection.tsx accordion mounts/unmounts daily-product-detail via conditional render — verified via DOM (query_selector returns None after 2nd tap).",
+    "All interactive elements have testIDs; text wrapped in <Text>; env-driven backend URL preserved (EXPO_PUBLIC_BACKEND_URL)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_v19_stok_akis_urun_trend.py (created)"
+  ],
+  "success_rate": {"backend": "100% (10/10 pytest)", "frontend": "100% (7/7 scenarios)"},
+  "seed_data_creation": "None — live production MySQL used read-only. GALETA on 2026-09-14 (18 adet, 14 fişler) and Abdul Rızaoğlu on 2026-08-26 (1 adet ₺2,00) are existing production data.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend v19 endpoints stable. DB tunnel (tunel_aktif=true, sistem-durum) — no timeouts hit during this run but retry-once helper in tests. Reference tenant IDs from review request: Merkez b9f4d960e43f462d9b77915577add71a (NOTE: test_credentials.md lists a different Merkez d5587c87a7f9476fa82b83f40accd6c7 — both work; the review's tenant is authoritative for v19 fixtures) and large tenant ea5231b886ef47baac5b49188f2ef0d3. Filter modal opens via top-right funnel icon (~x=365,y=40 on 390-wide); it exposes only 2 date text-inputs (Başlangıç/Bitiş) in DD/MM/YYYY. Accordion collapses by re-tapping the row (component conditionally renders daily-product-detail). Weekly section hides toggles when 0 products.",
+  "rca_of_issue": "N/A — no bugs found."
+}

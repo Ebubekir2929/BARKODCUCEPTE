@@ -20,6 +20,11 @@ interface Urun {
   LOKASYONLAR?: string[];
 }
 
+interface UrunDetay {
+  saatler: { SAAT: string; MIKTAR: number; TUTAR: number; LOKASYONLAR?: string[] }[];
+  fisler: { FIS_ID: number; BELGENO?: string; FIS_TARIHI?: string; KESEN_PERSONEL?: string; LOKASYON?: string; TUTAR?: any; URUN_MIKTAR: number; URUN_TUTAR: number; KALEM_SAYISI?: number }[];
+}
+
 interface Props {
   tenantId: string | null;
   tarih: string; // YYYY-MM-DD — dashboard filtresinden gelir
@@ -39,6 +44,26 @@ export function DailyProductSalesSection({ tenantId, tarih, lokasyonId, colors, 
   const [gosterilen, setGosterilen] = useState(10);
   const [arama, setArama] = useState('');
   const [siralama, setSiralama] = useState<'adet' | 'tutar'>('adet');
+  // v19 — Ürün Detayı: dokunulan ürünün saat dağılımı + fişleri (akordeon)
+  const [acikUrun, setAcikUrun] = useState<string | null>(null);
+  const [detay, setDetay] = useState<Record<string, UrunDetay | 'yukleniyor' | 'hata'>>({});
+
+  const detayGetir = async (u: Urun) => {
+    const key = String(u.STOK_ID ?? u.STOK_ADI);
+    if (acikUrun === key) { setAcikUrun(null); return; }
+    setAcikUrun(key);
+    if (detay[key] && detay[key] !== 'hata') return;
+    setDetay((d) => ({ ...d, [key]: 'yukleniyor' }));
+    try {
+      const { token } = useAuthStore.getState();
+      const q = `tenant_id=${tenantId}&tarih=${tarih}&stok_id=${encodeURIComponent(String(u.STOK_ID ?? ''))}&stok_adi=${encodeURIComponent(u.STOK_ADI)}`;
+      const res = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/data/gunluk-urun-detay?${q}`, { headers: { Authorization: `Bearer ${token}` } });
+      const j = await res.json();
+      setDetay((d) => ({ ...d, [key]: j?.ok ? { saatler: j.saatler || [], fisler: j.fisler || [] } : 'hata' }));
+    } catch {
+      setDetay((d) => ({ ...d, [key]: 'hata' }));
+    }
+  };
 
   const filtreli = useMemo(() => {
     if (!urunler) return null;
@@ -56,6 +81,8 @@ export function DailyProductSalesSection({ tenantId, tarih, lokasyonId, colors, 
     setLoading(true);
     setGosterilen(10);
     setArama('');
+    setAcikUrun(null);
+    setDetay({});
     (async () => {
       try {
         const { token } = useAuthStore.getState();
@@ -178,11 +205,17 @@ export function DailyProductSalesSection({ tenantId, tarih, lokasyonId, colors, 
           ) : (filtreli || []).slice(0, gosterilen).map((u, i) => {
             const deger = siralama === 'adet' ? u.MIKTAR : u.TUTAR;
             const oran = enCok > 0 ? Math.max(0.04, Math.min(1, deger / enCok)) : 0;
+            const key = String(u.STOK_ID ?? u.STOK_ADI);
+            const acik = acikUrun === key;
+            const dt = detay[key];
             return (
-              <View
-                key={`${u.STOK_ID ?? u.STOK_ADI}-${i}`}
+              <TouchableOpacity
+                key={`${key}-${i}`}
+                testID={`daily-product-row-${i}`}
+                activeOpacity={0.7}
+                onPress={() => detayGetir(u)}
                 style={{
-                  marginBottom: 8, borderRadius: 12, borderWidth: 1, borderColor: colors.border,
+                  marginBottom: 8, borderRadius: 12, borderWidth: 1, borderColor: acik ? colors.primary + '60' : colors.border,
                   backgroundColor: colors.background, padding: 12, overflow: 'hidden',
                 }}
               >
@@ -211,7 +244,43 @@ export function DailyProductSalesSection({ tenantId, tarih, lokasyonId, colors, 
                 <View style={{ height: 4, borderRadius: 2, backgroundColor: colors.border, marginTop: 10, overflow: 'hidden' }}>
                   <View style={{ width: `${Math.round(oran * 100)}%`, height: 4, backgroundColor: colors.primary, borderRadius: 2 }} />
                 </View>
-              </View>
+                {acik && (
+                  <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: 10 }} testID="daily-product-detail">
+                    {dt === 'yukleniyor' || !dt ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : dt === 'hata' ? (
+                      <Text style={{ fontSize: 12, color: colors.error }}>Detay alınamadı</Text>
+                    ) : (
+                      <>
+                        <Text style={{ fontSize: 11, fontWeight: '800', color: colors.textSecondary, marginBottom: 6 }}>SAATLERE GÖRE</Text>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                          {dt.saatler.map((s) => (
+                            <View key={s.SAAT} style={{ paddingHorizontal: 8, paddingVertical: 5, borderRadius: 8, backgroundColor: colors.primary + '14' }}>
+                              <Text style={{ fontSize: 11, fontWeight: '800', color: colors.primary }}>{s.SAAT} · {fmtMiktar(s.MIKTAR)}</Text>
+                              <Text style={{ fontSize: 9, color: colors.textSecondary }}>₺{fmtTL(s.TUTAR)}</Text>
+                            </View>
+                          ))}
+                        </View>
+                        <Text style={{ fontSize: 11, fontWeight: '800', color: colors.textSecondary, marginBottom: 6 }}>FİŞLER ({dt.fisler.length})</Text>
+                        {dt.fisler.length === 0 ? (
+                          <Text style={{ fontSize: 12, color: colors.textSecondary }}>Bu ürünü içeren fiş bulunamadı</Text>
+                        ) : dt.fisler.slice(0, 15).map((f) => (
+                          <View key={f.FIS_ID} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 6 }}>
+                            <View style={{ flex: 1, paddingRight: 8 }}>
+                              <Text style={{ fontSize: 12, fontWeight: '700', color: colors.text }} numberOfLines={1}>
+                                {(f.FIS_TARIHI || '').slice(11, 16) || '—'} · {f.KESEN_PERSONEL || 'Personel'}{f.BELGENO ? ` · ${f.BELGENO}` : ''}
+                              </Text>
+                              <Text style={{ fontSize: 10, color: colors.textSecondary }}>{f.LOKASYON || ''} · fiş toplamı ₺{fmtTL(f.TUTAR)} · {f.KALEM_SAYISI || 0} kalem</Text>
+                            </View>
+                            <Text style={{ fontSize: 12, fontWeight: '800', color: colors.primary }}>{fmtMiktar(f.URUN_MIKTAR)} · ₺{fmtTL(f.URUN_TUTAR)}</Text>
+                          </View>
+                        ))}
+                        {dt.fisler.length > 15 && <Text style={{ fontSize: 10, color: colors.textSecondary }}>+{dt.fisler.length - 15} fiş daha</Text>}
+                      </>
+                    )}
+                  </View>
+                )}
+              </TouchableOpacity>
             );
           })}
           {(filtreli || []).length > gosterilen && (

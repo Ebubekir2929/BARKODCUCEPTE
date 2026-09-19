@@ -98,6 +98,11 @@ DELTA_PUSH_MAX_ROWS_PER_BATCH = 300
 PAGED_PUSH_TARGET_BYTES = 450_000
 PAGED_PUSH_FALLBACK_BYTES = [450_000, 220_000, 100_000]
 PAGED_PUSH_MAX_ROWS_PER_PAGE = 10_000
+# v19 — Büyük stok listesi (200K+ ürün): tüm fiyat adlarının satırları RAM'de
+# toplanıp hash'lenmiyor; fiyat adı bazında ÇEKİLİR ve sayfa sayfa HEMEN gönderilir.
+# Eşik: bir fiyat adı bu kadar satırdan fazla döndürürse (ya da toplam aşılırsa) akış modu.
+STOCK_LIST_STREAM_ROW_THRESHOLD = 40_000
+STOCK_LIST_STREAM_MIN_INTERVAL_SEC = 6 * 3600  # akış modunda tam gönderim sıklığı (fiyat/miktar değişimleri delta ile ayrıca gelir)
 
 MASS_DELETE_RATIO_BLOCK = 0.60
 MASS_DELETE_MIN_PREV = 50
@@ -2889,6 +2894,103 @@ class Main(QMainWindow):
         self.println(f"stock_list: toplam eklenecek satır={len(all_rows)}, dolu fiyat adı={total_price_names}, boş atlanan={skipped_empty}")
         return all_rows
 
+    def _stock_list_is_big(self, defn: Dict[str, Any]) -> bool:
+        """v19 — Toplam stok satırı (tüm fiyat adları) eşiği aşacak mı? İlk fiyat adı
+        sorgulanır; satır sayısı × fiyat adı sayısı tahmini eşikle karşılaştırılır.
+        Sonuç 1 saat önbelleklenir (her push turunda SP tekrar koşmasın)."""
+        try:
+            onbellek = getattr(self, "_stock_list_big_cache", None)
+            if onbellek and time.time() - onbellek[0] < 3600:
+                return bool(onbellek[1])
+            fiyat_adlari = self.load_stock_price_names(defn.get("database", ""))
+            params = resolve_params(defn.get("params_template", {}))
+            params["FIYAT_AD"] = (fiyat_adlari[0] if fiyat_adlari else {}).get("ID", 0)
+            conn = self.get_connection(defn.get("database", ""))
+            try:
+                rows = self.execute_procedure(conn, defn["sql"], ordered_param_values(defn, params), bool(defn.get("multi_result", False)))
+            finally:
+                conn.close()
+            ilk = len(rows or [])
+            tahmin = ilk * max(1, len(fiyat_adlari))
+            buyuk = ilk > STOCK_LIST_STREAM_ROW_THRESHOLD or tahmin > STOCK_LIST_STREAM_ROW_THRESHOLD * 2
+            self._stock_list_big_cache = (time.time(), buyuk)
+            if buyuk:
+                self.println(f"stock_list: büyük liste algılandı (ilk fiyat adı {ilk} satır × {len(fiyat_adlari)} fiyat adı) → akış modu")
+            return buyuk
+        except Exception as exc:
+            self.println(f"stock_list büyüklük kontrolü yapılamadı: {exc}")
+            return False
+
+    def _push_stock_list_streaming(self, defn: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, Any]:
+        """v19 — stock_list'i fiyat adı bazında çekip sayfa sayfa HEMEN gönderir.
+        Tüm liste hiçbir an RAM'de tutulmaz; hash sayfa hash'lerinden zincirlenir.
+        sync.php commit yalnızca alınan parça sayısı == total_parts kontrolü yapar,
+        bu yüzden begin'deki total_parts geçici (1) olabilir."""
+        import hashlib
+        tenant = self.ed_tenant.text().strip() or self.cfg.get("tenant_id", "").strip()
+        if not tenant:
+            raise RuntimeError("Tenant boş.")
+        server_url = self.ed_server_url.text().strip() or self.cfg.get("server_url", DEFAULT_SERVER_URL)
+        secret = self.get_client_secret()
+        dataset_key = str(defn["dataset_key"])
+        upload_id = uuid.uuid4().hex
+        post_json(server_url, tenant, {
+            "action": "dataset_page_begin", "dataset_key": dataset_key, "upload_id": upload_id,
+            "params": params, "total_parts": 1, "total_row_count": 0, "data_hash": "",
+        }, client_secret=secret, timeout=120)
+
+        part_no = 0
+        toplam = 0
+        zincir = hashlib.sha256()
+        fiyat_adlari = self.load_stock_price_names(defn.get("database", ""))
+        for fiyat in fiyat_adlari:
+            fiyat_id = fiyat.get("ID", 0)
+            fiyat_adi = fiyat.get("AD") or f"Fiyat {fiyat_id}"
+            p = resolve_params(defn.get("params_template", {}))
+            p["FIYAT_AD"] = fiyat_id
+            conn = self.get_connection(defn.get("database", ""))
+            try:
+                rows = self.execute_procedure(conn, defn["sql"], ordered_param_values(defn, p), bool(defn.get("multi_result", False)))
+            finally:
+                conn.close()
+            rows = [r for r in (rows or []) if isinstance(r, dict)]
+            if not rows:
+                self.println(f"stock_list(akış): ürün yok, fiyat adı atlandı -> {fiyat_id} / {fiyat_adi}")
+                continue
+            for r in rows:
+                r["FIYAT_AD"] = fiyat_id
+                r["FIYAT_AD_ID"] = fiyat_id
+                r["FIYAT_ADI"] = fiyat_adi
+                r["FIYAT_LISTE_ADI"] = fiyat_adi
+            for page_rows in split_rows_for_paged_push(rows, max_bytes=PAGED_PUSH_TARGET_BYTES, max_rows=PAGED_PUSH_MAX_ROWS_PER_PAGE):
+                part_no += 1
+                toplam += len(page_rows)
+                zincir.update(hash_obj(page_rows).encode("utf-8"))
+                post_json(server_url, tenant, {
+                    "action": "dataset_page_part", "dataset_key": dataset_key, "upload_id": upload_id,
+                    "part_no": part_no, "total_parts": part_no, "params": params, "data": page_rows,
+                }, client_secret=secret, timeout=300)
+                self._bekle_istek_bitsin()  # kullanıcı raporları öncelikli
+            self.println(f"stock_list(akış): fiyat adı gönderildi -> {fiyat_id} / {fiyat_adi} / {len(rows)} ürün (toplam {toplam}, sayfa {part_no})")
+            del rows
+        if part_no == 0:
+            raise RuntimeError("stock_list(akış): hiçbir fiyat adından ürün gelmedi, commit yapılmadı.")
+        data_hash = zincir.hexdigest()
+        resp = post_json(server_url, tenant, {
+            "action": "dataset_page_commit", "dataset_key": dataset_key, "upload_id": upload_id,
+            "params": params, "total_parts": part_no, "total_row_count": toplam, "data_hash": data_hash,
+        }, client_secret=secret, timeout=600)
+        if not isinstance(resp, dict) or not resp.get("ok"):
+            raise RuntimeError(f"stock_list(akış) commit hatası: {resp}")
+        # Snapshot: veri RAM'de olmadığı için hash/satır sayısı doğrudan yazılır
+        key = dataset_run_key(dataset_key, params)
+        snap = load_snapshots()
+        snap[key] = {"dataset_key": dataset_key, "params": params, "data_hash": data_hash, "row_count": toplam, "last_sync_at": now_str()}
+        save_snapshots(snap)
+        resp["total_parts"] = part_no
+        resp["total_row_count"] = toplam
+        return resp
+
     def execute_dataset(self, defn: Dict[str, Any], params: Dict[str, Any]):
         conn = self.get_connection(defn.get("database", ""))
         try:
@@ -3539,10 +3641,30 @@ class Main(QMainWindow):
             total += 1
             self.println(f"→ Çalışıyor: {defn['dataset_key']}")
             if dataset_key == "stock_list":
-                # Tek web datasetine basılacak ama satırlar fiyat adına göre zenginleştirilecek.
-                data = self.execute_stock_list_all_price_names(defn)
+                # v19 — Önce ilk fiyat adının satır sayısına bakılır; büyükse akış modu:
+                # fiyat adı bazında çekilir ve sayfa sayfa hemen gönderilir (RAM sabit).
                 params = resolve_params(defn.get("params_template", {}))
                 params["FIYAT_AD"] = 0
+                if self._stock_list_is_big(defn):
+                    # Akış modunda "değişiklik yok" hash kıyası yapılamaz → en fazla
+                    # STOCK_LIST_STREAM_MIN_INTERVAL_SEC'de bir tam gönderim (force hariç).
+                    onceki = load_snapshots().get(dataset_run_key(dataset_key, params), {}) or {}
+                    son = str(onceki.get("last_sync_at") or "")
+                    try:
+                        yas = (datetime.now() - datetime.strptime(son, "%Y-%m-%d %H:%M:%S")).total_seconds() if son else 1e9
+                    except ValueError:
+                        yas = 1e9
+                    if not (force or dataset_force) and yas < STOCK_LIST_STREAM_MIN_INTERVAL_SEC:
+                        self.println(f"= stock_list (akış): son tam gönderim {int(yas//60)} dk önce, atlandı.")
+                        continue
+                    sonuc = self._push_stock_list_streaming(defn, params)
+                    pushed += 1
+                    total_rows = int(sonuc.get("total_row_count") or 0)
+                    self.record_success(defn["dataset_key"], params, total_rows, status="ok", note="otomatik/push-akis")
+                    self.println(f"✓ Gönderildi (akış): {defn['dataset_key']} ({total_rows} kayıt, {sonuc.get('total_parts')} sayfa)")
+                    continue
+                # Tek web datasetine basılacak ama satırlar fiyat adına göre zenginleştirilecek.
+                data = self.execute_stock_list_all_price_names(defn)
             else:
                 data = self.execute_dataset(defn, params)
             self.protect_mass_delete(defn, params, data, force=force)
