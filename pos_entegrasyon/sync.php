@@ -2100,48 +2100,34 @@ try {
             }
 
             $paramsHash = sha256_hex(cache_lookup_json($datasetKey, $params));
+
+            // v20 — 200K ürünlü müşteri: eski sürüm TÜM sayfaları PHP dizisine
+            // açıyordu (200K satır ≈ 500 MB) → memory_limit aşımı → delta hiç
+            // işlenmiyordu. Artık sayfalar TEK TEK okunur, yalnızca değişen
+            // sayfalar yerinde güncellenir; yeni satırlar sona yeni sayfa olarak eklenir.
+            @ini_set('memory_limit', '512M');
+            @set_time_limit(900);
+
             $stmt = $pdo->prepare(
-                "SELECT page_no, data_json
+                "SELECT page_no
                    FROM dataset_cache_pages
                   WHERE tenant_id = ? AND dataset_key = ? AND params_hash = ?
                   ORDER BY page_no ASC"
             );
             $stmt->execute([$tenantId, $datasetKey, $paramsHash]);
-            $pageRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-            if (!$pageRows) {
+            $pageNos = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN, 0));
+            if (!$pageNos) {
                 respond(['ok' => false, 'error' => 'paged_cache_not_found', 'message' => 'Önce full sayfalı seed gerekir.'], 404);
             }
 
-            $order = [];
-            $rowsByKey = [];
-            foreach ($pageRows as $pageRow) {
-                $rows = json_decode((string)$pageRow['data_json'], true);
-                if (!is_array($rows)) {
-                    continue;
-                }
-                foreach ($rows as $row) {
-                    if (!is_array($row)) {
-                        continue;
-                    }
-                    $rk = paged_dataset_row_key($datasetKey, $row);
-                    if (!array_key_exists($rk, $rowsByKey)) {
-                        $order[] = $rk;
-                    }
-                    $rowsByKey[$rk] = $row;
-                }
-            }
-
-            $deleteCount = 0;
+            $deleteSet = [];
             foreach ($deletes as $del) {
                 if (!is_array($del)) continue;
                 $rk = trim((string)($del['row_key'] ?? ''));
-                if ($rk !== '' && array_key_exists($rk, $rowsByKey)) {
-                    unset($rowsByKey[$rk]);
-                    $deleteCount++;
-                }
+                if ($rk !== '') $deleteSet[$rk] = true;
             }
 
-            $upsertCount = 0;
+            $changeMap = [];
             foreach ($changes as $chg) {
                 if (!is_array($chg)) continue;
                 $row = $chg['row'] ?? null;
@@ -2150,42 +2136,94 @@ try {
                 if ($rk === '') {
                     $rk = paged_dataset_row_key($datasetKey, $row);
                 }
-                if (!array_key_exists($rk, $rowsByKey)) {
-                    $order[] = $rk;
-                }
-                $rowsByKey[$rk] = $row;
-                $upsertCount++;
+                $changeMap[$rk] = $row;
             }
 
-            $newRows = [];
-            foreach ($order as $rk) {
-                if (array_key_exists($rk, $rowsByKey)) {
-                    $newRows[] = $rowsByKey[$rk];
-                }
-            }
-
-            if ($totalRowCount <= 0) {
-                $totalRowCount = count($newRows);
-            }
-            if ($dataHash === '') {
-                $dataHash = sha256_hex($datasetKey . '|' . $paramsHash . '|' . (string)$totalRowCount . '|' . clean_json([$upsertCount, $deleteCount, time()]));
-            }
-
-            $pages = split_rows_for_page_storage($newRows, 450000, 10000);
-
-            $pdo->beginTransaction();
-            $pdo->prepare(
+            $selectPage = $pdo->prepare(
+                "SELECT data_json FROM dataset_cache_pages
+                  WHERE tenant_id = ? AND dataset_key = ? AND params_hash = ? AND page_no = ?"
+            );
+            $updatePage = $pdo->prepare(
+                "UPDATE dataset_cache_pages
+                    SET row_count = ?, data_hash = ?, data_json = ?, updated_at = NOW()
+                  WHERE tenant_id = ? AND dataset_key = ? AND params_hash = ? AND page_no = ?"
+            );
+            $deletePage = $pdo->prepare(
                 "DELETE FROM dataset_cache_pages
-                  WHERE tenant_id = ? AND dataset_key = ? AND params_hash = ?"
-            )->execute([$tenantId, $datasetKey, $paramsHash]);
-
+                  WHERE tenant_id = ? AND dataset_key = ? AND params_hash = ? AND page_no = ?"
+            );
             $insertPage = $pdo->prepare(
                 "INSERT INTO dataset_cache_pages
                     (tenant_id, dataset_key, params_hash, page_no, row_count, data_hash, data_json, created_at, updated_at)
                  VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())"
             );
 
-            $pageNo = 0;
+            $pdo->beginTransaction();
+
+            $deleteCount = 0;
+            $upsertCount = 0;
+            $totalRows = 0;
+            $maxPageNo = 0;
+            $pageCount = 0;
+
+            foreach ($pageNos as $pageNo) {
+                $maxPageNo = max($maxPageNo, $pageNo);
+                $selectPage->execute([$tenantId, $datasetKey, $paramsHash, $pageNo]);
+                $pageJson = (string)$selectPage->fetchColumn();
+                $selectPage->closeCursor();
+
+                $rows = json_decode($pageJson, true);
+                unset($pageJson);
+                if (!is_array($rows)) {
+                    $pageCount++;
+                    continue;
+                }
+
+                $changed = false;
+                $out = [];
+                foreach ($rows as $row) {
+                    if (!is_array($row)) continue;
+                    $rk = paged_dataset_row_key($datasetKey, $row);
+                    if (isset($deleteSet[$rk])) {
+                        $deleteCount++;
+                        $changed = true;
+                        continue;
+                    }
+                    if (array_key_exists($rk, $changeMap)) {
+                        $out[] = $changeMap[$rk];
+                        unset($changeMap[$rk]);
+                        $upsertCount++;
+                        $changed = true;
+                        continue;
+                    }
+                    $out[] = $row;
+                }
+                unset($rows);
+
+                if ($changed) {
+                    if (count($out) === 0) {
+                        $deletePage->execute([$tenantId, $datasetKey, $paramsHash, $pageNo]);
+                    } else {
+                        $outJson = clean_json($out);
+                        $updatePage->execute([count($out), sha256_hex($outJson), $outJson, $tenantId, $datasetKey, $paramsHash, $pageNo]);
+                        unset($outJson);
+                        $pageCount++;
+                    }
+                } else {
+                    $pageCount++;
+                }
+                $totalRows += count($out);
+                unset($out);
+            }
+
+            // Hiçbir sayfada bulunmayan değişiklikler = yeni satırlar → sona yeni sayfa(lar)
+            $newRows = array_values($changeMap);
+            unset($changeMap);
+            $upsertCount += count($newRows);
+            $totalRows += count($newRows);
+            $pages = split_rows_for_page_storage($newRows, 450000, 10000);
+            unset($newRows);
+            $pageNo = $maxPageNo;
             foreach ($pages as $page) {
                 $pageNo++;
                 $pageJson = clean_json($page);
@@ -2198,20 +2236,29 @@ try {
                     sha256_hex($pageJson),
                     $pageJson,
                 ]);
+                $pageCount++;
+            }
+            unset($pages);
+
+            if ($totalRowCount <= 0) {
+                $totalRowCount = $totalRows;
+            }
+            if ($dataHash === '') {
+                $dataHash = sha256_hex($datasetKey . '|' . $paramsHash . '|' . (string)$totalRowCount . '|' . clean_json([$upsertCount, $deleteCount, time()]));
             }
 
             $saved = save_dataset_cache_meta($pdo, $tenantId, $datasetKey, $params, $totalRowCount, $dataHash, [
                 'paged_delta' => true,
                 'upsert_count' => $upsertCount,
                 'delete_count' => $deleteCount,
-                'page_count' => count($pages),
+                'page_count' => $pageCount,
             ]);
 
             log_sync($pdo, $tenantId, $datasetKey, 'dataset_page_delta_push', 'ok', null, clean_json($params), [
                 'upsert_count' => $upsertCount,
                 'delete_count' => $deleteCount,
                 'row_count' => $totalRowCount,
-                'page_count' => count($pages),
+                'page_count' => $pageCount,
                 'lookup_json' => $saved['lookup_json'],
             ]);
 
@@ -2223,7 +2270,7 @@ try {
                 'upsert_count' => $upsertCount,
                 'delete_count' => $deleteCount,
                 'row_count' => $totalRowCount,
-                'page_count' => count($pages),
+                'page_count' => $pageCount,
             ] + $saved);
         }
 
@@ -2244,6 +2291,19 @@ try {
 
             $pdo->prepare("DELETE FROM dataset_upload_chunks WHERE tenant_id = ? AND upload_id = ?")
                 ->execute([$tenantId, $uploadId]);
+
+            // v20 — Commit edilememiş eski yüklemeler birikmesin (200K ürünlü müşteride
+            // 28 yükleme ≈ 10 GB birikmişti). 12 saatten eski parçalar dilim dilim silinir.
+            @set_time_limit(300);
+            $stale = $pdo->prepare(
+                "DELETE FROM dataset_upload_chunks
+                  WHERE tenant_id = ? AND dataset_key = ? AND created_at < NOW() - INTERVAL 12 HOUR
+                  LIMIT 200"
+            );
+            for ($i = 0; $i < 25; $i++) {
+                $stale->execute([$tenantId, $datasetKey]);
+                if ($stale->rowCount() < 200) break;
+            }
 
             respond(['ok' => true, 'upload_id' => $uploadId, 'dataset_key' => $datasetKey, 'total_parts' => $totalParts]);
         }
@@ -2307,20 +2367,27 @@ try {
                 respond(['ok' => false, 'error' => 'invalid_page_commit'], 400);
             }
 
+            // v20 — 200K ürünlü müşteri: eski sürüm TÜM parçaları tek fetchAll ile
+            // (80+ MB metin) PHP belleğine alıyordu → memory_limit aşımı → commit
+            // hiç tamamlanmıyor, stok listesi web'e hiç gelmiyordu. Artık yalnızca
+            // part_no listesi çekilir; her parça tek tek okunur, yazılır, bırakılır.
+            @ini_set('memory_limit', '512M');
+            @set_time_limit(900);
+
             $stmt = $pdo->prepare(
-                "SELECT part_no, total_parts, chunk_text
+                "SELECT part_no
                    FROM dataset_upload_chunks
                   WHERE tenant_id = ? AND upload_id = ? AND dataset_key = ?
                   ORDER BY part_no ASC"
             );
             $stmt->execute([$tenantId, $uploadId, $datasetKey]);
-            $parts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $partNos = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN, 0));
 
-            if (count($parts) !== $totalParts) {
+            if (count($partNos) !== $totalParts) {
                 respond([
                     'ok' => false,
                     'error' => 'page_upload_incomplete',
-                    'received_parts' => count($parts),
+                    'received_parts' => count($partNos),
                     'total_parts' => $totalParts,
                 ], 409);
             }
@@ -2354,16 +2421,25 @@ try {
                  VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())"
             );
 
+            $selectPart = $pdo->prepare(
+                "SELECT chunk_text FROM dataset_upload_chunks
+                  WHERE tenant_id = ? AND upload_id = ? AND dataset_key = ? AND part_no = ?"
+            );
+
             $actualRows = 0;
-            foreach ($parts as $part) {
-                $pageNo = (int)$part['part_no'];
-                $rows = json_decode((string)$part['chunk_text'], true);
+            foreach ($partNos as $pageNo) {
+                $selectPart->execute([$tenantId, $uploadId, $datasetKey, $pageNo]);
+                $chunkText = (string)$selectPart->fetchColumn();
+                $selectPart->closeCursor();
+
+                $rows = json_decode($chunkText, true);
                 if (!is_array($rows)) {
                     throw new RuntimeException('invalid_page_json');
                 }
 
                 $rowCount = count($rows);
                 $actualRows += $rowCount;
+                unset($rows);
 
                 $insertPage->execute([
                     $tenantId,
@@ -2371,9 +2447,10 @@ try {
                     $stagingHash,
                     $pageNo,
                     $rowCount,
-                    sha256_hex((string)$part['chunk_text']),
-                    (string)$part['chunk_text'],
+                    sha256_hex($chunkText),
+                    $chunkText,
                 ]);
+                unset($chunkText);
             }
 
             if ($totalRowCount <= 0) {

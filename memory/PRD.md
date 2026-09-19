@@ -397,5 +397,18 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - **Ürün Detayı:** `GET /api/data/gunluk-urun-detay?tenant_id&tarih&stok_id&stok_adi` → saat dağılımı + ürünü içeren fişler (`_gunluk_fisleri_yukle` ortak yardımcı, gunluk-fisler ile paylaşılır). UI: DailyProductSalesSection satırına dokun → akordeon (testID daily-product-row-N / daily-product-detail).
 - **Haftalık Ürün Trendi:** `GET /api/data/haftalik-urun-trend?tenant_id&bitis&limit&lokasyon_id` → 7 günün params_hash'leriyle tek akış; ürün başına GUNLUK[7], TOPLAM, GUN_ORT, IVME_YUZDE (son 3 gün vs ilk 3 gün). UI: `WeeklyProductTrendSection.tsx` (gün özet çubukları, En Çok / Yükselen modu, arama; testID weekly-product-trend, weekly-trend-search, weekly-trend-mode-toplam/ivme, weekly-trend-more). 200K ürünlü tenant: 5,1 sn.
 - Not: Bu oturumda hosting (185.223.77.132) sandbox'tan aralıklı erişilemez oldu; bekçi TLS tüneline düşüyor, login 6 sn'ye çıkabiliyor — ortam kaynaklı.
-- Sürüm 1.0.53 (iOS 57 / Android 57); `/api/sistem-durum` → `2026-09-20-v20-baslik-buyuk-isim`.
+- Sürüm 1.0.53 (iOS 57 / Android 57); `/api/sistem-durum` → `2026-09-20-v20-baslik-buyuk-isim-tunel-fix`.
 - v20: Dashboard başlığı — dar ekranda aksiyon butonları ikinci satıra iner, "Hoş geldiniz" (15-16pt) ve kullanıcı adı (26-27pt) büyütüldü; adjustsFontSizeToFit küçültmesi minimumFontScale 0.85 ile sınırlandı.
+
+## 2026-09-19 — v20: 200K ürünlü müşteride stok listesi NEDEN gelmiyordu (KÖK NEDEN + FIX) ✅
+- Teşhis endpoint'i: `GET /api/data/senkron-tani?tenant_id=…&dataset_key=stock_list` → üst kayıt, sayfa istatistikleri, **yarım yüklemeler** (dataset_upload_chunks), son sync_logs, 24 saat işlem özeti, tamamlama durumu.
+- **KÖK NEDEN**: POS istemcisi 830 parçanın hepsini (830/830) sync.php'ye başarıyla yüklüyor; ancak `dataset_page_commit` PHP'de tüm parçaları tek `fetchAll` ile (~370 MB) belleğe alıyordu → memory_limit aşımı → commit hiç tamamlanmıyor, log bile yazılmıyor. Her ~45 dk yeni yükleme → **28 yarım yükleme ≈ 10 GB çöp** `dataset_upload_chunks`'ta birikti (DB sunucusunu da yoruyor).
+- **Düzeltmeler**
+  - `sync.php` `dataset_page_commit`: parçalar TEK TEK okunur/yazılır (RAM'de tek parça), `memory_limit 512M`, `set_time_limit 900`.
+  - `sync.php` `dataset_page_delta_push`: tüm sayfaları diziye açmak yerine sayfa sayfa yerinde güncelleme; yeni satırlar sona yeni sayfa.
+  - `sync.php` `dataset_page_begin`: 12 saatten eski commit edilmemiş parçaları dilim dilim siler.
+  - Backend `services/yarim_yukleme.py` + `POST /api/data/senkron-yarim-yukleme-tamamla {tenant_id, dataset_key}`: en güncel tam yüklemeyi web tarafında parça parça commit eder (staging hash → tek transaction takas → dataset_cache meta → sync_logs), ardından tenant'ın TÜM upload parçalarını 200'lük dilimlerle siler. İlerleme `senkron-tani.tamamlama_durumu`.
+  - `veri_temizlik.py` 3b: 1 günden eski `dataset_upload_chunks` günlük temizlik.
+- **MySQL bağlantı dalgalanması** (185.223.77.132, 3306 + TLS 3308): yeni TCP bağlantılarının çoğu greeting almadan düşüyor (sunucu IO yükü / sağlayıcı). Backend IP: 34.170.12.145 (whitelist için). v20 sertleştirme: `services/__init__.py` — paralel greeting yoklaması (2), paralel create_pool yarışı (2), `connect_timeout 12 / wait 16`, ölü tünelde takılmama (tünel hedefi TCP kapalıysa direkt 3306, karar önbelleğe alınmaz), havuz açılamazsa endpoint kararı unutulur, `pymysql OperationalError(2003)` de yakalanır (eskiden 500 dönüyordu).
+- UYARI: uvicorn `--reload` açık → backend dosyası düzenlemek canlı havuz bağlantılarını düşürür; DB dalgalanırken düzenleme yapma.
+- Kullanıcının yapması gerekenler: (1) hosting'e yeni `sync.php` yükle (`/api/pos-dosya/sync.php`), (2) müşteri POS'unda `client.py` güncel olsun, (3) Railway redeploy.

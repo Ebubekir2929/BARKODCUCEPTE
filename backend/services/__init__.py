@@ -1,5 +1,6 @@
 import aiomysql
 import asyncio
+from pymysql.err import OperationalError as _MySQLOpErr  # (2003) Can't connect — OSError DEĞİL
 import os
 import logging
 from dotenv import load_dotenv
@@ -33,18 +34,33 @@ _endpoint_cache: dict = {}  # host -> (host, port, expires_monotonic)
 _ENDPOINT_TTL_SEC = 300
 
 
-async def _mysql_greeting_ok(host: str, port: int, timeout: float = 4.0) -> bool:
-    try:
-        r, w = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
+async def _mysql_greeting_ok(host: str, port: int, timeout: float = 4.0, deneme: int = 2) -> bool:
+    """v20 — Sağlayıcının SYN-proxy'si bağlantıların bir kısmını rastgele düşürüyor
+    (aynı anda 1 deneme 15 sn askıda, diğeri 0.3 sn'de yanıtlıyor). Tek yoklamayla
+    '3306 ölü' demeyip `deneme` adet bağlantıyı PARALEL açar; biri greeting alırsa
+    sağlıklı sayılır."""
+    async def _bir():
         try:
-            data = await asyncio.wait_for(r.read(5), timeout)
-            # MySQL greeting: payload[0] = protokol sürümü (0x0a). Hata paketi
-            # (örn. ER_HOST_IS_BLOCKED) 0xFF ile başlar → sağlıklı DEĞİL.
-            return len(data) >= 5 and data[4] != 0xFF
-        finally:
-            w.close()
-    except Exception:
+            r, w = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
+            try:
+                data = await asyncio.wait_for(r.read(5), timeout)
+                # MySQL greeting: payload[0] = protokol sürümü (0x0a). Hata paketi
+                # (örn. ER_HOST_IS_BLOCKED) 0xFF ile başlar → sağlıklı DEĞİL.
+                return len(data) >= 5 and data[4] != 0xFF
+            finally:
+                w.close()
+        except Exception:
+            return False
+
+    gorevler = [asyncio.ensure_future(_bir()) for _ in range(max(1, deneme))]
+    try:
+        for bitti in asyncio.as_completed(gorevler):
+            if await bitti:
+                return True
         return False
+    finally:
+        for g in gorevler:
+            g.cancel()
 
 
 async def _resolve_mysql_endpoint(host: str) -> tuple:
@@ -56,15 +72,69 @@ async def _resolve_mysql_endpoint(host: str) -> tuple:
         ep = (host, 3306)
     else:
         tls_port = int(os.environ.get('MYSQL_TLS_PORT', '0') or 0)
-        if tls_port:
+        tls_host = os.environ.get('MYSQL_TLS_HOST', host)
+        # v20 — Tünel hedefi (3308) de kapalıysa tünele bağlanmak anlamsız; 5 dk
+        # boyunca ölü tünelde takılı kalıyorduk (3306 toparlansa bile). Bu durumda
+        # direkt 3306'ya dön ve kararı ÖNBELLEĞE ALMA → sonraki deneme yeniden yoklar.
+        if tls_port and await _tcp_acik(tls_host, tls_port):
             from .tls_tunnel import ensure_tunnel, LOCAL_TUNNEL_PORT
-            await ensure_tunnel(os.environ.get('MYSQL_TLS_HOST', host), tls_port)
+            await ensure_tunnel(tls_host, tls_port)
             logger.warning(f"MySQL direkt 3306 erişilemiyor — TLS tüneli kullanılıyor ({host})")
             ep = ('127.0.0.1', LOCAL_TUNNEL_PORT)
         else:
-            ep = (host, 3306)
+            logger.warning(f"MySQL 3306 ve TLS {tls_port} şu an yanıt vermiyor — direkt 3306 deneniyor, karar önbelleğe alınmadı ({host})")
+            return (host, 3306)
     _endpoint_cache[host] = (ep[0], ep[1], _time.monotonic() + _ENDPOINT_TTL_SEC)
     return ep
+
+
+async def _tcp_acik(host: str, port: int, timeout: float = 4.0) -> bool:
+    try:
+        _, w = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
+        w.close()
+        return True
+    except Exception:
+        return False
+
+
+def _endpoint_unut(host: str) -> None:
+    """Havuz açılamadıysa endpoint kararını unut → sonraki deneme yeniden yoklar."""
+    _endpoint_cache.pop(host, None)
+
+
+async def _havuz_ac(host_env: str, deneme: int = 2, **pool_kw):
+    """v20 — Havuzu açar. Sağlayıcı el sıkışmaların bir kısmını rastgele düşürdüğü
+    için `deneme` adet create_pool PARALEL yarışır; ilk başaran kalır, diğerleri
+    kapatılır. Hepsi düşerse endpoint kararı unutulur ve hata fırlatılır."""
+    host = os.environ.get(host_env, '185.223.77.132')
+    h, p = await _resolve_mysql_endpoint(host)
+
+    async def _bir():
+        return await asyncio.wait_for(
+            aiomysql.create_pool(host=h, port=p, autocommit=True, minsize=1,
+                                 pool_recycle=280, connect_timeout=12, **pool_kw),
+            timeout=16)  # v20 — IO yükü altındaki sunucuda el sıkışma 5 sn'yi aşabiliyor
+
+    gorevler = [asyncio.ensure_future(_bir()) for _ in range(max(1, deneme))]
+    kazanan = None
+    son_hata: Exception = asyncio.TimeoutError()
+    try:
+        for bitti in asyncio.as_completed(gorevler):
+            try:
+                kazanan = await bitti
+                break
+            except (asyncio.TimeoutError, OSError, _MySQLOpErr) as exc:
+                son_hata = exc
+    finally:
+        for g in gorevler:
+            if g.done() and not g.cancelled() and g.exception() is None and g.result() is not kazanan:
+                g.result().close()  # fazladan açılan havuz
+            elif not g.done():
+                g.cancel()
+    if kazanan is None:
+        _endpoint_unut(host)
+        raise son_hata
+    return kazanan
 
 
 async def init_patron_pool():
@@ -77,22 +147,15 @@ async def init_patron_pool():
         # 2026-08 — wait_for: MySQL sunucusu TCP kabul edip el sıkışmayı
         # yanıtlamazsa istekler sonsuza dek asılı kalmasın (net hata dönsün).
         try:
-            _p_host, _p_port = await _resolve_mysql_endpoint(
-                os.environ.get('MYSQL_PATRON_HOST', '185.223.77.132'))
-            patron_pool = await asyncio.wait_for(aiomysql.create_pool(
-                host=_p_host,
-                port=_p_port,
+            patron_pool = await _havuz_ac(
+                'MYSQL_PATRON_HOST',
                 user=os.environ.get('MYSQL_PATRON_USER', 'patron'),
                 password=os.environ.get('MYSQL_PATRON_PASS', ''),
                 db=os.environ.get('MYSQL_PATRON_DB', 'patron'),
                 charset='utf8',
-                autocommit=True,
-                minsize=1,
                 maxsize=10,
-                pool_recycle=280,
-                connect_timeout=5,
-            ), timeout=8)
-        except (asyncio.TimeoutError, OSError) as exc:
+            )
+        except (asyncio.TimeoutError, OSError, _MySQLOpErr) as exc:
             _patron_last_fail = _time.monotonic()
             logger.error(f"patron MySQL pool init BAŞARISIZ: {exc!r}")
             raise DBUnreachableError("MySQL (patron) sunucusuna ulaşılamıyor") from exc
@@ -108,22 +171,15 @@ async def init_data_pool():
         if (_time.monotonic() - _data_last_fail) < _FAIL_CACHE_SEC:
             raise DBUnreachableError("MySQL (kasacepteweb) sunucusuna ulaşılamıyor — kısa süre önce deneme başarısız oldu")
         try:
-            _d_host, _d_port = await _resolve_mysql_endpoint(
-                os.environ.get('MYSQL_DATA_HOST', '185.223.77.132'))
-            data_pool = await asyncio.wait_for(aiomysql.create_pool(
-            host=_d_host,
-            port=_d_port,
-            user=os.environ.get('MYSQL_DATA_USER', 'kceptetransfer'),
-            password=os.environ.get('MYSQL_DATA_PASS', ''),
-            db=os.environ.get('MYSQL_DATA_DB', 'kasacepteweb'),
-            charset='utf8mb4',
-            autocommit=True,
-            minsize=1,
-            maxsize=15,
-            pool_recycle=280,
-            connect_timeout=5,
-        ), timeout=8)
-        except (asyncio.TimeoutError, OSError) as exc:
+            data_pool = await _havuz_ac(
+                'MYSQL_DATA_HOST',
+                user=os.environ.get('MYSQL_DATA_USER', 'kceptetransfer'),
+                password=os.environ.get('MYSQL_DATA_PASS', ''),
+                db=os.environ.get('MYSQL_DATA_DB', 'kasacepteweb'),
+                charset='utf8mb4',
+                maxsize=15,
+            )
+        except (asyncio.TimeoutError, OSError, _MySQLOpErr) as exc:
             _data_last_fail = _time.monotonic()
             logger.error(f"kasacepteweb MySQL pool init BAŞARISIZ: {exc!r}")
             raise DBUnreachableError("MySQL (kasacepteweb) sunucusuna ulaşılamıyor") from exc

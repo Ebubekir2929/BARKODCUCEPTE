@@ -30,7 +30,7 @@ TENANT_LIVE = "ea5231b886ef47baac5b49188f2ef0d3"
 TARIH = "2026-09-14"
 STOK_ID = "27210514"
 STOK_ADI = "GALETA"
-EXPECTED_SURUM = "2026-09-20-v20-baslik-buyuk-isim"
+EXPECTED_SURUM = "2026-09-20-v20-baslik-buyuk-isim-tunel-fix"
 
 
 def _request_with_retry(method: str, url: str, **kw):

@@ -1396,6 +1396,93 @@ async def get_available_dataset_keys(
     }
 
 
+@router.get("/senkron-tani")
+async def senkron_tani(
+    tenant_id: str = Query(...),
+    dataset_key: str = Query("stock_list"),
+    hafif: bool = Query(False),
+    current_user: dict = Depends(get_current_user),
+):
+    """v20 — Senkron teşhisi: bir veri setinin üst kaydı, sayfa istatistikleri ve
+    POS istemcisinin sync.php'ye yaptığı son çağrıların kaydı (sync_logs).
+    200K ürünlü müşteride stok listesi neden gelmiyor sorusunu DB'ye girmeden
+    yanıtlamak için."""
+    pool = await get_data_pool()
+    out: Dict[str, Any] = {"tenant_id": tenant_id, "dataset_key": dataset_key}
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"SELECT row_count, updated_at, LENGTH(data_json) FROM dataset_cache WHERE tenant_id=%s AND dataset_key=%s",
+                (tenant_id, dataset_key))
+            m = await cur.fetchone()
+            out["ust_kayit"] = {"row_count": m[0], "updated_at": m[1].isoformat() if m[1] else None, "json_bayt": m[2]} if m else None
+            await cur.execute(
+                """SELECT params_hash, COUNT(*), COALESCE(SUM(row_count),0), MIN(updated_at), MAX(updated_at)
+                   FROM dataset_cache_pages WHERE tenant_id=%s AND dataset_key=%s GROUP BY params_hash""",
+                (tenant_id, dataset_key))
+            out["sayfalar"] = [
+                {"params_hash": r[0], "sayfa": r[1], "satir": int(r[2]), "ilk": r[3].isoformat() if r[3] else None, "son": r[4].isoformat() if r[4] else None}
+                for r in await cur.fetchall()]
+            if hafif:
+                # Parça tablosu GB'larca olabilir; GROUP BY ağır → hafif modda atla
+                out["yarim_yuklemeler"] = None
+            else:
+                await cur.execute(
+                    """SELECT upload_id, COUNT(*), MAX(total_parts), MIN(created_at), MAX(created_at)
+                       FROM dataset_upload_chunks WHERE tenant_id=%s AND dataset_key=%s GROUP BY upload_id""",
+                    (tenant_id, dataset_key))
+                out["yarim_yuklemeler"] = [
+                    {"upload_id": r[0], "gelen_parca": r[1], "toplam_parca": r[2], "ilk": r[3].isoformat() if r[3] else None, "son": r[4].isoformat() if r[4] else None}
+                    for r in await cur.fetchall()]
+            await cur.execute(
+                """SELECT action_name, status, error_text, meta_json, created_at
+                   FROM sync_logs WHERE tenant_id=%s AND (dataset_key=%s OR dataset_key IS NULL)
+                   ORDER BY created_at DESC LIMIT 40""",
+                (tenant_id, dataset_key))
+            out["son_loglar"] = [
+                {"islem": r[0], "durum": r[1], "hata": (r[2] or "")[:300] or None,
+                 "meta": (r[3] or "")[:300] or None, "zaman": r[4].isoformat() if r[4] else None}
+                for r in await cur.fetchall()]
+            await cur.execute(
+                """SELECT action_name, COUNT(*), MAX(created_at) FROM sync_logs
+                   WHERE tenant_id=%s AND created_at > NOW() - INTERVAL 1 DAY GROUP BY action_name ORDER BY 3 DESC""",
+                (tenant_id,))
+            out["son_24s_islem_ozeti"] = [{"islem": r[0], "adet": r[1], "son": r[2].isoformat() if r[2] else None} for r in await cur.fetchall()]
+    from services import yarim_yukleme as _yy
+    out["tamamlama_durumu"] = _yy.durum(tenant_id, dataset_key)
+    return out
+
+
+@router.post("/senkron-yarim-yukleme-tamamla")
+async def senkron_yarim_yukleme_tamamla(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """v20 — POS'un gönderdiği ama sync.php'nin commit edemediği (PHP bellek)
+    sayfalı yüklemeyi web tarafında parça parça tamamlar; ardından biriken
+    tüm upload parçalarını (GB'larca) siler. Arka planda çalışır; ilerleme
+    /senkron-tani → tamamlama_durumu'ndan izlenir.
+    Body: { tenant_id, dataset_key?='stock_list', upload_id?, temizle?=true }"""
+    tenant_id = str(body.get("tenant_id") or "").strip()
+    dataset_key = str(body.get("dataset_key") or "stock_list").strip()
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id gerekli")
+    from services import yarim_yukleme as _yy
+    pool = await get_data_pool()
+    if body.get("sadece_temizle"):
+        # Commit zaten yapıldı; yalnızca biriken parçaları sil (yeniden başlatılabilir)
+        async def _sil():
+            _yy._guncelle(f"{tenant_id}|{dataset_key}", asama="temizleniyor", sonuc=None)
+            n = await _yy.parcalari_sil(pool, tenant_id, dataset_key)
+            _yy._guncelle(f"{tenant_id}|{dataset_key}", asama="bitti", sonuc="ok", silinen_parca=n)
+        asyncio.create_task(_sil())
+    else:
+        asyncio.create_task(_yy.tamamla(pool, tenant_id, dataset_key, body.get("upload_id"), bool(body.get("temizle", True))))
+    await asyncio.sleep(0.2)
+    return {"ok": True, "baslatildi": True, "durum": _yy.durum(tenant_id, dataset_key)}
+
+
+
 # === On-demand sync requests (via sync.php) ===
 
 import httpx

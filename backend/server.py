@@ -132,7 +132,7 @@ _POS_FILES = {"client.py": "text/x-python", "sync.php": "application/octet-strea
 @app.get("/api/sistem-durum", include_in_schema=False)
 async def sistem_durum(derin: int = 0):
     import services as _svc
-    out = {"surum": "2026-09-20-v20-baslik-buyuk-isim", "patron": None, "data": None}
+    out = {"surum": "2026-09-20-v20-baslik-buyuk-isim-tunel-fix", "patron": None, "data": None}
     # 2026-08 — OOM teşhisi: çalışma süresi (restart tespiti için)
     try:
         with open("/proc/self/stat") as f:
@@ -206,6 +206,15 @@ async def sistem_durum(derin: int = 0):
                         "SELECT id, params_json FROM dataset_cache WHERE tenant_id='d5587c87a7f9476fa82b83f40accd6c7' AND dataset_key='hourly_data' ORDER BY updated_at DESC"), timeout=10)
                     rows = await cur.fetchall()
                 out["derin_meta_sorgu"] = {"sure": round(_t.monotonic() - t0, 2), "satir": len(rows)}
+                # v20 — Sunucu limitleri: havuz boyutu/recycle bu değerlere göre ayarlanır
+                async with conn.cursor() as cur:
+                    await _aio.wait_for(cur.execute(
+                        "SHOW VARIABLES WHERE Variable_name IN ('wait_timeout','interactive_timeout','max_connections','max_user_connections','max_connect_errors','max_allowed_packet')"), timeout=8)
+                    out["mysql_degiskenler"] = {r[0]: r[1] for r in await cur.fetchall()}
+                async with conn.cursor() as cur:
+                    await _aio.wait_for(cur.execute(
+                        "SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_connected','Aborted_connects','Connection_errors_max_connections','Max_used_connections','Uptime')"), timeout=8)
+                    out["mysql_durum"] = {r[0]: r[1] for r in await cur.fetchall()}
             finally:
                 pool.release(conn)
         except Exception as exc:

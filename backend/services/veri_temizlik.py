@@ -215,6 +215,27 @@ async def temizlik_calistir() -> dict:
     except Exception as e:
         stat["sayfa_hata"] = str(e)[:200]
 
+    # 3b) v20 — dataset_upload_chunks: commit edilememiş sayfalı yükleme parçaları.
+    # 200K ürünlü müşteride her 45 dk'da 830×450 KB (~370 MB) birikiyordu (28 yükleme ≈ 10 GB).
+    # 1 günden eski parçalar küçük dilimlerle (parça ≈ 450 KB) silinir.
+    try:
+        async def _eski_parca_sil() -> int:
+            toplam = 0
+            while True:
+                async with pool.acquire() as conn:
+                    async with conn.cursor() as cur:
+                        await cur.execute(
+                            "DELETE FROM dataset_upload_chunks WHERE created_at < NOW() - INTERVAL 1 DAY LIMIT 200"
+                        )
+                        n = cur.rowcount or 0
+                toplam += n
+                if n < 200:
+                    return toplam
+                await asyncio.sleep(PARCA_ARASI_SN)
+        stat["eski_yukleme_parca_silinen"] = await _eski_parca_sil()
+    except Exception as e:
+        stat["yukleme_parca_hata"] = str(e)[:200]
+
     # 4) hourly_stock_detail SUPERSEDED kopyalar — EN BÜYÜK şişme kaynağı.
     # POS aynı (TARIH, SAAT, STOK, LOKASYON) kombinasyonunu her push'ta yeniden
     # yazar; okuma tarafı (dedupe) yalnızca EN GÜNCEL satırı kullanır — eski
