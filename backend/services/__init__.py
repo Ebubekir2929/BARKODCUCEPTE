@@ -169,13 +169,26 @@ async def stream_rows(pool, sql: str, params=None, chunk: int = 1000):
 
 
 async def close_pools():
+    """v18 — Kapanış askıda kalmasın: meşgul bağlantı (yarım kalan SSCursor akışı,
+    arka plan görevi) varsa wait_closed sonsuza dek bekliyordu → uvicorn reload /
+    Railway SIGTERM'de "Waiting for application shutdown" takılması. 3 sn içinde
+    kapanmayan havuz terminate() ile zorla kapatılır."""
     global patron_pool, data_pool
-    if patron_pool:
-        patron_pool.close()
-        await patron_pool.wait_closed()
-    if data_pool:
-        data_pool.close()
-        await data_pool.wait_closed()
+    for ad in ("patron_pool", "data_pool"):
+        havuz = globals().get(ad)
+        if not havuz:
+            continue
+        try:
+            havuz.close()
+            await asyncio.wait_for(havuz.wait_closed(), timeout=3)
+        except (asyncio.TimeoutError, Exception) as e:
+            logger.warning(f"[close_pools] {ad} 3 sn'de kapanmadı ({type(e).__name__}) — terminate")
+            try:
+                havuz.terminate()
+                await asyncio.wait_for(havuz.wait_closed(), timeout=2)
+            except Exception:
+                pass
+        globals()[ad] = None
     logger.info("MySQL pools closed")
 
 

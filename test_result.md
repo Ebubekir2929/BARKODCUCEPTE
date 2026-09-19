@@ -2633,3 +2633,8 @@ agent_communication:
     sync.php v41 report_prefetch_list, client.py _prefetch_reports kullanım tabanlı liste.
   - rap_* MySQL cache yaş sınırı (bugünü kapsar 600 sn / geçmiş 12 sa), TIMESTAMPDIFF ile DB saati.
   - testing_agent iteration_21: 6 birim + 7 API testi PASS. VERIFIED ✅
+
+## 2026-09-19 — v18 saatlik indeks (200K ürünlü müşteri) + Günlük Ürün Satışları
+  - hourly_stock_detail okumaları params_hash indeksiyle (18 sn → 1 sn), dashboard tek gün 2 sorgu (fetch_day_datasets),
+    GET /api/data/gunluk-urun-satis + DailyProductSalesSection. close_pools/shutdown askı düzeltmesi.
+  - pytest tests/test_v18_gunluk_urun_satis.py 10/10; testing_agent iteration_22 frontend 5/5 PASS. VERIFIED ✅

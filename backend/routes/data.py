@@ -330,50 +330,58 @@ def aggregate_dataset(key: str, raw_items: list) -> list:
 
 
 
-async def fetch_dataset(pool, tenant_id: str, dataset_key: str, filter_date: Optional[str] = None):
-    """Fetch dataset - if filter_date given, find record matching that date, otherwise get latest"""
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            if filter_date:
-                # 2026-06 — Önce SADECE hafif kolonları çek (blob YOK), tarihi
-                # Python'da eşle, sonra yalnız eşleşen kaydın blob'unu al.
-                # (Eski hali tüm günlerin MB'lık bloblarını taşıyordu — tünelde çok yavaş.)
-                await cur.execute("""
-                    SELECT id, params_json
-                    FROM dataset_cache 
-                    WHERE tenant_id = %s AND dataset_key = %s
-                    ORDER BY updated_at DESC
-                """, (tenant_id, dataset_key))
-                meta_rows = await cur.fetchall()
+_SATIR_YOK = object()  # fetch_dataset(row=...) için "kayıt yok" işareti
 
-                match_id = None
-                for rid, pjson in meta_rows:
-                    try:
-                        params = json.loads(pjson) if pjson else {}
-                        sdate_val = params.get('sdate', '')
-                        if sdate_val and sdate_val.startswith(filter_date):
-                            match_id = rid
-                            break
-                    except (json.JSONDecodeError, TypeError):
-                        continue
 
-                row = None
-                if match_id is not None:
+async def fetch_dataset(pool, tenant_id: str, dataset_key: str, filter_date: Optional[str] = None, row=None):
+    """Fetch dataset - if filter_date given, find record matching that date, otherwise get latest.
+    v18 — `row` verilirse (data_json, row_count, synced_at, updated_at, params_json) DB'ye
+    gidilmez; `_SATIR_YOK` verilirse boş öğe döner. Toplu gün çekimi (fetch_day_datasets) kullanır."""
+    if row is _SATIR_YOK:
+        row = None
+    elif row is None:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                if filter_date:
+                    # 2026-06 — Önce SADECE hafif kolonları çek (blob YOK), tarihi
+                    # Python'da eşle, sonra yalnız eşleşen kaydın blob'unu al.
+                    # (Eski hali tüm günlerin MB'lık bloblarını taşıyordu — tünelde çok yavaş.)
+                    await cur.execute("""
+                        SELECT id, params_json
+                        FROM dataset_cache 
+                        WHERE tenant_id = %s AND dataset_key = %s
+                        ORDER BY updated_at DESC
+                    """, (tenant_id, dataset_key))
+                    meta_rows = await cur.fetchall()
+
+                    match_id = None
+                    for rid, pjson in meta_rows:
+                        try:
+                            params = json.loads(pjson) if pjson else {}
+                            sdate_val = params.get('sdate', '')
+                            if sdate_val and sdate_val.startswith(filter_date):
+                                match_id = rid
+                                break
+                        except (json.JSONDecodeError, TypeError):
+                            continue
+
+                    row = None
+                    if match_id is not None:
+                        await cur.execute("""
+                            SELECT data_json, row_count, synced_at, updated_at, params_json
+                            FROM dataset_cache WHERE id = %s
+                        """, (match_id,))
+                        row = await cur.fetchone()
+                else:
+                    # Get latest (real-time mode)
                     await cur.execute("""
                         SELECT data_json, row_count, synced_at, updated_at, params_json
-                        FROM dataset_cache WHERE id = %s
-                    """, (match_id,))
+                        FROM dataset_cache 
+                        WHERE tenant_id = %s AND dataset_key = %s
+                        ORDER BY updated_at DESC
+                        LIMIT 1
+                    """, (tenant_id, dataset_key))
                     row = await cur.fetchone()
-            else:
-                # Get latest (real-time mode)
-                await cur.execute("""
-                    SELECT data_json, row_count, synced_at, updated_at, params_json
-                    FROM dataset_cache 
-                    WHERE tenant_id = %s AND dataset_key = %s
-                    ORDER BY updated_at DESC
-                    LIMIT 1
-                """, (tenant_id, dataset_key))
-                row = await cur.fetchone()
     
     if not row:
         return {"data": [], "row_count": 0, "synced_at": None, "updated_at": None, "params": {}}
@@ -569,6 +577,87 @@ async def _finans_gun_toplamlari(tenant_id: str, like_patterns: list, limit: int
             kart += k
         gun_toplam[gun] = {"toplam": round(toplam, 2), "nakit": round(nakit, 2), "kart": round(kart, 2)}
     return gun_toplam
+
+
+@router.get("/gunluk-urun-satis")
+async def gunluk_urun_satis(
+    tenant_id: str = Query(...),
+    tarih: str = Query(..., description="YYYY-MM-DD"),
+    lokasyon_id: Optional[int] = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    """v18 — Seçilen günde her üründen KAÇ ADET satıldı (dashboard bölümü).
+
+    Kaynak: `hourly_stock_detail` satırları (saat × lokasyon × ürün). Günün
+    params_hash'i ile indeksli okunur (200K ürünlü müşteride de ~1 sn), ürünler
+    STOK_ID bazında toplanır; miktar sırasına göre döner.
+    """
+    import re as _re
+    if not _re.match(r"^\d{4}-\d{2}-\d{2}$", tarih or ""):
+        raise HTTPException(status_code=422, detail="tarih YYYY-MM-DD biçiminde olmalı")
+
+    params = {
+        "sdate": f"{tarih} 00:00:00",
+        "edate": f"{tarih} 23:59:59",
+        "lokasyonID": int(lokasyon_id) if lokasyon_id else None,
+        "_skip_aggregate": True,
+    }
+    try:
+        rows = await lookup_rows_dataset(tenant_id, "hourly_stock_detail", params)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ürün satışları okunamadı: {e}")
+    rows = _flatten_hourly_urunler(rows or [])
+
+    def _f(v):
+        try:
+            return float(v) if v is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    urunler: Dict[str, dict] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        ad = str(r.get("STOK_ADI") or "").strip()
+        if not ad:
+            continue  # üst (aggregate) satır
+        if str(r.get("TARIH") or "")[:10] not in ("", tarih):
+            continue
+        sid = str(r.get("STOK_ID") or ad)
+        u = urunler.get(sid)
+        if u is None:
+            u = urunler[sid] = {
+                "STOK_ID": r.get("STOK_ID"), "STOK_ADI": ad, "BIRIM_ADI": r.get("BIRIM_ADI") or "",
+                "MIKTAR": 0.0, "TUTAR": 0.0, "SAATLER": set(), "LOKASYONLAR": set(),
+            }
+        u["MIKTAR"] += _f(r.get("TOPLAM_MIKTAR") if r.get("TOPLAM_MIKTAR") is not None else r.get("MIKTAR"))
+        u["TUTAR"] += max(
+            _f(r.get("KDV_DAHIL_TOPLAM_TUTAR")),
+            _f(r.get("PERAKENDE_KDV_DAHIL_TOPLAM_TUTAR")),
+            _f(r.get("ERP12_KDV_DAHIL_TOPLAM_TUTAR")),
+        )
+        if r.get("SAAT_ADI"):
+            u["SAATLER"].add(str(r.get("SAAT_ADI")).strip()[:5])
+        if r.get("LOKASYON"):
+            u["LOKASYONLAR"].add(str(r.get("LOKASYON")).strip())
+
+    out = []
+    for u in urunler.values():
+        out.append({
+            "STOK_ID": u["STOK_ID"], "STOK_ADI": u["STOK_ADI"], "BIRIM_ADI": u["BIRIM_ADI"],
+            "MIKTAR": round(u["MIKTAR"], 3), "TUTAR": round(u["TUTAR"], 2),
+            "SAAT_SAYISI": len(u["SAATLER"]), "SAATLER": sorted(u["SAATLER"]),
+            "LOKASYONLAR": sorted(u["LOKASYONLAR"]),
+        })
+    out.sort(key=lambda x: (-x["MIKTAR"], -x["TUTAR"], x["STOK_ADI"]))
+    return {
+        "ok": True,
+        "tarih": tarih,
+        "urun_sayisi": len(out),
+        "toplam_miktar": round(sum(x["MIKTAR"] for x in out), 3),
+        "toplam_tutar": round(sum(x["TUTAR"] for x in out), 2),
+        "data": _fix_large_ints(out),
+    }
 
 
 @router.get("/gunluk-fisler")
@@ -786,6 +875,54 @@ async def haftalik_trend(
     return {"ok": True, "data": out}
 
 
+async def fetch_day_datasets(pool, tenant_id: str, keys: List[str], day: str) -> Dict[str, dict]:
+    """v18 — Bir günün birden çok veri setini 2 sorguda getirir:
+    1) hafif meta (id, dataset_key, params_json; updated_at >= gün ön süzgeci),
+    2) eşleşen id'lerin blobları tek SSCursor akışında.
+    Her öğe fetch_dataset(row=...) ile aynı son işlemden geçer."""
+    key_ph = ",".join(["%s"] * len(keys))
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(f"""
+                SELECT id, dataset_key, params_json
+                FROM dataset_cache
+                WHERE tenant_id = %s AND dataset_key IN ({key_ph}) AND updated_at >= %s
+                ORDER BY updated_at DESC
+            """, (tenant_id, *keys, day))
+            meta_rows = await cur.fetchall()
+    secilen: Dict[str, int] = {}
+    for rid, dk, pjson in meta_rows:
+        if dk in secilen:
+            continue
+        try:
+            params = json.loads(pjson) if pjson else {}
+        except (json.JSONDecodeError, TypeError):
+            continue
+        sv = params.get("sdate", "") if isinstance(params, dict) else ""
+        if sv and str(sv).startswith(day):
+            secilen[dk] = rid
+    satirlar: Dict[str, tuple] = {}
+    if secilen:
+        id_ph = ",".join(["%s"] * len(secilen))
+        async for rid, dk, data_json, row_count, synced_at, updated_at, params_json in stream_rows(
+            pool,
+            f"""SELECT id, dataset_key, data_json, row_count, synced_at, updated_at, params_json
+                FROM dataset_cache WHERE id IN ({id_ph})""",
+            tuple(secilen.values()), chunk=4,
+        ):
+            satirlar[dk] = (data_json, row_count, synced_at, updated_at, params_json)
+    out: Dict[str, dict] = {}
+    for k in keys:
+        try:
+            out[k] = await asyncio.wait_for(
+                fetch_dataset(pool, tenant_id, k, day, row=satirlar.get(k, _SATIR_YOK)), timeout=20
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"[dashboard] {k} zaman aşımı (20s) — boş dönülüyor")
+            out[k] = {"data": [], "row_count": 0, "synced_at": None, "updated_at": None}
+    return out
+
+
 @router.get("/dashboard")
 async def get_dashboard_data(
     tenant_id: str = Query(...),
@@ -813,18 +950,12 @@ async def get_dashboard_data(
             edate = sdate
         
         if sdate == edate:
-            # Single date — 2026-06: tünel gecikmesine karşı PARALEL çekim
-            # (en fazla 4 eşzamanlı — bağlantı patlamasını önler)
-            _sem = asyncio.Semaphore(4)
-            async def _fetch_one(k):
-                async with _sem:
-                    try:
-                        return await asyncio.wait_for(fetch_dataset(pool, tenant_id, k, sdate), timeout=20)
-                    except asyncio.TimeoutError:
-                        logger.warning(f"[dashboard] {k} zaman aşımı (20s) — boş dönülüyor")
-                        return {"data": [], "row_count": 0, "synced_at": None, "updated_at": None}
-            fetched = await asyncio.gather(*[_fetch_one(key) for key in dashboard_keys])
-            for key, item in zip(dashboard_keys, fetched):
+            # Single date — v18: 11 veri seti için 22 ayrı sorgu yerine TEK meta
+            # taraması + TEK blob akışı (fetch_day_datasets). Tünel gecikmesinde
+            # ~3-5 sn → ~1 sn. Öğe işleme (delta_rows, tarih süzgeci) aynı.
+            fetched = await fetch_day_datasets(pool, tenant_id, dashboard_keys, sdate)
+            for key in dashboard_keys:
+                item = fetched.get(key) or {"data": [], "row_count": 0, "synced_at": None, "updated_at": None}
                 item.pop("params", None)
                 result[key] = item
         else:
@@ -1760,7 +1891,18 @@ async def get_hourly_stock_detail(
     # ── STEP 1: Cache-first — dataset_cache_rows'tan doğrudan çek ─────────
     try:
         pool = await get_data_pool()
-        params_sql = [tenant_id, f'%"SAAT_ADI":"{canonical_hour}"%', f'%"TARIH":"{filter_date}%']
+        # v18 — Günün params_hash'i ile indeksli okuma. Eski hali `row_json LIKE`
+        # ile tenant'ın TÜM satırlarını tarıyordu (200K ürünlü müşteride 531 MB
+        # → 18 sn; grafiğe dokununca ürünler gelmiyordu). Hash yoksa eski yol.
+        from services.dataset_cache import _hourly_gun_hashleri
+        _hashler = await _hourly_gun_hashleri(pool, tenant_id, f"{filter_date} 00:00:00", f"{filter_date} 23:59:59")
+        params_sql = [tenant_id, f'%"SAAT_ADI":"{canonical_hour}"%']
+        if _hashler:
+            where_gun = f" AND params_hash IN ({','.join(['%s'] * len(_hashler))})"
+            params_sql.extend(_hashler)
+        else:
+            where_gun = " AND row_json LIKE %s"
+            params_sql.append(f'%"TARIH":"{filter_date}%')
         where_extra = ""
         if lokasyon_id:
             where_extra = " AND row_json LIKE %s"
@@ -1776,7 +1918,7 @@ async def get_hourly_stock_detail(
               AND dataset_key='hourly_stock_detail'
               AND deleted_at IS NULL
               AND row_json LIKE %s
-              AND row_json LIKE %s
+              {where_gun}
               {where_extra}
             """,
             tuple(params_sql),

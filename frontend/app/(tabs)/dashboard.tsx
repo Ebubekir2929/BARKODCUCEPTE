@@ -39,6 +39,7 @@ import { MonthlyCompareCard } from '../../src/components/dashboard/MonthlyCompar
 import { MonthlyTrendChart } from '../../src/components/dashboard/MonthlyTrendChart';
 import { MonthDetailModal } from '../../src/components/dashboard/MonthDetailModal';
 import { DailyReceiptsSection } from '../../src/components/dashboard/DailyReceiptsSection';
+import { DailyProductSalesSection } from '../../src/components/dashboard/DailyProductSalesSection';
 import { CardTypeLocationModal } from '../../src/components/dashboard/CardTypeLocationModal';
 import { HourDetailModal } from '../../src/components/dashboard/HourDetailModal';
 import { LocationIptalModal } from '../../src/components/dashboard/LocationIptalModal';
@@ -1389,6 +1390,15 @@ export default function DashboardScreen() {
           colors={colors}
           style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}
           onMonthPress={(ay) => setSelectedTrendMonth(ay)}
+        />
+
+        {/* Günlük Ürün Satışları — 2026-09 v18: üründen kaç adet satıldı (tarih + şube filtresine bağlı) */}
+        <DailyProductSalesSection
+          tenantId={activeTenantId}
+          tarih={`${filters.startDate.getFullYear()}-${String(filters.startDate.getMonth() + 1).padStart(2, '0')}-${String(filters.startDate.getDate()).padStart(2, '0')}`}
+          lokasyonId={filters.branchId && /^\d+$/.test(String(filters.branchId)) ? String(filters.branchId) : null}
+          colors={colors}
+          style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}
         />
 
         {/* Günlük Satılan Fişler — 2026-08 yeni bölüm (tarih filtresine bağlı) */}

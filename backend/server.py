@@ -132,7 +132,7 @@ _POS_FILES = {"client.py": "text/x-python", "sync.php": "application/octet-strea
 @app.get("/api/sistem-durum", include_in_schema=False)
 async def sistem_durum(derin: int = 0):
     import services as _svc
-    out = {"surum": "2026-09-18-v17-rapor-on-yukleme", "patron": None, "data": None}
+    out = {"surum": "2026-09-19-v18-saatlik-indeks", "patron": None, "data": None}
     # 2026-08 — OOM teşhisi: çalışma süresi (restart tespiti için)
     try:
         with open("/proc/self/stat") as f:
@@ -411,8 +411,20 @@ async def shutdown():
         stop_watcher()
     except Exception:
         pass
+    # v18 — arka plan görevleri (bekçiler, rapor bekleme görevleri) kapanışı
+    # engellemesin: hepsi iptal edilir, havuzlar süre sınırıyla kapatılır.
+    for gorev in list(asyncio.all_tasks()):
+        if gorev is asyncio.current_task():
+            continue
+        try:
+            dosya = gorev.get_coro().cr_code.co_filename  # uvicorn/starlette görevlerine dokunma
+        except Exception:
+            dosya = ""
+        if "uvicorn" in dosya or "starlette" in dosya:
+            continue
+        gorev.cancel()
     try:
-        await close_pools()
+        await asyncio.wait_for(close_pools(), timeout=8)
     except Exception:
         pass
 

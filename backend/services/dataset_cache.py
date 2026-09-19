@@ -780,6 +780,41 @@ async def lookup_pages_dataset(
         return None
 
 
+async def _hourly_gun_hashleri(pool, tenant_id: str, sdate_str: str, edate_str: str) -> Optional[List[str]]:
+    """2026-09 v18 — hourly_stock_detail satırları, günün üst kaydıyla (dataset_cache,
+    params {sdate:"GÜN 00:00:00", edate:"GÜN 23:59:59"}) AYNI params_hash'i taşır.
+    Gün(ler)in hash'lerini küçük dataset_cache tablosundan çözüp dataset_cache_rows'u
+    (tenant_id, dataset_key, params_hash) indeksiyle okuruz. Eski yol row_json LIKE
+    '%"TARIH":"…"%' ile tenant'ın TÜM satırlarını tarıyordu — 200K ürünlü müşteride
+    9.952 satır / 531 MB → 20 sn (saatlik grafiğe dokununca ürünler gelmiyordu).
+    Döner: hash listesi; tarih çözülemezse None (çağıran eski yola düşer)."""
+    try:
+        from datetime import date as _d, timedelta as _td
+        _sd = _d.fromisoformat((sdate_str or "")[:10])
+        _ed = _d.fromisoformat((edate_str or sdate_str)[:10])
+    except (ValueError, TypeError):
+        return None
+    if _sd > _ed or (_ed - _sd).days > 45:
+        return None
+    likes, args = [], []
+    g = _sd
+    while g <= _ed:
+        likes.append("params_json LIKE %s")
+        args.append(f'%"sdate":"{g.isoformat()}%')
+        g += _td(days=1)
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"""
+                SELECT DISTINCT params_hash FROM dataset_cache
+                WHERE tenant_id=%s AND dataset_key='hourly_stock_detail'
+                  AND ({' OR '.join(likes)})
+                """,
+                (tenant_id, *args),
+            )
+            return [r[0] for r in await cur.fetchall() if r and r[0]]
+
+
 async def lookup_rows_dataset(
     tenant_id: str,
     dataset_key: str,
@@ -874,6 +909,13 @@ async def lookup_rows_dataset(
                     _date_likes = []
                     _date_args = []
                 _date_sql = f" AND ({' OR '.join(_date_likes)})" if _date_likes else ""
+                # v18 — günün params_hash'leri bulunduysa LIKE taraması yerine indeks
+                _hashler = await _hourly_gun_hashleri(pool, tenant_id, sdate_str, edate_str)
+                if _hashler is not None:
+                    if not _hashler:
+                        return []  # o gün için hiç push yok → boş (veri var ama eşleşme yok anlamında)
+                    _date_sql = f" AND params_hash IN ({','.join(['%s'] * len(_hashler))})"
+                    _date_args = list(_hashler)
                 if skip_agg and not is_single_hour:
                     # Full-day RAW — no hour pre-filter, return ALL rows
                     _sql = f"""
@@ -984,15 +1026,25 @@ async def lookup_rows_dataset(
 
                 seen_keys: set = set()
                 agg: dict = {}
+                # v18 — tarih verilmişse yalnızca o günlerin params_hash'leri okunur
+                _agg_sql_extra = ""
+                _agg_args: list = [tenant_id]
+                if sdate_str:
+                    _h = await _hourly_gun_hashleri(pool, tenant_id, sdate_str, edate_str)
+                    if _h is not None:
+                        if not _h:
+                            return []
+                        _agg_sql_extra = f" AND params_hash IN ({','.join(['%s'] * len(_h))})"
+                        _agg_args.extend(_h)
                 async for row_json_raw, upd in stream_rows(
                     pool,
-                    """
+                    f"""
                     SELECT row_json, updated_at
                     FROM dataset_cache_rows
-                    WHERE tenant_id=%s AND dataset_key='hourly_stock_detail' AND deleted_at IS NULL
+                    WHERE tenant_id=%s AND dataset_key='hourly_stock_detail' AND deleted_at IS NULL{_agg_sql_extra}
                     ORDER BY updated_at DESC
                     """,
-                    (tenant_id,),
+                    tuple(_agg_args),
                     chunk=100,
                 ):
                     try:

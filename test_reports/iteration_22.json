@@ -1,0 +1,33 @@
+{
+  "summary": "v18 'Günlük Ürün Satışları' dashboard section frontend testing complete on mobile viewport 390x844. All acceptance criteria verified: (1) login with cakmak.ebubekir29@gmail.com / 1234567 → dashboard renders with 'HOŞ GELDINIZ' greeting and 'Açık Masalar' section. (2) Section 'Günlük Ürün Satışları' (testID=daily-product-sales) is present, shows date 19.09.2026 (container date=today) and correctly renders the empty state 'Bu tarihte ürün satışı yok' for today · Merkez. (3) Opened filter modal via the funnel button (top-right header), changed both Başlangıç and Bitiş text-inputs to 26/08/2026, tapped Uygula → filter banner reads '26/08 - 26/08' and section header updates to '1 adet · 1 ürün · ₺2,00' with rank-1 row 'Abdul Rızaoğlu · 1 farklı saatte · Merkez · 1 adet · ₺2,00' (bar filled ~100%). (4) daily-product-search input filters correctly: typing 'abdul' shows '1 ürün bulundu' and keeps the row; typing 'xyz-no-match' shows '0 ürün bulundu' + empty-state 'Aramayla eşleşen ürün yok'. (5) Tapping daily-product-sort-tutar then daily-product-sort-adet highlights the correct segment (primary bg + white text) with no crash or re-fetch. (6) Regression OK: 'Günlük Satılan Fişler' renders immediately below with its own search box and 1 fiş row; 'Aylık Karşılaştırma' (Eylül vs Ağustos) and 'Son 6 Ay Satış Trendi' cards render above. No console errors (only ignored shadow*/expo-notifications/pointerEvents deprecation warnings). No pageerrors. No deprecated Expo packages detected in the tested component.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/tmp/daily_product_empty.png",
+    "/tmp/filter_modal.png",
+    "/tmp/daily_product_with_data.png",
+    "/tmp/sort_tutar.png",
+    "/tmp/sort_adet.png"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "DailyProductSalesSection.tsx (~236 lines) is well-scoped, uses async/await + AbortController-free but has correct `iptal` flag cleanup for the useEffect fetch — no leaked setState on unmount.",
+    "Component uses process.env.EXPO_PUBLIC_BACKEND_URL and Bearer token from useAuthStore — matches project convention.",
+    "All interactive elements have testIDs: daily-product-sales (wrapper), daily-product-search (TextInput), daily-product-sort-adet, daily-product-sort-tutar, daily-product-more.",
+    "Touch targets meet 44px minimum (minHeight:44 on search wrapper, sort buttons, and 'Daha fazla göster').",
+    "All text is wrapped in <Text>. Styles applied inline (not StyleSheet.create) but consistent with dashboard.tsx pattern — no violation.",
+    "No MongoDB _id concerns (MySQL project). No mocked APIs."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (skipped per request)", "frontend": "100% (5/5 scenarios pass)"},
+  "seed_data_creation": "None; existing production data on 26.08.2026 (Merkez tenant, product 'Abdul Rızaoğlu', 1 adet ₺2,00) was used for the with-data assertions.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Container date is 2026-09-19; dashboard defaults to today so 'Günlük Ürün Satışları' initially shows empty state for Merkez. Dates with confirmed sales for Merkez tenant: 26.08.2026 (1 row, ₺2,00). Filter modal has 2 date text-inputs (Başlangıç/Bitiş) accepting DD/MM/YYYY; the funnel/filter button is the RIGHTMOST icon in the top header row (~x=365, y=40 on 390-wide viewport). Regression scope for future iterations: DailyReceiptsSection, MonthlyCompareCard, MonthlyTrendChart still render below/above the new section.",
+  "rca_of_issue": "N/A — no bugs found; feature verified working end-to-end via Playwright on the public preview URL."
+}
