@@ -5,7 +5,7 @@
  * akordeon olarak açılır. "Daha fazla göster" ile 10'arlı yüklenir.
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleProp, ViewStyle } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ActivityIndicator, StyleProp, ViewStyle, Share, Platform, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../store/authStore';
 
@@ -38,6 +38,36 @@ interface Props {
 
 const fmtTL = (v: any) => (parseFloat(String(v ?? '0')) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const saat = (t?: string) => (t && t.length >= 16 ? t.slice(11, 16) : '');
+
+
+// v22 — Fiş Paylaşma: fiş özetini düz metin olarak WhatsApp/SMS/… paylaşım sayfasına gönderir
+function fisMetni(f: Fis, firma?: string): string {
+  const satirlar = [
+    `🧾 ${firma ? firma + ' — ' : ''}Fiş ${f.BELGENO || '#' + f.FIS_ID}`,
+    `📅 ${f.FIS_TARIHI ? f.FIS_TARIHI.slice(0, 16).replace('T', ' ') : ''}${f.LOKASYON ? ' · ' + f.LOKASYON : ''}`,
+    f.KESEN_PERSONEL ? `👤 ${f.KESEN_PERSONEL}` : '',
+    '',
+    ...(f.DETAYLAR || []).map((u) =>
+      `• ${u.STOK_ADI || 'Ürün'}  ${(u.MIKTAR ?? 0).toLocaleString('tr-TR', { maximumFractionDigits: 3 })} ${u.BIRIM_ADI || ''}  ₺${fmtTL(u.DAHIL_TUTAR)}`),
+    '',
+    `TOPLAM: ₺${fmtTL(f.TUTAR)}`,
+  ];
+  return satirlar.filter((x, i) => x !== '' || (i > 0 && satirlar[i - 1] !== '')).join('\n');
+}
+
+async function fisPaylas(f: Fis, firma?: string) {
+  const mesaj = fisMetni(f, firma);
+  try {
+    if (Platform.OS === 'web' && typeof navigator !== 'undefined' && (navigator as any).share) {
+      await (navigator as any).share({ text: mesaj });
+      return;
+    }
+    await Share.share({ message: mesaj, title: `Fiş ${f.BELGENO || f.FIS_ID}` });
+  } catch {
+    // kullanıcı vazgeçti / desteklenmiyor → WhatsApp'a düş
+    Linking.openURL(`https://wa.me/?text=${encodeURIComponent(mesaj)}`).catch(() => {});
+  }
+}
 
 export function DailyReceiptsSection({ tenantId, tarih, colors, style }: Props) {
   const [fisler, setFisler] = useState<Fis[] | null>(null);
@@ -202,6 +232,32 @@ export function DailyReceiptsSection({ tenantId, tarih, colors, style }: Props) 
                 </TouchableOpacity>
                 {acik && (
                   <View style={{ paddingHorizontal: 12, paddingBottom: 12, borderTopWidth: 1, borderTopColor: colors.border }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, paddingTop: 10 }}>
+                      <TouchableOpacity
+                        testID={`fis-paylas-${f.FIS_ID}`}
+                        onPress={() => fisPaylas(f)}
+                        activeOpacity={0.6}
+                        style={{
+                          flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36,
+                          paddingHorizontal: 12, borderRadius: 10, backgroundColor: colors.primary + '15',
+                        }}
+                      >
+                        <Ionicons name="share-social-outline" size={16} color={colors.primary} />
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: colors.primary }}>Paylaş</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        testID={`fis-whatsapp-${f.FIS_ID}`}
+                        onPress={() => Linking.openURL(`https://wa.me/?text=${encodeURIComponent(fisMetni(f))}`).catch(() => {})}
+                        activeOpacity={0.6}
+                        style={{
+                          flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 36,
+                          paddingHorizontal: 12, borderRadius: 10, backgroundColor: '#25D36620',
+                        }}
+                      >
+                        <Ionicons name="logo-whatsapp" size={16} color="#25D366" />
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#25D366' }}>WhatsApp</Text>
+                      </TouchableOpacity>
+                    </View>
                     {f.DETAYLAR.length === 0 ? (
                       <Text style={{ fontSize: 12, color: colors.textSecondary, paddingTop: 10 }}>Ürün detayı yok</Text>
                     ) : f.DETAYLAR.map((u, i) => (

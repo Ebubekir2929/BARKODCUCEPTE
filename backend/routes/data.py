@@ -1453,6 +1453,25 @@ async def senkron_tani(
     return out
 
 
+@router.get("/stok-arama-durum")
+async def stok_arama_durum(tenant_id: str = Query(...), current_user: dict = Depends(get_current_user)):
+    """v22 — Büyük stok listesi arama indeksinin durumu."""
+    from services import stok_arama as _sa
+    return {"ok": True, "tenant_id": tenant_id, "durum": _sa.durum(tenant_id), "hazir": await _sa.indeks_hazir_mi(tenant_id)}
+
+
+@router.post("/stok-arama-indeksle")
+async def stok_arama_indeksle(body: dict, current_user: dict = Depends(get_current_user)):
+    """v22 — İndeksi (yeniden) kur. Body: { tenant_id, tam?: bool }. Arka planda çalışır."""
+    tenant_id = str(body.get("tenant_id") or "").strip()
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id gerekli")
+    from services import stok_arama as _sa
+    asyncio.create_task(_sa.indeksi_yenile(tenant_id, zorla_tam=bool(body.get("tam"))))
+    await asyncio.sleep(0.2)
+    return {"ok": True, "baslatildi": True, "durum": _sa.durum(tenant_id)}
+
+
 @router.post("/veri-diyeti-baslat")
 async def veri_diyeti_baslat(current_user: dict = Depends(get_current_user)):
     """v21 — Veritabanı diyetini hemen başlat (normalde İstanbul 03:00'te otomatik).
@@ -2695,13 +2714,21 @@ async def barcode_price(
     if not tenant_id or not barkod:
         raise HTTPException(status_code=400, detail="tenant_id ve barkod gerekli")
     try:
+        items = None
         if await dataset_satir_sayisi(tenant_id, "stock_list") > BUYUK_VERI_ESIGI:
-            # v19 — büyük tenant: barkodu içeren sayfalar LIKE ile bulunur, tüm liste RAM'e alınmaz
-            import contextlib
-            items = []
-            async with contextlib.aclosing(stream_dataset_items(tenant_id, "stock_list", barkod)) as akis:
-                async for sayfa in akis:
-                    items.extend(it for it in sayfa if barkod in (str(it.get("BARKOD") or "").strip(), str(it.get("KOD") or "").strip()))
+            # v22 — indeks hazırsa barkod/kod anahtar eşleşmesi (ms); değilse arka planda kur, LIKE'a düş
+            from services import stok_arama as _sa
+            if await _sa.indeks_hazir_mi(tenant_id):
+                items = await _sa.ara(tenant_id, barkod, None, max_aday=50)
+            else:
+                asyncio.create_task(_sa.indeksi_yenile(tenant_id))
+            if items is None:
+                # v19 — büyük tenant: barkodu içeren sayfalar LIKE ile bulunur, tüm liste RAM'e alınmaz
+                import contextlib
+                items = []
+                async with contextlib.aclosing(stream_dataset_items(tenant_id, "stock_list", barkod)) as akis:
+                    async for sayfa in akis:
+                        items.extend(it for it in sayfa if barkod in (str(it.get("BARKOD") or "").strip(), str(it.get("KOD") or "").strip()))
         else:
             items = await get_dataset_items(tenant_id, "stock_list")
         matches = [it for it in items if str(it.get("BARKOD", "") or "").strip() == barkod]
@@ -2884,6 +2911,33 @@ async def get_stock_list_sync(
             )
             sayfa_no = max(1, int(page or 1))
             bas = (sayfa_no - 1) * page_size
+
+            # v22 — HIZLI ARAMA: indeks hazırsa LIKE taraması yerine kelime indeksi
+            # (ms düzeyi). Hazır değilse arka planda kurulur, bu istek eski yola düşer.
+            if arama:
+                from services import stok_arama as _sa
+                if await _sa.indeks_hazir_mi(tenant_id):
+                    idx_rows = await _sa.ara(tenant_id, arama, fa_id)
+                    if idx_rows is not None:
+                        # Doğrulama katlanmış (Türkçe→ASCII) eşleşmeyle; diğer süzgeçler filter_stock_items'ta
+                        idx_rows = [r for r in idx_rows if _sa.eslesir(r, arama)]
+                        diger_filtreler = {k: v for k, v in filtre_args.items() if k != "search"}
+                        idx_rows = filter_stock_items(idx_rows, **diger_filtreler)
+                        idx_rows.sort(key=lambda it: str(it.get("AD") or "").strip().upper())
+                        toplam = len(idx_rows)
+                        return {
+                            "ok": True,
+                            "data": _fix_large_ints(idx_rows[bas:bas + page_size]),
+                            "page": sayfa_no,
+                            "page_size": page_size,
+                            "total_pages": max(1, (toplam + page_size - 1) // page_size) if toplam else 0,
+                            "total_count": toplam,
+                            "_source": "mysql_index",
+                            "_load_ms": int((time.time() - t0) * 1000),
+                        }
+                else:
+                    asyncio.create_task(_sa.indeksi_yenile(tenant_id))
+
             secilen: list = []
             sayac = 0
             # Arama LIKE ön süzgeci yalnızca ASCII güvenli 3+ karakterli terimlerde

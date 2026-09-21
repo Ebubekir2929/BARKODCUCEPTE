@@ -1,0 +1,30 @@
+{
+  "summary": "v22 frontend-only testing. All primary features PASS: (1) Hedef Kartı (testID hedef-karti) visible with 'Eylül Hedefi', ₺, %, progress bar, Kalan/Günlük gereken/Ay sonu tahmini boxes. Inline edit (hedef-duzenle → hedef-girdi → hedef-kaydet) works for 300000 (card refreshes to 'hedef ₺300.000') and reverts back to 250000. (2) Header compact: 'HOŞ GELDINIZ, EBUBEKİR ÇAK…' + 5 icons on single row. (3) Senkron Sağlığı reachable from Settings tab via testID 'ayar-senkron-saglik', shows title, Merkez/Gümüşhane chips, general status card (Merkez=Dikkat / Gümüşhane=Sorun var), POS bağlantısı, Veri tazeliği with 6 datasets with realistic ages ('2 sn önce', '10 sn önce', '22 sn önce', '2 dk önce', '3 dk önce', '62 gün önce' — NOT all '0 sn önce'), Bekleyen rapor istekleri, Son 24 saat hatalar sections. Chip switch reloads data; senkron-yenile refreshes; senkron-geri returns to Settings. (4) Fiş Paylaşma/WhatsApp buttons: today (2026-09-21) has 0 receipts on Merkez ('Bu tarihte fiş yok'); presence of testIDs fis-paylas-<id>/fis-whatsapp-<id> verified only via code review in DailyReceiptsSection.tsx (rendered inside expanded receipt row) — implementation looks correct. No red screens or console errors (only benign warnings: shadow* deprecated, pointerEvents deprecated, expo-notifications web).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Senkron Sağlığı loading", "issue": "GET /api/senkron/saglik?tenant_id=... takes ~13-15s to respond (measured via curl and UI). Screen shows spinner during this time. Not broken, but UX slow — consider adding a friendlier 'Yükleniyor…' placeholder or timeout hint on frontend. Backend query optimization may help.", "affected_testIDs": ["senkron-genel", "senkron-yenile"]}
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_24.json"],
+  "action_items": [
+    "Optional: Investigate /api/senkron/saglik latency (~13-15s). If it aggregates multiple SELECTs on hot tables, consider parallelizing or caching per-tenant summary for 30–60s. Not blocking for this feature.",
+    "Optional: On senkron-saglik.tsx add a small hint like 'Bu işlem 10-15 sn sürebilir' beneath the spinner while first fetch is pending, so users don't think it's frozen.",
+    "Fiş Paylaşma/WhatsApp buttons could not be end-to-end verified today because Merkez has 0 receipts for 2026-09-21. Code review confirms correct testIDs (fis-paylas-<FIS_ID>, fis-whatsapp-<FIS_ID>) rendered inside expanded receipt row. Main agent may quickly self-verify by changing the dashboard date filter to a day with receipts, or by seeding a receipt for today."
+  ],
+  "critical_code_review_comments": [
+    "TargetProgressCard.tsx: clean; uses testIDs, handles empty/edit/save/revert states properly.",
+    "senkron-saglik.tsx: correct testIDs (senkron-geri, senkron-yenile, senkron-tenant-<id>, senkron-genel); auth-redirect logic works when landing directly.",
+    "DailyReceiptsSection.tsx: fisPaylas() uses navigator.share on web and Share.share on native — good; WhatsApp fallback via Linking.openURL. testIDs `fis-paylas-<FIS_ID>` and `fis-whatsapp-<FIS_ID>` present."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (per prior report — 8/8 pytest v22)", "frontend": "~95% (share buttons not exercised due to zero receipts today; all other flows PASS)"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Login: cakmak.ebubekir29@gmail.com / 1234567. Merkez tenant=d5587c87a7f9476fa82b83f40accd6c7 already has hedef=250000 saved. Senkron API is slow (~13-15s) — wait at least 20s after clicking senkron menu before asserting content. Daily receipts empty for today; use dashboard date filter to a day with data (e.g. 2026-09-14) if you need to exercise fis-paylas/fis-whatsapp testIDs.",
+  "rca_of_issue": "N/A — all requested features function as designed. Only observed nit is slow senkron API response (~13-15s) which is a UX concern, not a bug."
+}

@@ -17,6 +17,9 @@ from routes.data import router as data_router
 from routes.notifications import router as notifications_router, ensure_tokens_table
 from routes.price_update import router as price_update_router
 from routes.islem import router as islem_router
+from routes.hedef import router as hedef_router
+from routes.saglik import router as saglik_router
+from routes.rapor_mail import router as rapor_mail_router
 from services import init_patron_pool, init_data_pool, close_pools
 
 
@@ -89,6 +92,9 @@ api_router.include_router(data_router)
 api_router.include_router(notifications_router)
 api_router.include_router(price_update_router)
 api_router.include_router(islem_router)
+api_router.include_router(hedef_router)
+api_router.include_router(saglik_router)
+api_router.include_router(rapor_mail_router)
 
 # Include the router in the main app
 app.include_router(api_router)
@@ -132,7 +138,7 @@ _POS_FILES = {"client.py": "text/x-python", "sync.php": "application/octet-strea
 @app.get("/api/sistem-durum", include_in_schema=False)
 async def sistem_durum(derin: int = 0):
     import services as _svc
-    out = {"surum": "2026-09-21-v21-sayfa-senkron-diyet", "patron": None, "data": None}
+    out = {"surum": "2026-09-23-v23-haftalik-rapor-maili", "patron": None, "data": None}
     # 2026-08 — OOM teşhisi: çalışma süresi (restart tespiti için)
     try:
         with open("/proc/self/stat") as f:
@@ -172,6 +178,12 @@ async def sistem_durum(derin: int = 0):
         from services.veri_temizlik import son_calisma as _temizlik, son_diyet as _diyet
         out["temizlik"] = dict(_temizlik) if _temizlik else {"durum": "henüz çalışmadı"}
         out["diyet"] = dict(_diyet) if _diyet else {"durum": "henüz çalışmadı (İstanbul 03:00)"}
+    except Exception:
+        pass
+    # v23 — Haftalık rapor maili son tur istatistiği
+    try:
+        from services.haftalik_rapor import son_calisma as _hr, sonraki_gonderim_metni as _hr_sonraki
+        out["haftalik_rapor"] = dict(_hr) if _hr else {"durum": "henüz çalışmadı", "sonraki": _hr_sonraki()}
     except Exception:
         pass
     try:
@@ -348,6 +360,10 @@ async def startup():
             from services.veri_temizlik import start_temizlik, start_diyet
             start_temizlik()
             start_diyet()  # v21 — gece 03:00 veritabanı diyeti
+            from services.stok_arama import start_yenileyici
+            start_yenileyici()  # v22 — büyük stok listesi arama indeksi (10 dk)
+            from services.haftalik_rapor import start_haftalik_rapor
+            start_haftalik_rapor()  # v23 — Pazartesi 08:00 haftalık satış özeti e-postası
         except Exception as e:
             logging.error(f"Failed to start veri temizlik: {e}")
 

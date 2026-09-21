@@ -36,6 +36,7 @@ import { WaiterSalesSection, HourlyLocationSection } from '../../src/components/
 import { KdvMatrahSection } from '../../src/components/dashboard/KdvMatrahSection';
 import { WeeklyTrendChart } from '../../src/components/dashboard/WeeklyTrendChart';
 import { MonthlyCompareCard } from '../../src/components/dashboard/MonthlyCompareCard';
+import { TargetProgressCard } from '../../src/components/dashboard/TargetProgressCard';
 import { MonthlyTrendChart } from '../../src/components/dashboard/MonthlyTrendChart';
 import { MonthDetailModal } from '../../src/components/dashboard/MonthDetailModal';
 import { DailyReceiptsSection } from '../../src/components/dashboard/DailyReceiptsSection';
@@ -1378,6 +1379,13 @@ export default function DashboardScreen() {
             const gun = new Date(tarih + 'T12:00:00');
             setFilters((f) => ({ ...f, startDate: gun, endDate: gun }));
           }}
+        />
+
+        {/* Hedef Takibi — 2026-09 v22: aylık satış hedefi + ilerleme çubuğu */}
+        <TargetProgressCard
+          tenantId={activeTenantId}
+          colors={colors}
+          style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}
         />
 
         {/* Aylık Karşılaştırma — 2026-08 yeni kart */}

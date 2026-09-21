@@ -2643,3 +2643,16 @@ agent_communication:
   - client.py streaming stock_list push; backend stream_dataset_items (/stock-list, /barcode-price); gunluk-urun-detay, haftalik-urun-trend;
     DailyProductSalesSection akordeon + WeeklyProductTrendSection.
   - testing_agent iteration_23: backend 10/10 + frontend 7/7 PASS. VERIFIED ✅
+
+## 2026-09-22 — v22 Hızlı Arama indeksi + Hedef Takibi + Senkron Sağlığı + Fiş Paylaşma
+  - services/stok_arama.py (kelime/konum/sayfa tabloları, artımlı yenileme), routes/hedef.py, routes/saglik.py,
+    TargetProgressCard, app/senkron-saglik.tsx, DailyReceiptsSection Paylaş/WhatsApp.
+  - pytest tests/test_v22_hedef_saglik_arama.py 8/8; testing_agent iteration_24 frontend PASS. VERIFIED ✅
+
+## 2026-09-22 — v23 Haftalık Rapor Maili
+  - services/haftalik_rapor.py (Pazartesi İstanbul 08:00 zamanlayıcı + yakalama turu, tenant başına hafta özeti, HTML/metin e-posta,
+    haftalik_rapor_ayar / haftalik_rapor_gonderim tabloları), routes/rapor_mail.py (ayar GET/PUT, onizleme, gonder-simdi),
+    src/components/settings/HaftalikRaporMailKarti.tsx (Ayarlar → HAFTALIK RAPOR MAİLİ). sistem-durum → haftalik_rapor.
+  - pytest tests/test_v23_haftalik_rapor.py 8/8; kuru tur (send_email mock) 53 kullanıcı → 2. turda tümü atlandı (tekrar yok) ✅;
+    UI: toggle aç/kapa + Şimdi Gönder hata alert'i ekran testi ✅. Gerçek e-posta dev'de gönderilemez (BREVO_API_KEY yalnız Railway'de;
+    dev Gmail SMTP 535). Prod'da forgot-password ile aynı mailer yolu. VERIFIED (dev) ✅

@@ -25,6 +25,7 @@ import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import notificationService from '../../src/services/notificationService';
 import AccentColorPickerModal from '../../src/components/AccentColorPickerModal';
+import HaftalikRaporMailKarti from '../../src/components/settings/HaftalikRaporMailKarti';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -1003,6 +1004,8 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        <HaftalikRaporMailKarti showSuccess={showSuccess} showError={showError} />
+
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('data_management')}</Text>
           <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -1067,6 +1070,18 @@ export default function SettingsScreen() {
                 ))}
               </View>
             </View>
+
+            <TouchableOpacity
+              style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}
+              onPress={() => router.push('/senkron-saglik')}
+              testID="ayar-senkron-saglik"
+            >
+              <View style={styles.menuItemLeft}>
+                <Ionicons name="sync-circle-outline" size={22} color={colors.primary} />
+                <Text style={[styles.menuItemLabel, { color: colors.text }]}>Senkron Sağlığı</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+            </TouchableOpacity>
 
             <TouchableOpacity
               style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}

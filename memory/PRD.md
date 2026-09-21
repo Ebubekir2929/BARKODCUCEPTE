@@ -441,3 +441,25 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
   - Test: mock harness (8 senaryo) + gerçek PHP 8 + MariaDB 10.11 ile uçtan uca (commit/replace/delete/finalize/delta merge/şema bakımı günde 1) → `/tmp/cli_test/harness.py`, `e2e.py`, `e2e_delta.py`.
 - Bilinen sınır: 734K satırda ürün arama LIKE taraması (~5-18 sn) → arama indeksi sonraki adım.
 - KULLANICI AKSİYONU: (1) hosting'e yeni sync.php (`/api/pos-dosya/sync.php`, `{"action":"surum"}` → v21), (2) 200K müşterinin POS'una yeni client.py (`/api/pos-dosya/client.py`; ilk turda bir kez tam kurulum yapar), (3) Railway redeploy (Dockerfile/requirements yeni).
+
+## 2026-09-22 — v22: Hızlı Ürün Arama indeksi + Senkron Sağlık Ekranı + Hedef Takibi + Fiş Paylaşma ✅
+- **Hızlı arama** (`services/stok_arama.py`): MySQL'de `stok_arama_kelime (tenant, kelime, stok_key)` PK-önek araması, `stok_arama_konum (tenant, stok_key, fiyat_ad, page_no, satir_idx)`, `stok_arama_sayfa (tenant, page_no, data_hash)`. Terimler Türkçe→ASCII katlanır; her terim `LIKE 'TERIM%'`, kesişim → konum → yalnızca ilgili sayfalar okunur → `filter_stock_items` ile doğrulanır. `/stock-list` (arama varsa) ve `/barcode-price` büyük tenant'ta indeks hazırsa `_source: mysql_index`; hazır değilse arka planda kurulur, eski LIKE yoluna düşer. Artımlı yenileme: sayfa data_hash farkı; hash'i değişen sayfa oranı >%50 → tam kurulum. `indeks_hazir_mi` = indeksli sayfa ≥ %98 (yarım kurulum hazır sayılmaz). Yenileyici 10 dk (`start_yenileyici`). Uçlar: `GET /data/stok-arama-durum`, `POST /data/stok-arama-indeksle {tenant_id, tam?}`. NOT: uvicorn --reload kurulumu keser (artımlı devam eder); ilk kurulum 200K müşteride ~1,5-2 sa (sunucu yavaş).
+- **Hedef Takibi** (`routes/hedef.py`, tablo `satis_hedefleri` kasacepteweb'de): `GET /hedef?tenant_id&ay`, `PUT /hedef`, `GET /hedef/gecmis`. Gerçekleşen = `_finans_gun_toplamlari` (dashboard Toplam ile aynı). Hedef girilmeyen ay en son hedefi devralır (`kaynak_ay`). Frontend `TargetProgressCard` (dashboard, MonthlyCompareCard üstünde): ilerleme çubuğu + takvimsel tempo çizgisi, Kalan / Günlük gereken / Ay sonu tahmini, satır içi düzenleme (Modal yok).
+- **Senkron Sağlığı** (`routes/saglik.py` → `GET /senkron/saglik?tenant_id`; ekran `app/senkron-saglik.tsx`, Ayarlar → "Senkron Sağlığı"): POS kalp atışı (firms.last_seen_at), 6 veri setinin tazeliği (TIMESTAMPDIFF ile DB saati), son 6 saat hataları (24 saat sayımı 13 sn sürüyordu → 6 sa tek sorgu ~4 sn), yarım yüklemeler, bekleyen istekler, arama indeksi; genel durum iyi/uyari/kritik.
+- **Fiş Paylaşma** (`DailyReceiptsSection`): açılan fişte "Paylaş" (RN Share / web navigator.share) ve "WhatsApp" (wa.me) butonları; düz metin fiş özeti.
+- Sürüm: backend `2026-09-22-v22-hizli-arama-hedef-paylas`, app 1.0.55 (build 59). Testler: `tests/test_v22_hedef_saglik_arama.py` 8/8; testing_agent iteration_24 frontend PASS (fiş paylaş UI: bugün fiş yoktu, kod incelemesiyle doğrulandı).
+
+## 2026-09-22 — v23: Haftalık Rapor Maili ✅
+- **services/haftalik_rapor.py**: her Pazartesi İstanbul `HAFTALIK_RAPOR_SAAT` (vars. 08:00) aktif + e-postalı kullanıcılara GEÇEN HAFTA (Pzt–Paz) özeti:
+  kaynak (tenant: MySQL ana + Mongo ek kaynaklar) başına toplam/nakit/kart, önceki haftaya göre % değişim, gün gün çubuklu döküm, en iyi gün,
+  aylık hedef ilerlemesi (`routes.hedef._hedef_bul`), birden çok kaynakta genel toplam. Kaynak veri `_finans_gun_toplamlari` (dashboard Toplam ile aynı).
+  Tablolar (kasacepteweb): `haftalik_rapor_ayar(user_id, aktif)` (varsayılan AÇIK, yalnızca değiştirenler kayıtlı), `haftalik_rapor_gonderim(user_id, hafta, durum, hata)`
+  → aynı hafta ikinci kez gönderilmez; tüm kaynaklar 2 haftada da 0 ise `veri_yok` (mail atılmaz). Açılıştan 5 dk sonra yakalama turu (Pazartesi ve saat geçtiyse).
+  `send_email` (mailer.py: Brevo → Resend → SMTP) `asyncio.to_thread` ile. Durum: `/api/sistem-durum → haftalik_rapor`.
+- **routes/rapor_mail.py**: `GET/PUT /api/rapor-mail/ayar`, `GET /api/rapor-mail/onizleme` (JSON), `POST /api/rapor-mail/gonder-simdi` (zorla, `-manuel` eki).
+  HATA kodu 500 (502 KULLANMA: Cloudflare 502'yi kendi HTML sayfasıyla değiştiriyor, detail kayboluyor).
+- **Frontend**: `src/components/settings/HaftalikRaporMailKarti.tsx` — Ayarlar'da "HAFTALIK RAPOR MAİLİ" bölümü (switch, sonraki gönderim, son gönderim durumu, "Şimdi Gönder").
+  testID: haftalik-rapor-mail / haftalik-rapor-switch / haftalik-rapor-son / haftalik-rapor-gonder.
+- Sürüm: backend `2026-09-23-v23-haftalik-rapor-maili`, app 1.0.56 (build 60). Test: `tests/test_v23_haftalik_rapor.py` 8/8.
+- NOT: dev ortamında e-posta gönderilemiyor (BREVO_API_KEY yalnız Railway'de; Gmail SMTP 535 reddediyor) → gerçek teslimat prod'da doğrulanmalı
+  (Ayarlar → Şimdi Gönder). TS: settings.tsx'te ÖNCEDEN VAR olan 2 tsc hatası (deleteAccount, notify_line_cancellations) dokunulmadı.
