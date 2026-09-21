@@ -429,3 +429,15 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - MySQL sunucu bilgileri: MariaDB 5.5.68, max_connections 151, max_allowed_packet 1 MB (sayfa ≈ 450 KB — sınırın altında kalmalı!), wait_timeout 8 sa.
 - DB şişkinliği (ileride temizlik adayı): dataset_upload_chunks 4,4 GB (parçalanma), sync_logs 3,6 GB, dataset_cache 3 GB (Haziran'dan kalan rap_* rapor önbellekleri), dataset_cache_rows 1,45 GB.
 - KULLANICI AKSİYONU: yeni sync.php'yi hosting'e yükle (`/api/pos-dosya/sync.php`) → `?derin=1` ile `sync_php_surum` v21 görünmeli; Railway redeploy.
+
+## 2026-09-21 — v21 (devam): Railway build fix + Veritabanı Diyeti + Kompakt başlık + STOK SAYFA SENKRONU ✅
+- **Railway build** ("No space left on device" apt-get'te): `backend/Dockerfile` apt-get adımı kaldırıldı (tüm paketler wheel), healthcheck python ile; `requirements.txt` 123 → 18 paket (tam liste `requirements-dev-full.txt`), `.dockerignore` eklendi. Temiz venv'de doğrulandı (server import OK, 42 paket).
+- **Veritabanı Diyeti** (`services/veri_temizlik.py` → `veri_diyeti_calistir`, İstanbul 03:00; elle: `POST /api/data/veri-diyeti-baslat`; durum `/api/sistem-durum → diyet`): sync_logs>3g, rap_* >14g (rap_filtre_lookup & rap_acik_hesap_kisi_ozet_web KORUNUR), fis_gunluk_bildirim_feed/stok_extre/kart_extre_cari >30g, dataset_upload_chunks >6s, bitmiş sync_requests >3g. Hepsi dilimli DELETE.
+- **Başlık**: tek satır; "Hoş geldiniz" 12pt + isim 17pt; 5 aksiyon butonu her zaman aynı satırda (dar ekranda 36px). Sürüm 1.0.54 (build 58).
+- **STOK SAYFA SENKRONU (client.py v21 + sync.php v21)** — kök neden: watcher her 30 sn `dataset_force` → akış modunda 830 sayfa/370 MB TAM yükleme; ayrıca `dataset_cache_exists` zaman aşımı → "web boş" varsayımı → tam yükleme (kısır döngü, günde 13 kez).
+  - client `_push_stock_list_streaming`: fiyat adı başına sayfa BLOĞU (blok*1000+n), ada göre sıralı, sayfa SINIRLARI + sayfa hash'leri yerel snapshot'ta (`stockpages::…`); yalnızca hash'i değişen sayfa `dataset_page_replace`, üretilmeyen sayfalar `dataset_pages_delete`, sonda `dataset_pages_finalize` (üst kayıt). İlk kurulum/web boş/yerel durum yok → klasik begin/part/commit (atomik). Kıyas turu en sık 10 dk (watcher dahil), elle Full Sync hemen.
+  - `server_dataset_status` hata → `unknown` → tur ATLANIR (artık tam yükleme zorlamaz).
+  - sync.php: `dataset_page_replace` (ON DUPLICATE KEY, boş → sil), `dataset_pages_delete`, `dataset_pages_finalize` (+`paged_dataset_totals`), `{"action":"surum"}`.
+  - Test: mock harness (8 senaryo) + gerçek PHP 8 + MariaDB 10.11 ile uçtan uca (commit/replace/delete/finalize/delta merge/şema bakımı günde 1) → `/tmp/cli_test/harness.py`, `e2e.py`, `e2e_delta.py`.
+- Bilinen sınır: 734K satırda ürün arama LIKE taraması (~5-18 sn) → arama indeksi sonraki adım.
+- KULLANICI AKSİYONU: (1) hosting'e yeni sync.php (`/api/pos-dosya/sync.php`, `{"action":"surum"}` → v21), (2) 200K müşterinin POS'una yeni client.py (`/api/pos-dosya/client.py`; ilk turda bir kez tam kurulum yapar), (3) Railway redeploy (Dockerfile/requirements yeni).

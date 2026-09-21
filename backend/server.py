@@ -132,7 +132,7 @@ _POS_FILES = {"client.py": "text/x-python", "sync.php": "application/octet-strea
 @app.get("/api/sistem-durum", include_in_schema=False)
 async def sistem_durum(derin: int = 0):
     import services as _svc
-    out = {"surum": "2026-09-21-v21-sync-php-kilit-fix", "patron": None, "data": None}
+    out = {"surum": "2026-09-21-v21-sayfa-senkron-diyet", "patron": None, "data": None}
     # 2026-08 — OOM teşhisi: çalışma süresi (restart tespiti için)
     try:
         with open("/proc/self/stat") as f:
@@ -169,8 +169,9 @@ async def sistem_durum(derin: int = 0):
         pass
     # 2026-08 v13 — Veri temizlik görevi son çalışma istatistiği
     try:
-        from services.veri_temizlik import son_calisma as _temizlik
+        from services.veri_temizlik import son_calisma as _temizlik, son_diyet as _diyet
         out["temizlik"] = dict(_temizlik) if _temizlik else {"durum": "henüz çalışmadı"}
+        out["diyet"] = dict(_diyet) if _diyet else {"durum": "henüz çalışmadı (İstanbul 03:00)"}
     except Exception:
         pass
     try:
@@ -344,8 +345,9 @@ async def startup():
 
         # 2026-08 v13 — Günlük eski veri temizlik görevi
         try:
-            from services.veri_temizlik import start_temizlik
+            from services.veri_temizlik import start_temizlik, start_diyet
             start_temizlik()
+            start_diyet()  # v21 — gece 03:00 veritabanı diyeti
         except Exception as e:
             logging.error(f"Failed to start veri temizlik: {e}")
 

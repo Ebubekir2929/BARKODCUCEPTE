@@ -53,7 +53,7 @@ LOG_PATH = os.path.join(CONFIG_DIR, "client.log")
 DEFAULT_SERVER_URL = "https://kasaceptetransfer.berkyazilim.com/sync.php"
 
 # 2026-06 — Çalışan sürümü loglarda görmek için (kullanıcı doğru build'i kurdu mu?)
-CLIENT_BUILD = "2026-06-13 v3 (istek önceliği + paralel request)"
+CLIENT_BUILD = "2026-09-21 v21 (stok sayfa senkronu + web durumu bilinmiyor→atla)"
 
 AUTORUN_START_DELAY_SEC = 8
 # Normal datasetler için direkt POST sınırı.
@@ -102,7 +102,13 @@ PAGED_PUSH_MAX_ROWS_PER_PAGE = 10_000
 # toplanıp hash'lenmiyor; fiyat adı bazında ÇEKİLİR ve sayfa sayfa HEMEN gönderilir.
 # Eşik: bir fiyat adı bu kadar satırdan fazla döndürürse (ya da toplam aşılırsa) akış modu.
 STOCK_LIST_STREAM_ROW_THRESHOLD = 40_000
-STOCK_LIST_STREAM_MIN_INTERVAL_SEC = 6 * 3600  # akış modunda tam gönderim sıklığı (fiyat/miktar değişimleri delta ile ayrıca gelir)
+# v21 — Akış modu artık SAYFA SENKRONU: her turda yalnızca hash'i değişen sayfalar gider
+# (eskiden her watcher tetiğinde 830 sayfa / 370 MB tam yükleme → sunucu kilitleniyordu).
+# Bu yüzden kıyas turu 10 dk'da bir yeterli; watcher tetiği de bu tabana uyar.
+STOCK_LIST_STREAM_MIN_INTERVAL_SEC = 10 * 60
+STOCK_LIST_PAGE_BLOCK = 1000              # her fiyat adının sayfa numarası bloğu (fiyat_idx*1000 + 1..)
+STOCK_LIST_PAGE_TARGET_BYTES = 350_000    # sınırlar sabitken sayfa büyüyebilir; MySQL max_allowed_packet 1 MB
+STOCK_LIST_PAGE_MAX_BYTES = 800_000       # bu aşılırsa o fiyat adının sınırları yeniden kurulur
 
 MASS_DELETE_RATIO_BLOCK = 0.60
 MASS_DELETE_MIN_PREV = 50
@@ -2922,10 +2928,24 @@ class Main(QMainWindow):
             return False
 
     def _push_stock_list_streaming(self, defn: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, Any]:
-        """v19 — stock_list'i fiyat adı bazında çekip sayfa sayfa HEMEN gönderir.
-        Tüm liste hiçbir an RAM'de tutulmaz; hash sayfa hash'lerinden zincirlenir.
-        sync.php commit yalnızca alınan parça sayısı == total_parts kontrolü yapar,
-        bu yüzden begin'deki total_parts geçici (1) olabilir."""
+        """v21 — Büyük stok listesi için SAYFA SENKRONU.
+
+        Eski (v19) akış her turda 830 sayfa / 370 MB'ı yeniden yüklüyordu; watcher her
+        30 sn tetiklediği için sunucu sürekli tam yükleme altında kilitleniyordu.
+
+        Yeni model:
+          • Her fiyat adı ayrı bir sayfa BLOĞU (fiyat_idx*1000 + 1..N) → alfabetik sıra korunur.
+          • Satırlar ada göre sıralanır; sayfa SINIRLARI (ilk satırın sıralama anahtarı) ilk
+            kurulumda belirlenir ve yerel durumda saklanır. Sonraki turlarda satırlar aynı
+            sınırlara göre sayfalara dağıtılır → bir ürün değişince yalnızca o sayfa değişir.
+          • Sayfa hash'i (sha256) yerel durumdaki hash ile aynıysa GÖNDERİLMEZ.
+          • Değişen sayfa `dataset_page_replace` ile yerinde değiştirilir; bu turda
+            üretilmeyen sayfalar `dataset_pages_delete` ile silinir. Son sayfada
+            finalize=1 → üst kayıt (row_count, synced_at) güncellenir.
+          • İlk kurulum / web'de veri yok / yerel durum yok → klasik begin/part/commit ile
+            ATOMİK tam yükleme (part_no = yeni sayfa numaraları), ardından durum kaydedilir.
+        Tüm liste hiçbir an RAM'de tutulmaz (fiyat adı bazında işlenir)."""
+        import bisect
         import hashlib
         tenant = self.ed_tenant.text().strip() or self.cfg.get("tenant_id", "").strip()
         if not tenant:
@@ -2933,17 +2953,48 @@ class Main(QMainWindow):
         server_url = self.ed_server_url.text().strip() or self.cfg.get("server_url", DEFAULT_SERVER_URL)
         secret = self.get_client_secret()
         dataset_key = str(defn["dataset_key"])
-        upload_id = uuid.uuid4().hex
-        post_json(server_url, tenant, {
-            "action": "dataset_page_begin", "dataset_key": dataset_key, "upload_id": upload_id,
-            "params": params, "total_parts": 1, "total_row_count": 0, "data_hash": "",
-        }, client_secret=secret, timeout=120)
+        durum_key = "stockpages::" + dataset_run_key(dataset_key, params)
 
-        part_no = 0
+        snap = load_snapshots()
+        durum = snap.get(durum_key) if isinstance(snap.get(durum_key), dict) else {}
+        fiyat_durum: Dict[str, Any] = durum.get("fiyat") if isinstance(durum.get("fiyat"), dict) else {}
+
+        server_status = self.server_dataset_status(dataset_key, params)
+        if server_status.get("unknown"):
+            self.println(f"~ stock_list (sayfa senkronu): web durumu okunamadı, bu tur atlandı.")
+            return {"ok": True, "skipped": True}
+        try:
+            server_rows = int(server_status.get("active_row_count", server_status.get("row_count", 0)) or 0)
+        except Exception:
+            server_rows = 0
+        tam_yukleme = (not bool(server_status.get("exists", False))) or server_rows <= 0 or not fiyat_durum
+        if tam_yukleme:
+            self.println(
+                f"stock_list (sayfa senkronu): TAM kurulum. web_var={server_status.get('exists')}, "
+                f"web_satir={server_rows}, yerel_durum={bool(fiyat_durum)}"
+            )
+            fiyat_durum = {}
+            upload_id = uuid.uuid4().hex
+            post_json(server_url, tenant, {
+                "action": "dataset_page_begin", "dataset_key": dataset_key, "upload_id": upload_id,
+                "params": params, "total_parts": 1, "total_row_count": 0, "data_hash": "",
+            }, client_secret=secret, timeout=120)
+        else:
+            upload_id = ""
+
+        def _sira_anahtari(row: Dict[str, Any]) -> str:
+            ad = str(row.get("AD") or row.get("STOK_ADI") or row.get("ad") or "").strip().upper()
+            return ad + "\x00" + make_row_key(dataset_key, row)
+
+        yeni_fiyat_durum: Dict[str, Any] = {}
         toplam = 0
+        toplam_sayfa = 0
+        gonderilen = 0
         zincir = hashlib.sha256()
+        uretilen_sayfalar: set = set()
+        kullanilan_bloklar: set = {int(fd["blok"]) for fd in fiyat_durum.values() if isinstance(fd, dict) and "blok" in fd}
         fiyat_adlari = self.load_stock_price_names(defn.get("database", ""))
-        for fiyat in fiyat_adlari:
+        for fiyat_idx, fiyat in enumerate(fiyat_adlari):
             fiyat_id = fiyat.get("ID", 0)
             fiyat_adi = fiyat.get("AD") or f"Fiyat {fiyat_id}"
             p = resolve_params(defn.get("params_template", {}))
@@ -2955,41 +3006,129 @@ class Main(QMainWindow):
                 conn.close()
             rows = [r for r in (rows or []) if isinstance(r, dict)]
             if not rows:
-                self.println(f"stock_list(akış): ürün yok, fiyat adı atlandı -> {fiyat_id} / {fiyat_adi}")
+                self.println(f"stock_list(sayfa): ürün yok, fiyat adı atlandı -> {fiyat_id} / {fiyat_adi}")
+                del rows
                 continue
             for r in rows:
                 r["FIYAT_AD"] = fiyat_id
                 r["FIYAT_AD_ID"] = fiyat_id
                 r["FIYAT_ADI"] = fiyat_adi
                 r["FIYAT_LISTE_ADI"] = fiyat_adi
-            for page_rows in split_rows_for_paged_push(rows, max_bytes=PAGED_PUSH_TARGET_BYTES, max_rows=PAGED_PUSH_MAX_ROWS_PER_PAGE):
-                part_no += 1
+            rows.sort(key=_sira_anahtari)
+
+            eski = fiyat_durum.get(str(fiyat_id)) if isinstance(fiyat_durum.get(str(fiyat_id)), dict) else {}
+            if eski and "blok" in eski:
+                blok = int(eski["blok"])
+            else:
+                # Yeni fiyat adı: kullanılmayan en küçük blok (sıra kayması çakışma yaratmasın)
+                blok = 0
+                while blok in kullanilan_bloklar:
+                    blok += 1
+            kullanilan_bloklar.add(blok)
+            # DİKKAT: tek sayfalık fiyat adında sınır listesi BOŞ ama geçerlidir → None ile ayrıştır
+            sinirlar: Optional[List[str]] = list(eski["sinirlar"]) if (eski and isinstance(eski.get("sinirlar"), list)) else None
+            eski_hashler: Dict[str, str] = dict(eski.get("sayfa_hash") or {}) if eski else {}
+
+            # Satırları sayfalara dağıt: sınırlar varsa bisect ile, yoksa byte hedefine göre kur.
+            # Her sayfanın kanonik JSON'u TEK kez üretilir (boyut + hash aynı metinden).
+            def _sayfalari_hazirla(sinir_listesi: Optional[List[str]]):
+                if sinir_listesi is not None:
+                    dagilim: List[List[Dict[str, Any]]] = [[] for _ in range(len(sinir_listesi) + 1)]
+                    for r in rows:
+                        dagilim[bisect.bisect_right(sinir_listesi, _sira_anahtari(r))].append(r)
+                else:
+                    dagilim = list(split_rows_for_paged_push(rows, max_bytes=STOCK_LIST_PAGE_TARGET_BYTES, max_rows=PAGED_PUSH_MAX_ROWS_PER_PAGE))
+                metinler = [canonical(sp) if sp else "" for sp in dagilim]
+                return dagilim, metinler
+
+            sayfalar, metinler = _sayfalari_hazirla(sinirlar)
+            if sinirlar is not None and any(len(m.encode("utf-8")) > STOCK_LIST_PAGE_MAX_BYTES for m in metinler):
+                # Bir sayfa çok büyüdü (yeni ürünler aynı aralığa yığıldı) → sınırları yeniden kur
+                self.println(f"stock_list(sayfa): fiyat adı {fiyat_id} sayfaları büyüdü, sınırlar yeniden kuruluyor.")
+                sinirlar = None
+                sayfalar, metinler = _sayfalari_hazirla(sinirlar)
+            if sinirlar is None:
+                sinirlar = [_sira_anahtari(sp[0]) for sp in sayfalar[1:]]
+                eski_hashler = {}  # numaralandırma değişti → hepsi gönderilecek
+            if len(sayfalar) >= STOCK_LIST_PAGE_BLOCK:
+                raise RuntimeError(f"stock_list(sayfa): fiyat adı {fiyat_id} için {len(sayfalar)} sayfa — blok sınırı aşıldı.")
+
+            yeni_hashler: Dict[str, str] = {}
+            fiyat_gonderilen = 0
+            for yerel_idx, page_rows in enumerate(sayfalar):
+                page_no = blok * STOCK_LIST_PAGE_BLOCK + yerel_idx + 1
+                if not page_rows:
+                    continue  # boş sayfa → üretilmedi sayılır, sonda silinir
+                h = sha256_text(metinler[yerel_idx])
+                zincir.update(h.encode("utf-8"))
                 toplam += len(page_rows)
-                zincir.update(hash_obj(page_rows).encode("utf-8"))
-                post_json(server_url, tenant, {
-                    "action": "dataset_page_part", "dataset_key": dataset_key, "upload_id": upload_id,
-                    "part_no": part_no, "total_parts": part_no, "params": params, "data": page_rows,
-                }, client_secret=secret, timeout=300)
+                toplam_sayfa += 1
+                uretilen_sayfalar.add(page_no)
+                yeni_hashler[str(page_no)] = h
+                if tam_yukleme:
+                    post_json(server_url, tenant, {
+                        "action": "dataset_page_part", "dataset_key": dataset_key, "upload_id": upload_id,
+                        "part_no": page_no, "total_parts": 1, "params": params, "data": page_rows,
+                    }, client_secret=secret, timeout=300)
+                    gonderilen += 1
+                    fiyat_gonderilen += 1
+                elif eski_hashler.get(str(page_no)) != h:
+                    post_json(server_url, tenant, {
+                        "action": "dataset_page_replace", "dataset_key": dataset_key, "params": params,
+                        "page_no": page_no, "data": page_rows,
+                    }, client_secret=secret, timeout=300)
+                    gonderilen += 1
+                    fiyat_gonderilen += 1
                 self._bekle_istek_bitsin()  # kullanıcı raporları öncelikli
-            self.println(f"stock_list(akış): fiyat adı gönderildi -> {fiyat_id} / {fiyat_adi} / {len(rows)} ürün (toplam {toplam}, sayfa {part_no})")
-            del rows
-        if part_no == 0:
-            raise RuntimeError("stock_list(akış): hiçbir fiyat adından ürün gelmedi, commit yapılmadı.")
+            yeni_fiyat_durum[str(fiyat_id)] = {"blok": blok, "sinirlar": sinirlar, "sayfa_hash": yeni_hashler}
+            self.println(
+                f"stock_list(sayfa): {fiyat_id} / {fiyat_adi} → {len(rows)} ürün, {len(yeni_hashler)} sayfa, gönderilen {fiyat_gonderilen}"
+            )
+            del rows, sayfalar, metinler
+
+        if toplam_sayfa == 0:
+            raise RuntimeError("stock_list(sayfa): hiçbir fiyat adından ürün gelmedi, gönderim yapılmadı.")
         data_hash = zincir.hexdigest()
-        resp = post_json(server_url, tenant, {
-            "action": "dataset_page_commit", "dataset_key": dataset_key, "upload_id": upload_id,
-            "params": params, "total_parts": part_no, "total_row_count": toplam, "data_hash": data_hash,
-        }, client_secret=secret, timeout=600)
-        if not isinstance(resp, dict) or not resp.get("ok"):
-            raise RuntimeError(f"stock_list(akış) commit hatası: {resp}")
-        # Snapshot: veri RAM'de olmadığı için hash/satır sayısı doğrudan yazılır
-        key = dataset_run_key(dataset_key, params)
+
+        # Bu turda üretilmeyen eski sayfalar (silinen ürünlerle boşalan / kaymış numaralar)
+        eski_tum: set = set()
+        for fd in fiyat_durum.values():
+            if isinstance(fd, dict):
+                eski_tum.update(int(k) for k in (fd.get("sayfa_hash") or {}).keys())
+        silinecek = sorted(eski_tum - uretilen_sayfalar)
+        silinen = 0
+
+        if tam_yukleme:
+            resp = post_json(server_url, tenant, {
+                "action": "dataset_page_commit", "dataset_key": dataset_key, "upload_id": upload_id,
+                "params": params, "total_parts": toplam_sayfa, "total_row_count": toplam, "data_hash": data_hash,
+            }, client_secret=secret, timeout=600)
+            if not isinstance(resp, dict) or not resp.get("ok"):
+                raise RuntimeError(f"stock_list(sayfa) commit hatası: {resp}")
+        else:
+            if silinecek:
+                r = post_json(server_url, tenant, {
+                    "action": "dataset_pages_delete", "dataset_key": dataset_key, "params": params, "page_nos": silinecek,
+                }, client_secret=secret, timeout=120)
+                silinen = int((r or {}).get("deleted") or 0) if isinstance(r, dict) else 0
+            if gonderilen or silinecek:
+                # Üst kayıt (row_count / synced_at / revision) sayfa toplamlarından güncellenir
+                post_json(server_url, tenant, {
+                    "action": "dataset_pages_finalize", "dataset_key": dataset_key, "params": params,
+                    "data_hash": data_hash, "changed_pages": gonderilen, "deleted_pages": silinen,
+                }, client_secret=secret, timeout=120)
+            else:
+                self.println("= stock_list (sayfa senkronu): değişiklik yok.")
+
         snap = load_snapshots()
+        snap[durum_key] = {"fiyat": yeni_fiyat_durum, "last_sync_at": now_str(), "row_count": toplam, "page_count": toplam_sayfa}
+        key = dataset_run_key(dataset_key, params)
         snap[key] = {"dataset_key": dataset_key, "params": params, "data_hash": data_hash, "row_count": toplam, "last_sync_at": now_str()}
         save_snapshots(snap)
-        resp["total_parts"] = part_no
-        resp["total_row_count"] = toplam
-        return resp
+        return {
+            "ok": True, "total_parts": toplam_sayfa, "total_row_count": toplam,
+            "changed_pages": gonderilen, "deleted_pages": silinen, "full": tam_yukleme,
+        }
 
     def execute_dataset(self, defn: Dict[str, Any], params: Dict[str, Any]):
         conn = self.get_connection(defn.get("database", ""))
@@ -3078,12 +3217,11 @@ class Main(QMainWindow):
             return resp if isinstance(resp, dict) else {"ok": False, "exists": True, "row_count": 1, "active_row_count": 1}
         except Exception as exc:
             self.println(f"Web cache kontrolü yapılamadı: {dataset_key} -> {exc}")
-            # Stok/cari sayfalı push ve rows datasetlerinde web durumu okunamazsa
-            # "var" kabul etmek en riskli senaryodur; local snapshot aynı olsa bile web boş kalabilir.
-            # Bu yüzden bu datasetlerde eksik kabul edip yeniden seed/push zorlanır.
-            if is_paged_push_dataset_key(dataset_key) or is_rows_cache_dataset_key(dataset_key):
-                return {"ok": False, "exists": False, "row_count": 0, "active_row_count": 0, "error": str(exc)}
-            return {"ok": False, "exists": True, "row_count": 1, "active_row_count": 1, "error": str(exc)}
+            # v21 — ESKİ davranış: kontrol başarısızsa "web boş" sayıp TAM yükleme zorlanıyordu.
+            # 200K ürünlü müşteride sunucu yoğunken kontrol zaman aşımına düşüyor → 370 MB tam
+            # yükleme → sunucu daha da yoğun → kısır döngü (günde 13 tam yükleme görüldü).
+            # Artık durum "bilinmiyor" döner; çağıran bu turu ATLAR, bir sonraki turda yeniden bakar.
+            return {"ok": False, "exists": True, "row_count": 1, "active_row_count": 1, "unknown": True, "error": str(exc)}
 
     def server_dataset_exists(self, dataset_key: str, params: Dict[str, Any]) -> bool:
         return bool(self.server_dataset_status(dataset_key, params).get("exists", False))
@@ -3131,6 +3269,8 @@ class Main(QMainWindow):
         prev_hashes = prev_snapshot.get("row_hashes", {}) if isinstance(prev_snapshot.get("row_hashes", {}), dict) else {}
 
         server_status = self.server_dataset_status(dataset_key, params)
+        if server_status.get("unknown") and not force_full:
+            raise RuntimeError(f"{dataset_key}: web durumu okunamadı ({server_status.get('error')}), bu tur atlandı.")
         server_exists = bool(server_status.get("exists", False))
         try:
             server_row_count = int(server_status.get("active_row_count", server_status.get("row_count", 0)) or 0)
@@ -3356,6 +3496,8 @@ class Main(QMainWindow):
         prev_hashes = prev_snapshot.get("row_hashes", {}) if isinstance(prev_snapshot.get("row_hashes", {}), dict) else {}
 
         server_status = self.server_dataset_status(dataset_key, params)
+        if server_status.get("unknown") and not force_full:
+            raise RuntimeError(f"{dataset_key}: web durumu okunamadı ({server_status.get('error')}), bu tur atlandı.")
         server_exists = bool(server_status.get("exists", False))
         try:
             server_row_count = int(server_status.get("active_row_count", server_status.get("row_count", 0)) or 0)
@@ -3609,6 +3751,9 @@ class Main(QMainWindow):
 
             if not dataset_force and defn.get("push_enabled", False):
                 server_status = self.server_dataset_status(dataset_key, params)
+                if server_status.get("unknown") and (dataset_key in PAGED_PUSH_DATASET_KEYS or is_rows_cache_dataset_key(dataset_key)):
+                    self.println(f"~ Web durumu okunamadı, bu tur atlandı: {dataset_key}")
+                    continue
                 server_has_cache = bool(server_status.get("exists", False))
                 try:
                     server_row_count = int(server_status.get("active_row_count", server_status.get("row_count", 0)) or 0)
@@ -3646,22 +3791,28 @@ class Main(QMainWindow):
                 params = resolve_params(defn.get("params_template", {}))
                 params["FIYAT_AD"] = 0
                 if self._stock_list_is_big(defn):
-                    # Akış modunda "değişiklik yok" hash kıyası yapılamaz → en fazla
-                    # STOCK_LIST_STREAM_MIN_INTERVAL_SEC'de bir tam gönderim (force hariç).
+                    # v21 — SAYFA SENKRONU: yalnızca değişen sayfalar gider. Watcher tetiği
+                    # (dataset_force) dahil kıyas turu en sık STOCK_LIST_STREAM_MIN_INTERVAL_SEC'de bir;
+                    # kullanıcı "force" (elle) verirse hemen.
                     onceki = load_snapshots().get(dataset_run_key(dataset_key, params), {}) or {}
                     son = str(onceki.get("last_sync_at") or "")
                     try:
                         yas = (datetime.now() - datetime.strptime(son, "%Y-%m-%d %H:%M:%S")).total_seconds() if son else 1e9
                     except ValueError:
                         yas = 1e9
-                    if not (force or dataset_force) and yas < STOCK_LIST_STREAM_MIN_INTERVAL_SEC:
-                        self.println(f"= stock_list (akış): son tam gönderim {int(yas//60)} dk önce, atlandı.")
+                    if not force and yas < STOCK_LIST_STREAM_MIN_INTERVAL_SEC:
+                        self.println(f"= stock_list (sayfa senkronu): son kıyas {int(yas//60)} dk önce, atlandı.")
                         continue
                     sonuc = self._push_stock_list_streaming(defn, params)
+                    if sonuc.get("skipped"):
+                        continue
                     pushed += 1
                     total_rows = int(sonuc.get("total_row_count") or 0)
-                    self.record_success(defn["dataset_key"], params, total_rows, status="ok", note="otomatik/push-akis")
-                    self.println(f"✓ Gönderildi (akış): {defn['dataset_key']} ({total_rows} kayıt, {sonuc.get('total_parts')} sayfa)")
+                    self.record_success(defn["dataset_key"], params, total_rows, status="ok", note="otomatik/sayfa-senkron")
+                    self.println(
+                        f"✓ Sayfa senkronu: {defn['dataset_key']} ({total_rows} kayıt, {sonuc.get('total_parts')} sayfa, "
+                        f"gönderilen {sonuc.get('changed_pages')}, silinen {sonuc.get('deleted_pages')})"
+                    )
                     continue
                 # Tek web datasetine basılacak ama satırlar fiyat adına göre zenginleştirilecek.
                 data = self.execute_stock_list_all_price_names(defn)

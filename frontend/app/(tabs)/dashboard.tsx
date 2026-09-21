@@ -775,15 +775,14 @@ export default function DashboardScreen() {
       {/* Status bar separator */}
       <View style={[styles.statusBarLine, { backgroundColor: colors.border }]} />
       {/* Header */}
-      {/* 2026-09 (v20) — Dar ekranda 5 buton "Hoş geldiniz + isim" alanını ~110px'e
-          sıkıştırıyor, adjustsFontSizeToFit de yazıyı minicik yapıyordu.
-          Çözüm: compact ekranda butonlar ikinci satıra iner, isim tam genişlik alır. */}
-      <View style={[styles.header, compactHeader && styles.headerCompact, { borderBottomColor: colors.border }]}>
-        <View style={compactHeader ? styles.headerGreetingCompact : styles.headerGreeting}>
+      {/* 2026-09-21 (v21) — Başlık kompakt: "Hoş geldiniz" (12pt) + isim (18pt) tek blok,
+          aksiyon butonları HER ZAMAN aynı satırda (dar ekranda 36px ikon). Yükseklik ~72px. */}
+      <View style={[styles.header, { borderBottomColor: colors.border }]}>
+        <View style={styles.headerGreeting}>
           <Text
             style={[styles.greeting, { color: colors.textSecondary }]}
             numberOfLines={1}
-            maxFontSizeMultiplier={1.3}
+            maxFontSizeMultiplier={1.2}
           >
             {t('welcome_greeting')}
           </Text>
@@ -791,40 +790,40 @@ export default function DashboardScreen() {
             style={[styles.userName, { color: colors.text }]}
             numberOfLines={1}
             adjustsFontSizeToFit
-            minimumFontScale={0.85}
-            maxFontSizeMultiplier={1.3}
+            minimumFontScale={0.75}
+            maxFontSizeMultiplier={1.2}
           >
             {user?.full_name || 'Kullanıcı'}
           </Text>
         </View>
-        <View style={compactHeader ? styles.headerActionsCompact : styles.headerActions}>
+        <View style={styles.headerActions}>
         <TouchableOpacity
-          style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border, marginRight: 8 }]}
+          style={[styles.filterButton, compactHeader && styles.filterButtonCompact, { backgroundColor: colors.card, borderColor: colors.border }]}
           onPress={() => router.push('/giderler')}
           hitSlop={6}
         >
-          <Ionicons name="trending-down-outline" size={20} color={colors.error} />
+          <Ionicons name="trending-down-outline" size={compactHeader ? 18 : 20} color={colors.error} />
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border, marginRight: 8 }]}
+          style={[styles.filterButton, compactHeader && styles.filterButtonCompact, { backgroundColor: colors.card, borderColor: colors.border }]}
           onPress={() => router.push('/fiyat-gor')}
           hitSlop={6}
         >
-          <Ionicons name="pricetags-outline" size={20} color={colors.primary} />
+          <Ionicons name="pricetags-outline" size={compactHeader ? 18 : 20} color={colors.primary} />
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border, marginRight: 8 }]}
+          style={[styles.filterButton, compactHeader && styles.filterButtonCompact, { backgroundColor: colors.card, borderColor: colors.border }]}
           onPress={() => setShowPdfExport(true)}
           hitSlop={6}
         >
-          <Ionicons name="document-text-outline" size={20} color={colors.primary} />
+          <Ionicons name="document-text-outline" size={compactHeader ? 18 : 20} color={colors.primary} />
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border, marginRight: 8, position: 'relative' }]}
+          style={[styles.filterButton, compactHeader && styles.filterButtonCompact, { backgroundColor: colors.card, borderColor: colors.border, position: 'relative' }]}
           onPress={() => setShowCompareModal(true)}
           hitSlop={6}
         >
-          <Ionicons name="git-compare-outline" size={20} color={colors.primary} />
+          <Ionicons name="git-compare-outline" size={compactHeader ? 18 : 20} color={colors.primary} />
           {!compactHeader && (
             <Text style={[styles.filterText, { color: colors.primary }]} maxFontSizeMultiplier={1.2}>{t('compare')}</Text>
           )}
@@ -839,10 +838,10 @@ export default function DashboardScreen() {
           </View>
         </TouchableOpacity>
         <TouchableOpacity
-          style={[styles.filterButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+          style={[styles.filterButton, compactHeader && styles.filterButtonCompact, { backgroundColor: colors.card, borderColor: colors.border }]}
           onPress={() => setShowFilterModal(true)}
         >
-          <Ionicons name="filter" size={20} color={colors.primary} />
+          <Ionicons name="filter" size={compactHeader ? 18 : 20} color={colors.primary} />
           {!compactHeader && (
             <Text style={[styles.filterText, { color: colors.primary }]} maxFontSizeMultiplier={1.2}>{t('filter_short')}</Text>
           )}
@@ -1891,42 +1890,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderBottomWidth: 1,
-  },
-  headerCompact: {
-    flexDirection: 'column',
-    alignItems: 'stretch',
-    paddingVertical: 12,
-    gap: 10,
   },
   headerGreeting: {
     flex: 1,
+    minWidth: 0,
     marginRight: 8,
-  },
-  headerGreetingCompact: {
-    width: '100%',
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  headerActionsCompact: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
+    gap: 6,
+    flexShrink: 0,
   },
   greeting: {
-    fontSize: Platform.select({ web: 13, ios: 15, android: 16, default: 15 }),
-    marginBottom: 2,
-    fontWeight: Platform.OS === 'web' ? '600' : '500',
+    fontSize: Platform.select({ web: 11, ios: 12, android: 12, default: 12 }),
+    marginBottom: 1,
+    fontWeight: '500',
     ...(Platform.OS === 'web' ? { letterSpacing: 0.4, textTransform: 'uppercase' as const } : {}),
   },
   userName: {
-    fontSize: Platform.select({ web: 24, ios: 26, android: 27, default: 26 }),
+    fontSize: Platform.select({ web: 17, ios: 16, android: 17, default: 17 }),
     fontWeight: '800',
-    ...(Platform.OS === 'web' ? { letterSpacing: -0.5 } : { letterSpacing: -0.3 }),
+    letterSpacing: -0.5,
   },
   filterButton: {
     flexDirection: 'row',
@@ -1943,6 +1931,11 @@ const styles = StyleSheet.create({
       } as any,
       default: {},
     }),
+  },
+  filterButtonCompact: {
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+    borderRadius: 18,
   },
   filterText: {
     fontSize: Platform.OS === 'ios' ? 12 : 14,

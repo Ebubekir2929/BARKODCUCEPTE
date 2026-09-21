@@ -1453,6 +1453,16 @@ async def senkron_tani(
     return out
 
 
+@router.post("/veri-diyeti-baslat")
+async def veri_diyeti_baslat(current_user: dict = Depends(get_current_user)):
+    """v21 — Veritabanı diyetini hemen başlat (normalde İstanbul 03:00'te otomatik).
+    Arka planda çalışır; ilerleme /api/sistem-durum → diyet."""
+    from services.veri_temizlik import veri_diyeti_calistir, son_diyet
+    asyncio.create_task(veri_diyeti_calistir())
+    await asyncio.sleep(0.3)
+    return {"ok": True, "baslatildi": True, "durum": dict(son_diyet)}
+
+
 @router.post("/senkron-yarim-yukleme-tamamla")
 async def senkron_yarim_yukleme_tamamla(
     body: dict,

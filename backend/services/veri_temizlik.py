@@ -215,26 +215,7 @@ async def temizlik_calistir() -> dict:
     except Exception as e:
         stat["sayfa_hata"] = str(e)[:200]
 
-    # 3b) v20 — dataset_upload_chunks: commit edilememiş sayfalı yükleme parçaları.
-    # 200K ürünlü müşteride her 45 dk'da 830×450 KB (~370 MB) birikiyordu (28 yükleme ≈ 10 GB).
-    # 1 günden eski parçalar küçük dilimlerle (parça ≈ 450 KB) silinir.
-    try:
-        async def _eski_parca_sil() -> int:
-            toplam = 0
-            while True:
-                async with pool.acquire() as conn:
-                    async with conn.cursor() as cur:
-                        await cur.execute(
-                            "DELETE FROM dataset_upload_chunks WHERE created_at < NOW() - INTERVAL 1 DAY LIMIT 200"
-                        )
-                        n = cur.rowcount or 0
-                toplam += n
-                if n < 200:
-                    return toplam
-                await asyncio.sleep(PARCA_ARASI_SN)
-        stat["eski_yukleme_parca_silinen"] = await _eski_parca_sil()
-    except Exception as e:
-        stat["yukleme_parca_hata"] = str(e)[:200]
+    # 3b) dataset_upload_chunks temizliği v21'de veri diyetine taşındı (6 saat kuralı).
 
     # 4) hourly_stock_detail SUPERSEDED kopyalar — EN BÜYÜK şişme kaynağı.
     # POS aynı (TARIH, SAAT, STOK, LOKASYON) kombinasyonunu her push'ta yeniden
@@ -253,6 +234,156 @@ async def temizlik_calistir() -> dict:
     son_calisma.clear()
     son_calisma.update(stat)
     return stat
+
+
+# ── v21 (2026-09-21) — VERİTABANI DİYETİ ─────────────────────────────────────
+# MySQL'de 12 GB veri / 128 MB InnoDB tampon → her büyük sorgu diske gidiyor.
+# Kullanıcı onayıyla saklama kuralları: log 3 gün, rapor önbelleği 14 gün,
+# günlük feed / ekstre 30 gün, yükleme parçası 6 saat. Gece (İstanbul 03:00)
+# çalışır; /api/data/veri-diyeti-baslat ile elle de tetiklenir.
+LOG_SAKLAMA_GUN = int(os.environ.get("DIYET_LOG_GUN", "3"))
+RAPOR_SAKLAMA_GUN = int(os.environ.get("DIYET_RAPOR_GUN", "14"))
+FEED_SAKLAMA_GUN = int(os.environ.get("DIYET_FEED_GUN", "30"))
+PARCA_SAKLAMA_SAAT = int(os.environ.get("DIYET_PARCA_SAAT", "6"))
+DIYET_SAATI_ISTANBUL = 3
+# Dashboard'un kullandığı rap_* anahtarları — SİLİNMEZ
+DIYET_KORUNAN_RAP = ("rap_filtre_lookup", "rap_acik_hesap_kisi_ozet_web")
+DIYET_FEED_ANAHTARLARI = ("fis_gunluk_bildirim_feed", "stok_extre", "kart_extre_cari")
+
+son_diyet: dict = {}
+_diyet_task = None
+_diyet_calisiyor = False
+
+
+async def _buyuk_satir_sil(pool, sql: str, params: tuple, dilim: int = 200) -> int:
+    """Büyük (yüzlerce KB) satırlar için küçük dilimli DELETE döngüsü."""
+    toplam = 0
+    while True:
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(sql, params)
+                n = cur.rowcount or 0
+        toplam += n
+        if n < dilim:
+            return toplam
+        await asyncio.sleep(PARCA_ARASI_SN)
+
+
+async def veri_diyeti_calistir() -> dict:
+    """Tek diyet turu; istatistik döndürür (sistem-durum → temizlik.diyet)."""
+    global _diyet_calisiyor
+    if _diyet_calisiyor:
+        return {**son_diyet, "durum": "zaten çalışıyor"}
+    _diyet_calisiyor = True
+    from services import get_data_pool
+    pool = await get_data_pool()
+    stat: dict = {"baslangic": datetime.utcnow().isoformat(timespec="seconds") + "Z", "durum": "çalışıyor"}
+    son_diyet.clear()
+    son_diyet.update(stat)
+    try:
+        # 1) sync_logs — tenant başına ~50K push/gün; 3 gün yeter (7 günde 7,1 M satır / 3,6 GB olmuştu)
+        try:
+            stat["log_silinen"] = await _parcali_sil(
+                pool,
+                f"DELETE FROM sync_logs WHERE created_at < NOW() - INTERVAL %s DAY LIMIT {PARCA_BOYU}",
+                (LOG_SAKLAMA_GUN,),
+            )
+            son_diyet.update(stat)
+        except Exception as e:
+            stat["log_hata"] = str(e)[:200]
+
+        # 2) Rapor önbellekleri (rap_*) — 14 günden eski; rapor tekrar istenirse POS'tan yeniden gelir
+        try:
+            korunan = " AND ".join(["dataset_key <> %s"] * len(DIYET_KORUNAN_RAP))
+            stat["rapor_silinen"] = await _buyuk_satir_sil(
+                pool,
+                f"""DELETE FROM dataset_cache
+                    WHERE dataset_key LIKE 'rap\\_%%' AND {korunan}
+                      AND updated_at < NOW() - INTERVAL %s DAY
+                    LIMIT 200""",
+                (*DIYET_KORUNAN_RAP, RAPOR_SAKLAMA_GUN),
+            )
+            son_diyet.update(stat)
+        except Exception as e:
+            stat["rapor_hata"] = str(e)[:200]
+
+        # 3) Günlük fiş feed'i / stok-cari ekstreleri — 30 günden eski
+        try:
+            yer = ",".join(["%s"] * len(DIYET_FEED_ANAHTARLARI))
+            stat["feed_silinen"] = await _buyuk_satir_sil(
+                pool,
+                f"""DELETE FROM dataset_cache
+                    WHERE dataset_key IN ({yer})
+                      AND updated_at < NOW() - INTERVAL %s DAY
+                    LIMIT 200""",
+                (*DIYET_FEED_ANAHTARLARI, FEED_SAKLAMA_GUN),
+            )
+            son_diyet.update(stat)
+        except Exception as e:
+            stat["feed_hata"] = str(e)[:200]
+
+        # 4) Yükleme parçaları — 6 saatten eski (commit edilemeyen/yarım kalan)
+        try:
+            stat["parca_silinen"] = await _buyuk_satir_sil(
+                pool,
+                "DELETE FROM dataset_upload_chunks WHERE created_at < NOW() - INTERVAL %s HOUR LIMIT 200",
+                (PARCA_SAKLAMA_SAAT,),
+            )
+        except Exception as e:
+            stat["parca_hata"] = str(e)[:200]
+
+        # 5) Bitmiş sync istekleri — 3 günden eski
+        try:
+            stat["istek_silinen"] = await _parcali_sil(
+                pool,
+                f"""DELETE FROM sync_requests
+                    WHERE status IN ('done','error','expired')
+                      AND created_at < NOW() - INTERVAL %s DAY LIMIT {PARCA_BOYU}""",
+                (LOG_SAKLAMA_GUN,),
+            )
+        except Exception as e:
+            stat["istek_hata"] = str(e)[:200]
+    finally:
+        _diyet_calisiyor = False
+    stat["durum"] = "bitti"
+    stat["bitis"] = datetime.utcnow().isoformat(timespec="seconds") + "Z"
+    logger.info(f"[diyet] tur tamamlandı: {stat}")
+    son_diyet.clear()
+    son_diyet.update(stat)
+    return stat
+
+
+def _saniye_sonraki_istanbul_saat(saat: int) -> float:
+    """İstanbul saatiyle bir sonraki `saat`:00'a kalan saniye (UTC+3, DST yok)."""
+    from datetime import timedelta, timezone
+    ist = timezone(timedelta(hours=3))
+    simdi = datetime.now(ist)
+    hedef = simdi.replace(hour=saat, minute=0, second=0, microsecond=0)
+    if hedef <= simdi:
+        hedef += timedelta(days=1)
+    return (hedef - simdi).total_seconds()
+
+
+async def _diyet_dongu():
+    while True:
+        bekle = _saniye_sonraki_istanbul_saat(DIYET_SAATI_ISTANBUL)
+        logger.info(f"[diyet] sonraki tur {bekle / 3600:.1f} saat sonra (İstanbul {DIYET_SAATI_ISTANBUL:02d}:00)")
+        await asyncio.sleep(bekle)
+        try:
+            await veri_diyeti_calistir()
+        except Exception as e:
+            logger.error(f"[diyet] tur hatası: {e}")
+        await asyncio.sleep(120)
+
+
+def start_diyet():
+    global _diyet_task
+    if _diyet_task is None or _diyet_task.done():
+        _diyet_task = asyncio.get_event_loop().create_task(_diyet_dongu())
+        logger.info(
+            f"🥗 Veritabanı diyeti zamanlandı (log>{LOG_SAKLAMA_GUN}g, rapor>{RAPOR_SAKLAMA_GUN}g, "
+            f"feed>{FEED_SAKLAMA_GUN}g, parça>{PARCA_SAKLAMA_SAAT}s)"
+        )
 
 
 async def _dongu():

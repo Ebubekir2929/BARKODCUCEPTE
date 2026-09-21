@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+tests/
+requirements-dev-full.txt
+.env
+*.log

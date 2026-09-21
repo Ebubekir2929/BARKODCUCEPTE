@@ -5,7 +5,7 @@ header('Content-Type: application/json; charset=utf-8');
 
 require_once __DIR__ . '/db.php';
 
-const SYNC_PHP_SURUM = '2026-09-21-v21-schema-kilit-fix';
+const SYNC_PHP_SURUM = '2026-09-21-v21-sayfa-senkron-kilit-fix';
 
 function json_input(): array
 {
@@ -811,6 +811,18 @@ function ensure_dataset_upload_chunks(PDO $pdo): void
     $idx = table_indexes($pdo, 'dataset_upload_chunks');
     if (!isset($idx['uniq_dataset_upload_part'])) safe_alter($pdo, "ALTER TABLE dataset_upload_chunks ADD UNIQUE KEY uniq_dataset_upload_part (tenant_id, upload_id, part_no)");
     if (!isset($idx['idx_dataset_upload_lookup'])) safe_alter($pdo, "ALTER TABLE dataset_upload_chunks ADD KEY idx_dataset_upload_lookup (tenant_id, upload_id, dataset_key)");
+}
+
+function paged_dataset_totals(PDO $pdo, string $tenantId, string $datasetKey, string $paramsHash): array
+{
+    // v21 — yalnızca row_count sütunu okunur (LONGTEXT'e dokunmaz) → indeksli, ucuz
+    $stmt = $pdo->prepare(
+        "SELECT COALESCE(SUM(row_count), 0), COUNT(*) FROM dataset_cache_pages
+          WHERE tenant_id = ? AND dataset_key = ? AND params_hash = ?"
+    );
+    $stmt->execute([$tenantId, $datasetKey, $paramsHash]);
+    $r = $stmt->fetch(PDO::FETCH_NUM) ?: [0, 0];
+    return ['row_count' => (int)$r[0], 'page_count' => (int)$r[1]];
 }
 
 function save_dataset_cache_meta(PDO $pdo, string $tenantId, string $datasetKey, array $params, int $rowCount, string $dataHash, ?array $extraMeta = null): array
@@ -2333,6 +2345,103 @@ try {
                 'row_count' => $totalRowCount,
                 'page_count' => $pageCount,
             ] + $saved);
+        }
+
+        case 'dataset_page_replace': {
+            /* v21 (2026-09-21) — SAYFA SENKRONU: 200K ürünlü müşteride istemci artık tüm
+               listeyi (830 sayfa / 370 MB) değil, yalnızca hash'i DEĞİŞEN sayfaları gönderir.
+               Sayfa (tenant, dataset, params_hash, page_no) anahtarıyla yerinde değiştirilir;
+               boş data → sayfa silinir. Üst kayıt (dataset_cache) sayfa toplamlarından güncellenir. */
+            $firm = require_firm($pdo, $tenantId);
+            verify_client_secret($firm);
+
+            $datasetKey = trim((string)($input['dataset_key'] ?? ''));
+            $params = is_array($input['params'] ?? null) ? $input['params'] : [];
+            $pageNo = (int)($input['page_no'] ?? 0);
+            $rows = $input['data'] ?? null;
+            if ($datasetKey === '' || $pageNo <= 0 || !is_array($rows)) {
+                respond(['ok' => false, 'error' => 'missing_page_replace_fields'], 400);
+            }
+
+            ensure_dataset_cache_pages($pdo);
+            $paramsHash = sha256_hex(cache_lookup_json($datasetKey, $params));
+
+            $rows = array_values(array_filter($rows, 'is_array'));
+            if (count($rows) === 0) {
+                $pdo->prepare("DELETE FROM dataset_cache_pages WHERE tenant_id = ? AND dataset_key = ? AND params_hash = ? AND page_no = ?")
+                    ->execute([$tenantId, $datasetKey, $paramsHash, $pageNo]);
+            } else {
+                $pageJson = clean_json($rows);
+                $pdo->prepare(
+                    "INSERT INTO dataset_cache_pages
+                        (tenant_id, dataset_key, params_hash, page_no, row_count, data_hash, data_json, created_at, updated_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+                     ON DUPLICATE KEY UPDATE
+                        row_count = VALUES(row_count), data_hash = VALUES(data_hash),
+                        data_json = VALUES(data_json), updated_at = NOW()"
+                )->execute([$tenantId, $datasetKey, $paramsHash, $pageNo, count($rows), sha256_hex($pageJson), $pageJson]);
+                unset($pageJson);
+            }
+
+            $totals = paged_dataset_totals($pdo, $tenantId, $datasetKey, $paramsHash);
+            respond(['ok' => true, 'page_no' => $pageNo, 'row_count' => $totals['row_count'], 'page_count' => $totals['page_count']]);
+        }
+
+        case 'dataset_pages_finalize': {
+            /* v21 — Sayfa senkronu turu sonunda üst kaydı (row_count / synced_at / revision) günceller. */
+            $firm = require_firm($pdo, $tenantId);
+            verify_client_secret($firm);
+
+            $datasetKey = trim((string)($input['dataset_key'] ?? ''));
+            $params = is_array($input['params'] ?? null) ? $input['params'] : [];
+            if ($datasetKey === '') {
+                respond(['ok' => false, 'error' => 'missing_dataset_key'], 400);
+            }
+            ensure_dataset_cache_pages($pdo);
+            $paramsHash = sha256_hex(cache_lookup_json($datasetKey, $params));
+            $totals = paged_dataset_totals($pdo, $tenantId, $datasetKey, $paramsHash);
+            $dataHash = trim((string)($input['data_hash'] ?? ''));
+            if ($dataHash === '') {
+                $dataHash = sha256_hex($datasetKey . '|' . $paramsHash . '|' . $totals['row_count'] . '|' . $totals['page_count']);
+            }
+            $saved = save_dataset_cache_meta($pdo, $tenantId, $datasetKey, $params, (int)$totals['row_count'], $dataHash, [
+                'page_count' => $totals['page_count'],
+                'page_sync' => true,
+                'changed_pages' => (int)($input['changed_pages'] ?? 0),
+                'deleted_pages' => (int)($input['deleted_pages'] ?? 0),
+            ]);
+            log_sync($pdo, $tenantId, $datasetKey, 'dataset_page_sync', 'ok', null, clean_json($params), [
+                'row_count' => $totals['row_count'],
+                'page_count' => $totals['page_count'],
+                'changed_pages' => (int)($input['changed_pages'] ?? 0),
+                'deleted_pages' => (int)($input['deleted_pages'] ?? 0),
+            ]);
+            respond(['ok' => true, 'row_count' => $totals['row_count'], 'page_count' => $totals['page_count'], 'meta' => $saved]);
+        }
+
+        case 'dataset_pages_delete': {
+            /* v21 — Sayfa senkronunda bu turda üretilmeyen (artık boş/kaymış) sayfaları siler. */
+            $firm = require_firm($pdo, $tenantId);
+            verify_client_secret($firm);
+
+            $datasetKey = trim((string)($input['dataset_key'] ?? ''));
+            $params = is_array($input['params'] ?? null) ? $input['params'] : [];
+            $pageNos = $input['page_nos'] ?? [];
+            if ($datasetKey === '' || !is_array($pageNos)) {
+                respond(['ok' => false, 'error' => 'missing_pages_delete_fields'], 400);
+            }
+            ensure_dataset_cache_pages($pdo);
+            $paramsHash = sha256_hex(cache_lookup_json($datasetKey, $params));
+            $pageNos = array_values(array_unique(array_map('intval', $pageNos)));
+            $deleted = 0;
+            $stmt = $pdo->prepare("DELETE FROM dataset_cache_pages WHERE tenant_id = ? AND dataset_key = ? AND params_hash = ? AND page_no = ?");
+            foreach ($pageNos as $pn) {
+                if ($pn <= 0) continue;
+                $stmt->execute([$tenantId, $datasetKey, $paramsHash, $pn]);
+                $deleted += $stmt->rowCount();
+            }
+            $totals = paged_dataset_totals($pdo, $tenantId, $datasetKey, $paramsHash);
+            respond(['ok' => true, 'deleted' => $deleted, 'row_count' => $totals['row_count'], 'page_count' => $totals['page_count']]);
         }
 
         case 'dataset_page_begin': {
