@@ -132,7 +132,7 @@ _POS_FILES = {"client.py": "text/x-python", "sync.php": "application/octet-strea
 @app.get("/api/sistem-durum", include_in_schema=False)
 async def sistem_durum(derin: int = 0):
     import services as _svc
-    out = {"surum": "2026-09-20-v20-baslik-buyuk-isim-tunel-fix", "patron": None, "data": None}
+    out = {"surum": "2026-09-21-v21-sync-php-kilit-fix", "patron": None, "data": None}
     # 2026-08 — OOM teşhisi: çalışma süresi (restart tespiti için)
     try:
         with open("/proc/self/stat") as f:
@@ -186,6 +186,15 @@ async def sistem_durum(derin: int = 0):
     if derin:
         import asyncio as _aio
         import time as _t
+        # v21 — hosting'deki sync.php sürümü (yüklemenin doğrulanması için)
+        try:
+            import httpx as _hx
+            from routes.data import SYNC_URL as _SU
+            async with _hx.AsyncClient(timeout=8) as _c:
+                _r = await _c.post(_SU, json={"action": "surum"})
+                out["sync_php_surum"] = (_r.json() or {}).get("surum") or f"eski sürüm (v21 öncesi, HTTP {_r.status_code})"
+        except Exception as _e:
+            out["sync_php_surum"] = f"ulaşılamadı: {type(_e).__name__}"
         # Veri havuzundan bağlantı alıp SELECT 1 dene — nerede takıldığını ölçer
         try:
             t0 = _t.monotonic()

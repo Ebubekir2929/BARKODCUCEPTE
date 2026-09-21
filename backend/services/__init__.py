@@ -28,67 +28,18 @@ class DBUnreachableError(RuntimeError):
 
 
 # ── 2026-06 — B Planı: direkt 3306 engelliyse otomatik TLS tüneli ──
-# Sağlayıcının SYN-proxy'si TCP'yi kabul edip MySQL greeting'i düşürüyor;
-# bu yüzden probe TCP connect ile yetinmez, greeting baytını da bekler.
+# v21 (2026-09-21) — Sunucuda max_connect_errors=10 (!). Eski "greeting yoklaması"
+# (TCP aç → 5 bayt oku → el sıkışmasız kapat) MySQL tarafında "aborted connect"
+# sayılır; kesinti anında art arda birikince sunucu bu host'u BLOKLAYABİLİR
+# (ER_HOST_IS_BLOCKED, ancak FLUSH HOSTS ile açılır). Bu yüzden yoklama kaldırıldı:
+# doğrudan tam el sıkışmalı create_pool denenir (3306 → gerekirse TLS tüneli),
+# paralel yarış yok (her deneme tek el sıkışma).
 _endpoint_cache: dict = {}  # host -> (host, port, expires_monotonic)
 _ENDPOINT_TTL_SEC = 300
 
 
-async def _mysql_greeting_ok(host: str, port: int, timeout: float = 4.0, deneme: int = 2) -> bool:
-    """v20 — Sağlayıcının SYN-proxy'si bağlantıların bir kısmını rastgele düşürüyor
-    (aynı anda 1 deneme 15 sn askıda, diğeri 0.3 sn'de yanıtlıyor). Tek yoklamayla
-    '3306 ölü' demeyip `deneme` adet bağlantıyı PARALEL açar; biri greeting alırsa
-    sağlıklı sayılır."""
-    async def _bir():
-        try:
-            r, w = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
-            try:
-                data = await asyncio.wait_for(r.read(5), timeout)
-                # MySQL greeting: payload[0] = protokol sürümü (0x0a). Hata paketi
-                # (örn. ER_HOST_IS_BLOCKED) 0xFF ile başlar → sağlıklı DEĞİL.
-                return len(data) >= 5 and data[4] != 0xFF
-            finally:
-                w.close()
-        except Exception:
-            return False
-
-    gorevler = [asyncio.ensure_future(_bir()) for _ in range(max(1, deneme))]
-    try:
-        for bitti in asyncio.as_completed(gorevler):
-            if await bitti:
-                return True
-        return False
-    finally:
-        for g in gorevler:
-            g.cancel()
-
-
-async def _resolve_mysql_endpoint(host: str) -> tuple:
-    """(host, port) döndürür: direkt 3306 sağlıklıysa onu, değilse TLS tünelini."""
-    cached = _endpoint_cache.get(host)
-    if cached and _time.monotonic() < cached[2]:
-        return cached[0], cached[1]
-    if await _mysql_greeting_ok(host, 3306):
-        ep = (host, 3306)
-    else:
-        tls_port = int(os.environ.get('MYSQL_TLS_PORT', '0') or 0)
-        tls_host = os.environ.get('MYSQL_TLS_HOST', host)
-        # v20 — Tünel hedefi (3308) de kapalıysa tünele bağlanmak anlamsız; 5 dk
-        # boyunca ölü tünelde takılı kalıyorduk (3306 toparlansa bile). Bu durumda
-        # direkt 3306'ya dön ve kararı ÖNBELLEĞE ALMA → sonraki deneme yeniden yoklar.
-        if tls_port and await _tcp_acik(tls_host, tls_port):
-            from .tls_tunnel import ensure_tunnel, LOCAL_TUNNEL_PORT
-            await ensure_tunnel(tls_host, tls_port)
-            logger.warning(f"MySQL direkt 3306 erişilemiyor — TLS tüneli kullanılıyor ({host})")
-            ep = ('127.0.0.1', LOCAL_TUNNEL_PORT)
-        else:
-            logger.warning(f"MySQL 3306 ve TLS {tls_port} şu an yanıt vermiyor — direkt 3306 deneniyor, karar önbelleğe alınmadı ({host})")
-            return (host, 3306)
-    _endpoint_cache[host] = (ep[0], ep[1], _time.monotonic() + _ENDPOINT_TTL_SEC)
-    return ep
-
-
 async def _tcp_acik(host: str, port: int, timeout: float = 4.0) -> bool:
+    """Yalnızca TLS tünel (stunnel) portu için TCP yoklaması — MySQL'e değil."""
     try:
         _, w = await asyncio.wait_for(asyncio.open_connection(host, port), timeout)
         w.close()
@@ -98,43 +49,56 @@ async def _tcp_acik(host: str, port: int, timeout: float = 4.0) -> bool:
 
 
 def _endpoint_unut(host: str) -> None:
-    """Havuz açılamadıysa endpoint kararını unut → sonraki deneme yeniden yoklar."""
+    """Havuz açılamadıysa endpoint kararını unut → sonraki deneme yeniden çözer."""
     _endpoint_cache.pop(host, None)
 
 
-async def _havuz_ac(host_env: str, deneme: int = 2, **pool_kw):
-    """v20 — Havuzu açar. Sağlayıcı el sıkışmaların bir kısmını rastgele düşürdüğü
-    için `deneme` adet create_pool PARALEL yarışır; ilk başaran kalır, diğerleri
-    kapatılır. Hepsi düşerse endpoint kararı unutulur ve hata fırlatılır."""
+async def _havuz_ac(host_env: str, **pool_kw):
+    """Havuzu açar. Sıra: önbellekteki karar → direkt 3306 → (tünel hedefi açıksa) TLS tüneli.
+    Başaran uç 5 dk önbelleğe alınır; hepsi düşerse karar unutulur ve hata fırlatılır."""
     host = os.environ.get(host_env, '185.223.77.132')
-    h, p = await _resolve_mysql_endpoint(host)
+    adaylar: list = []
+    cached = _endpoint_cache.get(host)
+    if cached and _time.monotonic() < cached[2]:
+        adaylar.append((cached[0], cached[1]))
+    if (host, 3306) not in adaylar:
+        adaylar.append((host, 3306))
 
-    async def _bir():
+    tls_port = int(os.environ.get('MYSQL_TLS_PORT', '0') or 0)
+    tls_host = os.environ.get('MYSQL_TLS_HOST', host)
+    son_hata: Exception = asyncio.TimeoutError()
+
+    async def _dene(h: str, p: int):
+        # IO yükü altındaki sunucuda el sıkışma 5 sn'yi aşabiliyor → 12/16 sn
         return await asyncio.wait_for(
             aiomysql.create_pool(host=h, port=p, autocommit=True, minsize=1,
                                  pool_recycle=280, connect_timeout=12, **pool_kw),
-            timeout=16)  # v20 — IO yükü altındaki sunucuda el sıkışma 5 sn'yi aşabiliyor
+            timeout=16)
 
-    gorevler = [asyncio.ensure_future(_bir()) for _ in range(max(1, deneme))]
-    kazanan = None
-    son_hata: Exception = asyncio.TimeoutError()
-    try:
-        for bitti in asyncio.as_completed(gorevler):
-            try:
-                kazanan = await bitti
-                break
-            except (asyncio.TimeoutError, OSError, _MySQLOpErr) as exc:
-                son_hata = exc
-    finally:
-        for g in gorevler:
-            if g.done() and not g.cancelled() and g.exception() is None and g.result() is not kazanan:
-                g.result().close()  # fazladan açılan havuz
-            elif not g.done():
-                g.cancel()
-    if kazanan is None:
-        _endpoint_unut(host)
-        raise son_hata
-    return kazanan
+    for h, p in adaylar:
+        try:
+            pool = await _dene(h, p)
+            _endpoint_cache[host] = (h, p, _time.monotonic() + _ENDPOINT_TTL_SEC)
+            return pool
+        except (asyncio.TimeoutError, OSError, _MySQLOpErr) as exc:
+            son_hata = exc
+            logger.warning(f"[{host_env}] {h}:{p} açılamadı: {exc!r}")
+
+    # Direkt düştü → tünel hedefi (3308) gerçekten açıksa TLS tünelini dene
+    if tls_port and await _tcp_acik(tls_host, tls_port):
+        try:
+            from .tls_tunnel import ensure_tunnel, LOCAL_TUNNEL_PORT
+            await ensure_tunnel(tls_host, tls_port)
+            pool = await _dene('127.0.0.1', LOCAL_TUNNEL_PORT)
+            logger.warning(f"MySQL direkt 3306 erişilemiyor — TLS tüneli kullanılıyor ({host})")
+            _endpoint_cache[host] = ('127.0.0.1', LOCAL_TUNNEL_PORT, _time.monotonic() + _ENDPOINT_TTL_SEC)
+            return pool
+        except (asyncio.TimeoutError, OSError, _MySQLOpErr) as exc:
+            son_hata = exc
+            logger.warning(f"[{host_env}] TLS tüneli de açılamadı: {exc!r}")
+
+    _endpoint_unut(host)
+    raise son_hata
 
 
 async def init_patron_pool():

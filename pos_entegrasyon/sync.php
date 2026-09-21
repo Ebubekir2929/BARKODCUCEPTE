@@ -5,6 +5,8 @@ header('Content-Type: application/json; charset=utf-8');
 
 require_once __DIR__ . '/db.php';
 
+const SYNC_PHP_SURUM = '2026-09-21-v21-schema-kilit-fix';
+
 function json_input(): array
 {
     $raw = file_get_contents('php://input');
@@ -696,6 +698,21 @@ function ensure_dataset_cache_pages(PDO $pdo): void
     }
     $done = true;
 
+    /* v21 (2026-09-21) — KESİNTİ KÖK NEDENİ: Aşağıdaki "UPDATE ... WHERE data_json IS NULL
+       OR data_json = ''" (LONGTEXT tam tablo taraması, 200K ürünlü müşteride 370+ MB)
+       ve "ALTER TABLE ADD UNIQUE KEY" (metadata kilidi) HER istekte, 6 PHP worker'da
+       paralel koşuyordu → dataset_cache_pages kilitleniyor, uygulama stok/dashboard
+       sorguları askıda kalıyordu. Tablo varsa bu blok günde 1 keze indirildi. */
+    try {
+        $existsStmt = $pdo->query("SHOW TABLES LIKE 'dataset_cache_pages'");
+        $tableExists = $existsStmt !== false && $existsStmt->fetchColumn() !== false;
+    } catch (Throwable $e) {
+        $tableExists = false;
+    }
+    if ($tableExists && !maintenance_due($pdo, 'pages_schema', 86400)) {
+        return;
+    }
+
     $pdo->exec(
         "CREATE TABLE IF NOT EXISTS dataset_cache_pages (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -727,13 +744,46 @@ function ensure_dataset_cache_pages(PDO $pdo): void
     if (isset($cols['page_json']) && isset($cols['data_json'])) {
         safe_alter($pdo, "UPDATE dataset_cache_pages SET data_json = page_json WHERE (data_json IS NULL OR data_json = '') AND page_json IS NOT NULL");
     }
-    safe_alter($pdo, "UPDATE dataset_cache_pages SET data_json = '[]' WHERE data_json IS NULL OR data_json = ''");
-    safe_alter($pdo, "ALTER TABLE dataset_cache_pages ADD UNIQUE KEY uniq_dataset_cache_page (tenant_id, dataset_key, params_hash, page_no)");
-    safe_alter($pdo, "ALTER TABLE dataset_cache_pages ADD KEY idx_dataset_cache_page_lookup (tenant_id, dataset_key, params_hash)");
+    // v21 — Yalnızca NULL kontrolü (boş string karşılaştırması LONGTEXT'te çok pahalı);
+    // yeni yazımlar zaten '[]' üretir. İndeksler yalnızca YOKSA eklenir (metadata kilidi alma).
+    safe_alter($pdo, "UPDATE dataset_cache_pages SET data_json = '[]' WHERE data_json IS NULL");
+    $idx = table_indexes($pdo, 'dataset_cache_pages');
+    if (!isset($idx['uniq_dataset_cache_page'])) safe_alter($pdo, "ALTER TABLE dataset_cache_pages ADD UNIQUE KEY uniq_dataset_cache_page (tenant_id, dataset_key, params_hash, page_no)");
+    if (!isset($idx['idx_dataset_cache_page_lookup'])) safe_alter($pdo, "ALTER TABLE dataset_cache_pages ADD KEY idx_dataset_cache_page_lookup (tenant_id, dataset_key, params_hash)");
+}
+
+function table_indexes(PDO $pdo, string $table): array
+{
+    $out = [];
+    try {
+        $stmt = $pdo->query("SHOW INDEX FROM `" . str_replace('`', '', $table) . "`");
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(string)($r['Key_name'] ?? '')] = true;
+        }
+    } catch (Throwable $e) {
+    }
+    return $out;
 }
 
 function ensure_dataset_upload_chunks(PDO $pdo): void
 {
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+
+    // v21 — Her istekte ALTER (metadata kilidi) yerine tablo varsa günde 1 kez.
+    try {
+        $existsStmt = $pdo->query("SHOW TABLES LIKE 'dataset_upload_chunks'");
+        $tableExists = $existsStmt !== false && $existsStmt->fetchColumn() !== false;
+    } catch (Throwable $e) {
+        $tableExists = false;
+    }
+    if ($tableExists && !maintenance_due($pdo, 'chunks_schema', 86400)) {
+        return;
+    }
+
     $pdo->exec(
         "CREATE TABLE IF NOT EXISTS dataset_upload_chunks (
             id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -758,7 +808,9 @@ function ensure_dataset_upload_chunks(PDO $pdo): void
     if (!isset($cols['total_parts'])) safe_alter($pdo, "ALTER TABLE dataset_upload_chunks ADD COLUMN total_parts INT NOT NULL DEFAULT 1 AFTER part_no");
     if (!isset($cols['chunk_text'])) safe_alter($pdo, "ALTER TABLE dataset_upload_chunks ADD COLUMN chunk_text LONGTEXT NULL AFTER total_parts");
     if (!isset($cols['created_at'])) safe_alter($pdo, "ALTER TABLE dataset_upload_chunks ADD COLUMN created_at DATETIME NULL");
-    safe_alter($pdo, "ALTER TABLE dataset_upload_chunks ADD UNIQUE KEY uniq_dataset_upload_part (tenant_id, upload_id, part_no)");
+    $idx = table_indexes($pdo, 'dataset_upload_chunks');
+    if (!isset($idx['uniq_dataset_upload_part'])) safe_alter($pdo, "ALTER TABLE dataset_upload_chunks ADD UNIQUE KEY uniq_dataset_upload_part (tenant_id, upload_id, part_no)");
+    if (!isset($idx['idx_dataset_upload_lookup'])) safe_alter($pdo, "ALTER TABLE dataset_upload_chunks ADD KEY idx_dataset_upload_lookup (tenant_id, upload_id, dataset_key)");
 }
 
 function save_dataset_cache_meta(PDO $pdo, string $tenantId, string $datasetKey, array $params, int $rowCount, string $dataHash, ?array $extraMeta = null): array
@@ -935,8 +987,9 @@ function ensure_dataset_cache_rows(PDO $pdo): void
     safe_alter($pdo, "UPDATE dataset_cache_rows SET row_uid_hash = SHA2(CONCAT(tenant_id, '|', dataset_key, '|', params_hash, '|', row_key), 256) WHERE row_uid_hash IS NULL OR row_uid_hash = ''");
 
     // Eski MySQL'de uzun composite index 1071 hatası verir. Tek 64 karakterlik UID hash ile güvenli unique kullanıyoruz.
-    safe_alter($pdo, "ALTER TABLE dataset_cache_rows ADD UNIQUE KEY uniq_dataset_cache_row_uid (row_uid_hash)");
-    safe_alter($pdo, "ALTER TABLE dataset_cache_rows ADD KEY idx_dataset_cache_rows_lookup (tenant_id(32), dataset_key(32), params_hash, deleted_at)");
+    $idx = table_indexes($pdo, 'dataset_cache_rows');
+    if (!isset($idx['uniq_dataset_cache_row_uid'])) safe_alter($pdo, "ALTER TABLE dataset_cache_rows ADD UNIQUE KEY uniq_dataset_cache_row_uid (row_uid_hash)");
+    if (!isset($idx['idx_dataset_cache_rows_lookup'])) safe_alter($pdo, "ALTER TABLE dataset_cache_rows ADD KEY idx_dataset_cache_rows_lookup (tenant_id(32), dataset_key(32), params_hash, deleted_at)");
 }
 
 function save_dataset_cache_rows_meta(PDO $pdo, string $tenantId, string $datasetKey, array $params, int $rowCount, string $dataHash, ?array $extraMeta = null): array
@@ -1447,7 +1500,9 @@ function ensure_pending_price_updates(PDO $pdo): void
     if (!isset($cols['status'])) safe_alter($pdo, "ALTER TABLE pending_price_updates ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'pending' AFTER new_price");
     if (!isset($cols['applied_at'])) safe_alter($pdo, "ALTER TABLE pending_price_updates ADD COLUMN applied_at DATETIME NULL AFTER created_at");
     if (!isset($cols['error_message'])) safe_alter($pdo, "ALTER TABLE pending_price_updates ADD COLUMN error_message VARCHAR(500) NULL AFTER applied_at");
-    safe_alter($pdo, "ALTER TABLE pending_price_updates ADD KEY idx_tenant_status (tenant_id, status)");
+    // v21 — indeks yalnızca yoksa (her istekte ALTER = metadata kilidi)
+    $idx = table_indexes($pdo, 'pending_price_updates');
+    if (!isset($idx['idx_tenant_status'])) safe_alter($pdo, "ALTER TABLE pending_price_updates ADD KEY idx_tenant_status (tenant_id, status)");
 }
 
 function normalize_id_list($value): array
@@ -1752,8 +1807,9 @@ function auto_cleanup_old_logs(PDO $pdo, int $days = 7): void
     }
     $days = max(1, min(3650, $days));
     try {
-        // Hızlı temizlik için created_at indeksi (varsa sessiz geçer)
-        try { $pdo->exec("ALTER TABLE sync_logs ADD KEY idx_sync_logs_created (created_at)"); } catch (Throwable $e) {}
+        // Hızlı temizlik için created_at indeksi — v21: yalnızca YOKSA (her saat ALTER = metadata kilidi)
+        $idx = table_indexes($pdo, 'sync_logs');
+        if (!isset($idx['idx_sync_logs_created'])) { try { $pdo->exec("ALTER TABLE sync_logs ADD KEY idx_sync_logs_created (created_at)"); } catch (Throwable $e) {} }
         for ($i = 0; $i < 5; $i++) {
             $stmt = $pdo->prepare("DELETE FROM sync_logs WHERE created_at < (NOW() - INTERVAL ? DAY) LIMIT 10000");
             $stmt->execute([$days]);
@@ -1768,7 +1824,8 @@ function auto_cleanup_old_logs(PDO $pdo, int $days = 7): void
 }
 
 $pdo = db();
-auto_cleanup_old_logs($pdo, 7);
+// v21 — sync_logs 7 günde 7,1 M satır / 3,6 GB olmuştu (tenant başına ~50K push/gün); 3 gün yeterli.
+auto_cleanup_old_logs($pdo, 3);
 $input = json_input();
 
 $action = trim((string)($input['action'] ?? ''));
@@ -1776,6 +1833,10 @@ $tenantId = trim((string)($input['tenant_id'] ?? ''));
 
 if ($action === '') {
     respond(['ok' => false, 'error' => 'missing_action'], 400);
+}
+// v21 — Yüklenen sync.php sürümünü doğrulamak için kimliksiz sürüm ucu
+if ($action === 'surum') {
+    respond(['ok' => true, 'surum' => SYNC_PHP_SURUM]);
 }
 if ($tenantId === '') {
     respond(['ok' => false, 'error' => 'missing_tenant_id'], 400);

@@ -412,3 +412,20 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - **MySQL bağlantı dalgalanması** (185.223.77.132, 3306 + TLS 3308): yeni TCP bağlantılarının çoğu greeting almadan düşüyor (sunucu IO yükü / sağlayıcı). Backend IP: 34.170.12.145 (whitelist için). v20 sertleştirme: `services/__init__.py` — paralel greeting yoklaması (2), paralel create_pool yarışı (2), `connect_timeout 12 / wait 16`, ölü tünelde takılmama (tünel hedefi TCP kapalıysa direkt 3306, karar önbelleğe alınmaz), havuz açılamazsa endpoint kararı unutulur, `pymysql OperationalError(2003)` de yakalanır (eskiden 500 dönüyordu).
 - UYARI: uvicorn `--reload` açık → backend dosyası düzenlemek canlı havuz bağlantılarını düşürür; DB dalgalanırken düzenleme yapma.
 - Kullanıcının yapması gerekenler: (1) hosting'e yeni `sync.php` yükle (`/api/pos-dosya/sync.php`), (2) müşteri POS'unda `client.py` güncel olsun, (3) Railway redeploy.
+
+## 2026-09-21 — v21: "Kesinti" KÖK NEDENİ — sync.php her istekte şema bakımı (kilit fırtınası) ✅
+- Belirti: Uygulama stok/dashboard sorguları askıda; MySQL processlist'te 6 PHP worker'da paralel
+  `UPDATE dataset_cache_pages SET data_json='[]' WHERE data_json IS NULL OR data_json=''` (LONGTEXT tam tarama, 36+ sn)
+  ve `ALTER TABLE dataset_cache_pages ADD UNIQUE KEY …` → "Waiting for table metadata lock" zinciri.
+- Neden: `ensure_dataset_cache_pages()` / `ensure_dataset_upload_chunks()` HER istekte çalışıyordu (static $done PHP'de istek başına sıfırlanır).
+  200K müşterinin 830 sayfası (785 MB tablo) gelince tarama saniyelerden dakikalara çıktı → tüm sorgular kilitlendi.
+- Düzeltme (sync.php v21 `2026-09-21-v21-schema-kilit-fix`):
+  - pages/chunks ensure blokları `maintenance_due(…, 86400)` ile günde 1 kez; UPDATE yalnızca `IS NULL`; indeksler yalnızca YOKSA (`table_indexes()` → SHOW INDEX) eklenir.
+  - `dataset_cache_rows` / `pending_price_updates` / `sync_logs` ALTER'ları da yalnızca indeks yoksa.
+  - `auto_cleanup_old_logs` 7 → 3 gün (sync_logs 7,1 M satır / 3,6 GB olmuştu).
+  - Kimliksiz `{"action":"surum"}` ucu → yüklenen sürüm doğrulanır; backend `/api/sistem-durum?derin=1` → `sync_php_surum`.
+- Backend v21: MySQL bağlantı katmanı sadeleştirildi — sunucuda `max_connect_errors=10` olduğu görüldü; el sıkışmasız
+  "greeting yoklaması" aborted-connect sayıldığı için kaldırıldı, paralel yarış yok: önbellek → direkt 3306 → (3308 açıksa) TLS tüneli.
+- MySQL sunucu bilgileri: MariaDB 5.5.68, max_connections 151, max_allowed_packet 1 MB (sayfa ≈ 450 KB — sınırın altında kalmalı!), wait_timeout 8 sa.
+- DB şişkinliği (ileride temizlik adayı): dataset_upload_chunks 4,4 GB (parçalanma), sync_logs 3,6 GB, dataset_cache 3 GB (Haziran'dan kalan rap_* rapor önbellekleri), dataset_cache_rows 1,45 GB.
+- KULLANICI AKSİYONU: yeni sync.php'yi hosting'e yükle (`/api/pos-dosya/sync.php`) → `?derin=1` ile `sync_php_surum` v21 görünmeli; Railway redeploy.

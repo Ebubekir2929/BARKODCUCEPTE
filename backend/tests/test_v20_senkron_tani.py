@@ -7,7 +7,7 @@ import requests
 BASE = os.environ.get("TEST_BASE_URL", "http://localhost:8001").rstrip("/") + "/api"
 EMAIL, PASS = "cakmak.ebubekir29@gmail.com", "1234567"
 TENANT_200K = "a6491c78291643e6b08e518e1de8e498"
-EXPECTED_SURUM_PREFIX = "2026-09-20-v20"
+EXPECTED_SURUM_PREFIX = "2026-09-21-v21"
 
 
 @pytest.fixture(scope="module")
