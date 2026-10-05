@@ -463,3 +463,17 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - Sürüm: backend `2026-09-23-v23-haftalik-rapor-maili`, app 1.0.56 (build 60). Test: `tests/test_v23_haftalik_rapor.py` 8/8.
 - NOT: dev ortamında e-posta gönderilemiyor (BREVO_API_KEY yalnız Railway'de; Gmail SMTP 535 reddediyor) → gerçek teslimat prod'da doğrulanmalı
   (Ayarlar → Şimdi Gönder). TS: settings.tsx'te ÖNCEDEN VAR olan 2 tsc hatası (deleteAccount, notify_line_cancellations) dokunulmadı.
+
+## 2026-09-22 — client.py v24: POS istemcisi RAM/CPU şişmesi (KÖK NEDEN + FIX) ✅
+- Belirti: müşteride KasaCepte Transfer Client %90 CPU / 620 MB RAM (tam ön yükleme sırasında).
+- KÖK NEDEN: `snapshots.json` her direkt-cache kaydında diskten tamamen okunup (json.load) İKİ kez tamamen yazılıyordu
+  (`_push_direct_cache_dataset_if_changed` → save + `update_snapshot` → load+save, indent=2). Tarihli parametreli girdiler
+  (kart_extre_cari TARIH_BITIS=bugün → 500 cari × 2 girdi/gün, günlük fişler) HİÇ budanmıyordu → dosya aylar içinde onlarca MB
+  (test: 120 gün = 120K girdi = 47,7 MB) → kayıt başına ~3 sn JSON parse/dump, paralel iş parçacıklarında kopyalar → RAM.
+  Ek: `txt_log` QTextEdit sınırsız (7/24 yüz binlerce satır), `record_success` her kayıtta dosya oku/yaz + UI yenileme.
+- FIX: snapshot bellek önbelleği (`load_snapshots` paylaşılan dict, `save_snapshots` kirli işareti, `_snapshots_flush` en sık 3 sn'de
+  kompakt+atomik .tmp→replace yazım, 5 sn daemon flush + atexit), `_snapshot_budama` 14 günden eski `last_sync_at/last_check_at`
+  girdileri siler (stockpages::/full_prefetch|/current_month_extre_cursor| ve zaman damgasız girdiler korunur; açılışta + 6 saatte bir),
+  success_state bellekte + UI yenileme 1,5 sn throttle, `txt_log.document().setMaximumBlockCount(1500)`, `update_snapshot(data_hash=)` çift hash yok.
+- Test (/tmp/snap_test.py, AST ile Qt'siz): 47,7 MB → budama sonrası 4,9 MB; 4000 load/save 0,10 sn (eski ~3 sn/kayıt); 4 yazıcı + flusher eşzamanlı hatasız.
+- KULLANICI AKSİYONU: müşteri POS'una yeni client.py (`/api/pos-dosya/client.py`, log başında "v24 (RAM/CPU diyeti…)").

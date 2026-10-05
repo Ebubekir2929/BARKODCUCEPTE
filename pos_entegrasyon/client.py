@@ -14,6 +14,7 @@ import sys
 import json
 import time
 import uuid
+import atexit
 import threading
 import traceback
 import base64
@@ -53,7 +54,7 @@ LOG_PATH = os.path.join(CONFIG_DIR, "client.log")
 DEFAULT_SERVER_URL = "https://kasaceptetransfer.berkyazilim.com/sync.php"
 
 # 2026-06 — Çalışan sürümü loglarda görmek için (kullanıcı doğru build'i kurdu mu?)
-CLIENT_BUILD = "2026-09-21 v21 (stok sayfa senkronu + web durumu bilinmiyor→atla)"
+CLIENT_BUILD = "2026-09-22 v24 (RAM/CPU diyeti: snapshot bellek önbelleği + budama, log sınırı)"
 
 AUTORUN_START_DELAY_SEC = 8
 # Normal datasetler için direkt POST sınırı.
@@ -335,22 +336,147 @@ def sanitize_row(row: Dict[str, Any]) -> Dict[str, Any]:
     return {str(k): sanitize_value(v) for k, v in row.items()}
 
 
-def load_snapshots() -> Dict[str, Any]:
-    ensure_dirs()
-    if os.path.exists(SNAPSHOT_PATH):
+def _json_atomik_yaz(path: str, data: Any, indent: Optional[int] = None):
+    """Önce .tmp'ye yaz, sonra os.replace — çökme anında dosya bozulmaz."""
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=indent, separators=None if indent else (",", ":"))
+    os.replace(tmp, path)
+
+
+# ── v24 — SNAPSHOT BELLEK ÖNBELLEĞİ (RAM/CPU diyeti) ───────────────────────────
+# ESKİ DAVRANIŞ: her direkt-cache kaydında snapshots.json tamamen diskten okunup
+# (json.load) iki kez tamamen yazılıyordu (json.dump indent=2). Tarihli parametreli
+# kayıtlar (kart_extre_cari TARIH_BITIS=bugün, günlük fişler) HİÇ budanmadığı için
+# dosya her gün ~2.500 kayıt büyüyor, aylar sonra onlarca MB oluyordu →
+# tam ön yüklemede kayıt başına saniyeler süren JSON parse/dump = %90 CPU, 600 MB+ RAM.
+# YENİ: dosya 1 kez okunur, bellekte tutulur; yazımlar birleştirilip en sık
+# SNAPSHOT_FLUSH_SEC'de bir kompakt (indent'siz) ve atomik yazılır; 14 günden eski
+# girdiler budanır (durum/sayfa anahtarları hariç).
+SNAPSHOT_FLUSH_SEC = 3.0
+SNAPSHOT_SAKLAMA_GUN = 14
+SNAPSHOT_BUDAMA_ARALIK_SEC = 6 * 3600
+_SNAP_LOCK = threading.RLock()
+_SNAP_CACHE: Optional[Dict[str, Any]] = None
+_SNAP_DIRTY = False
+_SNAP_LAST_FLUSH = 0.0
+_SNAP_LAST_BUDAMA = 0.0
+_SNAP_KORUNAN_ONEK = ("stockpages::", "full_prefetch|", "current_month_extre_cursor|")
+
+
+def _snapshot_budama(snap: Dict[str, Any]) -> int:
+    """last_sync_at / last_check_at değeri SNAPSHOT_SAKLAMA_GUN'den eski girdileri siler.
+    Zaman damgası olmayan ve korunan önekli (sayfa/durum) girdilere dokunmaz."""
+    esik = datetime.now() - timedelta(days=SNAPSHOT_SAKLAMA_GUN)
+    silinecek = []
+    for key, val in list(snap.items()):  # kopya: diğer iş parçacıkları eşzamanlı yazabilir
+        if not isinstance(val, dict) or key.startswith(_SNAP_KORUNAN_ONEK):
+            continue
+        ts = str(val.get("last_sync_at") or val.get("last_check_at") or "")
+        if not ts:
+            continue
         try:
-            with open(SNAPSHOT_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return data if isinstance(data, dict) else {}
-        except Exception:
-            return {}
-    return {}
+            if datetime.strptime(ts[:19], "%Y-%m-%d %H:%M:%S") < esik:
+                silinecek.append(key)
+        except ValueError:
+            continue
+    for key in silinecek:
+        snap.pop(key, None)
+    return len(silinecek)
+
+
+def load_snapshots() -> Dict[str, Any]:
+    """Bellekteki PAYLAŞILAN snapshot sözlüğünü döndürür (ilk çağrıda diskten yüklenir).
+    Çağıranlar bu sözlüğü değiştirip save_snapshots() ile 'kirli' işaretler."""
+    global _SNAP_CACHE, _SNAP_DIRTY, _SNAP_LAST_BUDAMA
+    with _SNAP_LOCK:
+        if _SNAP_CACHE is None:
+            ensure_dirs()
+            data: Any = {}
+            if os.path.exists(SNAPSHOT_PATH):
+                try:
+                    with open(SNAPSHOT_PATH, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    data = {}
+            _SNAP_CACHE = data if isinstance(data, dict) else {}
+            budanan = _snapshot_budama(_SNAP_CACHE)
+            _SNAP_LAST_BUDAMA = time.time()
+            if budanan:
+                _SNAP_DIRTY = True
+                log(f"snapshot budama: {budanan} eski girdi silindi ({len(_SNAP_CACHE)} kaldı)")
+        return _SNAP_CACHE
 
 
 def save_snapshots(data: Dict[str, Any]):
-    ensure_dirs()
-    with open(SNAPSHOT_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """Yalnızca 'kirli' işaretler; disk yazımı birleştirilerek _snapshots_flush ile yapılır."""
+    global _SNAP_CACHE, _SNAP_DIRTY
+    with _SNAP_LOCK:
+        if data is not _SNAP_CACHE:
+            _SNAP_CACHE = data  # çağıran yeni bir sözlük verdiyse onu benimse
+        _SNAP_DIRTY = True
+    _snapshots_flush()
+
+
+def _snapshots_flush(force: bool = False):
+    """Kirliyse ve süre dolduysa (ya da force) snapshot'ı kompakt+atomik yazar.
+    Üst düzey sözlüğün sığ kopyası kilit altında alınır; serileştirme kilit dışında."""
+    global _SNAP_DIRTY, _SNAP_LAST_FLUSH, _SNAP_LAST_BUDAMA
+    with _SNAP_LOCK:
+        if _SNAP_CACHE is None or not _SNAP_DIRTY:
+            return
+        if not force and (time.time() - _SNAP_LAST_FLUSH) < SNAPSHOT_FLUSH_SEC:
+            return
+        if (time.time() - _SNAP_LAST_BUDAMA) > SNAPSHOT_BUDAMA_ARALIK_SEC:
+            _snapshot_budama(_SNAP_CACHE)
+            _SNAP_LAST_BUDAMA = time.time()
+        kopya = dict(_SNAP_CACHE)
+        _SNAP_DIRTY = False
+        _SNAP_LAST_FLUSH = time.time()
+    try:
+        ensure_dirs()
+        _json_atomik_yaz(SNAPSHOT_PATH, kopya)
+    except Exception as exc:
+        with _SNAP_LOCK:
+            _SNAP_DIRTY = True  # bir sonraki turda yeniden denenir
+        log(f"snapshot yazılamadı: {exc}")
+
+
+def _snapshot_cache_sifirla():
+    global _SNAP_CACHE, _SNAP_DIRTY
+    with _SNAP_LOCK:
+        _SNAP_CACHE = None
+        _SNAP_DIRTY = False
+
+
+# Başarı listesi de bellekte tutulur (eskiden her kayıtta dosya okunup yazılıyordu)
+_SUCCESS_LOCK = threading.Lock()
+_SUCCESS_CACHE: Optional[List[Dict[str, Any]]] = None
+_SUCCESS_DIRTY = False
+
+
+def _arka_plan_flush_dongusu():
+    """Daemon: 5 sn'de bir bekleyen snapshot/başarı yazımlarını diske indirir."""
+    while True:
+        time.sleep(5.0)
+        try:
+            _snapshots_flush(force=True)
+            _success_flush()
+        except Exception:
+            pass
+
+
+def _flush_hepsi():
+    try:
+        _snapshots_flush(force=True)
+        _success_flush()
+    except Exception:
+        pass
+
+
+threading.Thread(target=_arka_plan_flush_dongusu, name="snapshot-flush", daemon=True).start()
+atexit.register(_flush_hepsi)
+
 
 def load_watch_state() -> Dict[str, Any]:
     ensure_dirs()
@@ -388,21 +514,43 @@ def save_offline_queue(items: List[Dict[str, Any]]):
 
 
 def load_success_state() -> List[Dict[str, Any]]:
-    ensure_dirs()
-    if os.path.exists(SUCCESS_STATE_PATH):
-        try:
-            with open(SUCCESS_STATE_PATH, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return data if isinstance(data, list) else []
-        except Exception:
-            return []
-    return []
+    """Bellekteki başarı listesi (ilk çağrıda diskten). Döndürülen liste paylaşılır."""
+    global _SUCCESS_CACHE
+    with _SUCCESS_LOCK:
+        if _SUCCESS_CACHE is None:
+            ensure_dirs()
+            data: Any = []
+            if os.path.exists(SUCCESS_STATE_PATH):
+                try:
+                    with open(SUCCESS_STATE_PATH, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    data = []
+            _SUCCESS_CACHE = data if isinstance(data, list) else []
+        return _SUCCESS_CACHE
 
 
 def save_success_state(items: List[Dict[str, Any]]):
-    ensure_dirs()
-    with open(SUCCESS_STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump(items, f, ensure_ascii=False, indent=2)
+    global _SUCCESS_CACHE, _SUCCESS_DIRTY
+    with _SUCCESS_LOCK:
+        _SUCCESS_CACHE = list(items[:200])
+        _SUCCESS_DIRTY = True
+
+
+def _success_flush():
+    global _SUCCESS_DIRTY
+    with _SUCCESS_LOCK:
+        if _SUCCESS_CACHE is None or not _SUCCESS_DIRTY:
+            return
+        kopya = list(_SUCCESS_CACHE)
+        _SUCCESS_DIRTY = False
+    try:
+        ensure_dirs()
+        _json_atomik_yaz(SUCCESS_STATE_PATH, kopya)
+    except Exception as exc:
+        with _SUCCESS_LOCK:
+            _SUCCESS_DIRTY = True
+        log(f"success_state yazılamadı: {exc}")
 
 
 DEFAULT_CHANGE_WATCHERS: List[Dict[str, Any]] = [
@@ -1042,6 +1190,7 @@ def save_cfg(cfg: Dict[str, Any]):
 
 
 def factory_reset():
+    _snapshot_cache_sifirla()
     for p in (CONFIG_PATH, SNAPSHOT_PATH, WATCH_STATE_PATH, LOG_PATH):
         try:
             if os.path.exists(p):
@@ -2322,6 +2471,9 @@ class Main(QMainWindow):
         v.addWidget(QLabel("Senkron Logu"))
         self.txt_log = QTextEdit()
         self.txt_log.setReadOnly(True)
+        # v24 — Sınırsız log birikimi RAM'i şişiriyordu (7/24 çalışan istemcide
+        # yüz binlerce satır); en fazla son 1500 satır tutulur. Tam log dosyada.
+        self.txt_log.document().setMaximumBlockCount(1500)
         v.addWidget(self.txt_log, 2)
 
         v.addWidget(QLabel("Son Başarılı Senkronlar"))
@@ -3184,13 +3336,13 @@ class Main(QMainWindow):
                     "Güvenlik için push iptal edildi."
                 )
 
-    def update_snapshot(self, defn: Dict[str, Any], params: Dict[str, Any], data: Any):
+    def update_snapshot(self, defn: Dict[str, Any], params: Dict[str, Any], data: Any, data_hash: Optional[str] = None):
         key = dataset_run_key(defn["dataset_key"], params)
         snap = load_snapshots()
         snap[key] = {
             "dataset_key": defn["dataset_key"],
             "params": params,
-            "data_hash": hash_obj(data),
+            "data_hash": data_hash or hash_obj(data),  # v24 — çağıran hash'i verdiyse yeniden hesaplanmaz
             "row_count": len(data) if isinstance(data, list) else 1,
             "last_sync_at": now_str(),
         }
@@ -3968,7 +4120,7 @@ class Main(QMainWindow):
             "note": note,
         }
         save_snapshots(snap)
-        self.update_snapshot(defn, params, data)
+        self.update_snapshot(defn, params, data, data_hash=new_hash)
         self.record_success(dataset_key, params, row_count, status=note, note="request beklemeden cache'e basıldı")
         self.println(f"✓ Direkt cache güncellendi: {dataset_key} ({row_count} kayıt) params={params}")
         return True
@@ -6655,7 +6807,7 @@ SELECT TOP {limit}
 
     def record_success(self, dataset_key: str, params: Dict[str, Any], row_count: int, status: str = "ok", note: str = ""):
         with self._record_success_lock:
-            items = load_success_state()
+            items = list(load_success_state())
             items.insert(0, {
                 "time": now_str(),
                 "dataset_key": dataset_key,
@@ -6665,6 +6817,12 @@ SELECT TOP {limit}
                 "note": note,
             })
             save_success_state(items[:200])
+            # v24 — UI yenilemesi en sık 1,5 sn'de bir (tam ön yüklemede kayıt başına
+            # ana iş parçacığını meşgul etmesin); arka plan flush döngüsü gerisini tamamlar.
+            simdi = time.time()
+            if simdi - getattr(self, "_son_success_render_ts", 0.0) < 1.5:
+                return
+            self._son_success_render_ts = simdi
         self.refresh_success_signal.emit()
 
     def queue_offline_payload(self, payload: Dict[str, Any]):
