@@ -152,12 +152,21 @@ export const AcikHesapKisiDetail: React.FC<{
   }
 
   if (rows.length === 0) {
+    // 2026-10-13 — Geçmiş gün: liste ANLIK açık bakiyeleri gösterir; gün bittikten /
+    // hesap kapandıktan sonra POS prosedürü boş döner. Üst karttaki Açık Hesap tutarı
+    // (financial_data VERESIYE) ise o gün yapılan veresiye satışın kendisidir.
+    const gecmisGun = (edate || sdate || '').slice(0, 10) < new Date().toISOString().slice(0, 10);
     return (
       <View style={{ padding: 16, alignItems: 'center' }}>
         <Ionicons name="checkmark-circle-outline" size={28} color={colors.success} />
         <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 6 }}>
-          Açık hesap bulunmamaktadır
+          {gecmisGun ? 'Bu güne ait açık (ödenmemiş) hesap kalmamış' : 'Açık hesap bulunmamaktadır'}
         </Text>
+        {gecmisGun && (
+          <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4, textAlign: 'center', lineHeight: 15 }}>
+            Kişi listesi anlık açık bakiyeleri gösterir; o gün veresiye yapılan satış sonradan kapatıldıysa burada görünmez.
+          </Text>
+        )}
       </View>
     );
   }

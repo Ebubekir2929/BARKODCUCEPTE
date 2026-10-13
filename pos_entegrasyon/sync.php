@@ -5,7 +5,7 @@ header('Content-Type: application/json; charset=utf-8');
 
 require_once __DIR__ . '/db.php';
 
-const SYNC_PHP_SURUM = '2026-09-21-v21-sayfa-senkron-kilit-fix';
+const SYNC_PHP_SURUM = '2026-10-13-v22-acik-hesap-gecmis-gun-korumasi';
 
 function json_input(): array
 {
@@ -470,7 +470,7 @@ function save_dataset_cache(PDO $pdo, string $tenantId, string $datasetKey, arra
     $rowCount = normalize_row_count($data);
 
     $stmt = $pdo->prepare(
-        "SELECT id, revision_no, data_hash
+        "SELECT id, revision_no, data_hash, row_count
            FROM dataset_cache
           WHERE tenant_id = ? AND dataset_key = ? AND params_hash = ?
           LIMIT 1"
@@ -486,6 +486,20 @@ function save_dataset_cache(PDO $pdo, string $tenantId, string $datasetKey, arra
             return ['cache_id' => (int)$existing['id'], 'revision_no' => (int)$existing['revision_no'], 'row_count' => 0, 'skipped_empty_overwrite' => true];
         }
         return ['cache_id' => 0, 'revision_no' => 0, 'row_count' => 0, 'skipped_empty_overwrite' => true];
+    }
+
+    // 2026-10-13 v22 — KORUMA: rap_acik_hesap_kisi_ozet_web GEÇMİŞ GÜN için gelen BOŞ sonuç,
+    // mevcut DOLU gün-sonu verisini EZMEZ. Prosedür anlık (hâlâ açık) bakiyeleri döndürdüğünden
+    // gün bittikten / hesap kapandıktan sonra aynı tarih aralığı için [] döner; istemcinin
+    // "ondemand takip" turu bunu basınca mobildeki "dünkü açık hesap" listesi boşalıyordu.
+    if ($datasetKey === 'rap_acik_hesap_kisi_ozet_web' && $rowCount <= 0 && $existing) {
+        $edate = substr((string)($params['edate'] ?? $params['BITTARIH'] ?? ''), 0, 10);
+        if ($edate !== '' && $edate < date('Y-m-d')) {
+            $mevcutSatir = (int)($existing['row_count'] ?? 0);
+            if ($mevcutSatir > 0) {
+                return ['cache_id' => (int)$existing['id'], 'revision_no' => (int)$existing['revision_no'], 'row_count' => $mevcutSatir, 'skipped_empty_overwrite' => true, 'neden' => 'gecmis_gun_bos_sonuc'];
+            }
+        }
     }
 
     if ($existing) {

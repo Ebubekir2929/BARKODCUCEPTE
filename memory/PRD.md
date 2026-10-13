@@ -477,3 +477,18 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
   success_state bellekte + UI yenileme 1,5 sn throttle, `txt_log.document().setMaximumBlockCount(1500)`, `update_snapshot(data_hash=)` çift hash yok.
 - Test (/tmp/snap_test.py, AST ile Qt'siz): 47,7 MB → budama sonrası 4,9 MB; 4000 load/save 0,10 sn (eski ~3 sn/kayıt); 4 yazıcı + flusher eşzamanlı hatasız.
 - KULLANICI AKSİYONU: müşteri POS'una yeni client.py (`/api/pos-dosya/client.py`, log başında "v24 (RAM/CPU diyeti…)").
+
+## 2026-10-13 — a649: "dünkü açık hesap içeriği yok" + "personel satışları üst toplamdan fazla" (KÖK NEDENLER) ✅
+- **Personel/Garson satışları farkı = İADE.** Tüm tenant'larda doğrulandı: garson_satis_ozet.PERAKENDE_SATIS_TUTARI − IADE_TUTARI
+  == financial_data.PERAKENDE_GENELTOPLAM (birebir). Prosedür brüt döndürüyor, dashboard Toplam iadeleri düşüyor.
+  FIX (DashboardSections.tsx WaiterSalesSection): netOf = brüt − iade (garson); ERP12 zaten net. Toplam/lokasyon/kişi satırları net,
+  iade varsa kırmızı "İade düşüldü" kutusu + kişi chip'i + üstü çizili brüt. Eski "Brüt satış" uyarı kutusu kaldırıldı.
+- **Açık hesap geçmiş gün boşalması.** RAP_ACIK_HESAP_KISI_OZET_WEB ANLIK açık bakiye döndürüyor (ödeme/kapanış sonrası aynı tarih için []).
+  İstemci `sync_tracked_ondemand_queries` tüm cache'li parametreleri (eski günler dahil) yeniden çalıştırıp hash farkında push ediyor →
+  gece 00:xx'te [] basılıp gün-sonu verisi eziliyordu (a649 10-12: 23:59:45 dolu → 00:10:39 [] ; e58bc47f 860 revizyon → 00:00:23 []).
+  Üst kart (financial_data_location.VERESIYE) ise o günkü veresiye satış → tutar var, liste boş.
+  FIX: (1) sync.php save_dataset_cache: rap_acik_hesap_kisi_ozet_web + edate<bugün + boş + mevcut dolu → yazma (skipped, neden=gecmis_gun_bos_sonuc);
+  SYNC_PHP_SURUM 2026-10-13-v22. (2) client.py v24: geçmiş gün açık hesap takibi atlanır; genel kural: geçmiş gün + boş sonuç + webde dolu → push yok
+  (`_params_gecmis_gun`). (3) AcikHesapKisiDetail boş durum: geçmiş gün için açıklayıcı metin.
+  KALICI ÇÖZÜM (kullanıcının SQL tarafı): prosedür tarih aralığındaki fişlerin açık hesap tutarını, sonraki ödemelerden bağımsız (veya edate itibarıyla) döndürmeli.
+- Not: 10-12 verisi geri getirilemez (ezildi). sync.php + client.py dağıtımı kullanıcı aksiyonu.

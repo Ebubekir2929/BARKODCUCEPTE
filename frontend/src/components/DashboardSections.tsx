@@ -24,6 +24,18 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
   const fmtTL = (n: number) => n.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtMiktar = (n: number) => n.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 
+  // 2026-10-13 — "Personel satışları üstteki Toplam'dan hep fazla çıkıyor" kök nedeni:
+  // Dashboard Toplam (financial_data.PERAKENDE_GENELTOPLAM) İADELERİ DÜŞER; garson_satis_ozet
+  // prosedürünün PERAKENDE_SATIS_TUTARI alanı ise BRÜT'tür (iade düşülmemiş). Tüm tenant'larda
+  // PERAKENDE_SATIS_TUTARI − IADE_TUTARI == PERAKENDE_GENELTOPLAM birebir doğrulandı.
+  // → Garson net satış = brüt − iade. ERP12 (personel) tarafı zaten net (ERP12_GENELTOPLAM ile eşit).
+  const iadeOf = (r: any, t: 'garson' | 'personel') => (t === 'garson' ? parseFloat(r.IADE_TUTARI || '0') : 0);
+  const brutOf = (r: any, t: 'garson' | 'personel') =>
+    t === 'garson'
+      ? parseFloat(r.PERAKENDE_SATIS_TUTARI || r.KAPANAN_SATIS_TUTARI || '0')
+      : parseFloat(r.ERP12_SATIS_TUTARI || r.PERSONEL_NET_SATIS_TUTARI || r.KAPANAN_SATIS_TUTARI || '0');
+  const netOf = (r: any, t: 'garson' | 'personel') => brutOf(r, t) - iadeOf(r, t);
+
   // Filter rows based on selected tab
   // - Garson: row has PERAKENDE_FIS_SAYISI > 0 (POS sales)
   // - Personel: row has ERP12_FIS_SAYISI > 0 (ERP12 sales)
@@ -48,20 +60,14 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
   });
 
   // Compute totals per tab.
-  // 2026-05-02 (user request) — "Toplam tutar perakende satış tutarı":
-  // use PERAKENDE_SATIS_TUTARI for garson / ERP12_SATIS_TUTARI for personel
-  // directly as the displayed total. The discount (iskonto) is already
-  // subtracted from these fields by the POS procedure; we show it as a
-  // separate chip for transparency.
+  // Net satış = brüt (PERAKENDE_SATIS_TUTARI / ERP12_SATIS_TUTARI) − iade. İskonto
+  // prosedürde zaten düşülmüş; şeffaflık için ayrı chip olarak gösterilir.
   const totals = detayRows.reduce(
     (acc, r: any) => {
       const fisAdet = tab === 'garson' ? parseInt(r.PERAKENDE_FIS_SAYISI || '0') : parseInt(r.ERP12_FIS_SAYISI || '0');
       const acik = tab === 'garson' ? parseFloat(r.ACIK_FIS_TUTARI || '0') : 0;
       const kapanan = parseFloat(r.KAPANAN_SATIS_TUTARI || '0');
-      const netSatis =
-        tab === 'garson'
-          ? parseFloat(r.PERAKENDE_SATIS_TUTARI || r.KAPANAN_SATIS_TUTARI || '0')
-          : parseFloat(r.ERP12_SATIS_TUTARI || r.PERSONEL_NET_SATIS_TUTARI || r.KAPANAN_SATIS_TUTARI || '0');
+      const netSatis = netOf(r, tab);
       const acikSay = tab === 'garson' ? parseInt(r.ACIK_FIS_SAYISI || '0') : 0;
       const kapananSay = tab === 'garson' ? parseInt(r.KAPANAN_FIS_SAYISI || '0') : fisAdet;
       const miktar = parseFloat(r.TOPLAM_MIKTAR || '0');
@@ -73,15 +79,17 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
       acik && (acc.acik += acik);
       acc.kapanan += kapanan;
       acc.netSatis += netSatis;
+      acc.brut += brutOf(r, tab);
+      acc.iade += iadeOf(r, tab);
       acc.acikSay += acikSay;
       acc.kapananSay += kapananSay;
       acc.miktar += miktar;
       acc.iskonto += iskonto;
       return acc;
     },
-    { fis: 0, acik: 0, kapanan: 0, netSatis: 0, acikSay: 0, kapananSay: 0, miktar: 0, iskonto: 0 }
+    { fis: 0, acik: 0, kapanan: 0, netSatis: 0, brut: 0, iade: 0, acikSay: 0, kapananSay: 0, miktar: 0, iskonto: 0 }
   );
-  // Main total = PERAKENDE_SATIS_TUTARI (garson) / ERP12_SATIS_TUTARI (personel)
+  // Main total = net satış (iade düşülmüş) → Dashboard Toplam ile aynı tanım
   const totalTutar = totals.netSatis;
 
   const tabColor = tab === 'garson' ? '#10B981' : '#8B5CF6';
@@ -92,48 +100,23 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
         <Text style={[styles.sectionTitle, { color: colors.text, flex: 1 }]} numberOfLines={1}>Garson / Personel Satışları</Text>
       </View>
 
-      {/* 2026-06-12 — Kullanıcı sorusu: "Personel satışı toplam satıştan nasıl
-          yüksek oluyor?"
-          Cevap: garson_satis_ozet procedure'ünün ana alanı PERAKENDE_SATIS_TUTARI
-          → sadece KAPANAN (ödenmiş) fişlerin brüt kasa toplamı.
-          — İptaller BURADA YOKTUR (iptaller ayrı bir procedure'de).
-          — Açık fişler AYRI gösterilir.
-          — İade varsa (IADE_TUTARI) küçük chip olarak görünür.
-          Dashboard üstündeki Toplam kartı ise financial_data_location.TOPLAM
-          alanından farklı bir formülle hesaplanır → değerler farklılaşabilir. */}
-      {(() => {
-        const totalIade = detayRows.reduce((s: number, r: any) => s + parseFloat(r.IADE_TUTARI || '0'), 0);
-        return (
-          <>
-            <View style={{
-              flexDirection: 'row', alignItems: 'flex-start', gap: 6,
-              marginBottom: 10, paddingHorizontal: 10, paddingVertical: 6,
-              borderRadius: 8, backgroundColor: '#F59E0B12',
-              borderWidth: 1, borderColor: '#F59E0B33',
-            }}>
-              <Ionicons name="information-circle-outline" size={14} color="#F59E0B" style={{ marginTop: 1 }} />
-              <Text style={{ flex: 1, fontSize: 10, color: colors.textSecondary, lineHeight: 14 }}>
-                <Text style={{ fontWeight: '800', color: '#F59E0B' }}>Brüt satış</Text>
-                <Text> · Kapanan (ödenmiş) fişlerin ham kasa toplamıdır. Dashboard'daki Toplam farklı bir formülle hesaplanır — aradaki fark KDV, iade veya net-brüt tanımından kaynaklanabilir.</Text>
-              </Text>
-            </View>
-            {totalIade > 0 && (
-              <View style={{
-                flexDirection: 'row', alignItems: 'center', gap: 6,
-                marginBottom: 10, paddingHorizontal: 10, paddingVertical: 6,
-                borderRadius: 8, backgroundColor: '#DC262612',
-                borderWidth: 1, borderColor: '#DC262633',
-                alignSelf: 'flex-start',
-              }}>
-                <Ionicons name="return-down-back-outline" size={14} color="#DC2626" />
-                <Text style={{ fontSize: 11, color: '#DC2626', fontWeight: '700' }}>
-                  İade: ₺{totalIade.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </Text>
-              </View>
-            )}
-          </>
-        );
-      })()}
+      {/* 2026-10-13 — Kök neden bulundu: garson_satis_ozet'in PERAKENDE_SATIS_TUTARI
+          alanı BRÜT (iade düşülmemiş), Dashboard Toplam ise iadeleri düşer. Artık net
+          (brüt − iade) gösteriliyor → Toplam ile birebir uyumlu. İade varsa chip. */}
+      {totals.iade > 0 && (
+        <View style={{
+          flexDirection: 'row', alignItems: 'center', gap: 6,
+          marginBottom: 10, paddingHorizontal: 10, paddingVertical: 6,
+          borderRadius: 8, backgroundColor: '#DC262612',
+          borderWidth: 1, borderColor: '#DC262633',
+        }}>
+          <Ionicons name="return-down-back-outline" size={14} color="#DC2626" />
+          <Text style={{ flex: 1, fontSize: 10, color: colors.textSecondary, lineHeight: 14 }}>
+            <Text style={{ fontWeight: '800', color: '#DC2626' }}>İade düşüldü: -₺{fmtTL(totals.iade)}</Text>
+            <Text> · Brüt ₺{fmtTL(totals.brut)} → Net ₺{fmtTL(totals.netSatis)} (Dashboard Toplam ile aynı)</Text>
+          </Text>
+        </View>
+      )}
 
       {/* Tab Switcher */}
       <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
@@ -207,11 +190,7 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
           </View>
 
           {Object.entries(byLocation).map(([loc, kisiler]) => {
-            const locTutar = kisiler.reduce((s: number, r: any) =>
-              s + (tab === 'garson'
-                ? parseFloat(r.PERAKENDE_SATIS_TUTARI || r.KAPANAN_SATIS_TUTARI || '0')
-                : parseFloat(r.ERP12_SATIS_TUTARI || r.PERSONEL_NET_SATIS_TUTARI || r.KAPANAN_SATIS_TUTARI || '0')),
-              0);
+            const locTutar = kisiler.reduce((s: number, r: any) => s + netOf(r, tab), 0);
             const locFisAll = kisiler.reduce((s: number, r: any) =>
               s + (tab === 'garson' ? parseInt(r.PERAKENDE_FIS_SAYISI || '0') : parseInt(r.ERP12_FIS_SAYISI || '0')), 0);
             // 2026-05-06 — Hide locations with NO sales today.
@@ -276,12 +255,10 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
                     tab === 'garson'
                       ? parseFloat(g.PERAKENDE_GENEL_ISKONTO_TUTARI || g.PERAKENDE_SATIR_ISKONTO_TUTARI || '0')
                       : parseFloat(g.ERP12_GENEL_ISKONTO_TUTARI || g.ERP12_SATIR_ISKONTO_TUTARI || '0');
-                  // Toplam = perakende/erp12 satış tutarı (iskonto zaten düşülmüş net değer)
-                  const netTuar =
-                    tab === 'garson'
-                      ? parseFloat(g.PERAKENDE_SATIS_TUTARI || g.KAPANAN_SATIS_TUTARI || '0')
-                      : parseFloat(g.ERP12_SATIS_TUTARI || g.PERSONEL_NET_SATIS_TUTARI || g.KAPANAN_SATIS_TUTARI || '0');
-                  const grossTuar = netTuar + iskonto;
+                  // Toplam = net satış (brüt − iade); iskonto prosedürde zaten düşülmüş
+                  const iade = iadeOf(g, tab);
+                  const netTuar = netOf(g, tab);
+                  const grossTuar = brutOf(g, tab) + iskonto;
                   return (
                     <View key={idx} style={[styles.itemCard, { backgroundColor: colors.background, borderColor: colors.border, marginLeft: 12 }]}>
                       <View style={styles.itemRow}>
@@ -291,6 +268,13 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
                             <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: tabColor + '15' }}>
                               <Text style={{ fontSize: 10, fontWeight: '700', color: tabColor }}>{fisAdet} fiş</Text>
                             </View>
+                            {iade > 0 && (
+                              <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: '#DC262615', borderWidth: 1, borderColor: '#DC262640' }}>
+                                <Text style={{ fontSize: 10, fontWeight: '800', color: '#DC2626' }}>
+                                  İade: -₺{fmtTL(iade)}
+                                </Text>
+                              </View>
+                            )}
                             {tab === 'garson' && acikAdet > 0 && (
                               <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: '#F59E0B15' }}>
                                 <Text style={{ fontSize: 10, fontWeight: '700', color: '#F59E0B' }}>
@@ -325,7 +309,7 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
                           <Text style={[styles.itemAmount, { color: tabColor }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
                             ₺{fmtTL(netTuar)}
                           </Text>
-                          {iskonto > 0 && (
+                          {(iskonto > 0 || iade > 0) && (
                             <Text style={{ fontSize: 10, color: colors.textSecondary, textDecorationLine: 'line-through', marginTop: 2 }} numberOfLines={1}>
                               ₺{fmtTL(grossTuar)}
                             </Text>

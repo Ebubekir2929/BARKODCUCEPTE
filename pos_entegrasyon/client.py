@@ -54,7 +54,7 @@ LOG_PATH = os.path.join(CONFIG_DIR, "client.log")
 DEFAULT_SERVER_URL = "https://kasaceptetransfer.berkyazilim.com/sync.php"
 
 # 2026-06 — Çalışan sürümü loglarda görmek için (kullanıcı doğru build'i kurdu mu?)
-CLIENT_BUILD = "2026-09-22 v24 (RAM/CPU diyeti: snapshot bellek önbelleği + budama, log sınırı)"
+CLIENT_BUILD = "2026-10-13 v24 (RAM/CPU diyeti + açık hesap geçmiş gün koruması)"
 
 AUTORUN_START_DELAY_SEC = 8
 # Normal datasetler için direkt POST sınırı.
@@ -311,6 +311,19 @@ def sha256_text(text: str) -> str:
 
 def hash_obj(obj: Any) -> str:
     return sha256_text(canonical(obj))
+
+def _params_gecmis_gun(params: Dict[str, Any], simdi: Optional[datetime] = None) -> bool:
+    """Parametrelerdeki bitiş tarihi (edate/BITTARIH/TARIH) bugünden ÖNCE mi? (v24 geçmiş gün koruması)"""
+    simdi = simdi or datetime.now()
+    for k in ("edate", "EDATE", "BITTARIH", "TARIH_BITIS", "TARIH"):
+        v = params.get(k) if isinstance(params, dict) else None
+        if v:
+            try:
+                return datetime.strptime(str(v)[:10], "%Y-%m-%d").date() < simdi.date()
+            except ValueError:
+                return False
+    return False
+
 
 def normalize_row_count(data: Any) -> int:
     return len(data) if isinstance(data, list) else 1
@@ -5608,6 +5621,14 @@ SELECT TOP {limit}
             if not defn:
                 continue
 
+            # v24 — GEÇMİŞ GÜN KORUMASI: rap_acik_hesap_kisi_ozet_web prosedürü ANLIK (hâlâ açık)
+            # bakiyeleri döndürür; gün bittikten sonra aynı tarih için [] gelir ve bu push
+            # webdeki gün-sonu verisini eziyordu ("dünkü açık hesap var ama içeriği yok").
+            # Geçmiş günün takibi yapılmaz — gün sonundaki son dolu veri dondurulur.
+            gecmis_gun = _params_gecmis_gun(params, now_dt)
+            if dataset_key == "rap_acik_hesap_kisi_ozet_web" and gecmis_gun:
+                continue
+
             skey = self._tracked_ondemand_snapshot_key(dataset_key, params)
             meta = snap.get(skey, {}) if isinstance(snap.get(skey, {}), dict) else {}
             last_check = str(meta.get("last_check_at", "") or "")
@@ -5627,15 +5648,20 @@ SELECT TOP {limit}
                 old_hash = str(meta.get("data_hash", "") or "")
 
                 if new_hash != server_hash and new_hash != old_hash:
-                    resp = self.push_dataset(defn, params, data)
-                    if not resp.get("ok"):
-                        self.println(f"ondemand güncelleme gönderilemedi: {dataset_key} -> {resp}")
+                    # v24 — geçmiş gün + boş sonuç + webde dolu veri → ezme (tüm ondemand setleri)
+                    if gecmis_gun and normalize_row_count(data) == 0 and int(item.get("row_count") or 0) > 0:
+                        self.println(f"~ {dataset_key}: geçmiş gün için boş sonuç, webdeki {item.get('row_count')} satır korundu.")
+                        server_hash = new_hash  # bir daha denenmesin
                     else:
-                        pushed += 1
-                        row_count = normalize_row_count(data)
-                        self.record_success(dataset_key, params, row_count, status="ondemand_update", note="cache takip güncellendi")
-                        self.println(f"↻ Ondemand cache güncellendi: {dataset_key} ({row_count} kayıt)")
-                        server_hash = new_hash
+                        resp = self.push_dataset(defn, params, data)
+                        if not resp.get("ok"):
+                            self.println(f"ondemand güncelleme gönderilemedi: {dataset_key} -> {resp}")
+                        else:
+                            pushed += 1
+                            row_count = normalize_row_count(data)
+                            self.record_success(dataset_key, params, row_count, status="ondemand_update", note="cache takip güncellendi")
+                            self.println(f"↻ Ondemand cache güncellendi: {dataset_key} ({row_count} kayıt)")
+                            server_hash = new_hash
 
                 snap[skey] = {
                     "dataset_key": dataset_key,
