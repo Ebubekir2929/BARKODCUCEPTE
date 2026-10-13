@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../store/themeStore';
 import { useAuthStore } from '../store/authStore';
 import { usePrefsStore } from '../store/prefsStore';
+import IadeFisModal from './dashboard/IadeFisModal';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -14,10 +15,13 @@ const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 //   + TOPLAM_MIKTAR
 // Garson = POS (PERAKENDE) tarafında satış yapan
 // Personel = ERP12 tarafında fiş kesen
-export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
+export const WaiterSalesSection: React.FC<{ data: any[]; tenantId?: string; sdate?: string; edate?: string }> = ({ data, tenantId, sdate, edate }) => {
   const { colors } = useThemeStore();
   const [tab, setTab] = useState<'garson' | 'personel'>('garson');
   const [expanded, setExpanded] = useState<string | null>(null);
+  // v24 — iade chip'i → o günün iade fişleri (kişi bazında)
+  const [iadeModal, setIadeModal] = useState<{ personel: string | null; tutar: number } | null>(null);
+  const iadeTiklanabilir = !!(tenantId && sdate);
 
   if (!data || data.length === 0) return null;
 
@@ -104,18 +108,25 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
           alanı BRÜT (iade düşülmemiş), Dashboard Toplam ise iadeleri düşer. Artık net
           (brüt − iade) gösteriliyor → Toplam ile birebir uyumlu. İade varsa chip. */}
       {totals.iade > 0 && (
-        <View style={{
-          flexDirection: 'row', alignItems: 'center', gap: 6,
-          marginBottom: 10, paddingHorizontal: 10, paddingVertical: 6,
-          borderRadius: 8, backgroundColor: '#DC262612',
-          borderWidth: 1, borderColor: '#DC262633',
-        }}>
+        <TouchableOpacity
+          onPress={() => iadeTiklanabilir && setIadeModal({ personel: null, tutar: totals.iade })}
+          disabled={!iadeTiklanabilir}
+          activeOpacity={0.7}
+          testID="iade-toplam-chip"
+          style={{
+            flexDirection: 'row', alignItems: 'center', gap: 6,
+            marginBottom: 10, paddingHorizontal: 10, paddingVertical: 6,
+            borderRadius: 8, backgroundColor: '#DC262612',
+            borderWidth: 1, borderColor: '#DC262633',
+          }}
+        >
           <Ionicons name="return-down-back-outline" size={14} color="#DC2626" />
           <Text style={{ flex: 1, fontSize: 10, color: colors.textSecondary, lineHeight: 14 }}>
             <Text style={{ fontWeight: '800', color: '#DC2626' }}>İade düşüldü: -₺{fmtTL(totals.iade)}</Text>
             <Text> · Brüt ₺{fmtTL(totals.brut)} → Net ₺{fmtTL(totals.netSatis)} (Dashboard Toplam ile aynı)</Text>
           </Text>
-        </View>
+          {iadeTiklanabilir && <Ionicons name="chevron-forward" size={14} color="#DC2626" />}
+        </TouchableOpacity>
       )}
 
       {/* Tab Switcher */}
@@ -269,11 +280,18 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
                               <Text style={{ fontSize: 10, fontWeight: '700', color: tabColor }}>{fisAdet} fiş</Text>
                             </View>
                             {iade > 0 && (
-                              <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: '#DC262615', borderWidth: 1, borderColor: '#DC262640' }}>
+                              <TouchableOpacity
+                                onPress={() => iadeTiklanabilir && setIadeModal({ personel: String(g.GARSON_AD || ''), tutar: iade })}
+                                disabled={!iadeTiklanabilir}
+                                hitSlop={6}
+                                testID={`iade-chip-${idx}`}
+                                style={{ flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: '#DC262615', borderWidth: 1, borderColor: '#DC262640' }}
+                              >
                                 <Text style={{ fontSize: 10, fontWeight: '800', color: '#DC2626' }}>
                                   İade: -₺{fmtTL(iade)}
                                 </Text>
-                              </View>
+                                {iadeTiklanabilir && <Ionicons name="chevron-forward" size={10} color="#DC2626" />}
+                              </TouchableOpacity>
                             )}
                             {tab === 'garson' && acikAdet > 0 && (
                               <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, backgroundColor: '#F59E0B15' }}>
@@ -323,6 +341,17 @@ export const WaiterSalesSection: React.FC<{ data: any[] }> = ({ data }) => {
             );
           })}
         </>
+      )}
+      {iadeTiklanabilir && iadeModal && (
+        <IadeFisModal
+          visible
+          onClose={() => setIadeModal(null)}
+          tenantId={tenantId as string}
+          sdate={sdate as string}
+          edate={edate || (sdate as string)}
+          personel={iadeModal.personel}
+          beklenenTutar={iadeModal.tutar}
+        />
       )}
     </View>
   );

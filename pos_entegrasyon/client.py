@@ -2827,7 +2827,7 @@ class Main(QMainWindow):
             post_json(
                 self.cfg.get("server_url", DEFAULT_SERVER_URL),
                 tenant,
-                {"action": "heartbeat"},
+                {"action": "heartbeat", "client_build": CLIENT_BUILD},  # v24 — sürüm bildirimi (Senkron Sağlığı)
                 client_secret=self.get_client_secret(),
                 timeout=20,
             )

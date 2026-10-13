@@ -9,6 +9,9 @@ Tüm sorgular indeksli/küçük: `firms` (tek satır), `dataset_cache` (tenant+k
 `sync_requests` (tenant+status).
 """
 import logging
+import os
+import re
+import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +22,66 @@ from services.dataset_cache import get_data_pool
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/senkron", tags=["senkron"])
+
+# v24 — Sürüm bilgisi: beklenen client.py / sync.php sürümleri repo dosyalarından okunur,
+# hosting'deki sync.php sürümü 10 dk önbellekle sorgulanır, client sürümü firms.client_build'den gelir.
+_POS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "pos_entegrasyon")
+_surum_cache: Dict[str, Any] = {"zaman": 0.0, "hosting": None}
+_firms_client_build_hazir = False
+
+
+def _dosya_sabiti(dosya: str, desen: str) -> Optional[str]:
+    try:
+        with open(os.path.join(_POS_DIR, dosya), "r", encoding="utf-8") as f:
+            m = re.search(desen, f.read(200_000), re.M)
+        return m.group(1) if m else None
+    except Exception:
+        return None
+
+
+def beklenen_client_surumu() -> Optional[str]:
+    return _dosya_sabiti("client.py", r'^CLIENT_BUILD\s*=\s*"([^"]+)"')
+
+
+def beklenen_sync_php_surumu() -> Optional[str]:
+    return _dosya_sabiti("sync.php", r"^const SYNC_PHP_SURUM\s*=\s*'([^']+)'")
+
+
+async def hosting_sync_php_surumu() -> Optional[str]:
+    """Hosting'deki sync.php 'surum' aksiyonu (10 dk önbellek)."""
+    if time.time() - _surum_cache["zaman"] < 600:
+        return _surum_cache["hosting"]
+    try:
+        import httpx
+        from routes.data import SYNC_URL
+        async with httpx.AsyncClient(timeout=8) as c:
+            r = await c.post(SYNC_URL, json={"action": "surum"})
+            surum = (r.json() or {}).get("surum") if r.status_code == 200 else None
+            _surum_cache["hosting"] = surum or "eski sürüm (v21 öncesi)"
+    except Exception as e:
+        _surum_cache["hosting"] = f"ulaşılamadı: {type(e).__name__}"
+    _surum_cache["zaman"] = time.time()
+    return _surum_cache["hosting"]
+
+
+async def firms_client_build_kolonu(cur) -> None:
+    """firms.client_build / client_build_at kolonları yoksa ekler (sync.php heartbeat yazar)."""
+    global _firms_client_build_hazir
+    if _firms_client_build_hazir:
+        return
+    await cur.execute("SHOW COLUMNS FROM firms LIKE 'client_build'")
+    if not await cur.fetchone():
+        await cur.execute("ALTER TABLE firms ADD COLUMN client_build VARCHAR(160) NULL, ADD COLUMN client_build_at DATETIME NULL")
+        logger.info("firms.client_build kolonu eklendi")
+    _firms_client_build_hazir = True
+
+
+def _surum_kiyas(gercek: Optional[str], beklenen: Optional[str]) -> str:
+    if not gercek or gercek.startswith("ulaşılamadı"):
+        return "bilinmiyor"
+    if not beklenen:
+        return "bilinmiyor"
+    return "guncel" if gercek.strip() == beklenen.strip() else "eski"
 
 # dataset_key → (etiket, beklenen tazelik sn, kritik eşik sn)
 IZLENEN_SETLER = [
@@ -47,8 +110,13 @@ async def senkron_saglik(tenant_id: str = Query(...), current_user: dict = Depen
     out: Dict[str, Any] = {"tenant_id": tenant_id, "zaman": datetime.now().isoformat(timespec="seconds")}
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            # 1) POS istemcisi kalp atışı
-            await cur.execute("SELECT firma_adi, last_seen_at, is_active, TIMESTAMPDIFF(SECOND, last_seen_at, NOW()) FROM firms WHERE tenant_id=%s LIMIT 1", (tenant_id,))
+            # 1) POS istemcisi kalp atışı (+ v24 client sürümü)
+            await firms_client_build_kolonu(cur)
+            await cur.execute(
+                "SELECT firma_adi, last_seen_at, is_active, TIMESTAMPDIFF(SECOND, last_seen_at, NOW()), client_build, client_build_at "
+                "FROM firms WHERE tenant_id=%s LIMIT 1",
+                (tenant_id,),
+            )
             f = await cur.fetchone()
             yas = (max(0, int(f[3])) if f[3] is not None else None) if f else None
             out["pos"] = {
@@ -57,6 +125,24 @@ async def senkron_saglik(tenant_id: str = Query(...), current_user: dict = Depen
                 "son_gorulme": f[1].isoformat(timespec="seconds") if (f and f[1]) else None,
                 "yas_sn": yas,
                 "durum": _durum_secimi(yas, 3 * 60, 15 * 60),
+            }
+            client_build = (f[4] or "").strip() if f else ""
+            beklenen_client = beklenen_client_surumu()
+            beklenen_php = beklenen_sync_php_surumu()
+            hosting_php = await hosting_sync_php_surumu()
+            out["surumler"] = {
+                "client": {
+                    "surum": client_build or None,
+                    "beklenen": beklenen_client,
+                    "bildirim_zamani": f[5].isoformat(timespec="seconds") if (f and f[5]) else None,
+                    # Sürüm bildirmeyen istemci = v24 öncesi → eski
+                    "durum": "eski" if (f and not client_build) else _surum_kiyas(client_build, beklenen_client),
+                },
+                "sync_php": {
+                    "surum": hosting_php,
+                    "beklenen": beklenen_php,
+                    "durum": _surum_kiyas(hosting_php, beklenen_php),
+                },
             }
 
             # 2) Veri seti tazeliği (dataset_cache üst kayıtları; financial/feed için bugünün günü)
@@ -162,5 +248,8 @@ async def senkron_saglik(tenant_id: str = Query(...), current_user: dict = Depen
     genel = "kritik" if "kritik" in puanlar else ("uyari" if "uyari" in puanlar else "iyi")
     if out["pos"]["durum"] == "kritik" or out["pos"]["durum"] == "yok":
         genel = "kritik"
+    # v24 — eski client / sync.php sürümü en az "Dikkat"
+    if genel == "iyi" and (out["surumler"]["client"]["durum"] == "eski" or out["surumler"]["sync_php"]["durum"] == "eski"):
+        genel = "uyari"
     out["genel"] = genel
     return {"ok": True, "data": out}

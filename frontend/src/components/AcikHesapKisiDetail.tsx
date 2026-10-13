@@ -53,6 +53,8 @@ export const AcikHesapKisiDetail: React.FC<{
   const [rows, setRows] = useState<Row[]>([]);
   const [totals, setTotals] = useState<Totals | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // v24 — geçmiş gün için gece 23:55'te dondurulmuş gün-sonu kaydı mı?
+  const [kaynak, setKaynak] = useState<{ dondurma_at: string | null } | null>(null);
 
   useEffect(() => {
     if (!visible || !tenantId || !token) return;
@@ -121,6 +123,7 @@ export const AcikHesapKisiDetail: React.FC<{
         }));
         setRows(data);
         setTotals(j?.totals || null);
+        setKaynak(j?.kaynak === 'gun_sonu' ? { dondurma_at: j?.dondurma_at || null } : null);
       } catch (e: any) {
         if (!cancelled) setError(e?.message || 'Hata');
       } finally {
@@ -151,6 +154,15 @@ export const AcikHesapKisiDetail: React.FC<{
     );
   }
 
+  const gunSonuRozeti = kaynak ? (
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', marginBottom: 8, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, backgroundColor: colors.primary + '15', borderWidth: 1, borderColor: colors.primary + '40' }} testID="acik-hesap-gun-sonu-rozet">
+      <Ionicons name="snow-outline" size={12} color={colors.primary} />
+      <Text style={{ color: colors.primary, fontSize: 10, fontWeight: '700' }}>
+        Gün sonu kaydı{kaynak.dondurma_at ? ` · ${kaynak.dondurma_at.slice(11, 16)}` : ''}
+      </Text>
+    </View>
+  ) : null;
+
   if (rows.length === 0) {
     // 2026-10-13 — Geçmiş gün: liste ANLIK açık bakiyeleri gösterir; gün bittikten /
     // hesap kapandıktan sonra POS prosedürü boş döner. Üst karttaki Açık Hesap tutarı
@@ -158,11 +170,12 @@ export const AcikHesapKisiDetail: React.FC<{
     const gecmisGun = (edate || sdate || '').slice(0, 10) < new Date().toISOString().slice(0, 10);
     return (
       <View style={{ padding: 16, alignItems: 'center' }}>
+        {gunSonuRozeti}
         <Ionicons name="checkmark-circle-outline" size={28} color={colors.success} />
         <Text style={{ color: colors.textSecondary, fontSize: 12, marginTop: 6 }}>
-          {gecmisGun ? 'Bu güne ait açık (ödenmemiş) hesap kalmamış' : 'Açık hesap bulunmamaktadır'}
+          {gecmisGun ? (kaynak ? 'Gün sonunda açık (ödenmemiş) hesap kalmamıştı' : 'Bu güne ait açık (ödenmemiş) hesap kalmamış') : 'Açık hesap bulunmamaktadır'}
         </Text>
-        {gecmisGun && (
+        {gecmisGun && !kaynak && (
           <Text style={{ color: colors.textSecondary, fontSize: 11, marginTop: 4, textAlign: 'center', lineHeight: 15 }}>
             Kişi listesi anlık açık bakiyeleri gösterir; o gün veresiye yapılan satış sonradan kapatıldıysa burada görünmez.
           </Text>
@@ -173,6 +186,7 @@ export const AcikHesapKisiDetail: React.FC<{
 
   return (
     <View style={{ marginTop: 12 }}>
+      {gunSonuRozeti}
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>
           👥 Müşteri Bazlı Açık Hesaplar

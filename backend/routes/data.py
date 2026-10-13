@@ -800,8 +800,9 @@ async def gunluk_urun_satis(
     }
 
 
-async def _gunluk_fisleri_yukle(pool, tenant_id: str, tarih: str) -> dict:
-    """Günün fişleri (FIS_ID → fiş) — fis_gunluk_bildirim_feed bloblarından, dedupe."""
+async def _gunluk_fisleri_yukle(pool, tenant_id: str, tarih: str, tum_alanlar: bool = False) -> dict:
+    """Günün fişleri (FIS_ID → fiş) — fis_gunluk_bildirim_feed bloblarından, dedupe.
+    tum_alanlar=True → FIS_TURU / PERSONEL_ID / LOKASYON_ID de korunur (iade listesi)."""
     fisler: dict = {}
     async for (blob,) in stream_rows(
         pool,
@@ -844,6 +845,7 @@ async def _gunluk_fisleri_yukle(pool, tenant_id: str, tarih: str) -> dict:
                 "TUTAR": r.get("TUTAR"),
                 "DETAY_SATIR_SAYISI": r.get("DETAY_SATIR_SAYISI"),
                 "DETAYLAR": [d for d in detaylar if isinstance(d, dict)] if isinstance(detaylar, list) else [],
+                **({"FIS_TURU": r.get("FIS_TURU"), "PERSONEL_ID": r.get("PERSONEL_ID"), "LOKASYON_ID": r.get("LOKASYON_ID")} if tum_alanlar else {}),
             }
     return fisler
 
@@ -1934,18 +1936,37 @@ async def get_acik_hesap_kisi(
         "edate": f"{edate} 23:59:59",
     }
 
-    try:
-        result = await _on_demand_request(
-            tenant_id, "rap_acik_hesap_kisi_ozet_web", params,
-            timeout_sec=120, cache_only=True,
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Acik hesap kisi error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # v24 — GEÇMİŞ GÜN: önce gece 23:55'te dondurulmuş gün-sonu kaydı (prosedür anlık
+    # bakiye döndürdüğünden geçmiş gün için cache boşalabilir; dondurulmuş liste kalıcıdır).
+    kaynak = "cache"
+    dondurma_at = None
+    rows: list = []
+    gun_sonu_var = False
+    if sdate == edate and sdate < _istanbul_bugun():
+        try:
+            from services.acik_hesap_gun_sonu import gun_sonu_oku
+            gs = await gun_sonu_oku(tenant_id, sdate)
+        except Exception as e:
+            logger.warning(f"acik hesap gun sonu okunamadı: {e}")
+            gs = None
+        if gs is not None:
+            gun_sonu_var = True
+            rows = gs["rows"]
+            kaynak = "gun_sonu"
+            dondurma_at = gs["dondurma_at"]
 
-    rows = result.get("data", []) if isinstance(result, dict) else []
+    if not gun_sonu_var:
+        try:
+            result = await _on_demand_request(
+                tenant_id, "rap_acik_hesap_kisi_ozet_web", params,
+                timeout_sec=120, cache_only=True,
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Acik hesap kisi error: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+        rows = result.get("data", []) if isinstance(result, dict) else []
 
     # Extract grand totals from first row (proc returns same TOPLAM_KAYIT etc. per row)
     totals = {
@@ -1963,7 +1984,77 @@ async def get_acik_hesap_kisi(
             "genel_erp12": float(first.get("GENEL_ERP12_ACIK_HESAP", 0) or 0),
         }
 
-    return {"ok": True, "data": rows, "totals": totals, "page": page, "page_size": page_size}
+    return {"ok": True, "data": rows, "totals": totals, "page": page, "page_size": page_size,
+            "kaynak": kaynak, "dondurma_at": dondurma_at}
+
+
+def _istanbul_bugun() -> str:
+    from datetime import timezone as _tz
+    return datetime.now(_tz(timedelta(hours=3))).strftime("%Y-%m-%d")
+
+
+@router.get("/iade-fisler")
+async def iade_fisler(
+    tenant_id: str = Query(...),
+    sdate: str = Query(..., description="YYYY-MM-DD"),
+    edate: Optional[str] = Query(None, description="YYYY-MM-DD (vars. sdate)"),
+    personel: Optional[str] = Query(None, description="KESEN_PERSONEL adı (garson satırı)"),
+    current_user: dict = Depends(get_current_user),
+):
+    """v24 — Günün/aralığın İADE fişleri (kişi bazında). Garson satırındaki iade chip'i.
+
+    Kaynak: `fis_gunluk_bildirim_feed` (FIS_TURU_AD 'iade' içerenler). En fazla 31 gün.
+    """
+    import re as _re
+    edate = edate or sdate
+    if not _re.match(r"^\d{4}-\d{2}-\d{2}$", sdate or "") or not _re.match(r"^\d{4}-\d{2}-\d{2}$", edate or ""):
+        raise HTTPException(status_code=422, detail="tarih YYYY-MM-DD biçiminde olmalı")
+    d1, d2 = date.fromisoformat(sdate), date.fromisoformat(edate)
+    if d2 < d1:
+        d1, d2 = d2, d1
+    if (d2 - d1).days > 31:
+        raise HTTPException(status_code=422, detail="En fazla 31 günlük aralık")
+
+    def _f(v):
+        try:
+            return float(v) if v is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _ad_normalize(s: Any) -> str:
+        # Türkçe I/İ/ı farklarına duyarsız karşılaştırma (hepsi 'i')
+        return " ".join(str(s or "").replace("İ", "i").replace("I", "i").lower().replace("ı", "i").split())
+
+    pool = await get_data_pool()
+    hedef_personel = _ad_normalize(personel) if personel else ""
+    iadeler: List[dict] = []
+    gun = d1
+    while gun <= d2:
+        fisler = await _gunluk_fisleri_yukle(pool, tenant_id, gun.isoformat(), tum_alanlar=True)
+        for f in fisler.values():
+            tur_ad = str(f.get("FIS_TURU_AD") or "")
+            if "iade" not in tur_ad.lower() and "İade" not in tur_ad:
+                continue
+            if hedef_personel and _ad_normalize(f.get("KESEN_PERSONEL")) != hedef_personel:
+                continue
+            iadeler.append(f)
+        gun += timedelta(days=1)
+
+    iadeler.sort(key=lambda x: str(x.get("FIS_TARIHI") or ""), reverse=True)
+    kisi: Dict[str, Dict[str, Any]] = {}
+    for f in iadeler:
+        ad = str(f.get("KESEN_PERSONEL") or "—")
+        k = kisi.setdefault(ad, {"personel": ad, "fis_sayisi": 0, "tutar": 0.0})
+        k["fis_sayisi"] += 1
+        k["tutar"] = round(k["tutar"] + _f(f.get("TUTAR")), 2)
+    return {
+        "ok": True,
+        "sdate": d1.isoformat(), "edate": d2.isoformat(), "personel": personel,
+        "fis_sayisi": len(iadeler),
+        "toplam_tutar": round(sum(_f(x.get("TUTAR")) for x in iadeler), 2),
+        "kisiler": sorted(kisi.values(), key=lambda x: -x["tutar"]),
+        "data": _fix_large_ints(iadeler[:200]),
+    }
 
 
 @router.post("/hourly-detail-full")

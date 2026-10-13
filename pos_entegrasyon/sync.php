@@ -1896,10 +1896,29 @@ try {
             $firm = require_firm($pdo, $tenantId);
             verify_client_secret($firm);
 
-            $stmt = $pdo->prepare("UPDATE firms SET last_seen_at = NOW(), updated_at = NOW() WHERE tenant_id = ?");
-            $stmt->execute([$tenantId]);
+            // v22 (2026-10-13) — istemci sürümü (Senkron Sağlığı ekranı "Sürümler" kartı)
+            $clientBuild = isset($input['client_build']) ? mb_substr(trim((string)$input['client_build']), 0, 160) : '';
+            if ($clientBuild !== '') {
+                try {
+                    $stmt = $pdo->prepare("UPDATE firms SET last_seen_at = NOW(), client_build = ?, client_build_at = NOW(), updated_at = NOW() WHERE tenant_id = ?");
+                    $stmt->execute([$clientBuild, $tenantId]);
+                } catch (Throwable $e) {
+                    // kolon yoksa ekle ve bir kez daha dene (backend de açılışta ekler)
+                    safe_alter($pdo, "ALTER TABLE firms ADD COLUMN client_build VARCHAR(160) NULL, ADD COLUMN client_build_at DATETIME NULL");
+                    try {
+                        $stmt = $pdo->prepare("UPDATE firms SET last_seen_at = NOW(), client_build = ?, client_build_at = NOW(), updated_at = NOW() WHERE tenant_id = ?");
+                        $stmt->execute([$clientBuild, $tenantId]);
+                    } catch (Throwable $e2) {
+                        $stmt = $pdo->prepare("UPDATE firms SET last_seen_at = NOW(), updated_at = NOW() WHERE tenant_id = ?");
+                        $stmt->execute([$tenantId]);
+                    }
+                }
+            } else {
+                $stmt = $pdo->prepare("UPDATE firms SET last_seen_at = NOW(), updated_at = NOW() WHERE tenant_id = ?");
+                $stmt->execute([$tenantId]);
+            }
 
-            respond(['ok' => true, 'server_time' => gmdate('Y-m-d H:i:s')]);
+            respond(['ok' => true, 'server_time' => gmdate('Y-m-d H:i:s'), 'surum' => SYNC_PHP_SURUM]);
         }
 
         case 'fis_bildirim_settings_get': {

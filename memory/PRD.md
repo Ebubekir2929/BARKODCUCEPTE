@@ -492,3 +492,20 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
   (`_params_gecmis_gun`). (3) AcikHesapKisiDetail boş durum: geçmiş gün için açıklayıcı metin.
   KALICI ÇÖZÜM (kullanıcının SQL tarafı): prosedür tarih aralığındaki fişlerin açık hesap tutarını, sonraki ödemelerden bağımsız (veya edate itibarıyla) döndürmeli.
 - Not: 10-12 verisi geri getirilemez (ezildi). sync.php + client.py dağıtımı kullanıcı aksiyonu.
+
+## 2026-10-13 — v24 backend: Açık hesap GÜN SONU dondurma + İade fiş listesi + Sürüm sağlığı ✅
+- **services/acik_hesap_gun_sonu.py**: İstanbul 23:55 "dondur" (günün rap_acik_hesap_kisi_ozet_web cache satırını tüm tenant'lar için
+  `acik_hesap_gun_sonu(tenant_id, gun, row_count, data_json, kaynak_updated_at, dondurma_at)` tablosuna kopyalar), 00:03 "tamamla"
+  (sadece_dolu: 23:55–24:00 arası gelen daha yeni dolu veri), açılışta +4 dk dünün yakalama turu. Dolu kayıt boşla ezilmez; 400 gün saklama.
+  `/api/data/acik-hesap-kisi`: sdate==edate<bugün(İstanbul) → önce gün sonu kaydı (yanıt: kaynak='gun_sonu', dondurma_at), yoksa cache.
+  Mobil: AcikHesapKisiDetail "Gün sonu kaydı · HH:MM" rozeti. sistem-durum → acik_hesap_gun_sonu.
+- **GET /api/data/iade-fisler?tenant_id&sdate[&edate][&personel]**: fis_gunluk_bildirim_feed'den FIS_TURU_AD 'iade' fişleri (≤31 gün),
+  kişi bazında özet (`kisiler`), fiş + DETAYLAR; personel karşılaştırması Türkçe I/İ/ı duyarsız. `_gunluk_fisleri_yukle(tum_alanlar=True)`.
+  Mobil: WaiterSalesSection iade chip'leri (toplam + kişi) → `src/components/dashboard/IadeFisModal.tsx` (alt sayfa; fişe dokun → ürün satırları;
+  özet IADE_TUTARI ile fark uyarısı). dashboard.tsx WaiterSalesSection'a tenantId/sdate/edate (fmtYmd) geçer.
+  NOT: feed BILDIRIMLIK filtresi nedeniyle özetten küçük çıkabilir (a649 10-12: feed 3.325 vs özet 3.725) → modalda "fark … fiş akışında yok".
+- **Sürüm sağlığı** (routes/saglik.py `surumler`): client.py → heartbeat `client_build` → sync.php `firms.client_build/client_build_at`
+  (kolon backend açılışında/ilk sağlık çağrısında eklenir; sync.php'de de try/ALTER fallback). Beklenen sürümler repo dosyalarından regex ile
+  (CLIENT_BUILD / SYNC_PHP_SURUM); hosting sync.php sürümü `surum` aksiyonu 10 dk önbellek. durum: guncel/eski/bilinmiyor; sürüm bildirmeyen
+  istemci = eski. Eski sürüm → genel en az 'uyari'. Mobil senkron-saglik.tsx "Sürümler" kartı (testID senkron-surumler).
+- Sürüm: backend `2026-10-13-v24-gun-sonu-iade-surum`. Test: tests/test_v24_gun_sonu_iade_surum.py 6/6.

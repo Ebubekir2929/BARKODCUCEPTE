@@ -51,6 +51,8 @@ const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 const screenWidth = Dimensions.get('window').width;
 const screenHeight = Dimensions.get('window').height;
+// v24 — yerel tarih → YYYY-MM-DD (iade fişleri / açık hesap gün sonu için)
+const fmtYmd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 export default function DashboardScreen() {
   const { colors } = useThemeStore();
@@ -1170,7 +1172,12 @@ export default function DashboardScreen() {
 
         {/* Garson / Personel Satışları - Live Data (POS + ERP12) */}
         {(sourceData?.waiterSales || []).length > 0 && (
-          <WaiterSalesSection data={sourceData.waiterSales} />
+          <WaiterSalesSection
+            data={sourceData.waiterSales}
+            tenantId={activeTenantId || undefined}
+            sdate={fmtYmd(filters.startDate)}
+            edate={fmtYmd(filters.endDate)}
+          />
         )}
 
         {/* Hourly Sales Chart — only show if at least one hour has actual sales */}

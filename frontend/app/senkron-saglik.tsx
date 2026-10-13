@@ -20,6 +20,10 @@ interface Saglik {
   yarim_yuklemeler: { upload_id: string; veri_seti: string; gelen: number; toplam: number; yas_sn: number | null; durum: 'suruyor' | 'takili' }[];
   bekleyen_istekler: { sayi: number; en_eski_yas_sn: number | null; durum: Durum };
   arama_indeksi: { asama?: string; islenen?: number; toplam?: number; sayfa?: number; satir?: number };
+  surumler?: {
+    client: { surum: string | null; beklenen: string | null; bildirim_zamani: string | null; durum: 'guncel' | 'eski' | 'bilinmiyor' };
+    sync_php: { surum: string | null; beklenen: string | null; durum: 'guncel' | 'eski' | 'bilinmiyor' };
+  };
 }
 
 const yasMetni = (sn: number | null | undefined) => {
@@ -135,6 +139,48 @@ export default function SenkronSaglikScreen() {
               </View>
               <Text style={{ fontWeight: '800', color: renk(s.pos.durum), fontSize: 12 }}>{etiket(s.pos.durum)}</Text>
             </View>
+
+            {/* v24 — Sürümler: client.py (POS) ve sync.php (hosting) */}
+            {s.surumler && (() => {
+              const sr = (d: string) => (d === 'guncel' ? colors.success : d === 'eski' ? colors.warning : colors.textSecondary);
+              const se = (d: string) => (d === 'guncel' ? 'Güncel' : d === 'eski' ? 'Eski sürüm' : 'Bilinmiyor');
+              const kisa = (v: string | null) => (v || '—').replace(/\s*\(.*\)\s*$/, '');
+              return (
+                <View style={[styles.block, { backgroundColor: colors.card, borderColor: colors.border }]} testID="senkron-surumler">
+                  <Text style={[styles.cardTitle, { color: colors.text, marginBottom: 8 }]}>Sürümler</Text>
+                  <View style={styles.row}>
+                    <View style={[styles.dot, { backgroundColor: sr(s.surumler.client.durum) }]} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }}>POS istemcisi (client.py)</Text>
+                      <Text style={{ fontSize: 11, color: colors.textSecondary }} numberOfLines={2}>
+                        {s.surumler.client.surum
+                          ? `${kisa(s.surumler.client.surum)}${s.surumler.client.bildirim_zamani ? ` · ${s.surumler.client.bildirim_zamani.replace('T', ' ').slice(0, 16)}` : ''}`
+                          : 'Sürüm bildirmiyor (v24 öncesi istemci)'}
+                      </Text>
+                      {s.surumler.client.durum === 'eski' && (
+                        <Text style={{ fontSize: 11, color: colors.warning, marginTop: 2 }} numberOfLines={2}>
+                          Güncel: {kisa(s.surumler.client.beklenen)} — Ayarlar → POS Entegrasyonu bölümünden indirip kurun
+                        </Text>
+                      )}
+                    </View>
+                    <Text style={{ fontWeight: '800', color: sr(s.surumler.client.durum), fontSize: 12 }}>{se(s.surumler.client.durum)}</Text>
+                  </View>
+                  <View style={styles.row}>
+                    <View style={[styles.dot, { backgroundColor: sr(s.surumler.sync_php.durum) }]} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }}>Web köprüsü (sync.php)</Text>
+                      <Text style={{ fontSize: 11, color: colors.textSecondary }} numberOfLines={2}>{s.surumler.sync_php.surum || '—'}</Text>
+                      {s.surumler.sync_php.durum === 'eski' && (
+                        <Text style={{ fontSize: 11, color: colors.warning, marginTop: 2 }} numberOfLines={2}>
+                          Güncel: {s.surumler.sync_php.beklenen} — web sunucusuna yükleyin
+                        </Text>
+                      )}
+                    </View>
+                    <Text style={{ fontWeight: '800', color: sr(s.surumler.sync_php.durum), fontSize: 12 }}>{se(s.surumler.sync_php.durum)}</Text>
+                  </View>
+                </View>
+              );
+            })()}
 
             {/* Veri setleri */}
             <View style={[styles.block, { backgroundColor: colors.card, borderColor: colors.border }]}>

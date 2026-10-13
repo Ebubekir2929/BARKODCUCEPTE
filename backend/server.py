@@ -138,7 +138,7 @@ _POS_FILES = {"client.py": "text/x-python", "sync.php": "application/octet-strea
 @app.get("/api/sistem-durum", include_in_schema=False)
 async def sistem_durum(derin: int = 0):
     import services as _svc
-    out = {"surum": "2026-09-23-v23-haftalik-rapor-maili", "patron": None, "data": None}
+    out = {"surum": "2026-10-13-v24-gun-sonu-iade-surum", "patron": None, "data": None}
     # 2026-08 — OOM teşhisi: çalışma süresi (restart tespiti için)
     try:
         with open("/proc/self/stat") as f:
@@ -184,6 +184,12 @@ async def sistem_durum(derin: int = 0):
     try:
         from services.haftalik_rapor import son_calisma as _hr, sonraki_gonderim_metni as _hr_sonraki
         out["haftalik_rapor"] = dict(_hr) if _hr else {"durum": "henüz çalışmadı", "sonraki": _hr_sonraki()}
+    except Exception:
+        pass
+    # v24 — Açık hesap gün sonu dondurma son tur
+    try:
+        from services.acik_hesap_gun_sonu import son_calisma as _gs
+        out["acik_hesap_gun_sonu"] = dict(_gs) if _gs else {"durum": "henüz çalışmadı (İstanbul 23:55)"}
     except Exception:
         pass
     try:
@@ -364,6 +370,8 @@ async def startup():
             start_yenileyici()  # v22 — büyük stok listesi arama indeksi (10 dk)
             from services.haftalik_rapor import start_haftalik_rapor
             start_haftalik_rapor()  # v23 — Pazartesi 08:00 haftalık satış özeti e-postası
+            from services.acik_hesap_gun_sonu import start_gun_sonu
+            start_gun_sonu()  # v24 — 23:55 açık hesap gün sonu dondurma
         except Exception as e:
             logging.error(f"Failed to start veri temizlik: {e}")
 

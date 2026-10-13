@@ -2656,3 +2656,9 @@ agent_communication:
   - pytest tests/test_v23_haftalik_rapor.py 8/8; kuru tur (send_email mock) 53 kullanıcı → 2. turda tümü atlandı (tekrar yok) ✅;
     UI: toggle aç/kapa + Şimdi Gönder hata alert'i ekran testi ✅. Gerçek e-posta dev'de gönderilemez (BREVO_API_KEY yalnız Railway'de;
     dev Gmail SMTP 535). Prod'da forgot-password ile aynı mailer yolu. VERIFIED (dev) ✅
+
+## 2026-10-13 — v24 Gün sonu dondurma / İade fişleri / Sürüm sağlığı
+  - services/acik_hesap_gun_sonu.py (23:55 dondur, 00:03 tamamla, yakalama), /acik-hesap-kisi kaynak=gun_sonu, GET /data/iade-fisler,
+    saglik.surumler (firms.client_build), IadeFisModal.tsx, senkron-saglik "Sürümler" kartı, AcikHesapKisiDetail gün sonu rozeti.
+  - pytest tests/test_v24_gun_sonu_iade_surum.py 6/6; gun_dondur 10-12 manuel tur (8 tenant) ✅; Senkron Sağlığı ekran testi (Sürümler kartı) ✅.
+    İade modalı test kullanıcısında iade verisi olmadığından yalnızca tsc/lint ile doğrulandı (a649 hesabıyla kullanıcı doğrulaması).
