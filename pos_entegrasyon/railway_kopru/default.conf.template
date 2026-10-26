@@ -7,8 +7,10 @@ upstream kasacepte_hosting {
     # çözüleceği için döngüyü önlemek üzere IP kullanılır). Host/SNI yine ${HEDEF_HOST}.
     server ${HEDEF_UPSTREAM}:443;
     keepalive 16;
-    keepalive_timeout 120s;
-    keepalive_requests 10000;
+    # Boşta kalan bağlantıyı hosting / aradaki DDoS cihazı sessizce düşürmeden BİZ kapatalım
+    # (düşürülmüş bağlantıya yazılan istek cevapsız kalır → istemci okuma zaman aşımına düşer).
+    keepalive_timeout 20s;
+    keepalive_requests 50;
 }
 
 server {
@@ -46,8 +48,10 @@ server {
         proxy_request_buffering on;
         proxy_buffering off;
 
-        # Hosting kısa bir an düşerse bir sonraki bağlantıyla tekrar dene
-        proxy_next_upstream error timeout;
+        # Bağlantı düzeyinde hata (bayat keep-alive bağlantısı, reset) → yeni bağlantıyla 1 kez daha dene.
+        # POST olduğu için non_idempotent şart; 'timeout' bilerek dahil DEĞİL (işlenmiş isteği tekrarlamasın).
+        proxy_next_upstream error non_idempotent;
         proxy_next_upstream_tries 2;
+        proxy_socket_keepalive on;
     }
 }

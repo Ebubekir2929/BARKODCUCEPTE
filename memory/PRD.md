@@ -605,3 +605,14 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
   7 bağlantı; T3 ölü ana + yedek → 0,04 sn yedekten, 2. çağrı yedek önce; T4 yedeksiz ölü ana → 0,9 sn RuntimeError; T5 HTTP 503 → 3 deneme, yedek
   çağrılmaz. CANLI hosting: ilk istek 285 ms, sonrakiler ~65 ms (bağlantı yeniden kullanılıyor). `/api/pos-dosya/client.py` 324 KB v25.
 - NOT: saglik.py beklenen sürüm artık v25 → güncellenmeyen istemciler "eski" görünür (bilgi amaçlı).
+
+## 2026-10-26 — Köprü Railway'de CANLI: kasacepte-kopru-production.up.railway.app (EU West/Amsterdam)
+- İlk build FAILED (Root Directory pos_entegrasyon + RAILWAY_DOCKERFILE_PATH). Yapı sadeleştirildi: Root Directory `pos_entegrasyon/railway_kopru`,
+  Dockerfile klasör kökünde (`COPY default.conf.template`), yanında `railway.json` (builder DOCKERFILE, healthcheckPath /kopru-saglik). Build OK.
+- Uçtan uca test (köprü → hosting): /kopru-saglik ✓, surum ✓ (0,25 s), 401 geçişi ✓, 666 KB gövde ✓ (404 tenant_not_found = sync.php'nin kendi yanıtı),
+  20 ardışık istekte 1 adet 20 sn stall (0 byte) görüldü → upstream keepalive ayarı değişti: `keepalive_timeout 20s; keepalive_requests 50;`
+  `proxy_next_upstream error non_idempotent; tries 2; proxy_socket_keepalive on` ('timeout' bilerek dahil değil — işlenmiş POST tekrarlanmasın).
+  Yerel nginx ile 110 istek + 35/70 sn boşluklar: stall 0, max 0,16 s, upstream hata 0. Kullanıcı Save to GitHub → Railway otomatik redeploy.
+- 16:29 üçüncü toplu açılış (Poyraz elle temizlemiş olmalı) → 16:41'de yeniden engel (12 dk). Poyraz kuralı değiştirmiyor; tetikleyici kaldırılmalı.
+- SIRADAKİ: Railway Custom Domain `kasaceptetransfer.berkyazilim.com` → Plesk DNS A→CNAME (TTL 300) → ≤6 saatte tüm istemciler köprüden.
+  Plesk'e giriş: telefon uçak modu (yeni IP), hotspot kapalı. Ardından v25 client kademeli dağıtım.
