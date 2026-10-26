@@ -6,15 +6,15 @@
 # İstemcide kod değişikliği YOK — yalnızca "Sunucu URL" alanı köprü adresine çevrilir:
 #     https://<köprü-domaini>/api/sync.php
 #
-# Railway kurulumu:
-#   New Service → GitHub repo → Settings → Root Directory: pos_entegrasyon
-#   Variables → RAILWAY_DOCKERFILE_PATH = railway_kopru/Dockerfile
-#   (isteğe bağlı) HEDEF_HOST = kasaceptetransfer.berkyazilim.com   (varsayılan budur)
+# Railway kurulumu (en sade yol — ek değişken GEREKMEZ):
+#   New Service → GitHub repo → Settings → Root Directory: pos_entegrasyon/railway_kopru
+#   (Dockerfile bu klasörün kökünde; yanındaki railway.json builder'ı DOCKERFILE yapar)
 #   Settings → Networking → Generate Domain  → istemcilere verilecek adres
+#   (isteğe bağlı Variables) HEDEF_HOST / HEDEF_UPSTREAM — varsayılanlar aşağıda
 FROM nginx:1.27-alpine
 
 # nginx imajı /etc/nginx/templates/*.template dosyalarını envsubst ile işler (PORT, HEDEF_HOST)
-COPY railway_kopru/default.conf.template /etc/nginx/templates/default.conf.template
+COPY default.conf.template /etc/nginx/templates/default.conf.template
 
 ENV PORT=8080
 ENV HEDEF_HOST=kasaceptetransfer.berkyazilim.com

@@ -10,9 +10,9 @@ açılır → istemci sayısı ne olursa olsun bağlantı fırtınası olmaz. İ
 
 ## Kurulum (5 dakika)
 1. Railway → **New Service → GitHub Repo** (bu repo).
-2. Service **Settings → Root Directory:** `pos_entegrasyon`
-3. **Variables:** `RAILWAY_DOCKERFILE_PATH` = `railway_kopru/Dockerfile`
-   (isteğe bağlı `HEDEF_HOST` = `kasaceptetransfer.berkyazilim.com` — varsayılan zaten bu)
+2. Service **Settings → Root Directory:** `pos_entegrasyon/railway_kopru` (Dockerfile + railway.json bu klasörde;
+   ek değişken GEREKMEZ — `RAILWAY_DOCKERFILE_PATH` tanımlıysa silin).
+3. (isteğe bağlı Variables) `HEDEF_HOST` = `kasaceptetransfer.berkyazilim.com`, `HEDEF_UPSTREAM` = `185.223.77.132` — varsayılanlar zaten bu.
 4. **Settings → Networking → Generate Domain** → ör. `kasacepte-kopru-production.up.railway.app`
 5. Doğrulama: tarayıcıda `https://<domain>/kopru-saglik` → `{"ok":true,...}`;
    `POST https://<domain>/api/sync.php` gövde `{"action":"surum"}` → hosting'in sürüm yanıtı.
