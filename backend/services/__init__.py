@@ -57,18 +57,12 @@ async def _havuz_ac(host_env: str, **pool_kw):
     """Havuzu açar. Sıra: önbellekteki karar → direkt 3306 → (tünel hedefi açıksa) TLS tüneli.
     Başaran uç 5 dk önbelleğe alınır; hepsi düşerse karar unutulur ve hata fırlatılır."""
     host = os.environ.get(host_env, '185.223.77.132')
-    # 2026-10-26 — "host:port" biçimi desteklenir (Railway TCP proxy rastgele port kullanır,
-    # özel ağda mariadb.railway.internal:3306). Port verilmezse 3306.
-    port = 3306
-    if ':' in host and not host.startswith('['):
-        host, _p = host.rsplit(':', 1)
-        port = int(_p or 3306)
     adaylar: list = []
     cached = _endpoint_cache.get(host)
     if cached and _time.monotonic() < cached[2]:
         adaylar.append((cached[0], cached[1]))
-    if (host, port) not in adaylar:
-        adaylar.append((host, port))
+    if (host, 3306) not in adaylar:
+        adaylar.append((host, 3306))
 
     tls_port = int(os.environ.get('MYSQL_TLS_PORT', '0') or 0)
     tls_host = os.environ.get('MYSQL_TLS_HOST', host)
@@ -78,11 +72,7 @@ async def _havuz_ac(host_env: str, **pool_kw):
         # IO yükü altındaki sunucuda el sıkışma 5 sn'yi aşabiliyor → 12/16 sn
         return await asyncio.wait_for(
             aiomysql.create_pool(host=h, port=p, autocommit=True, minsize=1,
-                                 pool_recycle=280, connect_timeout=12,
-                                 # 2026-10-26 — Taşıma güvenlik ağı: yeni MariaDB (10/11) katı sql_mode + UTC ile gelir;
-                                 # hosting (5.5) '' ve +03 idi. Oturum bazında eski davranış korunur (5.5'te etkisiz).
-                                 init_command="SET SESSION sql_mode='', time_zone='+03:00'",
-                                 **pool_kw),
+                                 pool_recycle=280, connect_timeout=12, **pool_kw),
             timeout=16)
 
     for h, p in adaylar:
@@ -256,12 +246,8 @@ async def _havuz_bekcisi():
                 if hata[ad] >= 2:
                     logger.error(f"[havuz_bekcisi] {ad} havuzu SIFIRLANIYOR — endpoint yeniden çözülecek (gerekirse TLS tüneli)")
                     _endpoint_cache.clear()
-                    # 2026-10-26 — terminate(): KULLANIMDAKİ (askıdaki) bağlantılar da anında kapatılır.
-                    # Eski close() yalnızca boştakileri kapatıyordu; yavaş sorguda askıda kalanlar MySQL
-                    # tarafında 8 saat (wait_timeout) 'Sleep' zombi olarak kalıp paylaşımlı hostingin
-                    # 151 bağlantı sınırını dolduruyordu (26 Ekim: 47 zombi → web/app/istemci erişim kaybı).
                     try:
-                        pool.terminate()
+                        pool.close()
                     except Exception:
                         pass
                     if ad == "patron":
@@ -269,57 +255,6 @@ async def _havuz_bekcisi():
                     else:
                         data_pool = None
                     hata[ad] = 0
-        # Her 5 dk: kendi kullanıcımızın 10 dk+ boşta duran (zombi) MySQL bağlantılarını öldür
-        _zombi_sayac[0] += 1
-        if _zombi_sayac[0] % 5 == 0:
-            try:
-                await asyncio.wait_for(zombi_baglanti_temizle(), timeout=20)
-            except Exception as exc:
-                logger.warning(f"[havuz_bekcisi] zombi temizliği başarısız: {exc!r}")
-
-
-_zombi_sayac = [0]
-ZOMBI_ESIK_SN = int(os.environ.get("MYSQL_ZOMBI_ESIK_SN", "600"))
-son_zombi_temizlik: dict = {}
-
-
-async def zombi_baglanti_temizle(esik_sn: int = None) -> dict:
-    """Aynı MySQL kullanıcısının Command='Sleep' ve Time>esik bağlantılarını KILL eder.
-
-    Havuzlar 280 sn'de bağlantı yeniler, PHP (sync.php) kalıcı bağlantı kullanmaz →
-    10 dk+ uyuyan bağlantı yalnızca ölmüş/yeniden başlamış bir sürecin (Railway redeploy,
-    havuz sıfırlama) artığıdır. KILL için SUPER gerekmez (kendi kullanıcımız)."""
-    esik_sn = esik_sn or ZOMBI_ESIK_SN
-    pool = await get_data_pool()
-    sonuc = {"zaman": _time.strftime("%Y-%m-%d %H:%M:%S"), "esik_sn": esik_sn, "bulunan": 0, "oldurulen": 0, "toplam_baglanti": 0, "ip_dagilimi": {}}
-    async with pool.acquire() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute("SELECT CONNECTION_ID(), USER()")
-            benim_id, kullanici = await cur.fetchone()
-            kullanici = str(kullanici).split("@")[0]
-            await cur.execute("SHOW PROCESSLIST")
-            satirlar = await cur.fetchall()
-            hedefler = []
-            for r in satirlar:  # Id, User, Host, db, Command, Time, State, Info
-                if str(r[1]) != kullanici:
-                    continue
-                sonuc["toplam_baglanti"] += 1
-                ip = str(r[2] or "").split(":")[0]
-                if r[0] != benim_id and str(r[4]) == "Sleep" and int(r[5] or 0) > esik_sn:
-                    hedefler.append(r[0])
-                    sonuc["ip_dagilimi"][ip] = sonuc["ip_dagilimi"].get(ip, 0) + 1
-            sonuc["bulunan"] = len(hedefler)
-            for pid in hedefler:
-                try:
-                    await cur.execute(f"KILL {int(pid)}")
-                    sonuc["oldurulen"] += 1
-                except Exception:
-                    pass
-    if sonuc["oldurulen"]:
-        logger.warning(f"[zombi] {sonuc['oldurulen']} boşta MySQL bağlantısı öldürüldü (>{esik_sn}s): {sonuc['ip_dagilimi']}")
-    son_zombi_temizlik.clear()
-    son_zombi_temizlik.update(sonuc)
-    return sonuc
 
 
 _bekci_task = None

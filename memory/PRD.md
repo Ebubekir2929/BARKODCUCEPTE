@@ -554,3 +554,14 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - v25: server.py surum `2026-10-26-v25-zombi-temizlik` (zombi temizliği + mysql_baglanti alanları prod'a henüz deploy edilmemişti; prod sistem-durum'da bu alanlar yoktu).
   KULLANICI: Save to GitHub → Railway redeploy → /api/sistem-durum surum v25 + `zombi_temizlik` görünmeli.
 - Kullanıcıya verilen istemci tarafı teşhis komutları: `Test-NetConnection kasaceptetransfer.berkyazilim.com -Port 443`, `tracert`, `curl -vk https://185.223.77.132/`.
+
+## 2026-10-26 (Fork) — GERİ ALMA: kullanıcı "bu çalışan şeydi, eski haline al; darboğazı başka şekilde çözeceğiz" dedi
+- Bugünkü (26 Ekim) backend bağlantı katmanı değişiklikleri 7f50a86 durumuna GERİ ALINDI: zombi bağlantı temizliği (`zombi_baglantı_temizle`,
+  5 dk KILL), bekçide `pool.terminate()` → `pool.close()`, `_havuz_ac` host:port ayrıştırma + `init_command` (sql_mode/time_zone), `SYNC_URL` env,
+  sistem-durum `mysql_baglanti`/`zombi_temizlik` alanları. Sürüm yeniden `2026-10-13-v24-gun-sonu-iade-surum` (prod ile aynı → deploy GEREKMEZ).
+- sync.php v23 (bakim.flag) → v22'ye geri alındı (hosting'deki sürümle aynı; `/api/pos-dosya/sync.php` 149 KB v22 veriyor).
+- Taşıma araç seti dosyaları (tools/mysql_tasima.py, railway_sync/, sync_yonlendirici.php, baglanti_test.php, TASIMA_REHBERI.md) DURUYOR ama
+  kullanılmıyor; kullanıcı darboğazı (151 bağlantı / paylaşımlı hosting) başka yolla çözecek. Bu dosyalar yeniden gerekirse backend tarafı
+  host:port + init_command desteği git geçmişinden (3293fd1) geri alınabilir.
+- Not: zombi temizliğinin olası yan etkisi — aiomysql boştaki havuz bağlantıları 280 sn'de YENİLENMEZ (recycle yalnızca acquire/release anında),
+  prod'un 25 boş bağlantısı 10 dk+ Sleep göründüğünden dev'deki temizlik bunları da öldürebiliyordu. Geri alma ile bu risk kalktı.
