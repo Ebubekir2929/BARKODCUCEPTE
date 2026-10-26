@@ -192,6 +192,26 @@ async def sistem_durum(derin: int = 0):
         out["acik_hesap_gun_sonu"] = dict(_gs) if _gs else {"durum": "henüz çalışmadı (İstanbul 23:55)"}
     except Exception:
         pass
+    # 2026-10-26 — MySQL bağlantı sağlığı (paylaşımlı hosting 151 sınırı) + zombi temizliği
+    try:
+        from services import son_zombi_temizlik as _zt, get_data_pool as _gdp
+        out["zombi_temizlik"] = dict(_zt) if _zt else {"durum": "henüz çalışmadı (5 dk'da bir)"}
+        async def _mysql_durum():
+            pool = await _gdp()
+            async with pool.acquire() as conn:
+                async with conn.cursor() as cur:
+                    await cur.execute("SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_connected','Max_used_connections','Aborted_connects')")
+                    st = {k: v for k, v in await cur.fetchall()}
+                    await cur.execute("SHOW GLOBAL VARIABLES WHERE Variable_name IN ('max_connections')")
+                    st.update({k: v for k, v in await cur.fetchall()})
+                    await cur.execute("SELECT COUNT(*), SUM(Command='Sleep' AND Time>600) FROM information_schema.PROCESSLIST WHERE User=SUBSTRING_INDEX(USER(),'@',1)")
+                    r = await cur.fetchone()
+                    st["bizim_baglanti"] = int(r[0] or 0)
+                    st["bizim_zombi_10dk"] = int(r[1] or 0)
+                    return st
+        out["mysql_baglanti"] = await asyncio.wait_for(_mysql_durum(), timeout=8)
+    except Exception as _e:
+        out["mysql_baglanti"] = f"okunamadı: {type(_e).__name__}"
     try:
         from services.dataset_cache import _DATASET_MEM_CACHE
         from routes.data import _GLOBAL_CACHE

@@ -509,3 +509,16 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
   (CLIENT_BUILD / SYNC_PHP_SURUM); hosting sync.php sürümü `surum` aksiyonu 10 dk önbellek. durum: guncel/eski/bilinmiyor; sürüm bildirmeyen
   istemci = eski. Eski sürüm → genel en az 'uyari'. Mobil senkron-saglik.tsx "Sürümler" kartı (testID senkron-surumler).
 - Sürüm: backend `2026-10-13-v24-gun-sonu-iade-surum`. Test: tests/test_v24_gun_sonu_iade_surum.py 6/6.
+
+## 2026-10-26 — "Servera erişim bugün baya gitti" KÖK NEDEN + FIX ✅
+- Bulgular (hosting MariaDB 5.5, paylaşımlı, max_connections=151, innodb_buffer_pool 128 MB): Max_used_connections=152 (sınır DOLMUŞ),
+  Aborted_connects 74.6K (+~740/6 dk), Threads_connected 117. Bizim kullanıcı (kceptetransfer) 78 bağlantı tutuyordu: 47'si Railway IP'sinden
+  (152.55.186.34, direkt 3306) 28 dk–1 s 55 dk 'Sleep' ZOMBİ; prod backend ise 10:06'da yeniden başlamış ve tünelle (localhost) çalışıyordu.
+  Zombiler = havuz bekçisinin "SIFIRLANIYOR" turlarında `pool.close()` yalnızca boştaki bağlantıları kapattığı için yavaş sorguda askıda kalan
+  bağlantıların MySQL'de wait_timeout (8 saat) boyunca kalması. Zincir: MySQL yavaşlama (dev bekçi ping timeout 09:51/10:04/10:17 İst.) →
+  havuz sıfırlama → zombi sızıntısı → 151 sınırı → web/istemci/app zaman aşımı; sync_logs 5 dk push sayısı 11:20–11:50'de 4000→650'ye düştü.
+- FIX (services/__init__.py): havuz sıfırlamada `pool.terminate()` (kullanımdakiler dahil anında kapatma); bekçi her 5 dk `zombi_baglanti_temizle()`
+  (kendi kullanıcımızın Command=Sleep & Time>MYSQL_ZOMBI_ESIK_SN(600) bağlantılarını KILL; havuz 280 sn recycle + PHP kalıcı bağlantı yok → güvenli).
+  sistem-durum → `mysql_baglanti` {Threads_connected, max_connections, Max_used_connections, Aborted_connects, bizim_baglanti, bizim_zombi_10dk} + `zombi_temizlik`.
+  Anında temizlik çalıştırıldı: 62 zombi öldürüldü (47 Railway + 15 localhost) → Threads 117→65, bizim 85→22.
+- Kalıcı öneri: hosting MySQL kaynakları (max_connections/buffer pool) ya da ayrı MySQL (Railway MySQL) — paylaşımlı 151 sınırı tüm sistemin tek darboğazı.

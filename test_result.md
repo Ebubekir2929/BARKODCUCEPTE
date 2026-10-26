@@ -2662,3 +2662,7 @@ agent_communication:
     saglik.surumler (firms.client_build), IadeFisModal.tsx, senkron-saglik "Sürümler" kartı, AcikHesapKisiDetail gün sonu rozeti.
   - pytest tests/test_v24_gun_sonu_iade_surum.py 6/6; gun_dondur 10-12 manuel tur (8 tenant) ✅; Senkron Sağlığı ekran testi (Sürümler kartı) ✅.
     İade modalı test kullanıcısında iade verisi olmadığından yalnızca tsc/lint ile doğrulandı (a649 hesabıyla kullanıcı doğrulaması).
+
+## 2026-10-26 — MySQL zombi bağlantı temizliği
+  - services/__init__.py: pool.terminate() + zombi_baglanti_temizle (5 dk), sistem-durum mysql_baglanti/zombi_temizlik.
+  - Canlı: 62 zombi KILL (prod sağlıklı kaldı, havuzlar 5/5, 9/9); dev sistem-durum mysql_baglanti okundu ✅
