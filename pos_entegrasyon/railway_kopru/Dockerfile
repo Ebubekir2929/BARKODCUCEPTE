@@ -18,5 +18,7 @@ COPY railway_kopru/default.conf.template /etc/nginx/templates/default.conf.templ
 
 ENV PORT=8080
 ENV HEDEF_HOST=kasaceptetransfer.berkyazilim.com
+# Hosting sunucusunun IP'si (Host/SNI başlığı HEDEF_HOST kalır). Hosting IP değişirse Variables'tan güncelleyin.
+ENV HEDEF_UPSTREAM=185.223.77.132
 ENV NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx/conf.d
 EXPOSE 8080

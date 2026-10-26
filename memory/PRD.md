@@ -576,3 +576,7 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
   `/kopru-saglik` ucu. İstemcide yalnızca Sunucu URL → `https://<kopru>/api/sync.php`. Yerel nginx 1.22 ile test: surum ✓, 401 geçişi ✓,
   30 istekte hosting'e 3 TCP bağlantısı ✓. Kurulum: Root Directory pos_entegrasyon, RAILWAY_DOCKERFILE_PATH=railway_kopru/Dockerfile.
 - Kullanıcıya önerilen paralel aksiyon: Poyraz'a ofis IP'si + "telefon açılıyor, ofis açılmıyor" bilgisiyle DDoS/flood kara listesi sorgusu.
+- Kullanıcı "başka çözüm yok mu" (müşterilere dokunmadan) → **DNS yöntemi** eklendi: köprüye Railway Custom Domain
+  `kasaceptetransfer.berkyazilim.com` + Plesk DNS'te A → CNAME (TTL 300). Köprü hosting'e IP ile gider (`HEDEF_UPSTREAM=185.223.77.132`,
+  Host/SNI alan adı) → döngü yok. Eski A TTL 21600 → ≤6 saatte tüm müşteriler otomatik geçer; backend/web de aynı alan adıysa otomatik.
+  Yerel test (IP upstream + SNI): surum ✓, 401 ✓. Alternatifler: Poyraz engeli kaldırır / yeni IP (DNS), Cloudflare (NS taşıma, geniş etki).

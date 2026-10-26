@@ -3,7 +3,9 @@
 # ne olursa olsun hosting tarafında yeni bağlantı fırtınası oluşmaz.
 
 upstream kasacepte_hosting {
-    server ${HEDEF_HOST}:443;
+    # HEDEF_UPSTREAM = hosting'in IP'si (DNS köprüye çevrildiğinde alan adı köprünün kendisine
+    # çözüleceği için döngüyü önlemek üzere IP kullanılır). Host/SNI yine ${HEDEF_HOST}.
+    server ${HEDEF_UPSTREAM}:443;
     keepalive 16;
     keepalive_timeout 120s;
     keepalive_requests 10000;
@@ -20,7 +22,7 @@ server {
     # Sağlık kontrolü (Railway healthcheck için)
     location = /kopru-saglik {
         default_type application/json;
-        return 200 '{"ok":true,"kopru":"nginx","hedef":"${HEDEF_HOST}"}';
+        return 200 '{"ok":true,"kopru":"nginx","hedef":"${HEDEF_HOST}","upstream":"${HEDEF_UPSTREAM}"}';
     }
 
     location / {
