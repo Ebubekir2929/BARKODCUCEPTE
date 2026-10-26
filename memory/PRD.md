@@ -616,3 +616,12 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - 16:29 üçüncü toplu açılış (Poyraz elle temizlemiş olmalı) → 16:41'de yeniden engel (12 dk). Poyraz kuralı değiştirmiyor; tetikleyici kaldırılmalı.
 - SIRADAKİ: Railway Custom Domain `kasaceptetransfer.berkyazilim.com` → Plesk DNS A→CNAME (TTL 300) → ≤6 saatte tüm istemciler köprüden.
   Plesk'e giriş: telefon uçak modu (yeni IP), hotspot kapalı. Ardından v25 client kademeli dağıtım.
+
+## 2026-10-26 17:05 — ÇÖZÜLDÜ (Poyraz): "Firewall tarafında kısıtlama esnetilmiştir"
+- 17:05'te 24 müşteri aynı anda bağlandı; 17:36 itibarıyla 31 dk kesintisiz 24/24, dakikada ~1.300-1.600 kayıt (önceki açılışlar 6-12 dk sürmüştü).
+- Poyraz yazılı teyit: firewall kısıtlaması esnetildi. Kök neden: Poyraz DDoS/firewall'un IP başına bağlantı eşiği (26 Ekim ~11:00'de devreye girdi/sıkılaştı).
+- Köprü (kasacepte-kopru-production.up.railway.app) CANLI ama DNS DEĞİŞTİRİLMEDİ — sigorta olarak bekliyor. Railway Custom Domain için gerekli kayıtlar:
+  CNAME kasaceptetransfer → q9s9c3db.up.railway.app, TXT _railway-verify.kasaceptetransfer → railway-verify=52d5500232cd5b74c54b570559f8c0… (tam değer Railway'de).
+  Tekrarında: Plesk DNS A→CNAME + TXT (≤6 saat yayılma) veya acil müşterilerde Sunucu URL'yi köprüye çevirme.
+- Railway build altyapı hatası (BuildKit overlay "invalid argument") hem köprü hem backend deploy'unu düşürdü → Redeploy ile geçmesi beklenir; çalışan sürümler etkilenmedi.
+- Kalan iş: client v25 kademeli dağıtım (bağlantı sayısı ↓, yedek adres alanı), köprüye son iyileştirmenin (keepalive 20s/50) deploy'u (Redeploy).
