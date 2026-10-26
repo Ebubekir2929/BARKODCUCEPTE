@@ -580,3 +580,11 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
   `kasaceptetransfer.berkyazilim.com` + Plesk DNS'te A → CNAME (TTL 300). Köprü hosting'e IP ile gider (`HEDEF_UPSTREAM=185.223.77.132`,
   Host/SNI alan adı) → döngü yok. Eski A TTL 21600 → ≤6 saatte tüm müşteriler otomatik geçer; backend/web de aynı alan adıysa otomatik.
   Yerel test (IP upstream + SNI): surum ✓, 401 ✓. Alternatifler: Poyraz engeli kaldırır / yeni IP (DNS), Cloudflare (NS taşıma, geniş etki).
+- 15:24 kullanıcı PC'yi telefon hotspot'una aldı → d5587c87 (ofis tenant'ı) 15:24:43'te bağlandı; sonra "telefondan da ulaşamıyorum" dedi.
+- **15:32:32'de 24 tenant AYNI SANİYEDE geri geldi** (13:10'daki gibi; 2 sa 22 dk arayla) → engel per-IP TTL değil, Poyraz tarafında
+  GLOBAL aç/kapa durumu (saldırı azaltma modu). Sunucu portları (22/443/8443/3306/3308) buradan hep açıktı.
+- Kullanıcının tcpdump'ı (15:37, ofis IP 46.197.148.62 — Turkcell Superonline): sağlıklı tam TLS alışverişi; SYN bayrağı **[SEW]** = Windows ECN'li SYN.
+  TEORİ: azaltma modunda cihaz SYN+ECE+CWR (ECN) paketlerini düşürüyor → Windows 11 (ECN varsayılan açık) POS PC'leri engelli, Linux (sandbox,
+  check-host) ve telefon geçiyor; hiç etkilenmeyen 3 tenant muhtemelen Win10/Server (ECN kapalı). TEST (bir sonraki engelde, ofis PC admin cmd):
+  `netsh int tcp set global ecncapability=disabled` → `Test-NetConnection ... -Port 443` → True olursa kesinleşir (müşteri başına 10 sn, client'a dokunmadan).
+- Poyraz destek "hangi İSS, traceroute paylaşın" dedi → kullanıcıya yanıt metni + `tracert -d 185.223.77.132` (engel anında) verildi.
