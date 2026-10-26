@@ -2666,3 +2666,8 @@ agent_communication:
 ## 2026-10-26 — MySQL zombi bağlantı temizliği
   - services/__init__.py: pool.terminate() + zombi_baglanti_temizle (5 dk), sistem-durum mysql_baglanti/zombi_temizlik.
   - Canlı: 62 zombi KILL (prod sağlıklı kaldı, havuzlar 5/5, 9/9); dev sistem-durum mysql_baglanti okundu ✅
+
+## 2026-10-26 — Taşıma araç seti
+  - mysql_tasima.py: yerel MariaDB 10.11 hedefle sema (31 tablo) / tam (kes-devam, 1M+ satır) / delta / dogrula ✓
+  - sync.php bakım modu 503 ✓, yönlendirici → sync.php → MariaDB 10.11 (heartbeat, dataset_push, dataset_get, request_poll, 401) ✓
+  - backend host:port + init_command ile MariaDB 10.11'de login/sistem-durum/saglik ✓ (prod hosting bağlantısı etkilenmedi)

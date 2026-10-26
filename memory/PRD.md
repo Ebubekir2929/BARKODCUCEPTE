@@ -522,3 +522,35 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
   sistem-durum → `mysql_baglanti` {Threads_connected, max_connections, Max_used_connections, Aborted_connects, bizim_baglanti, bizim_zombi_10dk} + `zombi_temizlik`.
   Anında temizlik çalıştırıldı: 62 zombi öldürüldü (47 Railway + 15 localhost) → Threads 117→65, bizim 85→22.
 - Kalıcı öneri: hosting MySQL kaynakları (max_connections/buffer pool) ya da ayrı MySQL (Railway MySQL) — paylaşımlı 151 sınırı tüm sistemin tek darboğazı.
+
+## 2026-10-26 — Veritabanı taşıma araç seti (hosting MariaDB 5.5 → Railway MariaDB) ✅ HAZIR, GEÇİŞ BEKLİYOR
+- Kararlar (kullanıcı): Railway MariaDB · sync.php Railway'e, hosting sync.php yönlendirici · web sitesi hosting'de kalıp uzaktan bağlanır · tüm geçmiş · gece 03:00.
+- **backend/tools/mysql_tasima.py**: `sema|tam|delta|dogrula|durum`. Kaynak .env MYSQL_*; hedef `HEDEF_MYSQL_URL=mysql://u:p@host:port`.
+  PK aralığıyla ~8 MB parçalar, `tools/tasima_durum.json` ile kaldığı yerden devam, upsert (idempotent), `delta` = updated_at/last_success_at/created_at ≥ son tur
+  (zaman kolonu olmayan küçük tablolar baştan), ATLA veri: sync_logs, dataset_upload_chunks, sync_request_result_chunks, stok_arama_* (ŞEMALARI yine de oluşturulur!).
+  `TASIMA_TABLOLAR` (virgüllü) ile alt küme, `TASIMA_BEKLEME_SN`. Test: yerel MariaDB 10.11'e şema 31 tablo + 1M satır kopya/kes-devam/delta/dogrula ✓.
+- **sync.php v23**: `bakim.flag` dosyası varsa (db.php'den önce) HTTP 503 {ok:false,bakim:true} → client.py post_json RuntimeError → offline kuyruk. 'surum' aksiyonu bakımda da yanıt verir. mb_substr→substr.
+- **pos_entegrasyon/railway_sync/** (Dockerfile php:8.2-apache + pdo_mysql, php.ini 64M/512M/300s, db.php env'den DB_HOST/PORT/NAME/USER/PASS + `SET SESSION sql_mode='', time_zone='+03:00'`).
+  Railway: Root Directory `pos_entegrasyon`, `RAILWAY_DOCKERFILE_PATH=railway_sync/Dockerfile`.
+- **sync_yonlendirici.php** (hosting'de sync.php'nin yerine; HEDEF_SYNC_URL doldurulur; başlıklar+gövde cURL ile iletilir, 300 sn). Test: yerel PHP ile heartbeat/dataset_push/dataset_get/request_poll/yanlış secret 401 → MariaDB 10.11 üzerinde ✓.
+- **baglanti_test.php** (hosting → Railway TCP proxy port testi; yalnızca railway adresleri).
+- **Backend**: `_havuz_ac` "host:port" desteği (Railway proxy portu), pool `init_command` sql_mode=''/+03:00 (hosting 5.5 '' ve +03 idi; yeni MariaDB katı+UTC gelir),
+  `SYNC_URL` env ile Railway sync.php adresi. Yerel MariaDB 10.11'e karşı backend login/sistem-durum/ayar/saglik ✓.
+- **TASIMA_REHBERI.md**: 0 hazırlık → 1 ön kopya → 2 geçiş gecesi tablosu (bakim.flag → delta → dogrula → backend env → yönlendirici → web db.php → flag sil) → rollback → sonrası.
+- Railway MariaDB başlatma: `--default-time-zone=+03:00 --sql-mode= --max-connections=500` (Start Command) önerilir; volume ≥ 25 GB.
+- SONRAKİ: kullanıcı Railway MariaDB + sync servisi açınca `HEDEF_MYSQL_URL` secrets ile alınır → `sema` + `tam` arka planda başlatılır.
+
+## 2026-10-26 (Fork) — POS istemcileri hosting'e BAĞLANAMIYOR (ConnectTimeout) — teşhis + v25 deploy hazırlığı
+- DURUM DÜZELTMESİ: Taşıma YAPILMADI (araç seti hazır, HEDEF_MYSQL_URL yok, tasima_durum.json yok, hosting sync.php v22, backend hosting DB'de).
+  Önceki özet "taşıma tamamlandı" demişti — YANLIŞ. Kullanıcı taşımayı ERTELEDİ, client.py değişikliğini REDDETTİ (v25 keep-alive önerisi yapılmadı).
+- Belirti (kullanıcı logu): `POST başarısız: ... Connection to kasaceptetransfer.berkyazilim.com timed out (connect timeout=60)` → TCP SYN yanıtsız.
+- Kanıt: sandbox'tan sync.php 0,04 sn / 200; Railway prod → sync.php OK; check-host.net TR (İstanbul ×2), BG, DE, NL, PL, US 7/7 TCP 443 açık;
+  DNS tutarlı (185.223.77.132, ns1/ns2 aynı sunucu). Buna rağmen sync_logs: dün 64K/saat·23 tenant → bugün 11h 24K, 12h 10K, 13h 4K, 14h 449·2-4 tenant.
+  13:10'da 23 tenant 5 dk aynı anda bağlanıp tekrar koptu (engel kalkıp yeniden devreye girme örüntüsü). 14:36 itibarıyla 25 firmadan 2'si canlı.
+  Plesk Fail2Ban'da yasaklı IP YOK (kullanıcı baktı) → en olası: Poyraz Hosting DDoS/flood koruması (daha önce 3306/22'yi de bozmuştu) müşteri IP'lerini
+  kaynak bazında düşürüyor; istemciler saniyede 1 yeni TLS bağlantısı açıyor (REQUEST_POLL 1 sn + "Connection: close"), engel kalkınca kuyruk patlaması → yeniden engel.
+- Sunucu: nginx + Plesk (PleskLin), PHP 8.2.34. Aborted_connects ~+32/dk artıyor (kaynağı belirsiz, paylaşımlı sunucu).
+- Backend yükü notu: dev VE prod bildirim izleyicileri hosting sync.php'ye ~283 istek/dk (her biri) atıyor (dataset_get, 27 tenant, 5/15/30 sn döngüler) — keep-alive ile; azaltma adayı.
+- v25: server.py surum `2026-10-26-v25-zombi-temizlik` (zombi temizliği + mysql_baglanti alanları prod'a henüz deploy edilmemişti; prod sistem-durum'da bu alanlar yoktu).
+  KULLANICI: Save to GitHub → Railway redeploy → /api/sistem-durum surum v25 + `zombi_temizlik` görünmeli.
+- Kullanıcıya verilen istemci tarafı teşhis komutları: `Test-NetConnection kasaceptetransfer.berkyazilim.com -Port 443`, `tracert`, `curl -vk https://185.223.77.132/`.

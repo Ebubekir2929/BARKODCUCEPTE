@@ -3,9 +3,27 @@ declare(strict_types=1);
 
 header('Content-Type: application/json; charset=utf-8');
 
+// ── 2026-10-26 — BAKIM MODU (veritabanı taşıma penceresi) ─────────────────────
+// sync.php'nin yanına `bakim.flag` adlı boş bir dosya koyun → tüm istekler HTTP 503
+// {"ok":false,"bakim":true} alır. POS istemcisi (client.py) 503'ü hata sayıp gönderimi
+// ÇEVRİMDIŞI KUYRUĞA alır ve bakım bitince sırayla boşaltır → veri kaybı olmaz.
+// Dosyayı silince normal çalışmaya döner. (Sadece 'surum' aksiyonu bakımda da yanıt verir.)
+// db.php'den ÖNCE çalışır → bakımda veritabanına hiç dokunulmaz.
+if (file_exists(__DIR__ . '/bakim.flag')) {
+    $rawBakim = file_get_contents('php://input');
+    $girdiBakim = is_string($rawBakim) ? json_decode($rawBakim, true) : null;
+    $aksiyonBakim = is_array($girdiBakim) ? (string)($girdiBakim['action'] ?? '') : '';
+    if ($aksiyonBakim !== 'surum') {
+        header('Retry-After: 120');
+        http_response_code(503);
+        echo json_encode(['ok' => false, 'bakim' => true, 'mesaj' => 'Sunucu bakımda (veritabanı taşınıyor). Gönderimler kuyruğa alınır, birazdan tekrar deneyin.'], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+}
+
 require_once __DIR__ . '/db.php';
 
-const SYNC_PHP_SURUM = '2026-10-13-v22-acik-hesap-gecmis-gun-korumasi';
+const SYNC_PHP_SURUM = '2026-10-26-v23-bakim-modu';
 
 function json_input(): array
 {
@@ -1897,7 +1915,7 @@ try {
             verify_client_secret($firm);
 
             // v22 (2026-10-13) — istemci sürümü (Senkron Sağlığı ekranı "Sürümler" kartı)
-            $clientBuild = isset($input['client_build']) ? mb_substr(trim((string)$input['client_build']), 0, 160) : '';
+            $clientBuild = isset($input['client_build']) ? substr(trim((string)$input['client_build']), 0, 160) : '';
             if ($clientBuild !== '') {
                 try {
                     $stmt = $pdo->prepare("UPDATE firms SET last_seen_at = NOW(), client_build = ?, client_build_at = NOW(), updated_at = NOW() WHERE tenant_id = ?");

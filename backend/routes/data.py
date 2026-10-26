@@ -18,6 +18,7 @@ from routes.auth import get_current_user
 from typing import Optional, Dict, List, Any
 import json
 import logging
+import os
 import time
 import asyncio
 from datetime import date, datetime, timedelta
@@ -1519,7 +1520,9 @@ async def senkron_yarim_yukleme_tamamla(
 import httpx
 import asyncio
 
-SYNC_URL = "https://kasaceptetransfer.berkyazilim.com/api/sync.php"
+# 2026-10-26 — Taşıma: Railway'deki sync.php'ye doğrudan gitmek için SYNC_URL ortam değişkeni
+# (ör. https://<sync-servisi>.up.railway.app/sync.php). Tanımsızsa hosting adresi.
+SYNC_URL = os.environ.get("SYNC_URL", "").strip() or "https://kasaceptetransfer.berkyazilim.com/api/sync.php"
 
 # 2026-09 v16 — sync.php için PAYLAŞILAN keep-alive istemci.
 # Eskiden her çağrı yeni TCP+TLS el sıkışması yapıyordu (~0.5 sn/çağrı; bir rapor

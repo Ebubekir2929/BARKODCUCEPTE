@@ -57,12 +57,18 @@ async def _havuz_ac(host_env: str, **pool_kw):
     """Havuzu açar. Sıra: önbellekteki karar → direkt 3306 → (tünel hedefi açıksa) TLS tüneli.
     Başaran uç 5 dk önbelleğe alınır; hepsi düşerse karar unutulur ve hata fırlatılır."""
     host = os.environ.get(host_env, '185.223.77.132')
+    # 2026-10-26 — "host:port" biçimi desteklenir (Railway TCP proxy rastgele port kullanır,
+    # özel ağda mariadb.railway.internal:3306). Port verilmezse 3306.
+    port = 3306
+    if ':' in host and not host.startswith('['):
+        host, _p = host.rsplit(':', 1)
+        port = int(_p or 3306)
     adaylar: list = []
     cached = _endpoint_cache.get(host)
     if cached and _time.monotonic() < cached[2]:
         adaylar.append((cached[0], cached[1]))
-    if (host, 3306) not in adaylar:
-        adaylar.append((host, 3306))
+    if (host, port) not in adaylar:
+        adaylar.append((host, port))
 
     tls_port = int(os.environ.get('MYSQL_TLS_PORT', '0') or 0)
     tls_host = os.environ.get('MYSQL_TLS_HOST', host)
@@ -72,7 +78,11 @@ async def _havuz_ac(host_env: str, **pool_kw):
         # IO yükü altındaki sunucuda el sıkışma 5 sn'yi aşabiliyor → 12/16 sn
         return await asyncio.wait_for(
             aiomysql.create_pool(host=h, port=p, autocommit=True, minsize=1,
-                                 pool_recycle=280, connect_timeout=12, **pool_kw),
+                                 pool_recycle=280, connect_timeout=12,
+                                 # 2026-10-26 — Taşıma güvenlik ağı: yeni MariaDB (10/11) katı sql_mode + UTC ile gelir;
+                                 # hosting (5.5) '' ve +03 idi. Oturum bazında eski davranış korunur (5.5'te etkisiz).
+                                 init_command="SET SESSION sql_mode='', time_zone='+03:00'",
+                                 **pool_kw),
             timeout=16)
 
     for h, p in adaylar:
