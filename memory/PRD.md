@@ -565,3 +565,14 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
   host:port + init_command desteği git geçmişinden (3293fd1) geri alınabilir.
 - Not: zombi temizliğinin olası yan etkisi — aiomysql boştaki havuz bağlantıları 280 sn'de YENİLENMEZ (recycle yalnızca acquire/release anında),
   prod'un 25 boş bağlantısı 10 dk+ Sleep göründüğünden dev'deki temizlik bunları da öldürebiliyordu. Geri alma ile bu risk kalktı.
+
+## 2026-10-26 (Fork) — Kesinti teşhisi kesinleşti: HOSTING, POS IP'LERİNİ DÜŞÜRÜYOR → Railway KÖPRÜ hazırlandı
+- Kullanıcı: ofis internetinden kendi sunucusuna ulaşamıyor, aynı anda telefonundan (mobil veri) ulaşıyor → engel KAYNAK IP bazlı
+  (BTK/ülke engeli DEĞİL). Sandbox'tan flood testi: 60 sn × 1 yeni TLS/sn + 80 istek/40 paralel → hepsi 200, engel yok → tetikleyici
+  basit bağlantı hızı değil (POS'ların sürekli büyük POST + saatlerce 1 conn/sn + paralel iş parçacığı örüntüsü ya da hosting tarafında
+  bugün değişen bir eşik). Hosting'de /sync.php 404 — istemciler /api/sync.php kullanır (DEFAULT_SERVER_URL yanıltıcı ama config'ler doğru).
+- **pos_entegrasyon/railway_kopru/** (Dockerfile nginx:1.27-alpine + default.conf.template + README): Railway'de nginx yönlendirici;
+  `upstream kasacepte_hosting { server ${HEDEF_HOST}:443; keepalive 16; }`, proxy_ssl_server_name, 300 sn okuma/yazma, 64m gövde,
+  `/kopru-saglik` ucu. İstemcide yalnızca Sunucu URL → `https://<kopru>/api/sync.php`. Yerel nginx 1.22 ile test: surum ✓, 401 geçişi ✓,
+  30 istekte hosting'e 3 TCP bağlantısı ✓. Kurulum: Root Directory pos_entegrasyon, RAILWAY_DOCKERFILE_PATH=railway_kopru/Dockerfile.
+- Kullanıcıya önerilen paralel aksiyon: Poyraz'a ofis IP'si + "telefon açılıyor, ofis açılmıyor" bilgisiyle DDoS/flood kara listesi sorgusu.
