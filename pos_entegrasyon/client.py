@@ -51,10 +51,20 @@ OFFLINE_QUEUE_PATH = os.path.join(CONFIG_DIR, "offline_queue.json")
 SUCCESS_STATE_PATH = os.path.join(CONFIG_DIR, "success_state.json")
 LOG_PATH = os.path.join(CONFIG_DIR, "client.log")
 
-DEFAULT_SERVER_URL = "https://kasaceptetransfer.berkyazilim.com/sync.php"
+DEFAULT_SERVER_URL = "https://kasaceptetransfer.berkyazilim.com/api/sync.php"   # v25: /sync.php hosting'de yok (404)
 
 # 2026-06 — Çalışan sürümü loglarda görmek için (kullanıcı doğru build'i kurdu mu?)
-CLIENT_BUILD = "2026-10-13 v24 (RAM/CPU diyeti + açık hesap geçmiş gün koruması)"
+CLIENT_BUILD = "2026-10-26 v25 (keep-alive + hızlı vazgeçme + yedek sunucu)"
+
+# 2026-10-26 v25 — BAĞLANTI HİJYENİ
+# Hosting'in DDoS koruması, saniyede yeni TLS bağlantısı açan POS IP'lerini kara listeye alıyordu
+# (her post_json yeni bağlantı + "Connection: close"). Artık tek kalıcı oturum (keep-alive) kullanılır:
+# istemci başına 1-2 açık bağlantı, yeni bağlantı/sn ≈ 0. Ana adres TCP düzeyinde ulaşılamazsa
+# 15 sn'de vazgeçilir (eskiden 60-300 sn) ve varsa yedek adres (Railway köprüsü) denenir.
+HTTP_CONNECT_TIMEOUT_SEC = 15
+HTTP_RETRY_BACKOFF_SEC = (1, 2, 4)
+HTTP_PRIMARY_DOWN_SEC = 60          # ana adres bağlantı hatası verdikten sonra bu süre yedek önce denenir
+VARSAYILAN_YEDEK_SERVER_URL = ""    # köprü adresi bilinince buraya yazılabilir (ayarlardaki alan boşsa kullanılır)
 
 AUTORUN_START_DELAY_SEC = 8
 # Normal datasetler için direkt POST sınırı.
@@ -1062,6 +1072,7 @@ DEFAULT_DATASET_DEFINITIONS: List[Dict[str, Any]] = [
 DEFAULTS: Dict[str, Any] = {
     "admin_pass_enc": "",
     "server_url": DEFAULT_SERVER_URL,
+    "yedek_server_url": "",   # v25 — ana adres ulaşılamazsa denenecek adres(ler), virgülle birden çok
     "driver": "ODBC Driver 18 for SQL Server",
     "host": "localhost",
     "instance": "SQLEXPRESS",
@@ -1253,28 +1264,98 @@ def list_databases(conn) -> List[str]:
 
 
 def post_json(server_url: str, tenant_id: str, payload: Dict[str, Any], client_secret: Optional[str] = None, timeout: int = 300):
-    headers = {
-        "Content-Type": "application/json; charset=utf-8",
-        "Connection": "close",
-    }
+    """v25 — Tek kalıcı HTTP oturumu (keep-alive), kısa bağlantı zaman aşımı, yedek adres.
+
+    - Eski davranış: her çağrı yeni TCP+TLS bağlantısı + "Connection: close" → saniyede 1+ yeni bağlantı
+      (request_poll) → hosting DDoS koruması POS IP'lerini kara listeye alıyordu.
+    - Bağlantı (TCP) hatası: ana adres HTTP_PRIMARY_DOWN_SEC boyunca "düştü" sayılır, yedek adres(ler) önce denenir.
+    - HTTP hata kodu / okuma zaman aşımı: adres değiştirilmez, artan aralıkla (1-2-4 sn) 3 deneme (eski semantik).
+    """
+    headers = {"Content-Type": "application/json; charset=utf-8"}
     if client_secret:
         headers["X-Client-Secret"] = client_secret
 
     body = json.dumps({"tenant_id": tenant_id, **payload}, ensure_ascii=False).encode("utf-8")
+    sess = _http_session()
+    adresler = _aday_adresler(server_url)
     last_err = None
-    for _ in range(3):
-        try:
-            resp = requests.post(server_url, data=body, headers=headers, timeout=timeout)
-            if 200 <= resp.status_code < 300:
-                try:
-                    return resp.json()
-                except Exception:
-                    return {"ok": True}
-            raise RuntimeError(f"HTTP {resp.status_code}: {resp.text}")
-        except Exception as exc:
-            last_err = exc
-            time.sleep(1)
+    for deneme in range(3):
+        for url in adresler:
+            try:
+                resp = sess.post(url, data=body, headers=headers, timeout=(HTTP_CONNECT_TIMEOUT_SEC, timeout))
+                if 200 <= resp.status_code < 300:
+                    if url == server_url:
+                        _ANA_ADRES_DUSTU_TS.pop(server_url, None)
+                    else:
+                        _yedek_kullanim_logla(server_url, url)
+                    try:
+                        return resp.json()
+                    except Exception:
+                        return {"ok": True}
+                last_err = RuntimeError(f"HTTP {resp.status_code}: {resp.text}")
+                break  # sunucu yanıt verdi (hata kodu): adres değiştirme, bekleyip tekrar dene
+            except requests.exceptions.ConnectionError as exc:
+                # TCP/TLS düzeyinde ulaşılamadı (connect timeout, reset, DNS) → varsa yedek adrese geç
+                last_err = exc
+                if url == server_url:
+                    _ANA_ADRES_DUSTU_TS[server_url] = time.monotonic()
+                continue
+            except Exception as exc:
+                # okuma zaman aşımı vb.: adres sağlam, sunucu yavaş → aynı adreste tekrar dene
+                last_err = exc
+                break
+        time.sleep(HTTP_RETRY_BACKOFF_SEC[deneme])
     raise RuntimeError(f"POST başarısız: {last_err}")
+
+
+# ── v25 — HTTP oturumu + yedek adres yönetimi ────────────────────────────────
+_HTTP_SESSION: Optional[requests.Session] = None
+_HTTP_SESSION_LOCK = threading.Lock()
+_YEDEK_SERVER_URLS: List[str] = []
+_ANA_ADRES_DUSTU_TS: Dict[str, float] = {}      # ana adres → son bağlantı hatası (monotonic)
+_YEDEK_LOG_TS: List[float] = [0.0]
+
+
+def _http_session() -> requests.Session:
+    """Tüm iş parçacıklarının paylaştığı keep-alive oturumu (requests.Session iş parçacığı güvenli)."""
+    global _HTTP_SESSION
+    if _HTTP_SESSION is None:
+        with _HTTP_SESSION_LOCK:
+            if _HTTP_SESSION is None:
+                s = requests.Session()
+                adapter = requests.adapters.HTTPAdapter(pool_connections=4, pool_maxsize=16, max_retries=0)
+                s.mount("https://", adapter)
+                s.mount("http://", adapter)
+                s.headers["User-Agent"] = "KasaCepteTransferClient/v25"
+                _HTTP_SESSION = s
+    return _HTTP_SESSION
+
+
+def set_yedek_server_urls(text: Any) -> List[str]:
+    """Ayarlardaki 'Yedek Server URL' alanı (virgül/yeni satır ile birden çok). Boşsa varsayılan."""
+    ham = str(text or "").strip() or VARSAYILAN_YEDEK_SERVER_URL
+    urls: List[str] = []
+    for parca in ham.replace("\n", ",").split(","):
+        u = parca.strip()
+        if u and u not in urls:
+            urls.append(u)
+    _YEDEK_SERVER_URLS[:] = urls
+    return urls
+
+
+def _aday_adresler(server_url: str) -> List[str]:
+    yedekler = [u for u in _YEDEK_SERVER_URLS if u and u != server_url]
+    dustu = _ANA_ADRES_DUSTU_TS.get(server_url)
+    if yedekler and dustu is not None and (time.monotonic() - dustu) < HTTP_PRIMARY_DOWN_SEC:
+        return yedekler + [server_url]
+    return [server_url] + yedekler
+
+
+def _yedek_kullanim_logla(ana: str, yedek: str):
+    simdi = time.monotonic()
+    if simdi - _YEDEK_LOG_TS[0] >= 60:
+        _YEDEK_LOG_TS[0] = simdi
+        log(f"⚠ Ana sunucuya ulaşılamıyor ({ana}) → yedek adres kullanılıyor: {yedek}")
 
 
 def split_text_chunks(text: str, chunk_size: int) -> List[str]:
@@ -1914,6 +1995,7 @@ class Main(QMainWindow):
     def __init__(self, autorun: bool = False):
         super().__init__()
         self.cfg = load_cfg()
+        set_yedek_server_urls(self.cfg.get("yedek_server_url", ""))  # v25
         self.autorun = autorun
         self.logged_in = False
         self._allow_real_exit = False
@@ -2129,6 +2211,8 @@ class Main(QMainWindow):
 
     def _save_settings_silent(self):
         self.cfg["server_url"] = self.ed_server_url.text().strip()
+        self.cfg["yedek_server_url"] = self.ed_yedek_url.text().strip()
+        set_yedek_server_urls(self.cfg["yedek_server_url"])
         self.cfg["tenant_id"] = self.ed_tenant.text().strip()
         self.cfg["interval_seconds"] = int(self.spin_interval.value())
         self.cfg["batch_size"] = int(self.spin_batch.value())
@@ -2302,6 +2386,9 @@ class Main(QMainWindow):
 
         form = QFormLayout()
         self.ed_server_url = QLineEdit(self.cfg.get("server_url", DEFAULT_SERVER_URL))
+        # v25 — yedek adres (ör. Railway köprüsü); ana adres TCP düzeyinde ulaşılamazsa kullanılır
+        self.ed_yedek_url = QLineEdit(self.cfg.get("yedek_server_url", ""))
+        self.ed_yedek_url.setPlaceholderText("isteğe bağlı — https://kopru-adresi/api/sync.php (virgülle birden çok)")
         self.ed_tenant = QLineEdit(self.cfg.get("tenant_id", ""))
         self.btn_gen_tenant = QPushButton("Tenant Üret")
         tenant_hb = QHBoxLayout()
@@ -2358,6 +2445,7 @@ class Main(QMainWindow):
         sec_hb.addWidget(self.btn_register_secret)
 
         form.addRow("Server URL", self.ed_server_url)
+        form.addRow("Yedek Server URL", self.ed_yedek_url)
         form.addRow("Tenant ID", tenant_hb)
         form.addRow("Senkron Aralığı (sn)", self.spin_interval)
         form.addRow("Batch Boyutu", self.spin_batch)
@@ -2660,6 +2748,8 @@ class Main(QMainWindow):
 
     def on_save_settings(self):
         self.cfg["server_url"] = self.ed_server_url.text().strip()
+        self.cfg["yedek_server_url"] = self.ed_yedek_url.text().strip()
+        set_yedek_server_urls(self.cfg["yedek_server_url"])
         self.cfg["tenant_id"] = self.ed_tenant.text().strip()
         self.cfg["interval_seconds"] = int(self.spin_interval.value())
         self.cfg["batch_size"] = int(self.spin_batch.value())

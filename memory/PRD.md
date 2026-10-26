@@ -588,3 +588,20 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
   check-host) ve telefon geçiyor; hiç etkilenmeyen 3 tenant muhtemelen Win10/Server (ECN kapalı). TEST (bir sonraki engelde, ofis PC admin cmd):
   `netsh int tcp set global ecncapability=disabled` → `Test-NetConnection ... -Port 443` → True olursa kesinleşir (müşteri başına 10 sn, client'a dokunmadan).
 - Poyraz destek "hangi İSS, traceroute paylaşın" dedi → kullanıcıya yanıt metni + `tracert -d 185.223.77.132` (engel anında) verildi.
+- 15:38–15:42: engel TEKRAR geldi (24 → 11 → 2 tenant; ofis tenant son kayıt 15:38:32). Kullanıcı Test A: telefon uçak modu → YENİ IP → URL AÇILDI
+  → KESİN TEŞHİS: **kaynak IP kara listesi, POS istemci trafiği tetikliyor** (eski telefon IP'si 14 dk hotspot olarak Client taşıyınca yandı);
+  liste 13:10/15:32'de toplu temizleniyor, istemciler 6 dk'da yeniden giriyor. ECN teorisi düştü (test edilmedi, gerek kalmadı).
+- Kullanıcı kararı: client v25 + köprü (DNS ile) + Poyraz'a mesaj yazdı. "Köprüde tek tek bağlanmak gerekir" endişesi → DNS/CNAME yöntemiyle
+  müşteri başına işlem YOK diye açıklandı.
+
+## 2026-10-26 — client.py v25: keep-alive + hızlı vazgeçme + yedek sunucu ✅ (test edildi)
+- `post_json`: paylaşılan `requests.Session` (`_http_session`, HTTPAdapter pool 4/16, UA KasaCepteTransferClient/v25), "Connection: close" KALDIRILDI;
+  timeout=(HTTP_CONNECT_TIMEOUT_SEC=15, okuma); 3 deneme backoff (1,2,4 sn). `requests.exceptions.ConnectionError` (TCP/TLS/DNS) → ana adres
+  `_ANA_ADRES_DUSTU_TS` ile 60 sn "düştü" → `_aday_adresler` yedekleri önce dener; HTTP hata kodu/okuma zaman aşımı → adres değişmez (eski semantik).
+  Yedek adres: cfg `yedek_server_url` (virgülle çoklu) → Ayarlar "Yedek Server URL" alanı (`ed_yedek_url`), `set_yedek_server_urls()` açılış+kayıtta;
+  `VARSAYILAN_YEDEK_SERVER_URL` sabiti (köprü domaini bilinince doldurulabilir). Yedek kullanımı 60 sn'de bir `log()`.
+- DEFAULT_SERVER_URL → `/api/sync.php` (hosting'de /sync.php 404). CLIENT_BUILD "2026-10-26 v25 (keep-alive + hızlı vazgeçme + yedek sunucu)".
+- Test `/tmp/v25_test.py` (gerçek modül, Qt offscreen, pyodbc stub, yerel sahte sunucu): T1 40 istek → 1 TCP bağlantısı; T2 8×10 paralel hatasız,
+  7 bağlantı; T3 ölü ana + yedek → 0,04 sn yedekten, 2. çağrı yedek önce; T4 yedeksiz ölü ana → 0,9 sn RuntimeError; T5 HTTP 503 → 3 deneme, yedek
+  çağrılmaz. CANLI hosting: ilk istek 285 ms, sonrakiler ~65 ms (bağlantı yeniden kullanılıyor). `/api/pos-dosya/client.py` 324 KB v25.
+- NOT: saglik.py beklenen sürüm artık v25 → güncellenmeyen istemciler "eski" görünür (bilgi amaçlı).
