@@ -625,3 +625,5 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
   Tekrarında: Plesk DNS A→CNAME + TXT (≤6 saat yayılma) veya acil müşterilerde Sunucu URL'yi köprüye çevirme.
 - Railway build altyapı hatası (BuildKit overlay "invalid argument") hem köprü hem backend deploy'unu düşürdü → Redeploy ile geçmesi beklenir; çalışan sürümler etkilenmedi.
 - Kalan iş: client v25 kademeli dağıtım (bağlantı sayısı ↓, yedek adres alanı), köprüye son iyileştirmenin (keepalive 20s/50) deploy'u (Redeploy).
+
+## 2026-10-26 — Uygulama sürümü artırıldı (Apple güncellemesi için): app.json version 1.0.56 → **1.0.57**, ios.buildNumber 60 → **61**, android.versionCode 60 → **61**.
