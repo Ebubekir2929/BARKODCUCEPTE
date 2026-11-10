@@ -54,7 +54,7 @@ LOG_PATH = os.path.join(CONFIG_DIR, "client.log")
 DEFAULT_SERVER_URL = "https://kasaceptetransfer.berkyazilim.com/api/sync.php"   # v25: /sync.php hosting'de yok (404)
 
 # 2026-06 — Çalışan sürümü loglarda görmek için (kullanıcı doğru build'i kurdu mu?)
-CLIENT_BUILD = "2026-10-26 v25 (keep-alive + hızlı vazgeçme + yedek sunucu)"
+CLIENT_BUILD = "2026-11-10 v26 (filtre lookup küçültme + hata bildirimi)"
 
 # 2026-10-26 v25 — BAĞLANTI HİJYENİ
 # Hosting'in DDoS koruması, saniyede yeni TLS bağlantısı açan POS IP'lerini kara listeye alıyordu
@@ -204,6 +204,36 @@ RAP_FILTER_LOOKUP_SOURCES = [
     "TEDARIKCI", "FIS_TURU", "FIS_ALT_TIPI", "PERSONEL", "ADRESLER",
     "FIS_OZEL_KOD_1", "FIS_OZEL_KOD_2", "FIS_OZEL_KOD_3", "FIS_OZEL_KOD_4", "FIS_OZEL_KOD_5",
 ]
+
+# v26 — Filtre lookup satırlarını küçült + sınırla.
+# Hosting MySQL max_allowed_packet = 1 MB: büyük tenantlarda (binlerce cari/adres/stok) birleşik blob
+# sınırı aşıyor, dataset_cache'e HİÇ yazılamıyordu → raporlardaki Personel/Cari/Stok filtreleri sonsuza
+# dek boş kalıyordu (41510a68, f87f6d1c). Dropdown yalnızca ID/AD/KOD kullanır; diğer sütunlar atılır,
+# kaynak başına en fazla FILTRE_LOOKUP_KAYNAK_MAX_SATIR satır gönderilir (sıra SP'nin döndürdüğü gibi).
+FILTRE_LOOKUP_KAYNAK_MAX_SATIR = 2000
+_FILTRE_LOOKUP_ALANLAR = ("ID", "AD", "KOD")
+
+
+def filtre_lookup_satirlari_kucult(rows: Any, kaynak: str) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for r in (rows or []):
+        if not isinstance(r, dict):
+            continue
+        item: Dict[str, Any] = {}
+        for alan in _FILTRE_LOOKUP_ALANLAR:
+            for anahtar in (alan, alan.lower(), alan.capitalize()):
+                if anahtar in r and r[anahtar] is not None:
+                    item[alan] = r[anahtar]
+                    break
+        if not item:
+            item = dict(r)  # beklenmeyen şema: olduğu gibi bırak
+        item["Kaynak"] = kaynak
+        item["KAYNAK"] = kaynak
+        out.append(item)
+        if len(out) >= FILTRE_LOOKUP_KAYNAK_MAX_SATIR:
+            break
+    return out
+
 LIVE_DATASET_KEYS = {"acik_masalar"}
 
 FAST_REACTIVE_INTERVAL_SEC = 5
@@ -4321,27 +4351,26 @@ class Main(QMainWindow):
         all_rows: List[Dict[str, Any]] = []
         ok_sources = 0
         empty_sources = 0
+        hatalar: List[str] = []
         for kaynak in RAP_FILTER_LOOKUP_SOURCES:
             self._bekle_istek_bitsin()  # 2026-06 — istek önceliği
             params = {"Kaynak": kaynak, "Q": ""}
             try:
                 rows = self.execute_dataset(defn, params)
             except Exception as exc:
+                hatalar.append(f"{kaynak}: {exc}")
                 self.println(f"rap_filtre_lookup kaynak okunamadı: {kaynak} -> {exc}")
                 continue
-            rows = [r for r in (rows or []) if isinstance(r, dict)]
+            rows = filtre_lookup_satirlari_kucult(rows, kaynak)
             if not rows:
                 empty_sources += 1
                 continue
             ok_sources += 1
-            for row in rows:
-                item = dict(row)
-                item["Kaynak"] = kaynak
-                item["KAYNAK"] = kaynak
-                all_rows.append(item)
+            all_rows.extend(rows)
 
         if not all_rows:
-            self.println("rap_filtre_lookup: tüm kaynaklar boş geldi, cache push yapılmadı.")
+            self.println("rap_filtre_lookup: tüm kaynaklar boş geldi, cache push yapılmadı."
+                         + (f" ({len(hatalar)} kaynak hata; ilk: {hatalar[0][:200]})" if hatalar else ""))
             return 0
 
         cache_params = {"Kaynak": "", "Q": ""}
@@ -5860,17 +5889,20 @@ SELECT TOP {limit}
                 # tüm kaynakları tek tek okuyup BİRLEŞTİRİLMİŞ sonucu döndür.
                 if dataset_key == "rap_filtre_lookup" and not str(params.get("Kaynak", "") or "").strip():
                     data = []
+                    _kaynak_hatalari: List[str] = []
                     for _kaynak in RAP_FILTER_LOOKUP_SOURCES:
                         try:
                             _rows = self.execute_dataset(defn, {"Kaynak": _kaynak, "Q": ""})
-                            for _r in (_rows or []):
-                                if isinstance(_r, dict):
-                                    _item = dict(_r)
-                                    _item["Kaynak"] = _kaynak
-                                    _item["KAYNAK"] = _kaynak
-                                    data.append(_item)
+                            data.extend(filtre_lookup_satirlari_kucult(_rows, _kaynak))
                         except Exception as _exc:
+                            _kaynak_hatalari.append(f"{_kaynak}: {_exc}")
                             self.println(f"rap_filtre_lookup request kaynak hata: {_kaynak} -> {_exc}")
+                    # v26 — hiç satır yok ve en az bir kaynak hata verdiyse sessizce "done/0" dönme;
+                    # hatayı sunucuya bildir ki Senkron Sağlık'ta görünsün (ör. SP kurulu değil).
+                    if not data and _kaynak_hatalari:
+                        raise RuntimeError(
+                            f"rap_filtre_lookup: {len(_kaynak_hatalari)}/{len(RAP_FILTER_LOOKUP_SOURCES)} kaynak hata; ilk: {_kaynak_hatalari[0][:300]}"
+                        )
                 else:
                     data = self.execute_dataset(defn, params)
                 row_count = normalize_row_count(data)

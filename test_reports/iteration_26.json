@@ -1,0 +1,38 @@
+{
+  "summary": "Frontend-only regression of reports.tsx refactor (web preview 390x844). LIVE POS for BOTH tenants (Merkez, Gümüşhane) is NOT processing report jobs right now: every report-run returns pending/status=queued (Fiyat Listeleri queued >5.5 min, backend logs show 'Detay zamanında gelmedi' for all of today's runs) and cache_only returns 0 rows -> no live data could be obtained (infra/POS issue, not a frontend bug). To still verify the refactored result UI, /api/data/report-run was intercepted with Playwright page.route and fed TEST_ fixture rows (MOCKED IN TEST ONLY; app code untouched). With that, every requested flow passed: N kayıt counter + freshness badge, cards, Sırala pills (asc/desc/Temizle), search 'X kayıt · toplam Y' + clear, back-to-filters/close, required filter alert + Lokasyon picker, Gelir Tablosu hierarchy, Fiş Kalem headers + SATIŞ/ALIŞ banners, Personel TOPLAM SATIŞ banner, Excel .xlsx download, PDF popup. The real (unmocked) pending screen and 'Beklemeyi İptal Et' also work. 0 console errors / pageerrors in all runs.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/data/report-run", "issue": "INFRA/POS (not code under test): both tenants' POS clients are not picking up report jobs. Requests stay 'queued' (seen up to 5 dk 35 sn) and today's runs end with 'Detay zamanında gelmedi'. Probe: /app/tests/probe_report_cache.py"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Required-filter alert (reports.tsx:209 root CustomAlert + ReportFilterModal.tsx:161 inline CustomAlert)", "issue": "The 'Zorunlu Filtre' alert renders twice (2 visible, stacked). One 'Tamam' tap dismisses both. Same before the refactor (old file also has 2 <CustomAlert>), so not a regression.", "testID": "run-report", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Fiyat Listeleri result card", "issues": ["Amount shows both the ₺ symbol and a 'TL' currency label under it (₺15,00 / TL), which is redundant"]},
+      {"screen": "Fiş Kalem result", "issues": ["Fiş header cards show the date twice (calendar row + chip)", "The 'Stok' sort pill does nothing for header rows because they have no STOK_AD (needs live data to confirm)"]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/tests/rep_login.py", "/app/tests/rep_helpers.py", "/app/tests/probe_report_cache.py"],
+  "action_items": [
+    "No refactor regressions found. Optional: remove the duplicate required-filter alert (render either root or inline CustomAlert while the filter modal is open).",
+    "Ops: check why the Merkez/Gümüşhane POS clients are not processing report queue jobs (all queued). Retest with live data once they are back.",
+    "Minor: on an in-memory cache hit, useReportRunner.run (useReportRunner.ts:47-52) does not refresh reportAgeSec, so the freshness badge keeps the previous age."
+  ],
+  "critical_code_review_comments": [
+    "Fiyat Listeleri requires 'Fiyat Adı' (requiredFilters ['FiyatAd']) and has no summary config. This matches the pre-refactor file, so the review-request expectations 'run with no filter' and 'Rapor Özeti for Fiyat Listeleri' are wrong. Rapor Özeti was verified on Satış Adet/Kâr, Fiş Kalem and Personel instead.",
+    "useReportRunner.ts:13 API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '' falls back to an empty string; prefer failing fast.",
+    "Popup-blocked / export error alerts come from the root CustomAlert while the result Modal is open. They were not observed hidden on web, but on native they may render behind the Modal (pre-existing)."
+  ],
+  "updated_files": ["/app/tests/rep_helpers.py (new)", "/app/tests/probe_report_cache.py (new)"],
+  "success_rate": {"backend": "N/A (frontend only)", "frontend": "100% of requested UI flows (result-modal flows verified with MOCKED report-run responses; live data unavailable)"},
+  "seed_data_creation": "None. Fixture rows prefixed TEST_ were injected only through Playwright route interception, nothing written to the DB.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login: cakmak.ebubekir29@gmail.com/1234567. Fiyat Listeleri needs 'Fiyat Adı' picked (filter-pick-FiyatAd). Picker items have no testID: use container=locator('[data-testid=picker-done]').locator('xpath=../..') then '[tabindex=\"0\"]:not([data-testid=picker-done])'. If POS is queued, mock with page.route('**/api/data/report-run') returning {ok:true,data:[...],_age:N}. Result search input: input[placeholder='Ara...'].last; its clear button is following-sibling [tabindex=0]. Sort pill for Fiyat Listeleri is 'Satış Fiyatı'.",
+  "rca_of_issue": "Live report results unavailable: backend /api/data/report-run -> _on_demand_request queues a POS job; the POS clients for both tenants never pick it up (status 'queued'), so fetchReportWithPending keeps polling. Not caused by the frontend refactor."
+}

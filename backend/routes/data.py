@@ -1653,7 +1653,7 @@ async def sync_request(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, timeout_sec: int = 35, raw_cache: bool = False, skip_mysql_cache: bool = False, mysql_cache_max_age_sec: Optional[int] = None, cache_only: bool = False, status_cb=None):
+async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, timeout_sec: int = 35, raw_cache: bool = False, skip_mysql_cache: bool = False, mysql_cache_max_age_sec: Optional[int] = None, cache_only: bool = False, status_cb=None, force_request: bool = False):
     """Generic on-demand: MySQL cache → sync.php cache → request_create+poll.
 
     Three-tier cache strategy:
@@ -1736,7 +1736,9 @@ async def _on_demand_request(tenant_id: str, dataset_key: str, params: dict, tim
     # REQUEST_ALLOWED_DATASETS (or not a rap_* report), return empty data now.
     # 2026-05-13 — cache_only=True flag: caller explicitly wants ZERO POS calls;
     # short-circuit here even for whitelisted datasets.
-    if cache_only or not _is_request_create_allowed(dataset_key):
+    # 2026-11-10 — force_request=True: çağıran bilinçli olarak POS'a gitmek istiyor
+    # (ör. rap_filtre_lookup blobu tenant'ta HİÇ yoksa tek seferlik doldurma).
+    if cache_only or (not force_request and not _is_request_create_allowed(dataset_key)):
         if cache_only:
             logger.debug(
                 f"[on_demand] cache_only mode for {dataset_key} — returning MySQL state"
@@ -4199,6 +4201,10 @@ async def run_report(
 # cache_key -> {"task": asyncio.Task, "started": float, "status": str}
 _INFLIGHT_REPORTS: Dict[str, dict] = {}
 
+# 2026-11-10 — rap_filtre_lookup blobu olmayan tenant için POS'a zorla istek: tenant başına bekleme
+_FILTRE_LOOKUP_POS_SON_ISTEK: Dict[str, float] = {}
+_FILTRE_LOOKUP_POS_BEKLEME_SN = 600
+
 
 @router.post("/report-filter-options")
 async def get_report_filter_options(
@@ -4220,31 +4226,84 @@ async def get_report_filter_options(
 
     cached = _GLOBAL_CACHE.get(cache_key)
     age = now - cached["ts"] if cached else None
+    # 2026-11-10 — önbellekteki sonuç "istemci hiç basmamış" boşluğuysa ve POS bekleme süresi
+    # dolduysa önbelleği yok say → aşağıda POS'a yeniden sorulur.
+    if cached and cached.get("payload", {}).get("_pos_bos") and \
+            now - _FILTRE_LOOKUP_POS_SON_ISTEK.get(tenant_id, 0.0) >= _FILTRE_LOOKUP_POS_BEKLEME_SN:
+        cached = None
+        age = None
 
     if cached and age is not None and age < TTL_FRESH:
         return {**cached["payload"], "_cache": "fresh", "_age": int(age)}
 
     async def _refresh():
-        # 2026-05-02 — POS sync now stores rap_filtre_lookup as a SINGLE big
-        # blob with params {Kaynak:"", Q:""} containing every dropdown's rows
-        # under a `Kaynak` field. So we fetch the full blob once and filter
-        # by `Kaynak == source` in Python instead of asking POS per-source.
-        result = await _on_demand_request(tenant_id, "rap_filtre_lookup", {
-            "Kaynak": "",
-            "Q": "",
-        }, timeout_sec=30)
-        # Filter the rows for the requested source
-        try:
-            all_rows = result.get("data", []) if isinstance(result, dict) else []
-        except Exception:
-            all_rows = []
-        if isinstance(all_rows, list) and source:
-            wanted = source.strip().upper()
-            filtered = [
-                r for r in all_rows
-                if str(r.get("Kaynak") or r.get("KAYNAK") or "").strip().upper() == wanted
+        wanted = source.strip().upper()
+        kaynak_params = {"Kaynak": source.strip(), "Q": ""}
+
+        def _kaynak_filtrele(rows):
+            return [
+                r for r in (rows or [])
+                if isinstance(r, dict) and str(r.get("Kaynak") or r.get("KAYNAK") or wanted).strip().upper() == wanted
             ]
-            result = {**(result if isinstance(result, dict) else {}), "data": filtered}
+
+        # 1) 2026-11-10 — KAYNAK BAZLI küçük kayıt (params {Kaynak:"PERSONEL",Q:""}): MySQL önbelleği.
+        #    Büyük tenantlarda BİRLEŞİK blob hosting MySQL'in max_allowed_packet (1 MB) sınırına takılıp
+        #    hiç yazılamıyordu → dropdown'lar sonsuza dek boştu (41510a68, f87f6d1c). Kaynak bazlı kayıt küçüktür.
+        rows = []
+        try:
+            res_src = await _on_demand_request(tenant_id, "rap_filtre_lookup", kaynak_params, timeout_sec=30)
+            rows = _kaynak_filtrele(res_src.get("data", []) if isinstance(res_src, dict) else [])
+        except Exception as exc:
+            logger.debug(f"[filtre_lookup] kaynak bazlı MySQL okuma hatası {source}: {exc}")
+
+        # 2) Birleşik blob (2026-05-02 davranışı: istemci tüm kaynakları {Kaynak:"",Q:""} altında tek blob basar).
+        if not rows:
+            result = await _on_demand_request(tenant_id, "rap_filtre_lookup", {"Kaynak": "", "Q": ""}, timeout_sec=30)
+            try:
+                rows = _kaynak_filtrele(result.get("data", []) if isinstance(result, dict) else [])
+            except Exception:
+                rows = []
+
+        # 3) İkisi de yoksa: tenant başına 10 dk'da en fazla 1 kez POS'a ZORLA istek.
+        #    NOT: sync.php rap_filtre_lookup için Kaynak'ı normalize edip düşürür ({"scope":...}); istemci
+        #    her durumda TÜM kaynakları okuyup tek sonuç döndürür → istek tenant bazlıdır, gelen bloktan
+        #    bütün kaynaklar önbelleğe alınır. (Hosting MySQL max_allowed_packet=1 MB ise büyük tenantta
+        #    bu da düşebilir → client v26 satırları küçültüp sınırlar; kalıcı çözüm: max_allowed_packet ↑.)
+        pos_denendi = False
+        if not rows:
+            son = _FILTRE_LOOKUP_POS_SON_ISTEK.get(tenant_id, 0.0)
+            if time.time() - son >= _FILTRE_LOOKUP_POS_BEKLEME_SN:
+                _FILTRE_LOOKUP_POS_SON_ISTEK[tenant_id] = time.time()
+                pos_denendi = True
+                logger.info(f"[filtre_lookup] tenant={tenant_id[:8]} önbellek yok → POS'a zorla istek (tüm kaynaklar)")
+                try:
+                    pos_result = await _on_demand_request(
+                        tenant_id, "rap_filtre_lookup", {"Kaynak": "", "Q": ""},
+                        timeout_sec=60, skip_mysql_cache=True, force_request=True,
+                    )
+                    tum = pos_result.get("data", []) if isinstance(pos_result, dict) else []
+                    if isinstance(tum, list) and tum:
+                        gruplar: Dict[str, list] = {}
+                        for r in tum:
+                            if not isinstance(r, dict):
+                                continue
+                            k = str(r.get("Kaynak") or r.get("KAYNAK") or "").strip().upper()
+                            if k:
+                                gruplar.setdefault(k, []).append(r)
+                        for k, grup in gruplar.items():
+                            if k != wanted:
+                                _global_cache_set(f"filter_options::{tenant_id}::{k}", {"ok": True, "data": grup})
+                        rows = gruplar.get(wanted, [])
+                        logger.info(f"[filtre_lookup] tenant={tenant_id[:8]} POS'tan {len(tum)} satır, {len(gruplar)} kaynak; {wanted}={len(rows)}")
+                    else:
+                        logger.warning(f"[filtre_lookup] tenant={tenant_id[:8]} POS boş döndü")
+                except Exception as exc:
+                    logger.warning(f"[filtre_lookup] tenant={tenant_id[:8]} POS isteği başarısız: {exc}")
+
+        result = {"ok": True, "data": rows}
+        if not rows:
+            result["_pos_bos"] = True
+            result["_pos_denendi"] = pos_denendi
         _global_cache_set(cache_key, result)
         return result
 

@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '../../src/store/authStore';
 import { useThemeStore } from '../../src/store/themeStore';
@@ -292,7 +293,8 @@ export default function LoginScreen() {
               {t('developed_by')}
             </Text>
             <Text style={[styles.versionText, { color: colors.textSecondary }]}>
-              {t('version')}
+              {/* 2026-11-10 — sürüm app.json'dan okunur (sabit 'v1.0.0' metni kaldırıldı) */}
+              {`v${Constants.expoConfig?.version ?? '1.0.0'}`}
             </Text>
           </View>
         </ScrollView>

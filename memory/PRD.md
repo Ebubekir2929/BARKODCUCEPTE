@@ -627,3 +627,28 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - Kalan iş: client v25 kademeli dağıtım (bağlantı sayısı ↓, yedek adres alanı), köprüye son iyileştirmenin (keepalive 20s/50) deploy'u (Redeploy).
 
 ## 2026-10-26 — Uygulama sürümü artırıldı (Apple güncellemesi için): app.json version 1.0.56 → **1.0.57**, ios.buildNumber 60 → **61**, android.versionCode 60 → **61**.
+
+## 2026-11-10 — Raporlar: tarih=bugün, filtre lookup POS fallback, Android alt boşluk, v1.0.58 (build 62)
+- reports.tsx: `openReportFilter` tüm date filtreleri `today()` (BAS/BIT/SONTARIH); getDefDates kaldırıldı. Çalıştırmada 00:00:00/23:59:59 tamamlama aynen.
+- Android: `useSafeAreaInsets` → `altBosluk`; filtre ScrollView, picker FlatList ve sonuç modalına paddingBottom eklendi.
+- Filtre dropdown boş sorunu (41510a68, f87f6d1c) KÖK NEDEN: hosting MySQL max_allowed_packet=1 MB; büyük tenantlarda birleşik rap_filtre_lookup
+  blobu yazılamıyor (client sessizce "boş"). sync.php params'ı {"scope":...} olarak normalize ettiğinden kaynak bazlı istek mümkün değil.
+  Backend: `_on_demand_request(force_request=True)`; `/report-filter-options` → kaynak bazlı MySQL → birleşik blob → tenant başına 10 dk'da 1 POS zorla
+  istek (_FILTRE_LOOKUP_POS_SON_ISTEK); `_pos_bos` işaretli boş sonuç bekleme bitince yeniden denenir. Frontend boş listeyi önbelleğe almaz, mesaj gösterir.
+  client v26: `filtre_lookup_satirlari_kucult` (ID/AD/KOD, kaynak başına 2000 satır) hem arka plan hem request yolunda; tüm kaynaklar hata → request error.
+  KALICI ÖNERİ (kullanıcıya iletildi): VPS'te `max_allowed_packet=64M` (SET GLOBAL + my.cnf).
+- login.tsx sürüm metni Constants.expoConfig.version'dan. Web önizlemesinde görülen "v1.0.3" eski `frontend/dist/` statik çıktısından geliyor (native etkilenmez).
+- Backend surum `2026-11-10-v25-filtre-lookup-pos-fallback`. testing_agent iteration_25: tarih=bugün ✓ (6 rapor), Personel/Lokasyon picker ✓, filtre endpoint ✓.
+
+## 2026-11 (Fork) — reports.tsx REFACTOR TAMAMLANDI ✅ (davranış değişmedi)
+- `app/(tabs)/reports.tsx` 2.836 → ~220 satır (yalnızca ekran kompozisyonu + state).
+- Saf mantık `src/reports/`: `types.ts`, `dates.ts`, `definitions.ts` (ALL_REPORTS; defaultParams BİREBİR korundu → client.py prefetch uyumu),
+  `labels.ts` (translateLabel/reportTitle), `format.ts`, `summary.ts` (TOPLAM/MIN/MAX tek yerde; ekran+PDF+Excel kullanır),
+  `params.ts` (validateFilters/buildReportParams/buildInitialFilterValues), `postProcess.ts` (cari_ekstre drill-down, fis_kalem gruplama),
+  `exportPdf.ts`, `exportExcel.ts`.
+- Hook'lar `src/hooks/`: `useReportLookups` (filtre lookup cache; tenant değişince sıfırlanır), `useReportRunner` (cache_only → tam çekim → pending), `useProcessedRows` (arama/sıralama).
+- Bileşenler `src/components/reports/`: ReportFilterModal, FilterDateOverlay, FilterPickerOverlay, ReportResultModal, SortBar, ReportCard, ReportSummaryPanel, TopBanner, HierarchicalRow, PdfProgressOverlay, reportStyles.
+- Temizlenen ölü kod: isDesktop/web grid dalları (useResponsive hep false), kullanılmayan moreLoading/loadedPages, getGroupLabel.
+- Küçük düzeltmeler: PDF ilerleme overlay'i artık sonuç modalının İÇİNDE (native Modal arkasında kalmıyor); kart yedek görünümündeki tanımsız `translateLabel` referansı kaldırıldı.
+- Test: iteration_26 — tüm UI akışları PASS, 0 konsol hatası. NOT: Merkez POS istemcisi 31.10'dan beri heartbeat göndermiyor (çevrim dışı) → canlı rapor verisi gelmedi; sonuç ekranı testleri testing_agent tarafından sahte yanıtla doğrulandı.
+- Bilinen (refactor öncesi de vardı): zorunlu filtre uyarısı web'de 2 kez üst üste görünür (root + inline CustomAlert aynı alertProps).

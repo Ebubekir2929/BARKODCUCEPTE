@@ -1,0 +1,32 @@
+{
+  "summary": "v1.0.58 test of report filter defaults and filter-options. Backend: POST /api/data/report-filter-options passes. LOKASYON call 1 returned ok:true, _cache 'live', 2 rows. Call 2 returned _cache 'fresh'. PERSONEL returned ok:true with 3 rows (ADEM ÇOŞAR, BERAT, GENEL KULLANICI). Only 3 calls were made. Frontend (390x844): login works and the Raporlar tab loads 7 reports. Every date filter opens on TODAY (10.11.2026): Başlangıç and Bitiş in Personel Satış Özet, Fiş Kalem Listesi, Satış Adet / Kâr, Gelir Tablosu and Cari Hesap Ekstresi, and Son Tarih in Stok Envanter. Fiyat Listeleri has no date fields. In Personel Satış Özet, the Personel picker opens with 3 options and multi-select works. The options were prefetched when the modal opened, so no spinner appeared. The Lokasyon picker shows Merkez and VERESİYE. Running Personel Satış Özet with the default dates sends BASTARIH 2026-11-10 00:00:00 and BITTARIH 2026-11-10 23:59:59. The result modal opens but stayed in 'POS kuyruğunda sırada' for more than 100s, so no data or 'Sonuç bulunamadı' was seen. This looks like the live POS agent being slow or offline, not a code bug. The result modal closes with X. The filter modal X also works. No red screens.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Login footer version", "issue": "Login screen shows 'v1.0.0' (hard-coded translations.ts:320/793 'version') while app.json is 1.0.58 / build 62", "testID": "n/a", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Run Personel Satış Özet (today)", "issue": "Report stayed pending in the POS queue for more than 100s, so a final result was not seen. This is an external POS agent dependency, not app code. The pending UI and the 'Beklemeyi İptal Et' button render correctly.", "affected_testIDs": ["report-pending-cancel"]}
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_v25_filter_options_today.py", "/app/test_reports/pytest/pytest_v25.xml"],
+  "action_items": [
+    "Optional: show the real app version on the login footer (Constants.expoConfig.version) instead of the hard-coded 'v1.0.0'",
+    "Optional: SATIS_ADET_KAR/OTHER_REPORTS defaultParams still use firstOfMonth/firstOfYear for BASTARIH. The modal overrides them with today, but the Cari Ekstre Detayli fallback (reports.tsx:1239) still uses firstOfYear. Align these if consistency matters.",
+    "Report screen elements mostly lack testIDs (only report-pending-cancel). Add testIDs to report cards, the filter modal close/run buttons, multiselect fields and picker options."
+  ],
+  "critical_code_review_comments": [
+    "openReportFilter (reports.tsx:972) sets every date filter to today(). runReport pads BAS* to 00:00:00 and BIT* to 23:59:59. Verified in the network payload.",
+    "fetchLookupSource no longer caches empty lists, so a reopen asks again. OK.",
+    "altBosluk (insets.bottom / Android minimum of 12) is applied to the filter ScrollView, the picker list and the result modal.",
+    "reports.tsx is 2836 lines, far over 700. It should be split into report definitions, the filter modal, the picker and the result modal."
+  ],
+  "updated_files": ["/app/backend/tests/test_v25_filter_options_today.py"],
+  "success_rate": {"backend": "100% (2/2)", "frontend": "100% of requested checks (report final data not observable because of the POS queue)"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Login is cakmak.ebubekir29@gmail.com / 1234567. Bottom tabs are icon-only: use [role=tab] nth(3) for Raporlar. The filter modal close X is at roughly (363,95) on a 390x844 viewport. The run button text is 'Raporu Çalıştır'. Few testIDs exist in reports.tsx. Report runs can sit in the POS queue for more than 100s."
+}
