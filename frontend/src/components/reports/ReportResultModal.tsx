@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../store/themeStore';
 import FreshnessBadge from '../FreshnessBadge';
+import { CustomAlert } from '../CustomAlert';
 import { pendingLabel } from '../../utils/reportFetch';
 import { FilterValues, ReportDef } from '../../reports/types';
 import { ReportRunner } from '../../hooks/useReportRunner';
@@ -35,10 +36,12 @@ interface Props {
   onExportPdf: () => void;
   onBackToFilters: () => void;
   onClose: () => void;
+  /** Rapor / dışa aktarma hataları için inline CustomAlert (native Modal üstünde görünür) */
+  alertProps: React.ComponentProps<typeof CustomAlert>;
 }
 
 export const ReportResultModal: React.FC<Props> = ({
-  visible, report, title, filterValues, runner, rows, exportLoading, pdfProgress, onExportExcel, onExportPdf, onBackToFilters, onClose,
+  visible, report, title, filterValues, runner, rows, exportLoading, pdfProgress, onExportExcel, onExportPdf, onBackToFilters, onClose, alertProps,
 }) => {
   const { colors } = useThemeStore();
   const insets = useSafeAreaInsets();
@@ -159,6 +162,7 @@ export const ReportResultModal: React.FC<Props> = ({
             </View>
           )}
           <PdfProgressOverlay progress={pdfProgress} />
+          <CustomAlert {...alertProps} inline />
         </View>
       </View>
     </Modal>

@@ -652,3 +652,10 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - Küçük düzeltmeler: PDF ilerleme overlay'i artık sonuç modalının İÇİNDE (native Modal arkasında kalmıyor); kart yedek görünümündeki tanımsız `translateLabel` referansı kaldırıldı.
 - Test: iteration_26 — tüm UI akışları PASS, 0 konsol hatası. NOT: Merkez POS istemcisi 31.10'dan beri heartbeat göndermiyor (çevrim dışı) → canlı rapor verisi gelmedi; sonuç ekranı testleri testing_agent tarafından sahte yanıtla doğrulandı.
 - Bilinen (refactor öncesi de vardı): zorunlu filtre uyarısı web'de 2 kez üst üste görünür (root + inline CustomAlert aynı alertProps).
+
+## 2026-11 — Raporlar: 4 yeni özellik ✅ (iteration_27 PASS)
+- **Tek uyarı kutusu**: `useAlert` iki ayrı örnek (filtre modalı inline / sonuç modalı inline); kökteki CustomAlert kaldırıldı → uyarı çiftlenmesi bitti.
+- **POS Bağlantı Uyarısı**: `GET /api/senkron/pos-durum?tenant_id=` (hafif, sadece firms.last_seen_at) + `usePosDurum` (odakta + 60 sn) + `PosOfflineBanner` (durum kritik/yok → kırmızı şerit, dokununca /senkron-saglik).
+- **Son Raporlar**: `reportPrefsStore` (AsyncStorage `@reportPrefs:v1`, tenant bazlı, max 5, dedupe) + `RecentReportsRow`; dokun → sonuç modalı direkt açılır ve çalışır; uzun bas → sil; Temizle.
+- **Favori Filtreler**: aynı store; filtre modalı başlığında ★ → `FavoriteSaveOverlay` (isim); FAVORİLER chip'leri → uygula (tarihler korunur, diğer filtreler favorideki değerlerle değişir); uzun bas → sil onayı. Kaydedilen değerler: tarih dışı + varsayılandan farklı sabit seçenekler (`pickFavoriteValues`).
+- Bilinen/ertelenen: pos-durum ve saglik uçlarında tenant erişim kontrolü yok (projedeki diğer uçlarla aynı kalıp); fmtAge (yuvarlama) ile senkron-saglik (aşağı yuvarlama) gün farkı.

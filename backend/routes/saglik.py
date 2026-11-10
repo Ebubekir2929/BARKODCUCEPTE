@@ -104,6 +104,31 @@ def _durum_secimi(yas: Optional[int], uyari: int, kritik: int) -> str:
     return "kritik"
 
 
+@router.get("/pos-durum")
+async def pos_durum(tenant_id: str = Query(...), current_user: dict = Depends(get_current_user)):
+    """Hafif uç: yalnızca POS istemcisi kalp atışı (Raporlar ekranı 'POS çevrim dışı' şeridi).
+    /saglik gibi dataset/istek/hata tablolarını taramaz; 60 sn'de bir çağrılabilir."""
+    pool = await get_data_pool()
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT last_seen_at, is_active, TIMESTAMPDIFF(SECOND, last_seen_at, NOW()) "
+                "FROM firms WHERE tenant_id=%s LIMIT 1",
+                (tenant_id,),
+            )
+            f = await cur.fetchone()
+    yas = (max(0, int(f[2])) if f[2] is not None else None) if f else None
+    return {
+        "ok": True,
+        "data": {
+            "aktif": bool(f[1]) if f else False,
+            "son_gorulme": f[0].isoformat(timespec="seconds") if (f and f[0]) else None,
+            "yas_sn": yas,
+            "durum": _durum_secimi(yas, 3 * 60, 15 * 60),
+        },
+    }
+
+
 @router.get("/saglik")
 async def senkron_saglik(tenant_id: str = Query(...), current_user: dict = Depends(get_current_user)):
     pool = await get_data_pool()

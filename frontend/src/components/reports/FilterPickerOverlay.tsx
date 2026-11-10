@@ -65,10 +65,10 @@ export const FilterPickerOverlay: React.FC<Props> = ({ filter, options, loading,
             data={filtered}
             keyExtractor={(_, idx) => String(idx)}
             contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 20 + altBosluk, paddingTop: showSearch ? 0 : 8 }}
-            renderItem={({ item }) => {
+            renderItem={({ item, index }) => {
               const sel = selectedSet.has(item.value);
               return (
-                <TouchableOpacity style={[ms.pickerItem, { backgroundColor: sel ? colors.primary + '15' : colors.card, borderColor: sel ? colors.primary : colors.border }]} onPress={() => onToggle(item.value)}>
+                <TouchableOpacity style={[ms.pickerItem, { backgroundColor: sel ? colors.primary + '15' : colors.card, borderColor: sel ? colors.primary : colors.border }]} onPress={() => onToggle(item.value)} testID={`picker-item-${index}`}>
                   <Ionicons name={sel ? 'checkbox' : 'square-outline'} size={20} color={sel ? colors.primary : colors.textSecondary} />
                   <Text style={{ fontSize: 14, color: sel ? colors.primary : colors.text, fontWeight: sel ? '600' : '400', flex: 1 }}>{item.label}</Text>
                 </TouchableOpacity>

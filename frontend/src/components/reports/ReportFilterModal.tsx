@@ -3,32 +3,37 @@
  * "Raporu Çalıştır" düğmesi. Tarih seçici, liste seçici ve uyarı kutusu bu modalın
  * İÇİNDE inline overlay olarak çizilir (iOS modal yığını sorunu).
  */
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, Modal, Platform, Keyboard } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useThemeStore } from '../../store/themeStore';
 import { useLanguageStore } from '../../store/languageStore';
-import { CustomAlert } from '../CustomAlert';
+import { FavoriteFilter, useReportPrefsStore } from '../../store/reportPrefsStore';
+import { CustomAlert, useAlert } from '../CustomAlert';
 import { FilterDef, FilterValues, LookupOption, ReportDef } from '../../reports/types';
 import { formatDateTR } from '../../reports/dates';
-import { translateLabel } from '../../reports/labels';
+import { pickFavoriteValues, summarizeFilters, translateLabel } from '../../reports/labels';
 import { reportModalStyles as ms } from './reportStyles';
 import { FilterDateOverlay } from './FilterDateOverlay';
 import { FilterPickerOverlay } from './FilterPickerOverlay';
+import { FavoriteSaveOverlay } from './FavoriteSaveOverlay';
 
 interface Props {
   visible: boolean;
   report: ReportDef | null;
   title: string;
+  tenantId: string;
   filterValues: FilterValues;
   onChange: (name: string, value: any) => void;
+  /** Favori uygulandığında tarih dışı filtreleri bu değerlerle değiştirir */
+  onApplyValues: (values: FilterValues) => void;
   onClose: () => void;
   onRun: () => void;
   lookupCache: Record<string, LookupOption[]>;
   fetchLookupSource: (source: string) => Promise<LookupOption[] | null>;
-  /** Zorunlu filtre uyarısı için inline CustomAlert (useAlert().alertProps) */
-  alertProps: React.ComponentProps<typeof CustomAlert>;
+  /** Zorunlu filtre / favori uyarıları için inline CustomAlert (useAlert) */
+  alert: ReturnType<typeof useAlert>;
 }
 
 /** Aynı ada sahip filtreleri tekille (açık + spread tekrarları React key uyarısı veriyordu). */
@@ -38,7 +43,7 @@ const uniqueFilters = (filters: FilterDef[]) => {
 };
 
 export const ReportFilterModal: React.FC<Props> = ({
-  visible, report, title, filterValues, onChange, onClose, onRun, lookupCache, fetchLookupSource, alertProps,
+  visible, report, title, tenantId, filterValues, onChange, onApplyValues, onClose, onRun, lookupCache, fetchLookupSource, alert,
 }) => {
   const { colors } = useThemeStore();
   const { t, language } = useLanguageStore();
@@ -49,6 +54,42 @@ export const ReportFilterModal: React.FC<Props> = ({
   const [pickerFilter, setPickerFilter] = useState<FilterDef | null>(null);
   const [pickerOptions, setPickerOptions] = useState<LookupOption[]>([]);
   const [pickerLoading, setPickerLoading] = useState(false);
+  const [showFavoriteSave, setShowFavoriteSave] = useState(false);
+  const scrollRef = useRef<ScrollView>(null);
+
+  const allFavorites = useReportPrefsStore(s => s.favorites[tenantId]);
+  const { addFavorite, removeFavorite } = useReportPrefsStore.getState();
+  const favorites = useMemo(
+    () => (allFavorites || []).filter(f => f.reportKey === report?.key),
+    [allFavorites, report?.key],
+  );
+  const favoriteValues = report ? pickFavoriteValues(report, filterValues) : {};
+  const favoriteSummary = report ? summarizeFilters(report, favoriteValues) : '';
+
+  const openFavoriteSave = () => {
+    if (!report) return;
+    if (Object.keys(favoriteValues).length === 0) {
+      alert.showWarning('Filtre Seçilmedi', 'Favori kaydetmek için tarih dışında en az bir filtre seçin.');
+      return;
+    }
+    Keyboard.dismiss();
+    setShowFavoriteSave(true);
+  };
+
+  const saveFavorite = (name: string) => {
+    if (!report) return;
+    addFavorite(tenantId, report.key, name, favoriteValues);
+    setShowFavoriteSave(false);
+    // Yeni chip en üstte; kullanıcı aşağıdaysa görsün
+    scrollRef.current?.scrollTo({ y: 0, animated: true });
+  };
+
+  const confirmRemoveFavorite = (fav: FavoriteFilter) => {
+    alert.showWarning('Favoriyi Sil', `"${fav.name}" favorisi silinsin mi?`, [
+      { text: t('cancel'), style: 'cancel' },
+      { text: 'Sil', style: 'destructive', onPress: () => removeFavorite(tenantId, fav.id) },
+    ]);
+  };
 
   const openPicker = useCallback(async (filter: FilterDef) => {
     Keyboard.dismiss();
@@ -135,9 +176,36 @@ export const ReportFilterModal: React.FC<Props> = ({
         <View style={[ms.content, { backgroundColor: colors.surface, maxHeight: Platform.OS === 'web' ? '92%' : '85%' }]}>
           <View style={[ms.header, { borderBottomColor: colors.border }]}>
             <Text style={[ms.headerTitle, { fontSize: 17, color: colors.text }]}>{title} - {t('filters_suffix')}</Text>
+            <TouchableOpacity onPress={openFavoriteSave} style={{ marginRight: 12 }} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} testID="favorite-save">
+              <Ionicons name="star-outline" size={22} color={colors.warning} />
+            </TouchableOpacity>
             <TouchableOpacity onPress={onClose} testID="filter-close"><Ionicons name="close" size={24} color={colors.text} /></TouchableOpacity>
           </View>
-          <ScrollView style={{ padding: 16 }} contentContainerStyle={{ gap: 10, paddingBottom: 30 + altBosluk }}>
+          <ScrollView ref={scrollRef} style={{ padding: 16 }} contentContainerStyle={{ gap: 10, paddingBottom: 30 + altBosluk }}>
+            {favorites.length > 0 && (
+              <View style={{ marginBottom: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                  <Ionicons name="star" size={13} color={colors.warning} />
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: colors.textSecondary, letterSpacing: 0.3 }}>FAVORİLER</Text>
+                  <Text style={{ fontSize: 10, color: colors.textSecondary }}>· silmek için basılı tut</Text>
+                </View>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
+                  {favorites.map(fav => (
+                    <TouchableOpacity
+                      key={fav.id}
+                      style={[ms.chip, { flexDirection: 'row', alignItems: 'center', gap: 6, borderColor: colors.warning + '80', backgroundColor: colors.warning + '14' }]}
+                      onPress={() => onApplyValues(fav.filterValues)}
+                      onLongPress={() => confirmRemoveFavorite(fav)}
+                      delayLongPress={400}
+                      testID={`favorite-${fav.id}`}
+                    >
+                      <Ionicons name="star" size={12} color={colors.warning} />
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: colors.text }} numberOfLines={1}>{fav.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
             {uniqueFilters(report?.filters || []).map(filter => (
               <View key={filter.name}>
                 <Text style={{ fontSize: 13, fontWeight: '700', color: colors.text, marginBottom: 4 }}>
@@ -158,7 +226,10 @@ export const ReportFilterModal: React.FC<Props> = ({
               onClose={() => setDatePickerFor(null)}
             />
           )}
-          <CustomAlert {...alertProps} inline />
+          <CustomAlert {...alert.alertProps} inline />
+          {showFavoriteSave && (
+            <FavoriteSaveOverlay summary={favoriteSummary} onSave={saveFavorite} onClose={() => setShowFavoriteSave(false)} />
+          )}
           {pickerFilter && (
             <FilterPickerOverlay
               filter={pickerFilter}

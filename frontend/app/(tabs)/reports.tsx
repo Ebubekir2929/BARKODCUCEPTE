@@ -3,7 +3,7 @@
  * 2026-11 refactor: tanımlar `src/reports/`, veri akışı `src/hooks/useReport*`,
  * görsel parçalar `src/components/reports/` altında.
  */
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Platform, Keyboard } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,7 +14,8 @@ import { useLanguageStore } from '../../src/store/languageStore';
 import { useDataSourceStore } from '../../src/store/dataSourceStore';
 import { useUIStore } from '../../src/store/uiStore';
 import { ActiveSourceIndicator } from '../../src/components/DataSourceSelector';
-import { useAlert, CustomAlert } from '../../src/components/CustomAlert';
+import { useAlert } from '../../src/components/CustomAlert';
+import { RecentRun, useReportPrefsStore } from '../../src/store/reportPrefsStore';
 import { ALL_REPORTS } from '../../src/reports/definitions';
 import { FilterValues, ReportDef } from '../../src/reports/types';
 import { reportDesc, reportTitle } from '../../src/reports/labels';
@@ -27,13 +28,21 @@ import { useProcessedRows } from '../../src/hooks/useProcessedRows';
 import { ReportFilterModal } from '../../src/components/reports/ReportFilterModal';
 import { ReportResultModal } from '../../src/components/reports/ReportResultModal';
 import { PdfProgress } from '../../src/components/reports/PdfProgressOverlay';
+import { RecentReportsRow } from '../../src/components/reports/RecentReportsRow';
+import { PosOfflineBanner } from '../../src/components/reports/PosOfflineBanner';
+
+const EMPTY_RUNS: RecentRun[] = [];
 
 export default function ReportsScreen() {
   const { colors } = useThemeStore();
   const { t } = useLanguageStore();
   const { user } = useAuthStore();
   const { activeSource } = useDataSourceStore();
-  const { showWarning, showError, showInfo, alertProps } = useAlert();
+  // İki ayrı uyarı kutusu: filtre modalı içi (zorunlu filtre, favori) ve sonuç modalı içi
+  // (rapor / dışa aktarma hataları). Aynı alertProps iki yerde çizilince uyarı çiftleniyordu.
+  const filterAlert = useAlert();
+  const resultAlert = useAlert();
+  const { showWarning: showResultWarning, showError: showResultError, showInfo: showResultInfo } = resultAlert;
 
   const activeTenantId = useMemo(() => {
     if (!user?.tenants || user.tenants.length === 0) return '';
@@ -51,8 +60,12 @@ export default function ReportsScreen() {
   const [pdfProgress, setPdfProgress] = useState<PdfProgress | null>(null);
 
   const { lookupCache, fetchLookupSource } = useReportLookups(activeTenantId, selectedReport);
-  const runner = useReportRunner(activeTenantId, showError);
+  const runner = useReportRunner(activeTenantId, showResultError);
   const rows = useProcessedRows(runner.reportData, selectedReport, filterValues);
+
+  const hydratePrefs = useReportPrefsStore(s => s.hydrate);
+  const recentRuns = useReportPrefsStore(s => s.recent[activeTenantId]) || EMPTY_RUNS;
+  useEffect(() => { hydratePrefs(); }, [hydratePrefs]);
 
   // Sekmeden ayrılınca uçuştaki istekleri iptal et. expo-router sekme geçişinde ekranı
   // unmount etmez; useEffect cleanup çıkışta çalışmaz — doğru kanca useFocusEffect.
@@ -73,16 +86,42 @@ export default function ReportsScreen() {
     setFilterValues(prev => ({ ...prev, [name]: value }));
   }, []);
 
-  const runReport = async () => {
-    if (!activeTenantId || !selectedReport) return;
-    const err = validateFilters(selectedReport, filterValues);
-    if (err) { showWarning(err.title, err.message, [{ text: 'Tamam', style: 'default' }]); return; }
-    // iOS: arka arkaya modal geçişini stabilize et
+  /** Favori: tarih dışı tüm filtreler favorideki değerlerle değiştirilir, tarihler korunur. */
+  const applyFavoriteValues = useCallback((values: FilterValues) => {
+    if (!selectedReport) return;
+    setFilterValues(prev => {
+      const next = buildInitialFilterValues(selectedReport);
+      selectedReport.filters.forEach(f => { if (f.type === 'date' && prev[f.name]) next[f.name] = prev[f.name]; });
+      return { ...next, ...values };
+    });
+  }, [selectedReport]);
+
+  const openResultAndRun = async (report: ReportDef, values: FilterValues) => {
     Keyboard.dismiss();
     setShowFilterModal(false);
+    // iOS: arka arkaya modal geçişini stabilize et
     if (Platform.OS === 'ios') await new Promise(r => setTimeout(r, 350));
     setShowResultModal(true);
-    runner.run(selectedReport, filterValues);
+    useReportPrefsStore.getState().addRecent(activeTenantId, report.key, values);
+    runner.run(report, values);
+  };
+
+  const runReport = () => {
+    if (!activeTenantId || !selectedReport) return;
+    const err = validateFilters(selectedReport, filterValues);
+    if (err) { filterAlert.showWarning(err.title, err.message, [{ text: 'Tamam', style: 'default' }]); return; }
+    openResultAndRun(selectedReport, filterValues);
+  };
+
+  /** Son Raporlar kartı: aynı filtrelerle tek dokunuşta yeniden çalıştır. */
+  const rerunRecent = (run: RecentRun) => {
+    const report = ALL_REPORTS.find(r => r.key === run.reportKey);
+    if (!report || !activeTenantId) return;
+    setSelectedReport(report);
+    setFilterValues(run.filterValues);
+    runner.clear();
+    rows.reset();
+    openResultAndRun(report, run.filterValues);
   };
 
   const backToFilters = () => {
@@ -107,11 +146,11 @@ export default function ReportsScreen() {
         report: selectedReport, rows: rows.processedData, filterValues,
         onProgress: (done, total) => setPdfProgress({ done, total }),
       });
-      if (res === 'popup_blocked') showWarning('Popup engellendi', 'Tarayıcı yeni sekme açmaya izin vermedi. Popup izni verin.');
-      else if (typeof res === 'object') showInfo('PDF hazır', `Dosya: ${res.savedUri}`);
+      if (res === 'popup_blocked') showResultWarning('Popup engellendi', 'Tarayıcı yeni sekme açmaya izin vermedi. Popup izni verin.');
+      else if (typeof res === 'object') showResultInfo('PDF hazır', `Dosya: ${res.savedUri}`);
     } catch (err) {
       console.error('PDF export error:', err);
-      showError('PDF Hatası', 'PDF oluşturulurken bir hata oluştu. Veri çok büyükse Excel/CSV deneyin.');
+      showResultError('PDF Hatası', 'PDF oluşturulurken bir hata oluştu. Veri çok büyükse Excel/CSV deneyin.');
     } finally {
       setExportLoading(false);
       setPdfProgress(null);
@@ -126,7 +165,7 @@ export default function ReportsScreen() {
       await exportReportExcel(selectedReport, rows.processedData);
     } catch (err) {
       console.error('Excel export error:', err);
-      showError('Excel Hatası', 'Excel oluşturulurken bir hata oluştu.');
+      showResultError('Excel Hatası', 'Excel oluşturulurken bir hata oluştu.');
     } finally {
       setExportLoading(false);
     }
@@ -147,6 +186,7 @@ export default function ReportsScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <ActiveSourceIndicator />
+      <PosOfflineBanner tenantId={activeTenantId} />
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
         <Text style={[styles.headerTitle, { color: colors.text }]}>{t('reports')}</Text>
       </View>
@@ -155,6 +195,12 @@ export default function ReportsScreen() {
         onScroll={(e) => useUIStore.getState().reportScroll(e.nativeEvent.contentOffset.y)}
         scrollEventThrottle={16}
       >
+        <RecentReportsRow
+          runs={recentRuns}
+          onOpen={rerunRecent}
+          onRemove={run => useReportPrefsStore.getState().removeRecent(activeTenantId, run.id)}
+          onClear={() => useReportPrefsStore.getState().clearRecent(activeTenantId)}
+        />
         {ALL_REPORTS.map(report => (
           <TouchableOpacity
             key={report.key}
@@ -181,13 +227,15 @@ export default function ReportsScreen() {
         visible={showFilterModal}
         report={selectedReport}
         title={title}
+        tenantId={activeTenantId}
         filterValues={filterValues}
         onChange={onFilterChange}
+        onApplyValues={applyFavoriteValues}
         onClose={() => setShowFilterModal(false)}
         onRun={runReport}
         lookupCache={lookupCache}
         fetchLookupSource={fetchLookupSource}
-        alertProps={alertProps}
+        alert={filterAlert}
       />
 
       <ReportResultModal
@@ -203,10 +251,8 @@ export default function ReportsScreen() {
         onExportPdf={exportPdf}
         onBackToFilters={backToFilters}
         onClose={closeResult}
+        alertProps={resultAlert.alertProps}
       />
-
-      {/* Zorunlu alan uyarıları, PDF/Excel hataları (filtre modalı kapalıyken) */}
-      <CustomAlert {...alertProps} />
     </SafeAreaView>
   );
 }

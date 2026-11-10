@@ -1,0 +1,43 @@
+{
+  "summary": "Tested 4 new Reports features (single alert, POS offline banner, Recent Reports, Favorite Filters) + regression at 390x844. Backend: GET /api/senkron/pos-durum 8/8 PASS (ok:true, durum='kritik', son_gorulme 2026-10-31T17:15:25, yas_sn~856k; 401/403 without/invalid token; 422 missing tenant; unknown tenant -> durum 'yok'; consistent with /senkron/saglik). Frontend: ALL requested flows PASS. Banner visible ('POS bağlantısı yok · Son bağlantı: 10 gün önce'), tap -> /senkron-saglik, back works. 'Zorunlu Filtre' count==1, closes with Tamam. 'Filtre Seçilmedi' count==1. Favorite save -> chip shown, localStorage favorites = {KdvDahil:0, Lokasyon:'75919'} (no BASTARIH/BITTARIH). Favorite apply on reopen restores Lokasyon='Merkez', KDV Hariç active (rgb(37,99,235)), dates kept 10.11.2026. Long press -> 'Favoriyi Sil' -> İptal keeps chip, Sil removes chip + storage entry; long press does not apply the favorite. Recent: card 'SON RAPORLAR' with '10.11.2026 · KDV Hariç · Lokasyon: 1 | Tekrar çalıştır | az önce'; tapping opens result modal directly (no filter modal); back-to-filters shows Lokasyon=Merkez; same rerun deduped (1 card); with 5 seeded + 1 new run stays at 5 (oldest dropped); long press removes one card without opening result; recent-clear removes section + storage. With a mocked /api/data/report-run (3 rows) + window.open=null: 'Popup engellendi' shown once inside the result modal, result stays open after Tamam; mocked ok:false shows 'Hata' alert once inside the result modal. Regression: date picker overlay, personel picker (ADEM ÇOŞAR), run -> 'Çalıştırılıyor... / POS'tan veri alınıyor', result-close all OK. No console TypeError/ReferenceError/pageerror. A few minor issues only.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/senkron/pos-durum", "issue": "No tenant ownership check: any logged-in user can read the heartbeat of any tenant_id (only get_current_user is checked). /senkron/saglik has the same gap. Low sensitivity, but there is no authorization."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "PosOfflineBanner vs Senkron Sağlığı", "issue": "The two screens show different ages for the same yas_sn (856098s = 9.9 days): the banner says '10 gün önce' (fmtAge uses Math.round) and Senkron Sağlığı says '9 gün önce' (yasMetni floors). Use one formatter.", "testID": "pos-offline-banner", "priority": "low"},
+      {"component": "CustomAlert (inline)", "issue": "A dark gray rectangle (~96x45px) is drawn behind the top of the warning icon circle in the inline alerts ('Zorunlu Filtre', 'Favoriyi Sil', 'Popup engellendi') on web. Cosmetic only; may be pre-existing.", "testID": "n/a", "priority": "low"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "ReportFilterModal", "issues": [
+        "After saving a favorite while scrolled down to Lokasyon, the new FAVORİLER chip is added at the top of the ScrollView, off-screen, so the user gets no visible confirmation. Consider scrolling to the top or showing a toast.",
+        "Recent card and favorite summaries show counts ('Lokasyon: 1') rather than names. Acceptable, but names would be more useful."
+      ]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_v27_pos_durum.py", "/app/test_reports/pytest/pytest_v27.xml"],
+  "action_items": [
+    "(low) Use one age formatter on both screens (fmtAge vs yasMetni) so the banner and Senkron Sağlığı show the same day count.",
+    "(low) Add a tenant ownership/authorization check to /api/senkron/pos-durum (and /senkron/saglik).",
+    "(low) usePosDurum: reset durum when tenantId changes (otherwise the previous tenant's banner shows until the new fetch succeeds, or stays if it fails). Also handle non-ok/401 responses and drop the `|| ''` API_URL fallback.",
+    "(low) The recent card testID `recent-<reportKey>` is not unique when one report has several runs. Consider `recent-<reportKey>-<id>` (keep the old one as a prefix if needed).",
+    "(low) Scroll the filter modal to the top or show feedback after saving a favorite."
+  ],
+  "critical_code_review_comments": [
+    "reportPrefsStore: dedupe uses JSON.stringify equality, so key order matters. It works for the current flows because values come from the same builder; a run with the same filters in a different key order would create a duplicate card.",
+    "usePosDurum: on fetch error or non-ok it silently keeps stale state; the interval only runs while focused (fine).",
+    "Two separate useAlert instances (filter vs result) correctly prevent duplicate alerts; root CustomAlert removed (verified count==1 everywhere).",
+    "No deprecated Expo packages (expo-av / expo-barcode-scanner / expo-background-fetch) in package.json."
+  ],
+  "updated_files": ["/app/backend/tests/test_v27_pos_durum.py"],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "100% of requested flows (minor cosmetic issues only)"},
+  "seed_data_creation": "None in DB. localStorage '@reportPrefs:v1' was seeded/cleared only inside the Playwright browser context. Report rows were mocked via page.route('**/api/data/report-run') in the browser only.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Login cakmak.ebubekir29@gmail.com/1234567, Merkez tenant d5587c87a7f9476fa82b83f40accd6c7. The POS has been offline since 2026-10-31, so runs queue ('POS'tan veri alınıyor'); mock /api/data/report-run for data. Lokasyon picker-item-0 = 'Merkez' (id 75919), and there are only about 2 Lokasyon options, so seed localStorage '@reportPrefs:v1' {recent:{tenant:[...]},favorites:{tenant:[...]}} and reload to test the recent cap. Long press works via page.mouse.down + 900ms wait + mouse.up. Favorite chip testID favorite-<id>. window.open=null via add_init_script triggers 'Popup engellendi'."
+}

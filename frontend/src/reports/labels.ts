@@ -2,7 +2,8 @@
  * Rapor etiket çevirileri. Rapor tanımlarındaki filtre/kolon etiketleri TR saklanır;
  * dil EN ise bu sözlükten çevrilir.
  */
-import { ReportDef } from './types';
+import { FilterValues, ReportDef } from './types';
+import { formatDateTR } from './dates';
 
 type Translate = (key: any) => string;
 
@@ -23,6 +24,47 @@ export const translateLabel = (label: string | undefined | null, language: strin
   if (language !== 'en') return label;
   return LABEL_MAP[label] || label;
 };
+
+/**
+ * Filtre değerlerinin tek satırlık özeti (Son Raporlar kartı / favori ipucu):
+ * "10.11.2026 · Personel: 2 · KDV Hariç". Varsayılanıyla aynı sabit seçenekler gizlenir.
+ */
+export function summarizeFilters(report: ReportDef, values: FilterValues): string {
+  const parts: string[] = [];
+  const bas = values.BASTARIH ? formatDateTR(String(values.BASTARIH)) : '';
+  const bit = values.BITTARIH ? formatDateTR(String(values.BITTARIH)) : '';
+  if (bas || bit) parts.push(bas && bit && bas !== bit ? `${bas} – ${bit}` : bas || bit);
+  const seen = new Set<string>();
+  for (const f of report.filters) {
+    if (f.type === 'date' || seen.has(f.name)) continue;
+    seen.add(f.name);
+    const v = values[f.name];
+    if (v === undefined || v === null || v === '') continue;
+    if (f.type === 'multiselect') {
+      parts.push(`${f.label}: ${String(v).split(',').filter(Boolean).length}`);
+    } else if (f.type === 'select_static') {
+      if (String(v) === String(report.defaultParams[f.name] ?? '')) continue;
+      const opt = f.options?.find(o => String(o.value) === String(v));
+      parts.push(opt ? opt.label : `${f.label}: ${v}`);
+    } else {
+      parts.push(`${f.label}: ${v}`);
+    }
+  }
+  return parts.join(' · ') || 'Filtre yok';
+}
+
+/** Favoriye kaydedilecek değerler: tarih dışı, boş olmayan ve (sabit seçeneklerde) varsayılandan farklı filtreler. */
+export function pickFavoriteValues(report: ReportDef, values: FilterValues): FilterValues {
+  const out: FilterValues = {};
+  for (const f of report.filters) {
+    if (f.type === 'date') continue;
+    const v = values[f.name];
+    if (v === undefined || v === null || v === '') continue;
+    if (f.type === 'select_static' && String(v) === String(report.defaultParams[f.name] ?? '')) continue;
+    out[f.name] = v;
+  }
+  return out;
+}
 
 const LABEL_MAP: Record<string, string> = {
   'Cari': 'Customer',
