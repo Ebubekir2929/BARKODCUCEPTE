@@ -23,14 +23,15 @@ import ctypes
 import ctypes.wintypes
 from decimal import Decimal
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from collections import deque
+from typing import Any, Dict, List, Optional, Tuple
 
 import pyodbc
 import requests
 
 from PySide6.QtCore import Qt, QTimer, QSize, Signal, Slot
 from PySide6.QtCore import QDate
-from PySide6.QtGui import QAction, QClipboard
+from PySide6.QtGui import QAction, QClipboard, QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTextEdit, QMessageBox, QFormLayout, QComboBox, QCheckBox, QSpinBox,
@@ -54,7 +55,26 @@ LOG_PATH = os.path.join(CONFIG_DIR, "client.log")
 DEFAULT_SERVER_URL = "https://kasaceptetransfer.berkyazilim.com/api/sync.php"   # v25: /sync.php hosting'de yok (404)
 
 # 2026-06 — Çalışan sürümü loglarda görmek için (kullanıcı doğru build'i kurdu mu?)
-CLIENT_BUILD = "2026-11-10 v26 (filtre lookup küçültme + hata bildirimi)"
+CLIENT_BUILD = "2026-11-10 v27 (hafif mod: CPU/disk diyeti + arayüz akıcılığı)"
+
+# 2026-11-10 v27 — HAFİF MOD (CPU / disk / RAM diyeti)
+# Şikâyet: POS bilgisayarı yoruluyor, "Senkron" sekmesi donuyor. Ölçülen nedenler:
+#   • Ağır rapor prosedürleri (financial/hourly/cancel/top10/iptal/garson) değişiklik
+#     olmasa bile 10 sn'de bir çalışıyordu; watcher tetiğinde ise 5 sn'de bir.
+#   • Her 5 sn'lik turda ~20 adet "web cache var mı?" HTTP sorgusu (dataset başına).
+#   • acik_masa_detay 5 sn + 10 sn + 30 sn turlarında üç kez; açık hesap özeti sayfa
+#     sayfa SQL her 5 sn; her kayıtta snapshots.json (içinde 200K satırlık stok hash
+#     haritası) yeniden serileştirilip diske yazılıyordu.
+#   • Tam ön yükleme her açılışta (7.500 SQL + 7.500 HTTP) tekrar ediyordu.
+#   • Arayüz: saniyede onlarca log satırı tek tek QTextEdit.append → ana iş parçacığı.
+SERVER_STATUS_CACHE_SEC = 120                 # dataset_cache_exists yanıtı önbellek süresi
+DIRECT_CACHE_SERVER_TRUST_SEC = 6 * 3600      # direkt cache: veri değişmediyse web durumu bu kadar süre sorulmaz
+WATCHED_DATASET_FALLBACK_SEC = 180            # watcher'lı datasetler değişiklik yoksa en seyrek bu aralıkla
+WATCH_TRIGGER_MIN_SEC = 20                    # watcher tetikli yeniden çalıştırma en sık bu aralıkla (dataset başına)
+DIRECT_ACIK_HESAP_MIN_SEC = 60                # rap_acik_hesap_kisi_ozet_web direkt cache en sık
+DIRECT_FIS_FEED_MIN_SEC = 20                  # fis_gunluk_bildirim_feed direkt cache en sık
+FULL_PREFETCH_STARTUP_SKIP_IF_RECENT_SEC = 20 * 3600  # son tam ön yükleme bu kadar yeniyse açılışta tekrar etme
+UI_LOG_FLUSH_MS = 400                         # log satırları bu aralıkla toplu basılır
 
 # 2026-10-26 v25 — BAĞLANTI HİJYENİ
 # Hosting'in DDoS koruması, saniyede yeni TLS bağlantısı açan POS IP'lerini kara listeye alıyordu
@@ -278,6 +298,9 @@ BACKGROUND_DIRECT_CACHE_KEYS = {"rap_filtre_lookup"}
 
 FAST_REACTIVE_DATASET_KEYS = set(PRIORITY_REPORT_DATASET_KEYS)
 
+# v27 — 5 sn'lik reactive turda koşan direkt-cache setleri (acik_masa_detay 10 sn canlı turda)
+REACTIVE_DIRECT_CACHE_KEYS = PRIORITY_DIRECT_CACHE_KEYS - {"acik_masa_detay"}
+
 # Request kuyruğunu beklemeden web cache'i güncel tutması gereken küçük/hızlı feedler.
 # force=False ile çalışır: SQL sonucu değişmediyse snapshot yüzünden tekrar göndermez.
 FORCE_EVERY_REACTIVE_DATASET_KEYS = set()
@@ -496,10 +519,76 @@ def _snapshots_flush(force: bool = False):
 
 
 def _snapshot_cache_sifirla():
-    global _SNAP_CACHE, _SNAP_DIRTY
+    global _SNAP_CACHE, _SNAP_DIRTY, _DELTA_CACHE
     with _SNAP_LOCK:
         _SNAP_CACHE = None
         _SNAP_DIRTY = False
+    with _DELTA_LOCK:
+        _DELTA_CACHE = None
+
+
+# ── v27 — DELTA SNAPSHOT'LAR AYRI DOSYADA ─────────────────────────────────────
+# stock_list / cari / hourly_stock_detail satır hash haritaları (200K ürün → 20 MB+)
+# snapshots.json içinde duruyordu; her 5 sn'lik "last_sync_at" güncellemesinde
+# bu dev sözlük yeniden serileştirilip diske yazılıyordu (CPU + disk). Artık
+# delta_snapshots.json'da tutulur ve YALNIZCA satır hash'leri değiştiğinde yazılır.
+DELTA_SNAPSHOT_PATH = os.path.join(CONFIG_DIR, "delta_snapshots.json")
+_DELTA_LOCK = threading.RLock()
+_DELTA_CACHE: Optional[Dict[str, Any]] = None
+_DELTA_ONEK = "delta::"
+
+
+def load_delta_snapshots() -> Dict[str, Any]:
+    """Delta (satır hash) snapshot sözlüğü; ilk çağrıda diskten yüklenir.
+    Eski snapshots.json içindeki 'delta::' girdileri bir kez buraya taşınır."""
+    global _DELTA_CACHE
+    with _DELTA_LOCK:
+        if _DELTA_CACHE is None:
+            ensure_dirs()
+            data: Any = {}
+            if os.path.exists(DELTA_SNAPSHOT_PATH):
+                try:
+                    with open(DELTA_SNAPSHOT_PATH, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    data = {}
+            _DELTA_CACHE = data if isinstance(data, dict) else {}
+            # Tek seferlik göç: ana snapshot'taki delta girdilerini taşı ve ana dosyayı küçült
+            snap = load_snapshots()
+            tasinan = [k for k in list(snap.keys()) if k.startswith(_DELTA_ONEK)]
+            if tasinan:
+                for k in tasinan:
+                    _DELTA_CACHE.setdefault(k, snap.pop(k))
+                save_snapshots(snap)
+                _delta_snapshots_yaz()
+                log(f"v27 göç: {len(tasinan)} delta snapshot ayrı dosyaya taşındı (snapshots.json küçüldü)")
+        return _DELTA_CACHE
+
+
+def _delta_snapshots_yaz():
+    with _DELTA_LOCK:
+        if _DELTA_CACHE is None:
+            return
+        kopya = dict(_DELTA_CACHE)
+    try:
+        ensure_dirs()
+        _json_atomik_yaz(DELTA_SNAPSHOT_PATH, kopya)
+    except Exception as exc:
+        log(f"delta snapshot yazılamadı: {exc}")
+
+
+def save_delta_snapshot_entry(key: str, value: Dict[str, Any]):
+    """Tek bir delta girdisini günceller ve dosyayı hemen (nadir olay) yazar."""
+    cache = load_delta_snapshots()
+    with _DELTA_LOCK:
+        cache[key] = value
+    _delta_snapshots_yaz()
+
+
+def log_detay(msg: str):
+    """v27 — Ayrıntı seviyesi: yalnızca dosyaya yazılır, arayüz loguna basılmaz.
+    ('= Değişiklik yok', 'Push tamamlandı: 0' gibi her turda tekrarlayan satırlar.)"""
+    log(msg)
 
 
 # Başarı listesi de bellekte tutulur (eskiden her kayıtta dosya okunup yazılıyordu)
@@ -669,7 +758,7 @@ DEFAULT_CHANGE_WATCHERS: List[Dict[str, Any]] = [
   ISNULL((SELECT CHECKSUM_AGG(BINARY_CHECKSUM(FIS,STOK,MIKTAR_FIS,MIKTAR_CIKIS,FIYAT,KUR,ISKONTO_HESAP,KDV_TOPTAN,LOKASYON,FIS_TARIHI)) FROM FIS_DETAY WHERE FIS_TARIHI >= CONVERT(date, GETDATE()) AND FIS_TARIHI < DATEADD(day,1,CONVERT(date, GETDATE()))),0) AS fis_detay_sig, \
   ISNULL((SELECT CHECKSUM_AGG(BINARY_CHECKSUM(LOKASYON,TUTAR,SATIR_MI,TARIH,TARIH_IPTAL)) FROM FIS_POS_IPTAL WHERE (TARIH >= CONVERT(date, GETDATE()) AND TARIH < DATEADD(day,1,CONVERT(date, GETDATE()))) OR (TARIH_IPTAL >= CONVERT(date, GETDATE()) AND TARIH_IPTAL < DATEADD(day,1,CONVERT(date, GETDATE())))),0) AS iptal_sig",
         "watch_interval_sec": 30,
-        "triggers": ["financial_data", "financial_data_location", "hourly_data", "hourly_location_data", "cancel_data", "top10_stock_movements", "down10_stock_movements", "fis_gunluk_bildirim_feed"],
+        "triggers": ["financial_data", "financial_data_location", "hourly_data", "hourly_location_data", "cancel_data", "top10_stock_movements", "down10_stock_movements", "fis_gunluk_bildirim_feed", "garson_satis_ozet", "hourly_stock_detail"],
         "invalidate": []
     },
     {
@@ -1211,6 +1300,14 @@ def apply_required_runtime_overrides(cfg: Dict[str, Any]) -> Dict[str, Any]:
         key = str(item.get("watch_key", "")).strip()
         if key in watcher_overrides:
             item.update(watcher_overrides[key])
+        # v27 — garson özeti ve saatlik stok detayı da bugünün FIS/FIS_DETAY'ından türer;
+        # watcher tetiğine bağlanır ki periyodik (10 sn) yeniden çalıştırma seyreltilebilsin.
+        if key == "daily_reports_watch":
+            tetikler = [str(x) for x in (item.get("triggers") or [])]
+            for ek in ("garson_satis_ozet", "hourly_stock_detail"):
+                if ek not in tetikler:
+                    tetikler.append(ek)
+            item["triggers"] = tetikler
     return cfg
 
 def load_cfg() -> Dict[str, Any]:
@@ -1245,7 +1342,7 @@ def save_cfg(cfg: Dict[str, Any]):
 
 def factory_reset():
     _snapshot_cache_sifirla()
-    for p in (CONFIG_PATH, SNAPSHOT_PATH, WATCH_STATE_PATH, LOG_PATH):
+    for p in (CONFIG_PATH, SNAPSHOT_PATH, DELTA_SNAPSHOT_PATH, WATCH_STATE_PATH, LOG_PATH):
         try:
             if os.path.exists(p):
                 os.remove(p)
@@ -2051,6 +2148,15 @@ class Main(QMainWindow):
         self._full_prefetch_cancel = False
         self._startup_prefetch_started = False
         self._app_started_ts = time.time()
+        # v27 — hafif mod durumları
+        self._server_status_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+        self._pending_force_keys: set = set()          # watcher tetiği debounce'a takılan datasetler
+        self._last_acik_hesap_direct_ts = 0.0
+        self._last_fis_feed_direct_ts = 0.0
+        self._dataset_defs_cache: Optional[List[Dict[str, Any]]] = None
+        self._dataset_defs_lock = threading.Lock()
+        self._ui_log_kuyruk: deque = deque(maxlen=5000)
+        self._ui_log_lock = threading.Lock()
 
         self.setWindowTitle("KasaCepte Transfer Client")
         self.setMinimumSize(QSize(1180, 820))
@@ -2109,6 +2215,15 @@ class Main(QMainWindow):
         self.watchdog_timer.timeout.connect(self._ensure_auto_sync_running)
         self.watchdog_timer.start(15000)
 
+        # v27 — log satırları toplu basılır (arayüz akıcılığı)
+        self.ui_log_timer = QTimer(self)
+        self.ui_log_timer.timeout.connect(self._ui_log_flush)
+        self.ui_log_timer.start(UI_LOG_FLUSH_MS)
+        # Dataset tanımları başka iş parçacıklarından okunduğu için (toPlainText thread-safe değil)
+        # ana iş parçacığında bir kez ayrıştırılıp önbelleğe alınır; metin değişince yenilenir.
+        self.txt_datasets.textChanged.connect(self._dataset_defs_cache_yenile)
+        self._dataset_defs_cache_yenile()
+
         self._ensure_client_secret()
         self.refresh_secret_ui()
         self.println(f"🔧 Client sürümü: {CLIENT_BUILD}")
@@ -2122,16 +2237,36 @@ class Main(QMainWindow):
 
     def println(self, msg: str):
         log(msg)
-        if threading.current_thread() is threading.main_thread():
-            if hasattr(self, "txt_log"):
-                self.txt_log.append(msg)
-        else:
-            self.append_log_signal.emit(msg)
+        # v27 — Satırlar kuyruğa alınır; UI_LOG_FLUSH_MS'de bir TEK seferde basılır.
+        # Eskiden her satır için ana iş parçacığına sinyal + QTextEdit.append (HTML ayrıştırma,
+        # yeniden yerleşim) gidiyordu; saniyede onlarca satırda "Senkron" sekmesi donuyordu.
+        with self._ui_log_lock:
+            self._ui_log_kuyruk.append(msg)
 
     @Slot(str)
     def _append_log(self, msg: str):
         if hasattr(self, "txt_log"):
             self.txt_log.append(msg)
+
+    def _ui_log_flush(self):
+        """Ana iş parçacığı (QTimer): biriken log satırlarını tek parça düz metin olarak ekler."""
+        if not hasattr(self, "txt_log"):
+            return
+        with self._ui_log_lock:
+            if not self._ui_log_kuyruk:
+                return
+            satirlar = list(self._ui_log_kuyruk)
+            self._ui_log_kuyruk.clear()
+        # Pencere gizliyken (tepsi) arayüzü hiç meşgul etme; dosya logu zaten tam.
+        if not self.isVisible():
+            return
+        doc = self.txt_log.document()
+        cursor = self.txt_log.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        onek = "\n" if doc.blockCount() > 1 or doc.toPlainText() else ""
+        cursor.insertText(onek + "\n".join(satirlar))
+        self.txt_log.setTextCursor(cursor)
+        self.txt_log.ensureCursorVisible()
 
     @Slot()
     def _render_success_state_ui(self):
@@ -2884,7 +3019,9 @@ class Main(QMainWindow):
         return db_name
 
     def get_connection(self, database_override: str = ""):
-        cfg = load_cfg()
+        # v27 — Her SQL çağrısında config.json diskten okunuyordu; bellekteki self.cfg
+        # zaten save_cfg ile güncel tutuluyor.
+        cfg = self.cfg
         driver = cfg["driver"]
         host = cfg["host"]
         inst = cfg.get("instance", "")
@@ -2954,14 +3091,31 @@ class Main(QMainWindow):
         except Exception as exc:
             self.println(f"Heartbeat hata: {exc}")
 
-    def parse_dataset_defs(self) -> List[Dict[str, Any]]:
+    def _dataset_defs_cache_yenile(self):
+        """Ana iş parçacığı: dataset JSON'unu bir kez ayrıştırıp önbelleğe al (v27)."""
         try:
             defs = json.loads(self.txt_datasets.toPlainText())
             if not isinstance(defs, list):
                 raise ValueError("Dataset listesi bekleniyor.")
-            return defs
-        except Exception as exc:
-            raise RuntimeError(f"Dataset tanımları okunamadı: {exc}")
+            with self._dataset_defs_lock:
+                self._dataset_defs_cache = defs
+        except Exception:
+            # Kullanıcı yazarken geçici olarak bozuk JSON olabilir; son geçerli önbellek korunur
+            pass
+
+    def parse_dataset_defs(self) -> List[Dict[str, Any]]:
+        # v27 — Arka plan iş parçacıkları Qt widget'ına dokunmaz; önbellekten derin kopya döner
+        # (çağıranlar sözlükleri yerinde değiştirebiliyor: normalize_paged_push_definition vb.)
+        with self._dataset_defs_lock:
+            cached = self._dataset_defs_cache
+        if cached is not None:
+            return json.loads(json.dumps(cached))
+        if threading.current_thread() is threading.main_thread():
+            self._dataset_defs_cache_yenile()
+            with self._dataset_defs_lock:
+                if self._dataset_defs_cache is not None:
+                    return json.loads(json.dumps(self._dataset_defs_cache))
+        raise RuntimeError("Dataset tanımları okunamadı: JSON hatalı veya henüz yüklenmedi.")
 
     def execute_query(self, conn, sql_text: str) -> List[Dict[str, Any]]:
         cur = conn.cursor()
@@ -3037,6 +3191,7 @@ class Main(QMainWindow):
         tenant = self.ed_tenant.text().strip() or self.cfg.get("tenant_id", "").strip()
         if not tenant:
             return
+        self._server_status_cache_drop(dataset_key)  # v27 — web durumu önbelleği geçersiz
         try:
             post_json(
                 self.ed_server_url.text().strip() or self.cfg.get("server_url", DEFAULT_SERVER_URL),
@@ -3425,6 +3580,15 @@ class Main(QMainWindow):
         finally:
             conn.close()
 
+    def _watched_dataset_keys(self) -> set:
+        """Etkin watcher'ların tetiklediği datasetler: değişiklik watcher'dan anlaşılır,
+        periyodik yeniden çalıştırma WATCHED_DATASET_FALLBACK_SEC'e seyreltilir."""
+        keys: set = set()
+        for w in self.load_change_watchers():
+            if isinstance(w, dict) and w.get("enabled", True):
+                keys.update(str(x) for x in (w.get("triggers") or []) if str(x).strip())
+        return keys
+
     def should_push_now(self, defn: Dict[str, Any], params: Dict[str, Any], force: bool = False) -> bool:
         if force:
             return True
@@ -3435,6 +3599,10 @@ class Main(QMainWindow):
         key = dataset_run_key(defn["dataset_key"], params)
         meta = snap.get(key, {})
         interval_sec = int(defn.get("push_interval_sec", self.cfg.get("interval_seconds", 30)))
+        # v27 — watcher'ın izlediği dataset: veri değişmediyse 10 sn'de bir ağır prosedür
+        # çalıştırmanın anlamı yok; watcher değişikliği zaten anında tetikler.
+        if str(defn.get("dataset_key", "")) in self._watched_dataset_keys():
+            interval_sec = max(interval_sec, WATCHED_DATASET_FALLBACK_SEC)
         last_sync = meta.get("last_sync_at")
         if not last_sync:
             return True
@@ -3443,6 +3611,18 @@ class Main(QMainWindow):
         except Exception:
             return True
         return datetime.now() >= last_dt + timedelta(seconds=interval_sec)
+
+    def _watch_trigger_debounce_ok(self, defn: Dict[str, Any], params: Dict[str, Any]) -> bool:
+        """Watcher tetikli yeniden çalıştırma dataset başına en sık WATCH_TRIGGER_MIN_SEC."""
+        meta = load_snapshots().get(dataset_run_key(defn["dataset_key"], params), {}) or {}
+        last_sync = str(meta.get("last_sync_at") or "")
+        if not last_sync:
+            return True
+        try:
+            last_dt = datetime.strptime(last_sync, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            return True
+        return datetime.now() >= last_dt + timedelta(seconds=WATCH_TRIGGER_MIN_SEC)
 
     def protect_mass_delete(self, defn: Dict[str, Any], params: Dict[str, Any], data: Any, force: bool) -> None:
         if force:
@@ -3482,10 +3662,17 @@ class Main(QMainWindow):
         save_snapshots(snap)
 
     def server_dataset_status(self, dataset_key: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Web cache durumunu döndürür. Kontrol başarısızsa normal akışı bozmaz."""
+        """Web cache durumunu döndürür. Kontrol başarısızsa normal akışı bozmaz.
+        v27 — Yanıt SERVER_STATUS_CACHE_SEC boyunca önbellekte tutulur: eskiden her 5 sn'lik
+        turda dataset başına bir HTTP sorgusu gidiyordu (~20 istek / 5 sn)."""
         tenant = self.ed_tenant.text().strip() or self.cfg.get("tenant_id", "").strip()
         if not tenant:
             return {"ok": False, "exists": True, "row_count": 1, "active_row_count": 1}
+
+        ck = dataset_run_key(dataset_key, params)
+        onbellek = self._server_status_cache.get(ck)
+        if onbellek and (time.time() - onbellek[0]) < SERVER_STATUS_CACHE_SEC:
+            return dict(onbellek[1])
 
         try:
             resp = post_json(
@@ -3499,7 +3686,10 @@ class Main(QMainWindow):
                 client_secret=self.get_client_secret(),
                 timeout=30,
             )
-            return resp if isinstance(resp, dict) else {"ok": False, "exists": True, "row_count": 1, "active_row_count": 1}
+            if isinstance(resp, dict):
+                self._server_status_cache[ck] = (time.time(), dict(resp))
+                return resp
+            return {"ok": False, "exists": True, "row_count": 1, "active_row_count": 1}
         except Exception as exc:
             self.println(f"Web cache kontrolü yapılamadı: {dataset_key} -> {exc}")
             # v21 — ESKİ davranış: kontrol başarısızsa "web boş" sayıp TAM yükleme zorlanıyordu.
@@ -3508,25 +3698,37 @@ class Main(QMainWindow):
             # Artık durum "bilinmiyor" döner; çağıran bu turu ATLAR, bir sonraki turda yeniden bakar.
             return {"ok": False, "exists": True, "row_count": 1, "active_row_count": 1, "unknown": True, "error": str(exc)}
 
+    def _server_status_cache_set(self, dataset_key: str, params: Dict[str, Any], row_count: int):
+        """Başarılı push sonrası web durumunu HTTP sormadan 'var' olarak işaretle."""
+        self._server_status_cache[dataset_run_key(dataset_key, params)] = (
+            time.time(),
+            {"ok": True, "exists": True, "row_count": row_count, "active_row_count": row_count},
+        )
+
+    def _server_status_cache_drop(self, dataset_key: Optional[str] = None):
+        if dataset_key is None:
+            self._server_status_cache.clear()
+            return
+        onek = f"{dataset_key}|"
+        for k in [k for k in self._server_status_cache if k.startswith(onek)]:
+            self._server_status_cache.pop(k, None)
+
     def server_dataset_exists(self, dataset_key: str, params: Dict[str, Any]) -> bool:
         return bool(self.server_dataset_status(dataset_key, params).get("exists", False))
 
     def _get_delta_snapshot(self, dataset_key: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        snap = load_snapshots()
-        item = snap.get(delta_snapshot_key(dataset_key, params), {})
+        item = load_delta_snapshots().get(delta_snapshot_key(dataset_key, params), {})
         return item if isinstance(item, dict) else {}
 
     def _save_delta_snapshot(self, dataset_key: str, params: Dict[str, Any], rows: List[Dict[str, Any]], data_hash: str):
-        snap = load_snapshots()
-        snap[delta_snapshot_key(dataset_key, params)] = {
+        save_delta_snapshot_entry(delta_snapshot_key(dataset_key, params), {
             "dataset_key": dataset_key,
             "params": params,
             "row_hashes": build_row_hash_map(dataset_key, rows),
             "data_hash": data_hash,
             "row_count": len(rows),
             "last_sync_at": now_str(),
-        }
-        save_snapshots(snap)
+        })
 
     def _push_delta_dataset(self, defn: Dict[str, Any], params: Dict[str, Any], data: List[Dict[str, Any]], force_full: bool = False):
         """Stok/cari gibi büyük listelerde sadece değişen satırları web'e gönderir."""
@@ -3914,20 +4116,21 @@ class Main(QMainWindow):
         self.println(f"fis_gunluk_bildirim_feed MinTutar={out['MinTutar']} kaynak={settings.get('source', '-')}")
         return out
 
-    def push_dataset(self, defn: Dict[str, Any], params: Dict[str, Any], data: Any):
+    def push_dataset(self, defn: Dict[str, Any], params: Dict[str, Any], data: Any, data_hash: Optional[str] = None):
         tenant = self.ed_tenant.text().strip() or self.cfg.get("tenant_id", "").strip()
         if not tenant:
             raise RuntimeError("Tenant boş.")
         server_url = self.ed_server_url.text().strip() or self.cfg.get("server_url", DEFAULT_SERVER_URL)
         secret = self.get_client_secret()
         dataset_key = str(defn["dataset_key"])
+        data_hash = data_hash or hash_obj(data)  # v27 — çağıran verdiyse tekrar hesaplanmaz
 
         payload = {
             "action": "dataset_push",
             "dataset_key": dataset_key,
             "params": params,
             "data": data,
-            "data_hash": hash_obj(data),
+            "data_hash": data_hash,
         }
 
         try:
@@ -3970,7 +4173,7 @@ class Main(QMainWindow):
                     "dataset_key": dataset_key,
                     "upload_id": upload_id,
                     "params": params,
-                    "data_hash": hash_obj(data),
+                    "data_hash": data_hash,
                 },
                 client_secret=secret,
                 timeout=300,
@@ -4012,10 +4215,12 @@ class Main(QMainWindow):
         defs = self.parse_dataset_defs()
         total = 0
         pushed = 0
-        force_dataset_keys = force_dataset_keys or set()
+        force_dataset_keys = set(force_dataset_keys or set())
         only_dataset_keys = set(only_dataset_keys or [])
-
-        fiyat_adlari = None
+        # v27 — önceki turda debounce'a takılan watcher tetikleri bu turda yeniden denenir
+        if self._pending_force_keys:
+            bekleyen = {k for k in self._pending_force_keys if not only_dataset_keys or k in only_dataset_keys}
+            force_dataset_keys |= bekleyen
 
         for defn in defs:
             # 2026-06 — Her dataset arasında istek önceliği kontrolü
@@ -4032,7 +4237,21 @@ class Main(QMainWindow):
 
             params = resolve_params(defn.get("params_template", {}))
             dataset_key = str(defn.get("dataset_key", ""))
-            dataset_force = force or (dataset_key in force_dataset_keys)
+            watcher_tetik = (not force) and dataset_key in force_dataset_keys
+            dataset_force = force or watcher_tetik
+
+            # v27 — Watcher tetiği debounce: aynı dataset en sık WATCH_TRIGGER_MIN_SEC'te bir
+            # yeniden çalışır; yoğun satışta her 5 sn'de 10 ağır prosedür koşuyordu.
+            if watcher_tetik and not self._watch_trigger_debounce_ok(defn, params):
+                self._pending_force_keys.add(dataset_key)
+                log_detay(f"~ watcher tetiği ertelendi (debounce): {dataset_key}")
+                continue
+            if watcher_tetik:
+                self._pending_force_keys.discard(dataset_key)
+
+            # v27 — Ucuz aralık kontrolü ÖNCE: sırası gelmeyen dataset için web durumu HTTP'si gitmez.
+            if not dataset_force and not self.should_push_now(defn, params, force=False):
+                continue
 
             if not dataset_force and defn.get("push_enabled", False):
                 server_status = self.server_dataset_status(dataset_key, params)
@@ -4046,7 +4265,7 @@ class Main(QMainWindow):
                     server_row_count = 0
 
                 if dataset_key in PAGED_PUSH_DATASET_KEYS:
-                    self.println(f"{dataset_key}: web sayfa durumu -> exists={server_has_cache}, active_row_count={server_row_count}")
+                    log_detay(f"{dataset_key}: web sayfa durumu -> exists={server_has_cache}, active_row_count={server_row_count}")
 
                 # Stok/cari dataset_cache_pages içine sayfalı basılır.
                 # hourly_stock_detail ise dataset_cache_rows içine saat/lokasyon özeti olarak basılır.
@@ -4065,11 +4284,8 @@ class Main(QMainWindow):
                     dataset_force = True
                     self.println(f"! Local delta snapshot yok, ilk satır bazlı seed yapılacak: {dataset_key}")
 
-            if not self.should_push_now(defn, params, force=dataset_force):
-                continue
-
             total += 1
-            self.println(f"→ Çalışıyor: {defn['dataset_key']}")
+            log_detay(f"→ Çalışıyor: {defn['dataset_key']}")
             if dataset_key == "stock_list":
                 # v19 — Önce ilk fiyat adının satır sayısına bakılır; büyükse akış modu:
                 # fiyat adı bazında çekilir ve sayfa sayfa hemen gönderilir (RAM sabit).
@@ -4112,23 +4328,27 @@ class Main(QMainWindow):
 
             if not dataset_force and defn.get("snapshot") and old_hash == new_hash:
                 if not is_rows_cache_dataset_key(dataset_key) or self._get_delta_snapshot(dataset_key, params).get("row_hashes"):
-                    self.println(f"= Değişiklik yok: {defn['dataset_key']}")
-                    self.update_snapshot(defn, params, data)
+                    log_detay(f"= Değişiklik yok: {defn['dataset_key']}")
+                    self.update_snapshot(defn, params, data, data_hash=new_hash)  # v27 — hash yeniden hesaplanmaz
                     continue
 
-            resp = self.push_dataset(defn, params, data)
+            resp = self.push_dataset(defn, params, data, data_hash=new_hash)
             if not resp.get("ok"):
                 if resp.get("queued_offline"):
                     self.println(f"~ Offline kuyruğa alındı: {defn['dataset_key']}")
                     continue
                 raise RuntimeError(f"Sunucu push hatası: {resp}")
-            self.update_snapshot(defn, params, data)
-            pushed += 1
+            self.update_snapshot(defn, params, data, data_hash=new_hash)
             row_count = len(data) if isinstance(data, list) else 1
+            self._server_status_cache_set(dataset_key, params, row_count)  # v27
+            pushed += 1
             self.record_success(defn["dataset_key"], params, row_count, status="ok", note="otomatik/push")
             self.println(f"✓ Gönderildi: {defn['dataset_key']} ({row_count} kayıt)")
 
-        self.println(f"Push tamamlandı. Değerlendirilen: {total}, gönderilen: {pushed}")
+        if pushed:
+            self.println(f"Push tamamlandı. Değerlendirilen: {total}, gönderilen: {pushed}")
+        else:
+            log_detay(f"Push tamamlandı. Değerlendirilen: {total}, gönderilen: 0")
 
     def _first_row_value(self, row: Dict[str, Any], keys: List[str], default: Any = None) -> Any:
         for key in keys:
@@ -4215,7 +4435,21 @@ class Main(QMainWindow):
         dataset_key = str(defn.get("dataset_key", "")).strip()
         row_count = normalize_row_count(data)
         if (row_count <= 0 or (isinstance(data, list) and not data)) and not allow_empty:
-            self.println(f"{dataset_key}: veri yok, direkt cache push atlandı. params={params}")
+            log_detay(f"{dataset_key}: veri yok, direkt cache push atlandı. params={params}")
+            return False
+
+        new_hash = hash_obj(data)
+        snap = load_snapshots()
+        skey = "direct_cache|" + dataset_run_key(dataset_key, params)
+        onceki = snap.get(skey, {}) or {}
+        old_hash = str(onceki.get("data_hash", "") or "")
+
+        # v27 — Veri değişmediyse ve web'de var olduğu son DIRECT_CACHE_SERVER_TRUST_SEC içinde
+        # doğrulandıysa HTTP ile "web'de var mı?" diye sormadan çık. (Tam ön yüklemede
+        # 7.500 kayıt × 1 HTTP = sunucu + POS ağını boşuna yoruyordu.)
+        server_ok_at = float(onceki.get("server_ok_at") or 0.0)
+        if old_hash == new_hash and server_ok_at and (time.time() - server_ok_at) < DIRECT_CACHE_SERVER_TRUST_SEC:
+            log_detay(f"= Direkt cache değişiklik yok (web durumu güvenilir): {dataset_key} params={params}")
             return False
 
         server_status = self.server_dataset_status(dataset_key, params)
@@ -4228,16 +4462,16 @@ class Main(QMainWindow):
         # normalde "var" kabul edilmez. Ancak bildirim feed gibi boş listenin de
         # anlamlı olduğu datasetlerde cache varlığı yeterlidir.
         server_needs_seed = (not server_has_cache) or ((not allow_empty) and server_row_count <= 0)
-        new_hash = hash_obj(data)
-        snap = load_snapshots()
-        skey = "direct_cache|" + dataset_run_key(dataset_key, params)
-        old_hash = str((snap.get(skey, {}) or {}).get("data_hash", "") or "")
 
         if not server_needs_seed and old_hash == new_hash:
-            self.println(f"= Direkt cache değişiklik yok: {dataset_key} params={params}")
+            log_detay(f"= Direkt cache değişiklik yok: {dataset_key} params={params}")
+            if not server_status.get("unknown"):
+                onceki["server_ok_at"] = time.time()
+                snap[skey] = onceki
+                save_snapshots(snap)
             return False
 
-        resp = self.push_dataset(defn, params, data)
+        resp = self.push_dataset(defn, params, data, data_hash=new_hash)
         if not resp.get("ok"):
             if resp.get("queued_offline"):
                 self.println(f"~ Direkt cache offline kuyruğa alındı: {dataset_key} params={params}")
@@ -4250,10 +4484,12 @@ class Main(QMainWindow):
             "data_hash": new_hash,
             "row_count": row_count,
             "last_sync_at": now_str(),
+            "server_ok_at": time.time(),
             "note": note,
         }
         save_snapshots(snap)
         self.update_snapshot(defn, params, data, data_hash=new_hash)
+        self._server_status_cache_set(dataset_key, params, row_count)  # v27
         self.record_success(dataset_key, params, row_count, status=note, note="request beklemeden cache'e basıldı")
         self.println(f"✓ Direkt cache güncellendi: {dataset_key} ({row_count} kayıt) params={params}")
         return True
@@ -4327,7 +4563,7 @@ class Main(QMainWindow):
                 if isinstance(data, list):
                     before_count = len(data)
                     data = aggregate_acik_masa_detay_rows(data, pos_id)
-                    self.println(f"acik_masa_detay POS_ID={pos_id}: ürün satırları tek masa kaydına toplandı ({before_count} -> {len(data)} satır)")
+                    log_detay(f"acik_masa_detay POS_ID={pos_id}: ürün satırları tek masa kaydına toplandı ({before_count} -> {len(data)} satır)")
                 if self._push_direct_cache_dataset_if_changed(detail_def, params, data, note="direct_acik_masa_detay"):
                     pushed += 1
             except Exception as exc:
@@ -4337,8 +4573,8 @@ class Main(QMainWindow):
         self.cleanup_acik_masa_detay_cache(active_pos_ids)
 
         if not active_pos_ids:
-            self.println("acik_masa_detay: gerçek açık POS_ID yok; eski açık olmayan detaylar temizlendi.")
-        self.println(f"Açık masa detay kontrolü: gerçek açık POS={len(active_pos_ids)}, gönderilen={pushed}, kapalı atlanan={skipped_closed}, POS_ID olmayan atlanan={skipped_no_pos}")
+            log_detay("acik_masa_detay: gerçek açık POS_ID yok; eski açık olmayan detaylar temizlendi.")
+        log_detay(f"Açık masa detay kontrolü: gerçek açık POS={len(active_pos_ids)}, gönderilen={pushed}, kapalı atlanan={skipped_closed}, POS_ID olmayan atlanan={skipped_no_pos}")
         return pushed
 
     def sync_direct_rap_filtre_lookup(self, defs: Optional[List[Dict[str, Any]]] = None) -> int:
@@ -5193,7 +5429,19 @@ SELECT TOP {limit}
         if not self._startup_prefetch_started:
             if (time.time() - self._app_started_ts) >= FULL_PREFETCH_STARTUP_DELAY_SEC:
                 self._startup_prefetch_started = True
-                self.start_full_prefetch(reason="startup")
+                # v27 — Son tam ön yükleme yeniyse (ör. gece 03:00'te bitti, POS sabah açıldı)
+                # açılışta 7.500 SQL + HTTP'lik taramayı tekrar etme.
+                snap = load_snapshots()
+                meta = snap.get("full_prefetch|state", {}) if isinstance(snap.get("full_prefetch|state", {}), dict) else {}
+                son = str(meta.get("last_completed_at") or "")
+                try:
+                    yas = (datetime.now() - datetime.strptime(son, "%Y-%m-%d %H:%M:%S")).total_seconds() if son else 1e9
+                except ValueError:
+                    yas = 1e9
+                if yas < FULL_PREFETCH_STARTUP_SKIP_IF_RECENT_SEC and not meta.get("cancelled"):
+                    self.println(f"Tam ön yükleme (açılış) atlandı: son tarama {int(yas // 3600)} sa önce tamamlanmış.")
+                else:
+                    self.start_full_prefetch(reason="startup")
             return
 
         # 2) Gece tetikleyicisi (günde 1 kez)
@@ -5626,11 +5874,12 @@ SELECT TOP {limit}
             f"güncellenen={pushed}, rapor={report_pushed}, hata={errors}, süre={elapsed}sn"
         )
 
-    def sync_direct_cache_ondemand_datasets(self, only_dataset_keys: Optional[set] = None):
+    def sync_direct_cache_ondemand_datasets(self, only_dataset_keys: Optional[set] = None, force: bool = False):
         """
         Genel ondemand mantığını bozmaz. Sadece seçilen özel datasetler request beklemeden cache'e basılır.
         - rap_acik_hesap_kisi_ozet_web: veri varsa sayfa sayfa cache'e basılır.
         - acik_masa_detay: açık masalardaki POS_ID'ler için detay cache'e basılır.
+        v27 — force=False iken açık hesap özeti ve fiş feed'i kendi asgari aralıklarına uyar.
         """
         only_dataset_keys = set(only_dataset_keys or DIRECT_CACHE_ONDEMAND_KEYS)
         defs = self.parse_dataset_defs()
@@ -5638,14 +5887,19 @@ SELECT TOP {limit}
         handled = set()
         # 2026-06 — İstek önceliği: aktif kullanıcı isteği varsa bekle
         self._bekle_istek_bitsin()
+        simdi = time.time()
         if "rap_acik_hesap_kisi_ozet_web" in only_dataset_keys:
-            pushed += self.sync_direct_rap_acik_hesap_ozet(defs)
+            if force or (simdi - self._last_acik_hesap_direct_ts) >= DIRECT_ACIK_HESAP_MIN_SEC:
+                self._last_acik_hesap_direct_ts = simdi
+                pushed += self.sync_direct_rap_acik_hesap_ozet(defs)
             handled.add("rap_acik_hesap_kisi_ozet_web")
         if "rap_filtre_lookup" in only_dataset_keys:
             pushed += self.sync_direct_rap_filtre_lookup(defs)
             handled.add("rap_filtre_lookup")
         if "fis_gunluk_bildirim_feed" in only_dataset_keys:
-            pushed += self.sync_direct_fis_gunluk_bildirim_feed(defs)
+            if force or (simdi - self._last_fis_feed_direct_ts) >= DIRECT_FIS_FEED_MIN_SEC:
+                self._last_fis_feed_direct_ts = simdi
+                pushed += self.sync_direct_fis_gunluk_bildirim_feed(defs)
             handled.add("fis_gunluk_bildirim_feed")
         if "acik_masa_detay" in only_dataset_keys:
             pushed += self.sync_direct_acik_masa_detay(defs)
@@ -5949,7 +6203,7 @@ SELECT TOP {limit}
         self.register_client_secret_if_needed(force=False)
         self.flush_offline_queue(show_message=False)
         self.sync_push_datasets(force=True)
-        self.sync_direct_cache_ondemand_datasets()
+        self.sync_direct_cache_ondemand_datasets(force=True)
         self.sync_current_month_extre_cache(force=True, max_per_run=PREWARM_EXTRE_MAX_PER_RUN)
         self.sync_current_month_fis_detail_cache(force=True, max_per_run=PREWARM_MONTHLY_FIS_DETAIL_MAX_PER_RUN)
         self._cleanup_logs_if_needed(7)
@@ -6012,7 +6266,8 @@ SELECT TOP {limit}
 
         # Hızlı reactive tur SADECE canlı/rapor ekranını besler.
         # Lookup, stok/cari listeleri, ekstre prewarm ve aylık fiş detayları bu turda çalışmaz.
-        self.sync_direct_cache_ondemand_datasets(only_dataset_keys=PRIORITY_DIRECT_CACHE_KEYS)
+        # v27 — acik_masa_detay canlı zamanlayıcıda (10 sn) zaten koşuyor; burada tekrar etmez.
+        self.sync_direct_cache_ondemand_datasets(only_dataset_keys=REACTIVE_DIRECT_CACHE_KEYS)
 
         self.sync_push_datasets(
             force=False,
@@ -6029,10 +6284,14 @@ SELECT TOP {limit}
                 force_dataset_keys=force_dataset_keys,
                 only_dataset_keys=FAST_REACTIVE_DATASET_KEYS,
             )
+            # Fiş feed'i ondemand modda (push listesinde değil); watcher değişiklik gördüyse hemen tazele
+            if "fis_gunluk_bildirim_feed" in force_dataset_keys:
+                self._last_fis_feed_direct_ts = time.time()
+                self.sync_direct_fis_gunluk_bildirim_feed()
 
     def on_reactive_tick(self):
         if self._reactive_sync_busy:
-            self.println("reactive_sync: zaten çalışıyor")
+            log_detay("reactive_sync: zaten çalışıyor")
             return
         self._reactive_sync_busy = True
 
@@ -6060,7 +6319,7 @@ SELECT TOP {limit}
 
     def on_live_tick(self):
         if self._live_sync_busy:
-            self.println("live_open_tables: zaten çalışıyor")
+            log_detay("live_open_tables: zaten çalışıyor")
             return
         self._live_sync_busy = True
 
@@ -6918,6 +7177,7 @@ SELECT TOP {limit}
                 timeout=120,
             )
             self.println(f"Tenant wipe: {resp}")
+            self._server_status_cache_drop()  # v27 — web durumu önbelleği artık geçersiz
         except Exception as exc:
             self.println(f"Tenant wipe hata: {exc}")
             QMessageBox.critical(self, "Hata", str(exc))
@@ -6965,10 +7225,9 @@ SELECT TOP {limit}
                 "note": note,
             })
             save_success_state(items[:200])
-            # v24 — UI yenilemesi en sık 1,5 sn'de bir (tam ön yüklemede kayıt başına
-            # ana iş parçacığını meşgul etmesin); arka plan flush döngüsü gerisini tamamlar.
+            # v24/v27 — UI yenilemesi en sık 5 sn'de bir (ana iş parçacığını meşgul etmesin)
             simdi = time.time()
-            if simdi - getattr(self, "_son_success_render_ts", 0.0) < 1.5:
+            if simdi - getattr(self, "_son_success_render_ts", 0.0) < 5.0:
                 return
             self._son_success_render_ts = simdi
         self.refresh_success_signal.emit()

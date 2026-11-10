@@ -659,3 +659,17 @@ Bkz. /app/memory/test_credentials.md (admin şifresi kullanıcı tarafından 123
 - **Son Raporlar**: `reportPrefsStore` (AsyncStorage `@reportPrefs:v1`, tenant bazlı, max 5, dedupe) + `RecentReportsRow`; dokun → sonuç modalı direkt açılır ve çalışır; uzun bas → sil; Temizle.
 - **Favori Filtreler**: aynı store; filtre modalı başlığında ★ → `FavoriteSaveOverlay` (isim); FAVORİLER chip'leri → uygula (tarihler korunur, diğer filtreler favorideki değerlerle değişir); uzun bas → sil onayı. Kaydedilen değerler: tarih dışı + varsayılandan farklı sabit seçenekler (`pickFavoriteValues`).
 - Bilinen/ertelenen: pos-durum ve saglik uçlarında tenant erişim kontrolü yok (projedeki diğer uçlarla aynı kalıp); fmtAge (yuvarlama) ile senkron-saglik (aşağı yuvarlama) gün farkı.
+
+## 2026-11-10 — client.py v27 "Hafif Mod" (POS PC'yi yorma şikâyeti) ✅
+Kullanıcı: "son client PC'yi çok yoruyor (disk/RAM/CPU), Senkron sekmesine giremiyorum, kasıyor."
+Bulunan nedenler ve v27 düzeltmeleri (hepsi `pos_entegrasyon/client.py`):
+- Ağır rapor prosedürleri (financial/hourly/cancel/top10/iptal/garson/hourly_stock_detail) runtime override ile 10 sn'de bir, watcher tetiğinde 5 sn'de bir koşuyordu → **watcher-gated**: watcher'lı datasetler değişiklik yoksa en seyrek 180 sn (`WATCHED_DATASET_FALLBACK_SEC`), değişiklikte en sık 20 sn (`WATCH_TRIGGER_MIN_SEC`, debounce + `_pending_force_keys`). garson_satis_ozet ve hourly_stock_detail daily_reports_watch tetiğine eklendi.
+- Her 5 sn turda dataset başına "web cache var mı?" HTTP → `server_dataset_status` 120 sn önbellek (`_server_status_cache`), push sonrası "var" işaretlenir; `should_push_now` aralık kontrolü HTTP'den ÖNCE.
+- Direkt cache (`_push_direct_cache_dataset_if_changed`): veri değişmediyse ve web 6 saat içinde doğrulandıysa (`server_ok_at`) HTTP yok → tam ön yüklemede 7.500 HTTP kalktı.
+- acik_masa_detay 5 sn reactive turdan çıkarıldı (10 sn canlı tur + 30 sn auto kaldı); açık hesap özeti en sık 60 sn, fiş feed en sık 20 sn (watcher değişikliğinde anında).
+- Delta satır hash haritaları (stok 200K satır) `delta_snapshots.json`'a taşındı; yalnızca değişince yazılır (eskiden 5 sn'de bir tüm snapshot serileştiriliyordu). İlk açılışta otomatik göç.
+- Tam ön yükleme: son tarama 20 saat içinde tamamlandıysa açılışta tekrar etmez.
+- `hash_obj(data)` üçlü hesaplama → tek (push_dataset `data_hash` param), `get_connection` config.json'u diskten okumuyor.
+- Arayüz: log satırları kuyruk + 400 ms QTimer ile tek seferde düz metin basılır (pencere gizliyken basılmaz); gürültü satırları (`= Değişiklik yok`, `Push tamamlandı: 0`, açık masa detay sayımları) yalnızca dosyaya (`log_detay`); `parse_dataset_defs` ana iş parçacığında önbellek (worker thread'ler artık Qt widget'ına dokunmuyor); başarı paneli 5 sn.
+- Senkron Sağlığı MOBİL ekranı test edildi: 0.1 sn'de açılıyor, backend /senkron/saglik 0.5–0.9 sn → kullanıcının "senkron ekranı" şikâyeti masaüstü istemcinin 4) Senkron sekmesi olarak yorumlandı.
+- Kurulum: Merkez POS v25'te ve 31.10'dan beri çevrim dışı; v27 `/api/pos-dosya/client.py` üzerinden indirilmeli.
