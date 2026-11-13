@@ -683,3 +683,8 @@ Bulunan nedenler ve v27 düzeltmeleri (hepsi `pos_entegrasyon/client.py`):
 - Kullanıcı: normal (perakende) müşteride "Açık Masalar" bölümü görünüyordu. Neden: dashboard bölümü yalnızca `openTables.length > 0` ile gösteriyordu; POS askıdaki satışları açık masa gibi gelebiliyor.
 - Düzeltme (`dashboard.tsx`): `isRestoran = user.business_type === 'restoran'` (patron.users.has_tables) → kendi açık masaları, diğer kaynakların açık masaları (`digerMasalar` isteği de atlanır) ve PDF "Açık Masalar" bölümü yalnızca restoranda.
 - Not: Kullanıcının verdiği `92b92696…` (40 hex) ID hiçbir tabloda yok (muhtemelen yanlış kopyalandı); işletme türü Ayarlar ekranında "Restoran/Normal" olarak görünür; patron panelinde has_tables ile yönetilir.
+
+## 2026-11-13 — Sürüm 1.0.59 (build 63) ✅
+- Açık Hesap tercihleri + Açık Masalar/restoran düzeltmesi için `frontend/app.json` sürümü 1.0.58→1.0.59, iOS buildNumber 62→63, Android versionCode 62→63.
+- Backend değişmedi (Railway canlı sürüm `2026-11-10-v25` ile aynı) → redeploy gerekmez. client.py v27 kullanıcı tarafından kurulacak.
+- DNS: kasaceptetransfer.berkyazilim.com 185.223.77.132'ye çözümleniyor, sync.php 0.4 sn'de yanıt veriyor (yayılım tamamlandı).
