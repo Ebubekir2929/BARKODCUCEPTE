@@ -673,3 +673,8 @@ Bulunan nedenler ve v27 düzeltmeleri (hepsi `pos_entegrasyon/client.py`):
 - Arayüz: log satırları kuyruk + 400 ms QTimer ile tek seferde düz metin basılır (pencere gizliyken basılmaz); gürültü satırları (`= Değişiklik yok`, `Push tamamlandı: 0`, açık masa detay sayımları) yalnızca dosyaya (`log_detay`); `parse_dataset_defs` ana iş parçacığında önbellek (worker thread'ler artık Qt widget'ına dokunmuyor); başarı paneli 5 sn.
 - Senkron Sağlığı MOBİL ekranı test edildi: 0.1 sn'de açılıyor, backend /senkron/saglik 0.5–0.9 sn → kullanıcının "senkron ekranı" şikâyeti masaüstü istemcinin 4) Senkron sekmesi olarak yorumlandı.
 - Kurulum: Merkez POS v25'te ve 31.10'dan beri çevrim dışı; v27 `/api/pos-dosya/client.py` üzerinden indirilmeli.
+
+## 2026-11-13 — Açık Hesap tercihleri ✅
+- Ayarlar → "GÖSTERGE PANELİ": **Açık Hesabı Göster** (kart + lokasyon satırı + PDF sütunu gizlenir) ve **Açık Hesabı Toplama Ekle** (kapalıysa Toplam = GENELTOPLAM − VERESIYE; dataset_cache'ten doğrulandı: GENELTOPLAM = NAKIT + KART + VERESIYE).
+- `prefsStore`: showOpenAccount / includeOpenAccountInTotal (AsyncStorage `@prefs:*`, varsayılan açık).
+- Toplam düzeltmesi tek yerde: `useLiveData` → `adjustedData` (branchSales, weeklyComparison this/lastWeek) → kartlar, lokasyon satırları, CardTypeLocationModal, PDF aynı rakamı gösterir. Saatlik satış satırlarında açık hesap kırılımı yok (SAAT_ADI/TOPLAM) → saatlik grafik etkilenmez.

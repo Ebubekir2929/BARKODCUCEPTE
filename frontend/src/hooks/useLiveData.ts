@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '../store/authStore';
 import { useDataSourceStore } from '../store/dataSourceStore';
+import { usePrefsStore } from '../store/prefsStore';
 import {
   BranchSales, HourlySales, CancelledReceipt, OpenTable,
   TopProduct, WaiterLocation,
@@ -639,8 +640,25 @@ export function useLiveData(filter?: DashboardFilter, options?: { paused?: boole
     };
   }, [fetchDashboard, isFilterActive, paused]);
 
+  // 2026-11 — Kullanıcı tercihi: Açık Hesap "Toplam"a dahil edilmesin.
+  // POS GENELTOPLAM = NAKIT + KART + VERESIYE olduğu için çıkarılır; tek yerde
+  // uygulanınca kartlar, lokasyon satırları, modal ve PDF aynı rakamı gösterir.
+  const includeOpenAccountInTotal = usePrefsStore((s) => s.includeOpenAccountInTotal);
+  const adjustedData = useMemo(() => {
+    if (includeOpenAccountInTotal) return data;
+    const strip = <T extends { openAccount: number; total: number }>(s: T): T => ({ ...s, total: s.total - s.openAccount });
+    return {
+      ...data,
+      branchSales: data.branchSales.map((b) => ({ ...b, sales: strip(b.sales) })),
+      weeklyComparison: {
+        thisWeek: strip(data.weeklyComparison.thisWeek),
+        lastWeek: strip(data.weeklyComparison.lastWeek),
+      },
+    };
+  }, [data, includeOpenAccountInTotal]);
+
   return {
-    data,
+    data: adjustedData,
     isLoading: isFirstLoad && !hasLoadedOnce.current,
     isRefreshing,
     error,

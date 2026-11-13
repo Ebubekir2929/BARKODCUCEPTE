@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useThemeStore } from '../store/themeStore';
+import { usePrefsStore } from '../store/prefsStore';
 
 interface Totals { cash: number; card: number; openAccount: number; total: number }
 
@@ -43,6 +44,10 @@ export const DashboardPdfExport: React.FC<Props> = ({
   visible, onClose, tenantName, dateLabel, totals, branchSales, hourlySales, openTables, iptalOzet,
 }) => {
   const { colors } = useThemeStore();
+  // 2026-11 — Açık Hesap gizliyse PDF'te de sütun basılmaz (Toplam zaten tercihe göre gelir)
+  const showOpenAccount = usePrefsStore((s) => s.showOpenAccount);
+  const oaTh = showOpenAccount ? '<th>Açık Hesap</th>' : '';
+  const oaTd = (v: number | undefined) => (showOpenAccount ? `<td>${fmt(v ?? 0)}</td>` : '');
   const [selected, setSelected] = useState<Record<SectionKey, boolean>>({
     ozet: true, lokasyon: true, saatlik: true, masalar: true, iptaller: true,
   });
@@ -50,12 +55,12 @@ export const DashboardPdfExport: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
 
   const sections = useMemo(() => ([
-    { key: 'ozet' as SectionKey, label: 'Özet Kartlar', desc: 'Nakit · Kredi Kartı · Açık Hesap · Toplam', icon: 'grid-outline', count: 4 },
+    { key: 'ozet' as SectionKey, label: 'Özet Kartlar', desc: showOpenAccount ? 'Nakit · Kredi Kartı · Açık Hesap · Toplam' : 'Nakit · Kredi Kartı · Toplam', icon: 'grid-outline', count: showOpenAccount ? 4 : 3 },
     { key: 'lokasyon' as SectionKey, label: 'Lokasyon Bazlı Satışlar', desc: `${branchSales.length} lokasyon`, icon: 'business-outline', count: branchSales.length },
     { key: 'saatlik' as SectionKey, label: 'Saatlik Satışlar', desc: `${hourlySales.length} saat dilimi`, icon: 'time-outline', count: hourlySales.length },
     { key: 'masalar' as SectionKey, label: 'Açık Masalar', desc: `${openTables.length} açık masa`, icon: 'restaurant-outline', count: openTables.length },
     { key: 'iptaller' as SectionKey, label: 'İptaller', desc: `${iptalOzet.length} iptal kaydı`, icon: 'close-circle-outline', count: iptalOzet.length },
-  ]), [branchSales.length, hourlySales.length, openTables.length, iptalOzet.length]);
+  ]), [branchSales.length, hourlySales.length, openTables.length, iptalOzet.length, showOpenAccount]);
 
   const anySelected = sections.some((s) => selected[s.key] && s.count > 0);
 
@@ -63,13 +68,13 @@ export const DashboardPdfExport: React.FC<Props> = ({
     const parts: string[] = [];
     if (selected.ozet) {
       parts.push(`<h3>Özet</h3>
-      <table><thead><tr><th>Nakit</th><th>Kredi Kartı</th><th>Açık Hesap</th><th>Toplam</th></tr></thead>
-      <tbody><tr><td>${fmt(totals.cash)}</td><td>${fmt(totals.card)}</td><td>${fmt(totals.openAccount)}</td><td><b>${fmt(totals.total)}</b></td></tr></tbody></table>`);
+      <table><thead><tr><th>Nakit</th><th>Kredi Kartı</th>${oaTh}<th>Toplam</th></tr></thead>
+      <tbody><tr><td>${fmt(totals.cash)}</td><td>${fmt(totals.card)}</td>${oaTd(totals.openAccount)}<td><b>${fmt(totals.total)}</b></td></tr></tbody></table>`);
     }
     if (selected.lokasyon && branchSales.length > 0) {
       parts.push(`<h3>Lokasyon Bazlı Satışlar</h3>
-      <table><thead><tr><th>Lokasyon</th><th>Nakit</th><th>Kredi Kartı</th><th>Açık Hesap</th><th>Toplam</th></tr></thead><tbody>
-      ${branchSales.map((b: any) => `<tr><td>${esc(b.branchName)}</td><td>${fmt(b.sales?.cash)}</td><td>${fmt(b.sales?.card)}</td><td>${fmt(b.sales?.openAccount)}</td><td><b>${fmt(b.sales?.total)}</b></td></tr>`).join('')}
+      <table><thead><tr><th>Lokasyon</th><th>Nakit</th><th>Kredi Kartı</th>${oaTh}<th>Toplam</th></tr></thead><tbody>
+      ${branchSales.map((b: any) => `<tr><td>${esc(b.branchName)}</td><td>${fmt(b.sales?.cash)}</td><td>${fmt(b.sales?.card)}</td>${oaTd(b.sales?.openAccount)}<td><b>${fmt(b.sales?.total)}</b></td></tr>`).join('')}
       </tbody></table>`);
     }
     if (selected.saatlik && hourlySales.length > 0) {

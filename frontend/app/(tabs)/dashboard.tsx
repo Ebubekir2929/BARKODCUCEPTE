@@ -80,6 +80,7 @@ export default function DashboardScreen() {
 
   // User-configurable auto-refresh cadence (Settings → "Veri Yenileme Sıklığı")
   const refreshInterval = usePrefsStore((s) => s.refreshInterval);
+  const showOpenAccount = usePrefsStore((s) => s.showOpenAccount);
   // Track whether the Dashboard tab is currently focused; background refreshers
   // must PAUSE when the user navigates to Stok / Cari / Raporlar so their own
   // fetches aren't slowed down by parallel Dashboard traffic.
@@ -988,6 +989,7 @@ export default function DashboardScreen() {
             />
           </View>
           <View style={[styles.cardRow, isXLarge && { flex: 1 }]}>
+            {showOpenAccount && (
             <SummaryCard
               title={t('open_account')}
               amount={totals.openAccount}
@@ -998,6 +1000,7 @@ export default function DashboardScreen() {
               lastWeekLabel={lastWeekLabel}
               changePercent={cardChangePercents.openAccount}
             />
+            )}
             <SummaryCard
               title={t('total')}
               amount={totals.total}
@@ -1591,6 +1594,7 @@ export default function DashboardScreen() {
                   </View>
                 </View>
                 <View style={styles.locationRow}>
+                  {showOpenAccount && (
                   <View style={styles.locationStat}>
                     <Ionicons name="wallet-outline" size={14} color={colors.openAccount} />
                     <Text style={[styles.locationLabel, { color: colors.textSecondary }]}>{t('open_short')}</Text>
@@ -1598,6 +1602,7 @@ export default function DashboardScreen() {
                       ₺{branch.sales.openAccount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </Text>
                   </View>
+                  )}
                   <View style={styles.locationStat}>
                     <Ionicons name="stats-chart" size={14} color={colors.total} />
                     <Text style={[styles.locationLabel, { color: colors.textSecondary }]}>{t('total_short')}</Text>

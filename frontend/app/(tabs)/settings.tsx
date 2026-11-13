@@ -33,6 +33,10 @@ export default function SettingsScreen() {
   const { user, logout, addTenant, updateTenantName, removeTenant, changeTenantId } = useAuthStore();
   const refreshInterval = usePrefsStore((s) => s.refreshInterval);
   const setRefreshInterval = usePrefsStore((s) => s.setRefreshInterval);
+  const showOpenAccount = usePrefsStore((s) => s.showOpenAccount);
+  const setShowOpenAccount = usePrefsStore((s) => s.setShowOpenAccount);
+  const includeOpenAccountInTotal = usePrefsStore((s) => s.includeOpenAccountInTotal);
+  const setIncludeOpenAccountInTotal = usePrefsStore((s) => s.setIncludeOpenAccountInTotal);
   const { language, setLanguage, t, loadLanguage } = useLanguageStore();
   const { showSuccess, showError, showInfo, showWarning, alertProps } = useAlert();
   const insets = useSafeAreaInsets();
@@ -1005,6 +1009,45 @@ export default function SettingsScreen() {
         </View>
 
         <HaftalikRaporMailKarti showSuccess={showSuccess} showError={showError} />
+
+        {/* 2026-11 — Gösterge Paneli tercihleri: Açık Hesap göster / Toplam'a dahil et */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>GÖSTERGE PANELİ</Text>
+          <View style={[styles.sectionContent, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.menuItem, { borderBottomColor: colors.border, borderBottomWidth: 1 }]}>
+              <View style={styles.menuItemLeft}>
+                <Ionicons name="wallet-outline" size={22} color={colors.openAccount} />
+                <View style={{ flexShrink: 1 }}>
+                  <Text style={[styles.menuItemLabel, { color: colors.text }]}>Açık Hesabı Göster</Text>
+                  <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>Kapalıysa Açık Hesap kartı ve lokasyon satırı gizlenir</Text>
+                </View>
+              </View>
+              <Switch
+                value={showOpenAccount}
+                onValueChange={setShowOpenAccount}
+                trackColor={{ false: colors.border, true: colors.openAccount }}
+                thumbColor="#FFF"
+                testID="switch-show-open-account"
+              />
+            </View>
+            <View style={styles.menuItem}>
+              <View style={styles.menuItemLeft}>
+                <Ionicons name="calculator-outline" size={22} color={colors.total} />
+                <View style={{ flexShrink: 1 }}>
+                  <Text style={[styles.menuItemLabel, { color: colors.text }]}>Açık Hesabı Toplama Ekle</Text>
+                  <Text style={[styles.menuItemSub, { color: colors.textSecondary }]}>Kapalıysa Toplam = Nakit + Kredi Kartı (açık hesap hariç)</Text>
+                </View>
+              </View>
+              <Switch
+                value={includeOpenAccountInTotal}
+                onValueChange={setIncludeOpenAccountInTotal}
+                trackColor={{ false: colors.border, true: colors.total }}
+                thumbColor="#FFF"
+                testID="switch-include-open-account"
+              />
+            </View>
+          </View>
+        </View>
 
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>{t('data_management')}</Text>
