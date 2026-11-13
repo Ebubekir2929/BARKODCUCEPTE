@@ -57,6 +57,8 @@ const fmtYmd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padSt
 export default function DashboardScreen() {
   const { colors } = useThemeStore();
   const { user, isAuthenticated } = useAuthStore();
+  // İşletme türü (patron.users.has_tables): yalnızca restoranlarda açık masa bölümleri gösterilir
+  const isRestoran = user?.business_type === 'restoran';
   const { t } = useLanguageStore();
   const { activeSource, setActiveSource } = useDataSourceStore();
   const { isXLarge, isWideWeb, isDesktop, width: winWidth } = useResponsive();
@@ -316,7 +318,7 @@ export default function DashboardScreen() {
     const yukle = async () => {
       try {
         const tenants = user?.tenants || [];
-        if (tenants.length < 2 || !tok) { if (!iptalEdildi) setDigerMasalar([]); return; }
+        if (!isRestoran || tenants.length < 2 || !tok) { if (!iptalEdildi) setDigerMasalar([]); return; }
         const digerler = tenants.filter((tn) => tn.tenant_id !== activeTenantId);
         if (digerler.length === 0) { if (!iptalEdildi) setDigerMasalar([]); return; }
         const resp = await fetch(`${API_URL}/api/data/acik-masalar-coklu`, {
@@ -348,7 +350,7 @@ export default function DashboardScreen() {
     yukle();
     const zamanlayici = setInterval(yukle, 30000);
     return () => { iptalEdildi = true; clearInterval(zamanlayici); };
-  }, [user?.tenants, activeTenantId]);
+  }, [user?.tenants, activeTenantId, isRestoran]);
 
   // 2026-05-06 — Pending notification tap işleme — sade AsyncStorage flow.
   // activeTenantId'nin TANIMLANMASI bekleniyor (TDZ fix). Eğer auth hazır
@@ -1014,8 +1016,10 @@ export default function DashboardScreen() {
           </View>
         </View>
 
-        {/* Open Tables Section — Restoran + has open tables */}
-        {(sourceData?.openTables || []).length > 0 && (
+        {/* Open Tables Section — SADECE restoran işletme türü (has_tables=1) + açık masa varsa.
+            2026-11: Normal (market/perakende) müşterilerde POS'un askıdaki satışları "açık masa"
+            olarak gelebiliyordu; işletme türü normal ise bölüm hiç gösterilmez. */}
+        {isRestoran && (sourceData?.openTables || []).length > 0 && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.sectionHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -1119,7 +1123,7 @@ export default function DashboardScreen() {
         )}
 
         {/* 2026-08 — Diğer veri kaynaklarının açık masaları (Market + Restoran senaryosu) */}
-        {digerMasalar.map((kaynak) => (
+        {isRestoran && digerMasalar.map((kaynak) => (
           <View key={`dk-${kaynak.name}`} style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={styles.sectionHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
@@ -1882,7 +1886,7 @@ export default function DashboardScreen() {
         totals={totals}
         branchSales={sourceData?.branchSales || []}
         hourlySales={effectiveHourlySales}
-        openTables={sourceData?.openTables || []}
+        openTables={isRestoran ? (sourceData?.openTables || []) : []}
         iptalOzet={sourceData?.iptalOzet || []}
       />
     </SafeAreaView>

@@ -678,3 +678,8 @@ Bulunan nedenler ve v27 düzeltmeleri (hepsi `pos_entegrasyon/client.py`):
 - Ayarlar → "GÖSTERGE PANELİ": **Açık Hesabı Göster** (kart + lokasyon satırı + PDF sütunu gizlenir) ve **Açık Hesabı Toplama Ekle** (kapalıysa Toplam = GENELTOPLAM − VERESIYE; dataset_cache'ten doğrulandı: GENELTOPLAM = NAKIT + KART + VERESIYE).
 - `prefsStore`: showOpenAccount / includeOpenAccountInTotal (AsyncStorage `@prefs:*`, varsayılan açık).
 - Toplam düzeltmesi tek yerde: `useLiveData` → `adjustedData` (branchSales, weeklyComparison this/lastWeek) → kartlar, lokasyon satırları, CardTypeLocationModal, PDF aynı rakamı gösterir. Saatlik satış satırlarında açık hesap kırılımı yok (SAAT_ADI/TOPLAM) → saatlik grafik etkilenmez.
+
+## 2026-11-13 — Açık Masalar yalnızca restoranlarda ✅
+- Kullanıcı: normal (perakende) müşteride "Açık Masalar" bölümü görünüyordu. Neden: dashboard bölümü yalnızca `openTables.length > 0` ile gösteriyordu; POS askıdaki satışları açık masa gibi gelebiliyor.
+- Düzeltme (`dashboard.tsx`): `isRestoran = user.business_type === 'restoran'` (patron.users.has_tables) → kendi açık masaları, diğer kaynakların açık masaları (`digerMasalar` isteği de atlanır) ve PDF "Açık Masalar" bölümü yalnızca restoranda.
+- Not: Kullanıcının verdiği `92b92696…` (40 hex) ID hiçbir tabloda yok (muhtemelen yanlış kopyalandı); işletme türü Ayarlar ekranında "Restoran/Normal" olarak görünür; patron panelinde has_tables ile yönetilir.
